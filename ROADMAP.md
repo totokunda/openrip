@@ -127,4 +127,5 @@ Match CapCut's layout and workflows. Don't copy its assets.
 - Root `.gitignore` ignores `bin/` and `**/bin/`, which would hide Rust `src/bin/`. Fix this before adding the Cargo workspace.
 - Internal identifiers still say "apex" in places (env vars such as `APEX_FFMPEG_PATH`, `apex-settings.json`). Rename them during the Rust rewrite rather than churning the TS app.
 - `ffprobe-static@3.1.0` ships an x86_64 binary in its `darwin/arm64` folder, so it fails on Apple Silicon without Rosetta. Today only the unused `processMediaTo24` path calls ffprobe. The Rust app should link FFmpeg libraries directly instead.
+- The `clut-filters` submodule is about 910 MB (740 MB `full`, 112 MB `examples`, 55 MB `small`), while OpenRip itself clones in about 3 MB. Packaged builds already drop `full`. Decide whether to ship only `small`, split the packs into separate repos or releases, or download LUTs on demand.
 - `preload/src/media/root.ts` guesses the userData folder by name instead of asking Electron, so the previews folder ignores `--user-data-dir`. Set `APEX_USER_DATA_DIR` when running isolated tests.

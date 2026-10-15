@@ -9,7 +9,7 @@ FFmpeg doesn't need a separate install. Development builds use the `ffmpeg-stati
 
 ## Clone
 
-The LUT filter packs live in a Git submodule:
+The LUT filter packs live in an optional Git submodule. It's large (about 900 MB, mostly the `full` pack that packaged builds leave out by default). Without it the app still works, but the Filters panel is empty.
 
 ```bash
 git clone --recurse-submodules https://github.com/totokunda/openrip.git
