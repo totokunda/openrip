@@ -1,0 +1,3 @@
+[submodule "clut-filters"]
+	path = apps/app/packages/renderer/public/filters
+	url = https://github.com/totokunda/clut-filters.git

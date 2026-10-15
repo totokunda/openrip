@@ -1,0 +1,1286 @@
+import {
+  EncodedPacketSink,
+  EncodedPacket,
+  Input,
+  UrlSource,
+  ALL_FORMATS
+} from "mediabunny";
+// Minimal asset shape expected from the main thread. This mirrors the core
+// fields of the renderer-side `Asset` type but is kept local to the worker
+// for decoupling and to avoid importing renderer modules here.
+type WorkerAsset = {
+  id: string;
+  type: "video" | "image" | "audio";
+  path: string;
+};
+
+// Define message types
+export type WorkerMessage =
+  | {
+      type: "configure";
+      assetId: string;
+      config: {
+        videoDecoderConfig: VideoDecoderConfig;
+        asset: WorkerAsset;
+        formatStr?: string;
+        initialTimestamp?: number;
+        folderUuid?: string;
+      };
+      requestId?: number;
+    }
+  | {
+      type: "seek";
+      assetId: string;
+      timestamp: number;
+      forceAccurate: boolean;
+      requestId: number;
+    }
+  | {
+      type: "iterate";
+      assetId: string;
+      startTime: number;
+      endTime: number;
+      requestId: number;
+    }
+  | {
+      type: "dispose";
+      assetId?: string;
+    }
+  | {
+      type: "ack";
+      assetId?: string;
+      requestId: number;
+    };
+
+export type WorkerResponse =
+  | {
+      type: "frame";
+      frame: VideoFrame; // Transferable
+      timestamp: number;
+      duration: number;
+      requestId: number; // to match with seek/iterate request
+      assetId?: string;
+    }
+  | { type: "error"; error: string; requestId?: number; assetId?: string }
+  | { type: "seekDone"; requestId: number; assetId?: string }
+  | { type: "iterateDone"; requestId: number; assetId?: string }
+  | { type: "ready"; requestId?: number; assetId?: string }
+  // Lightweight debug messages mirrored back to the main thread so
+  // worker activity is visible in the renderer devtools console.
+  | {
+      type: "debug";
+      scope: "video-decoder-worker";
+      event: string;
+      assetId?: string;
+      requestId?: number;
+      payload?: any;
+    };
+
+// Worker-local helper: turn a file/app URL into a plain path string without
+// relying on Node.js utilities. This stays compatible with browser/Electron
+// worker contexts.
+function fileURLToPathInWorker(raw: string): string {
+  try {
+    const u = new URL(raw);
+
+    // For file:// or app:// URLs, use the pathname and strip leading slashes.
+    if (u.protocol === "file:" || u.protocol === "app:") {
+      return decodeURIComponent(u.pathname.replace(/^\/+/, ""));
+    }
+
+    // For other URL schemes, just normalize the pathname.
+    return decodeURIComponent((u.pathname || "").replace(/^\/+/, ""));
+  } catch {
+    // Not a URL – assume it's already a path; just normalize leading slashes.
+    return raw.replace(/^\/+/, "");
+  }
+}
+
+// Best-effort helper to quickly detect a 404 for an app:// URL before we hand
+// it off to mediabunny. If the HEAD request itself fails (e.g. protocol does
+// not support HEAD), we treat it as "unknown" and *do not* block source
+// creation – only an explicit 404 status will cause us to skip this URL.
+async function isAppUrlDefinitely404(url: URL): Promise<boolean> {
+  try {
+    const res = await fetch(url.toString(), { method: "HEAD" });
+    return res.status === 404;
+  } catch {
+    return false;
+  }
+}
+
+// State
+type AssetState = {
+  decoder: VideoDecoder | null;
+  alphaDecoder: VideoDecoder | null;
+  sink: EncodedPacketSink | null;
+  input: Input | null;
+
+// Caching
+  cachedDecodedFrames: Map<number, VideoFrame>;
+  keyPacketCache: Map<number, EncodedPacket>;
+  isCachingKeyPackets: boolean;
+
+  // Alpha merge (for codecs where alpha is stored separately in packet sideData)
+  alphaFramesByTimestamp: Map<number, VideoFrame>;
+  pendingColorFramesByTimestamp: Map<
+    number,
+    {
+      frame: VideoFrame;
+      requestId: number;
+    }
+  >;
+  // Reused canvases to avoid reallocating for every frame
+  mergeCanvas: OffscreenCanvas | null;
+  mergeCtx: OffscreenCanvasRenderingContext2D | null;
+  alphaCanvas: OffscreenCanvas | null;
+  alphaCtx: OffscreenCanvasRenderingContext2D | null;
+
+  // Seek state
+  seekTargetTimestamp: number | null;
+  seekDone: boolean;
+  currentRequestId: number;
+  lastSeekTime: number;
+  lastSeekTimestamp: number;
+  showingPreview: boolean;
+  config: VideoDecoderConfig | null;
+  pendingSeekFrame: VideoFrame | null;
+  pendingSeekFrameTime: number;
+
+  // Iteration flow control
+  iterationInFlight: number;
+  iterationResume: (() => void) | null;
+
+  // Output Handling with dynamic dispatch
+  customOutputHandler: ((frame: VideoFrame) => void) | null;
+};
+
+const assetStates = new Map<string, AssetState>();
+
+// Shared tuning constants
+const MAX_CACHE_SIZE = 240; // Keep ~2 seconds of frames (at 30fps)
+const MAX_ITERATION_IN_FLIGHT = 4;
+const MAX_DECODE_QUEUE_SIZE = 8;
+const MAX_DECODE_QUEUE_WAIT_MS = 500;
+const MAX_RESYNC_ATTEMPTS = 4;
+const DECODE_QUEUE_SLEEP_MS = 5;
+const KEYFRAME_REQUIRED_RE = /key\s*frame/i;
+
+// Emit a one-time debug message as soon as the worker script is evaluated so
+// we can confirm that this exact file is being loaded by the main thread.
+try {
+  // @ts-ignore
+  postMessage({
+    type: "debug",
+    scope: "video-decoder-worker",
+    event: "worker-loaded",
+  } satisfies WorkerResponse);
+} catch {
+  // Best-effort only.
+}
+
+function getOrCreateState(assetId: string): AssetState {
+  let state = assetStates.get(assetId);
+  if (!state) {
+    state = {
+      decoder: null,
+      alphaDecoder: null,
+      sink: null,
+      input: null,
+      cachedDecodedFrames: new Map<number, VideoFrame>(),
+      keyPacketCache: new Map<number, EncodedPacket>(),
+      isCachingKeyPackets: false,
+      alphaFramesByTimestamp: new Map<number, VideoFrame>(),
+      pendingColorFramesByTimestamp: new Map<
+        number,
+        { frame: VideoFrame; requestId: number }
+      >(),
+      mergeCanvas: null,
+      mergeCtx: null,
+      alphaCanvas: null,
+      alphaCtx: null,
+      seekTargetTimestamp: null,
+      seekDone: false,
+      currentRequestId: 0,
+      lastSeekTime: 0,
+      lastSeekTimestamp: 0,
+      showingPreview: false,
+      config: null,
+      pendingSeekFrame: null,
+      pendingSeekFrameTime: 0,
+      iterationInFlight: 0,
+      iterationResume: null,
+      customOutputHandler: null,
+    };
+    assetStates.set(assetId, state);
+  }
+  return state;
+}
+
+function resetAlphaMergeQueues(state: AssetState) {
+  for (const f of state.alphaFramesByTimestamp.values()) f.close();
+  state.alphaFramesByTimestamp.clear();
+  for (const v of state.pendingColorFramesByTimestamp.values()) v.frame.close();
+  state.pendingColorFramesByTimestamp.clear();
+}
+
+function ensureMergeCanvases(state: AssetState, width: number, height: number) {
+  if (
+    !state.mergeCanvas ||
+    state.mergeCanvas.width !== width ||
+    state.mergeCanvas.height !== height
+  ) {
+    state.mergeCanvas = new OffscreenCanvas(width, height);
+    state.mergeCtx = state.mergeCanvas.getContext("2d", {
+      willReadFrequently: true,
+    }) as OffscreenCanvasRenderingContext2D | null;
+  }
+  if (
+    !state.alphaCanvas ||
+    state.alphaCanvas.width !== width ||
+    state.alphaCanvas.height !== height
+  ) {
+    state.alphaCanvas = new OffscreenCanvas(width, height);
+    state.alphaCtx = state.alphaCanvas.getContext("2d", {
+      willReadFrequently: true,
+    }) as OffscreenCanvasRenderingContext2D | null;
+  }
+}
+
+function mergeAlphaIntoColor(
+  state: AssetState,
+  colorFrame: VideoFrame,
+  alphaFrame: VideoFrame,
+): VideoFrame {
+  const width = colorFrame.displayWidth || (colorFrame as any).codedWidth || 0;
+  const height =
+    colorFrame.displayHeight || (colorFrame as any).codedHeight || 0;
+  if (!width || !height) {
+    // Fallback: if we can't determine dimensions, just return color as-is.
+    // Caller will close `alphaFrame`.
+    return colorFrame;
+  }
+
+  ensureMergeCanvases(state, width, height);
+  const ctx = state.mergeCtx;
+  const aCtx = state.alphaCtx;
+  if (!ctx || !aCtx || !state.mergeCanvas || !state.alphaCanvas) {
+    return colorFrame;
+  }
+
+  // Render both frames into RGBA buffers via 2D canvas drawImage conversion.
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(colorFrame as any, 0, 0, width, height);
+  const colorImage = ctx.getImageData(0, 0, width, height);
+
+  aCtx.clearRect(0, 0, width, height);
+  aCtx.drawImage(alphaFrame as any, 0, 0, width, height);
+  const alphaImage = aCtx.getImageData(0, 0, width, height);
+
+  const c = colorImage.data;
+  const a = alphaImage.data;
+  // Use the alpha frame's luminance (red channel after drawImage) as the output alpha.
+  for (let i = 0; i < c.length; i += 4) {
+    c[i + 3] = a[i]; // take R as alpha (grayscale)
+  }
+
+  ctx.putImageData(colorImage, 0, 0);
+  return new VideoFrame(state.mergeCanvas, {
+    timestamp: colorFrame.timestamp,
+    duration: colorFrame.duration ?? undefined,
+  });
+}
+
+function createAlphaFrameHandler(assetId: string) {
+  return (alphaFrame: VideoFrame) => {
+    const state = assetStates.get(assetId);
+    if (!state) {
+      alphaFrame.close();
+      return;
+    }
+
+    const ts = alphaFrame.timestamp;
+    const pending = state.pendingColorFramesByTimestamp.get(ts);
+    if (pending) {
+      state.pendingColorFramesByTimestamp.delete(ts);
+
+      // If request has moved on, drop both frames.
+      if (pending.requestId !== state.currentRequestId) {
+        pending.frame.close();
+        alphaFrame.close();
+        return;
+      }
+
+      let merged: VideoFrame | null = null;
+      try {
+        merged = mergeAlphaIntoColor(state, pending.frame, alphaFrame);
+      } catch {
+        merged = pending.frame;
+      } finally {
+        // If mergeAlphaIntoColor returned the original color frame, don't double-close.
+        if (merged !== pending.frame) pending.frame.close();
+        alphaFrame.close();
+      }
+
+      // Dispatch merged frame through the normal pipeline.
+      dispatchDecodedFrame(assetId, merged);
+      return;
+    }
+
+    // Store alpha frame for when the corresponding color frame arrives.
+    // Bound the map to avoid unbounded growth.
+    if (state.alphaFramesByTimestamp.size > 120) {
+      const firstKey = state.alphaFramesByTimestamp.keys().next().value;
+      if (firstKey !== undefined) {
+        state.alphaFramesByTimestamp.get(firstKey)?.close();
+        state.alphaFramesByTimestamp.delete(firstKey);
+      }
+    }
+    state.alphaFramesByTimestamp.set(ts, alphaFrame);
+  };
+}
+
+function ensureAlphaDecoder(state: AssetState, assetId: string) {
+  if (state.alphaDecoder && (state.alphaDecoder.state as string) !== "closed") {
+    return;
+  }
+  if (!state.config) {
+    return;
+  }
+
+  const alphaDecoder = new VideoDecoder({
+    output: createAlphaFrameHandler(assetId),
+    error: (e) => {
+      console.error("Alpha VideoDecoder error", e);
+      if (state.alphaDecoder === alphaDecoder) {
+        try {
+          alphaDecoder.close();
+        } catch {
+          // ignore
+        }
+        state.alphaDecoder = null;
+      }
+      const suppressError =
+        state.seekTargetTimestamp !== null || state.customOutputHandler !== null;
+      if (!suppressError) {
+        try {
+          // @ts-ignore
+          postMessage({
+            type: "error",
+            error: e.message ?? "Alpha VideoDecoder error",
+            assetId,
+          });
+        } catch {
+          // ignore
+        }
+      }
+    },
+  });
+  state.alphaDecoder = alphaDecoder;
+
+  // Alpha side data is encoded with the same codec, but is not "embedded alpha"
+  // in the bitstream. Some platforms reject `alpha: "keep"` for such streams,
+  // so we try without the alpha hint first.
+  try {
+    const cfgAny: any = { ...(state.config as any) };
+    delete cfgAny.alpha;
+    state.alphaDecoder.configure(cfgAny as VideoDecoderConfig);
+  } catch (e) {
+    try {
+      state.alphaDecoder.configure(state.config as VideoDecoderConfig);
+    } catch (e2) {
+      console.error("Alpha VideoDecoder configure failed", e, e2);
+      try {
+        state.alphaDecoder.close();
+      } catch {
+        // ignore
+      }
+      state.alphaDecoder = null;
+    }
+  }
+}
+
+function dispatchDecodedFrame(assetId: string, frame: VideoFrame) {
+  const state = assetStates.get(assetId);
+  if (!state) {
+    frame.close();
+    return;
+  }
+
+  if (state.customOutputHandler) {
+    state.customOutputHandler(frame);
+    return;
+  }
+
+  const frameTime = frame.timestamp / 1e6;
+
+  
+
+  
+  // 1. Cache
+  cacheFrame(state, frame);
+
+  // 2. Preview
+  if (state.showingPreview) {
+    postFrame(assetId, frame, state.currentRequestId);
+    state.showingPreview = false;
+  }
+
+  // 3. Check Target
+  if (state.seekTargetTimestamp !== null) {
+    // Track closest frame to the desired seek position as a fallback.
+    const distance = Math.abs(frameTime - state.seekTargetTimestamp);
+    if (
+      !state.pendingSeekFrame ||
+      distance < Math.abs(state.pendingSeekFrameTime - state.seekTargetTimestamp)
+    ) {
+      if (state.pendingSeekFrame) {
+        state.pendingSeekFrame.close();
+      }
+      state.pendingSeekFrame = frame.clone();
+      state.pendingSeekFrameTime = frameTime;
+    }
+
+    if (frameTime >= state.seekTargetTimestamp - 0.04) {
+      state.seekDone = true;
+      postFrame(assetId, frame, state.currentRequestId);
+      state.seekTargetTimestamp = null;
+      if (state.pendingSeekFrame) {
+        state.pendingSeekFrame.close();
+        state.pendingSeekFrame = null;
+      }
+    }
+  }
+
+  frame.close();
+}
+
+// Helpers
+function findCachedFrame(state: AssetState, timestamp: number): VideoFrame | null {
+  for (const [t, frame] of state.cachedDecodedFrames) {
+    if (Math.abs(t - timestamp) < 0.05) return frame;
+  }
+  return null;
+}
+
+function cacheFrame(state: AssetState, frame: VideoFrame) {
+  const frameTime = frame.timestamp / 1e6;
+  if (state.cachedDecodedFrames.has(frameTime)) return;
+
+  if (state.cachedDecodedFrames.size >= MAX_CACHE_SIZE) {
+    const firstKey = state.cachedDecodedFrames.keys().next().value;
+    if (firstKey !== undefined) {
+      state.cachedDecodedFrames.get(firstKey)?.close();
+      state.cachedDecodedFrames.delete(firstKey);
+    }
+  }
+  state.cachedDecodedFrames.set(frameTime, frame.clone());
+}
+
+// Background task
+async function cacheKeyPackets(state: AssetState) {
+  if (state.isCachingKeyPackets) return;
+  state.isCachingKeyPackets = true;
+  try {
+    // Lazy caching is usually sufficient and safer for performance
+  } catch (e) {
+    console.warn("Background keyframe caching failed", e);
+  }
+}
+
+// Handler factory – binds an assetId so multiple assets can run concurrently.
+const createFrameHandler = (assetId: string) => (frame: VideoFrame) => {
+
+
+  const state = assetStates.get(assetId);
+  if (!state) {
+    frame.close();
+    return;
+  }
+
+  // If an alpha decoder is active, merge alpha frames (from sideData) into this
+  // color frame before dispatching it to the rest of the worker pipeline.
+  if (state.alphaDecoder && (state.alphaDecoder.state as string) !== "closed") {
+    const ts = frame.timestamp;
+    const alpha = state.alphaFramesByTimestamp.get(ts);
+    if (alpha) {
+      state.alphaFramesByTimestamp.delete(ts);
+      let merged: VideoFrame | null = null;
+      try {
+        merged = mergeAlphaIntoColor(state, frame, alpha);
+      } catch {
+        merged = frame;
+      } finally {
+        if (merged !== frame) frame.close();
+        alpha.close();
+      }
+      dispatchDecodedFrame(assetId, merged);
+      return;
+    }
+
+    // Wait for alpha output callback to arrive.
+    state.pendingColorFramesByTimestamp.set(ts, {
+      frame,
+      requestId: state.currentRequestId,
+    });
+
+    // Bound pending color frames to avoid unbounded growth.
+    if (state.pendingColorFramesByTimestamp.size > 120) {
+      const firstKey = state.pendingColorFramesByTimestamp.keys().next().value;
+      if (firstKey !== undefined) {
+        const v = state.pendingColorFramesByTimestamp.get(firstKey);
+        v?.frame.close();
+        state.pendingColorFramesByTimestamp.delete(firstKey);
+      }
+    }
+    return;
+  }
+
+  dispatchDecodedFrame(assetId, frame);
+};
+
+function createVideoDecoder(state: AssetState, assetId: string) {
+  const decoder = new VideoDecoder({
+    output: createFrameHandler(assetId),
+    error: (e) => {
+      console.error("VideoDecoder error", e);
+      if (state.decoder === decoder) {
+        try {
+          decoder.close();
+        } catch {
+          // ignore
+        }
+        state.decoder = null;
+      }
+      const suppressError =
+        state.seekTargetTimestamp !== null || state.customOutputHandler !== null;
+      if (!suppressError) {
+        try {
+          // @ts-ignore
+          postMessage({
+            type: "error",
+            error: e.message,
+            assetId,
+          });
+        } catch {
+          // ignore
+        }
+      }
+    },
+  });
+  state.decoder = decoder;
+}
+
+function ensureDecoderInstance(state: AssetState, assetId: string): VideoDecoder | null {
+  if (state.decoder && (state.decoder.state as string) !== "closed") {
+    return state.decoder;
+  }
+  try {
+    state.decoder?.close();
+  } catch {
+    // ignore
+  }
+  createVideoDecoder(state, assetId);
+  return state.decoder;
+}
+
+function postFrame(assetId: string, frame: VideoFrame, reqId: number) {
+  const clone = frame.clone();
+  const msg: WorkerResponse = {
+    type: "frame",
+    frame: clone,
+    timestamp: clone.timestamp / 1e6,
+    duration: (clone.duration ?? 0) / 1e6,
+    requestId: reqId,
+    assetId,
+  };
+  // @ts-ignore
+  postMessage(msg, [clone]);
+}
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function isKeyframeRequiredError(err: any): boolean {
+  const msg = (err?.message ?? "").toString();
+  return err?.name === "DataError" && KEYFRAME_REQUIRED_RE.test(msg);
+}
+
+function isQuotaExceededError(err: any): boolean {
+  return err?.name === "QuotaExceededError";
+}
+
+function isInvalidStateError(err: any): boolean {
+  const msg = (err?.message ?? "").toString();
+  return err?.name === "InvalidStateError" || /closed/i.test(msg);
+}
+
+async function waitForDecodeQueue(
+  decoder: VideoDecoder,
+  maxSize: number = MAX_DECODE_QUEUE_SIZE,
+) {
+  let waited = 0;
+  while (
+    decoder.decodeQueueSize > maxSize &&
+    waited < MAX_DECODE_QUEUE_WAIT_MS
+  ) {
+    await sleep(DECODE_QUEUE_SLEEP_MS);
+    waited += DECODE_QUEUE_SLEEP_MS;
+  }
+}
+
+async function getVerifiedKeyPacket(
+  state: AssetState,
+  timestamp: number,
+): Promise<EncodedPacket | null> {
+  if (!state.sink) return null;
+
+  try {
+    const keyPacket = await state.sink.getKeyPacket(timestamp, {
+      verifyKeyPackets: true,
+    });
+    if (keyPacket) return keyPacket;
+
+    const nearby = await state.sink.getPacket(timestamp);
+    if (nearby) {
+      const nextKey = await state.sink.getNextKeyPacket(nearby, {
+        verifyKeyPackets: true,
+      });
+      if (nextKey) return nextKey;
+    }
+
+    return await state.sink.getFirstPacket({ verifyKeyPackets: true });
+  } catch {
+    return null;
+  }
+}
+
+async function getNextKeyPacketSafe(
+  state: AssetState,
+  packet: EncodedPacket,
+): Promise<EncodedPacket | null> {
+  if (!state.sink) return null;
+  try {
+    return await state.sink.getNextKeyPacket(packet, {
+      verifyKeyPackets: true,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function resetAndConfigureDecoders(state: AssetState, assetId: string): boolean {
+  if (!state.config) return false;
+  const decoder = ensureDecoderInstance(state, assetId);
+  if (!decoder) return false;
+
+  try {
+    decoder.reset();
+  } catch {
+    // ignore
+  }
+
+  try {
+    decoder.configure(state.config as VideoDecoderConfig);
+  } catch (e) {
+    try {
+      const fallbackConfig: any = { ...(state.config as any) };
+      delete fallbackConfig.alpha;
+      state.config = fallbackConfig;
+      decoder.configure(fallbackConfig as VideoDecoderConfig);
+    } catch {
+      return false;
+    }
+  }
+
+  if (state.alphaDecoder && (state.alphaDecoder.state as string) !== "closed") {
+    try {
+      state.alphaDecoder.reset();
+      const cfgAny: any = { ...(state.config as any) };
+      delete cfgAny.alpha;
+      state.alphaDecoder.configure(cfgAny as VideoDecoderConfig);
+    } catch {
+      // ignore
+    }
+  }
+
+  return true;
+}
+
+async function decodePacketSafe(
+  state: AssetState,
+  assetId: string,
+  packet: EncodedPacket,
+  requestId: number,
+): Promise<boolean> {
+  if (!state.decoder || (state.decoder.state as string) === "closed") {
+    return false;
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (state.currentRequestId !== requestId) return false;
+    await waitForDecodeQueue(state.decoder, MAX_DECODE_QUEUE_SIZE);
+    if (!state.decoder || (state.decoder.state as string) === "closed") {
+      return false;
+    }
+
+    try {
+      state.decoder.decode(packet.toEncodedVideoChunk());
+      break;
+    } catch (e: any) {
+      if (isQuotaExceededError(e)) {
+        await waitForDecodeQueue(state.decoder, 2);
+        continue;
+      }
+      if (isKeyframeRequiredError(e) || isInvalidStateError(e)) {
+        return false;
+      }
+      return false;
+    }
+  }
+
+  if (packet.sideData?.alpha) {
+    ensureAlphaDecoder(state, assetId);
+    if (state.alphaDecoder && (state.alphaDecoder.state as string) !== "closed") {
+      await waitForDecodeQueue(state.alphaDecoder, MAX_DECODE_QUEUE_SIZE);
+      try {
+        state.alphaDecoder.decode(packet.alphaToEncodedVideoChunk());
+      } catch {
+        // ignore alpha decode errors; color still decodes
+      }
+    }
+  }
+
+  return true;
+}
+
+
+// Message Listener
+self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
+  const msg = e.data;
+
+  // Mirror a tiny debug summary back to the main thread so that
+  // activity in this worker is visible in the normal renderer console.
+  try {
+    // @ts-ignore
+    postMessage({
+      type: "debug",
+      scope: "video-decoder-worker",
+      event: "onmessage",
+      assetId: (msg as any).assetId,
+      requestId: (msg as any).requestId,
+      payload: { type: msg.type },
+    } satisfies WorkerResponse);
+  } catch {
+    // Best-effort only; never let debug plumbing break decoding.
+  }
+
+  
+  try {
+    switch (msg.type) {
+      case "configure": {
+        await handleConfigure(msg, msg.requestId);
+        break;
+      }
+      case "seek": {
+        await handleSeek(msg.timestamp, msg.forceAccurate, msg.requestId, msg.assetId);
+        break;
+      }
+      case "iterate": {
+        await handleIterate(msg.startTime, msg.endTime, msg.requestId, msg.assetId);
+        break;
+      }
+      
+      case "ack": {
+        // Per-asset iteration flow control
+        const id = msg.assetId;
+        if (!id) break;
+        const state = assetStates.get(id);
+        if (!state) break;
+        if (msg.requestId === state.currentRequestId) {
+          state.iterationInFlight--;
+          if (state.iterationInFlight < MAX_ITERATION_IN_FLIGHT && state.iterationResume) {
+             state.iterationResume();
+             state.iterationResume = null;
+          }
+        }
+        break;
+      }
+      case "dispose": {
+        dispose(msg.assetId);
+        break;
+      }
+    }
+  } catch (err: any) {
+    console.error("Worker Error:", err);
+    // @ts-ignore
+    postMessage({
+      type: "error",
+      error: err.message,
+      // Some messages don't carry requestId; fall back to 0 in that case.
+      requestId: (msg as any).requestId || 0,
+      assetId: msg.assetId,
+    });
+  }
+};
+
+async function handleConfigure(
+  msg: Extract<WorkerMessage, { type: "configure" }>,
+  requestId?: number,
+) {
+  const { assetId, config: cfg } = msg;
+  const id = assetId ?? cfg.asset.id;
+  
+  if (!id) {
+    throw new Error("configure message missing asset identifier");
+  }
+  dispose(id);
+  const state = getOrCreateState(id);
+  let formats = ALL_FORMATS;
+  
+  // 1. Setup Input (asset-centric only)
+  // Interpret the asset path as a URL-like string that mediabunny knows how
+  // to open (e.g. file://, app://, http://).
+  let input: Input | null = null;
+  let filePath: string | null = null;
+  filePath = fileURLToPathInWorker(cfg.asset.path);
+  try {
+    const url = new URL(`app://user-data/${filePath}`);
+    // Skip this URL up-front if we *know* it returns a 404; otherwise let
+    // mediabunny attempt to open it.
+    const is404 = await isAppUrlDefinitely404(url);
+    if (is404) {
+      throw new Error("app:// URL returned 404");
+    }
+    input = new Input({ formats, source: new UrlSource(url) });
+  } catch {
+    throw new Error("Failed to create input");
+  }
+  state.input = input;
+
+  const videoTrack = await state.input.getPrimaryVideoTrack();
+  if (!videoTrack) throw new Error("No video track found in worker");
+
+
+  // 2. Setup Sink
+  state.sink = new EncodedPacketSink(videoTrack);
+
+  // 3. Setup Decoder
+  // NOTE: Some TS lib.dom versions don't expose `alpha` on VideoDecoderConfig yet.
+  // We still set it at runtime (when supported) to preserve transparency.
+  const configAny: any = {
+    ...cfg.videoDecoderConfig,
+    optimizeForLatency: true,
+  };
+  if (configAny.alpha == null) {
+    configAny.alpha = "keep";
+  }
+  state.config = configAny as VideoDecoderConfig;
+ 
+  createVideoDecoder(state, id);
+
+  try {
+    state?.decoder?.configure(state.config as VideoDecoderConfig);
+  } catch (e) {
+    // Fallback: if the platform/codec rejects alpha preservation, retry without it.
+    // This keeps broad compatibility while enabling transparency where supported.
+    try {
+      const fallbackConfig: any = { ...(state.config as any) };
+      delete fallbackConfig.alpha;
+      state.config = fallbackConfig;
+      state?.decoder?.configure(fallbackConfig as VideoDecoderConfig);
+    } catch (e2) {
+      console.error("VideoDecoder configure failed", e, e2);
+      // @ts-ignore
+      postMessage({
+        type: "error",
+        error: (e2 as any)?.message ?? "VideoDecoder configure failed",
+        assetId: id,
+      });
+      return;
+    }
+  }
+  void cacheKeyPackets(state);
+  postMessage({
+    type: "ready",
+    requestId,
+    assetId: id,
+  });
+}
+
+async function handleSeek(
+  timestamp: number,
+  forceAccurate: boolean,
+  requestId: number,
+  assetId?: string,
+) {
+
+  const id = assetId;
+ 
+  if (!id) return;
+  const state = assetStates.get(id);
+  if (!state || !state.sink || !state.config) return;
+  ensureDecoderInstance(state, id);
+  if (!state.decoder) return;
+
+  // Cancel any active iteration handler to prevent hijacking seek output
+  state.customOutputHandler = null;
+  // Also resume any stuck flow control so iterate can exit cleanly
+  if (state.iterationResume) {
+      state.iterationResume();
+      state.iterationResume = null;
+  }
+
+  state.currentRequestId = requestId;
+  resetAlphaMergeQueues(state);
+
+  // Reset any previous seek fallback frame
+  if (state.pendingSeekFrame) {
+    state.pendingSeekFrame.close();
+    state.pendingSeekFrame = null;
+  }
+
+  const now = performance.now();
+  const timeSinceLast = now - state.lastSeekTime;
+  const dist = Math.abs(timestamp - (state.lastSeekTimestamp || 0));
+  state.lastSeekTime = now;
+  state.lastSeekTimestamp = timestamp;
+
+  const isFastScrubbing = !forceAccurate && timeSinceLast < 150 && dist > 0.5;
+
+  // 1. Cache Hit
+  const cached = findCachedFrame(state, timestamp);
+
+  if (cached) {
+    postFrame(id, cached, requestId);
+    // @ts-ignore
+    postMessage({
+      type: "seekDone",
+      requestId,
+      assetId: id,
+    });
+    return;
+  }
+
+  state.seekTargetTimestamp = timestamp;
+  state.seekDone = false;
+  state.showingPreview = false;
+
+  // IMPORTANT:
+  // After VideoDecoder.reset()/configure() (and sometimes after flush()), WebCodecs
+  // requires the *next* decode() call to be a key frame. If we ask mediabunny for
+  // a "key packet" without verification, it can occasionally return a non-key
+  // packet (especially during rapid scrubbing), which triggers:
+  //   DataError: A key frame is required after configure() or flush().
+  // So we always verify key packets for seeks.
+  const initialPacket = await getVerifiedKeyPacket(state, timestamp);
+  if (!initialPacket) {
+    // @ts-ignore
+    postMessage({
+      type: "seekDone",
+      requestId,
+      assetId: id,
+    });
+    return;
+  }
+
+  if (!state.keyPacketCache.has(initialPacket.timestamp)) {
+    state.keyPacketCache.set(initialPacket.timestamp, initialPacket);
+  }
+
+  if (state.currentRequestId !== requestId) return;
+
+  let currentPacket: EncodedPacket | null = initialPacket;
+  let resyncAttempts = 0;
+  let previewArmed = isFastScrubbing;
+
+  while (
+    currentPacket &&
+    state.currentRequestId === requestId &&
+    resyncAttempts <= MAX_RESYNC_ATTEMPTS
+  ) {
+    if (!resetAndConfigureDecoders(state, id)) break;
+
+    const decodedKey = await decodePacketSafe(
+      state,
+      id,
+      currentPacket,
+      requestId,
+    );
+    if (!decodedKey) {
+      currentPacket = await getNextKeyPacketSafe(state, currentPacket);
+      resyncAttempts++;
+      continue;
+    }
+
+    if (previewArmed) {
+      state.showingPreview = true;
+      await sleep(80);
+      state.showingPreview = false;
+      previewArmed = false;
+    }
+
+    let resyncPacket: EncodedPacket | null = null;
+    try {
+      const packets = state.sink.packets(currentPacket);
+      await packets.next(); // skip start packet (already decoded)
+      for await (const packet of packets) {
+        if (state.currentRequestId !== requestId) break;
+        if (!state.decoder || (state.decoder.state as string) === "closed") {
+          resyncPacket = await getNextKeyPacketSafe(state, packet);
+          break;
+        }
+        if (packet.timestamp > timestamp + 0.1) break;
+
+        const decoded = await decodePacketSafe(state, id, packet, requestId);
+        if (!decoded) {
+          resyncPacket = await getNextKeyPacketSafe(state, packet);
+          break;
+        }
+
+        if (state.seekDone) break;
+      }
+    } catch (e) {
+      console.warn("Seek packet iteration failed", e);
+    }
+
+    if (!resyncPacket || state.seekDone || state.currentRequestId !== requestId) {
+      break;
+    }
+
+    currentPacket = resyncPacket;
+    resyncAttempts++;
+  }
+
+  if (forceAccurate) {
+    if (state.decoder && (state.decoder.state as string) !== "closed") {
+      try {
+        await state.decoder.flush();
+      } catch {
+        // ignore
+      }
+    }
+    if (state.alphaDecoder && (state.alphaDecoder.state as string) !== "closed") {
+      try {
+        await state.alphaDecoder.flush();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  // If we never hit the seek threshold inside onFrameHandler (e.g. end of
+  // stream or sparse frames near the target), fall back to the closest frame
+  // we observed so the caller always gets something for an initial seek.
+  if (!state.seekDone && state.pendingSeekFrame) {
+    state.seekTargetTimestamp = null;
+    postFrame(id, state.pendingSeekFrame, requestId);
+    // @ts-ignore - VideoFrame is available at runtime, but TS's lib typing
+    // can treat it as `never` in some worker configs.
+    state.pendingSeekFrame.close();
+    state.pendingSeekFrame = null;
+  }
+
+  // @ts-ignore
+  postMessage({
+    type: "seekDone",
+    requestId,
+    assetId: id,
+  });
+}
+
+async function handleIterate(
+  startTime: number,
+  endTime: number,
+  requestId: number,
+  assetId?: string,
+) {
+    const id = assetId;
+    if (!id) return;
+    const state = assetStates.get(id);
+    if (!state || !state.sink || !state.config) return;
+    ensureDecoderInstance(state, id);
+    if (!state.decoder) return;
+
+    state.currentRequestId = requestId;
+    resetAlphaMergeQueues(state);
+
+    // Same keyframe requirement as seek: after reset/configure, the first decode
+    // must be a key frame. Verify key packets to avoid intermittent DataError
+    // during iteration starts.
+    const initialPacket = await getVerifiedKeyPacket(state, startTime);
+    if (!initialPacket) {
+        // @ts-ignore
+        postMessage({
+          type: "iterateDone",
+          requestId,
+          assetId: id,
+        });
+        return;
+    }
+
+    // Override handler temporarily for iteration
+    
+    // To keep it simple in this worker version, let's reuse the decoder but clear the Seek target.
+    state.seekTargetTimestamp = null; 
+    
+    // Reset flow control
+    state.iterationInFlight = 0;
+    state.iterationResume = null;
+
+    const iterationHandler = (frame: VideoFrame) => {
+        const frameTime = frame.timestamp / 1e6;
+        if (frameTime < startTime || frameTime > endTime + 0.05) {
+            frame.close();
+            return;
+        }
+        
+        state.iterationInFlight++;
+        
+        // Post immediately
+        const clone = frame.clone();
+        const msg = { 
+            type: "frame", 
+            frame: clone, 
+            timestamp: frameTime, 
+            duration: (frame.duration ?? 0) / 1e6,
+            requestId,
+            assetId: id,
+        };
+        // @ts-ignore
+        postMessage(msg, [clone]);
+        frame.close();
+    };
+
+    // Use dynamic handler instead of recreating decoder
+    state.customOutputHandler = iterationHandler;
+
+
+    try {
+        let currentPacket: EncodedPacket | null = initialPacket;
+        let resyncAttempts = 0;
+
+        while (
+          currentPacket &&
+          state.currentRequestId === requestId &&
+          resyncAttempts <= MAX_RESYNC_ATTEMPTS
+        ) {
+          if (!resetAndConfigureDecoders(state, id)) break;
+
+          const decodedKey = await decodePacketSafe(
+            state,
+            id,
+            currentPacket,
+            requestId,
+          );
+          if (!decodedKey) {
+            currentPacket = await getNextKeyPacketSafe(state, currentPacket);
+            resyncAttempts++;
+            continue;
+          }
+
+          let resyncPacket: EncodedPacket | null = null;
+          try {
+            const packets = state.sink.packets(currentPacket);
+            await packets.next(); // skip start packet (already decoded)
+
+            for await (const packet of packets) {
+              if (state.currentRequestId !== requestId) break;
+              if (packet.timestamp > endTime + 0.1) break;
+
+              if (!state.decoder || (state.decoder.state as string) === "closed") {
+                resyncPacket = await getNextKeyPacketSafe(state, packet);
+                break;
+              }
+
+              // Flow control: Wait if too many frames are pending
+              while (state.iterationInFlight >= MAX_ITERATION_IN_FLIGHT) {
+                if (state.currentRequestId !== requestId) break;
+                await new Promise<void>((r) => (state.iterationResume = r));
+              }
+
+              const decoded = await decodePacketSafe(state, id, packet, requestId);
+              if (!decoded) {
+                resyncPacket = await getNextKeyPacketSafe(state, packet);
+                break;
+              }
+            }
+          } catch (e) {
+            console.warn("Iteration packet loop failed", e);
+          }
+
+          if (!resyncPacket || state.currentRequestId !== requestId) {
+            break;
+          }
+
+          currentPacket = resyncPacket;
+          resyncAttempts++;
+        }
+
+        if (state.decoder && (state.decoder.state as string) !== "closed") {
+          try {
+            await state.decoder.flush();
+          } catch {
+            // ignore
+          }
+        }
+        if (state.alphaDecoder && (state.alphaDecoder.state as string) !== "closed") {
+          try {
+            await state.alphaDecoder.flush();
+          } catch {
+            // ignore
+          }
+        }
+    } finally {
+        state.customOutputHandler = null;
+    }
+    
+    // @ts-ignore
+    postMessage({
+      type: "iterateDone",
+      requestId,
+      assetId: id,
+    });
+}
+
+function dispose(assetId?: string) {
+  if (assetId) {
+    const state = assetStates.get(assetId);
+    if (!state) return;
+    state.currentRequestId++;
+    if (state.decoder && (state.decoder.state as string) !== "closed") {
+      state.decoder.close();
+      state.decoder = null;
+  }
+    if (state.alphaDecoder && (state.alphaDecoder.state as string) !== "closed") {
+      try {
+        state.alphaDecoder.close();
+      } catch {
+        // ignore
+      }
+      state.alphaDecoder = null;
+    }
+    resetAlphaMergeQueues(state);
+    for (const frame of state.cachedDecodedFrames.values()) {
+    frame.close();
+  }
+    state.cachedDecodedFrames.clear();
+    state.keyPacketCache.clear();
+    state.input = null;
+    state.sink = null;
+    state.seekTargetTimestamp = null;
+    state.pendingSeekFrame?.close();
+    state.pendingSeekFrame = null;
+    state.seekDone = false;
+    state.customOutputHandler = null;
+    state.iterationInFlight = 0;
+    state.iterationResume = null;
+    return;
+  }
+
+  // Dispose all assets
+  for (const [id] of assetStates) {
+    dispose(id);
+  }
+  assetStates.clear();
+}

@@ -1,0 +1,53 @@
+import type { AppInitConfig } from "./AppInitConfig.js";
+import { createModuleRunner } from "./ModuleRunner.js";
+import { disallowMultipleAppInstance } from "./modules/SingleInstanceApp.js";
+import { createWindowManagerModule } from "./modules/WindowManager.js";
+import { terminateAppOnLastWindowClose } from "./modules/ApplicationTerminatorOnLastWindowClose.js";
+import { hardwareAccelerationMode } from "./modules/HardwareAccelerationModule.js";
+import { autoUpdater } from "./modules/AutoUpdater.js";
+import { allowInternalOrigins } from "./modules/BlockNotAllowdOrigins.js";
+import { chromeDevToolsExtension } from "./modules/ChromeDevToolsExtension.js";
+import { createNativeFileDialogModule } from "./modules/NativeFileDialog.js";
+import { settingsModule } from "./modules/SettingsModule.js";
+import { jsonPersistenceModule } from "./modules/JSONPersistenceModule.js";
+import { appDirProtocol } from "./modules/AppDirProtocol.js";
+import { coreIpc } from "./modules/CoreIpc.js";
+import { app } from "electron";
+
+export async function initApp(initConfig: AppInitConfig) {
+  // Set app name early, before any modules are initialized
+  app.setName("OpenRip");
+
+  let moduleRunner = createModuleRunner()
+    // Ensure single instance lock before any window creation
+    .init(disallowMultipleAppInstance())
+    // Settings must be loaded early (before other modules read them)
+    .init(settingsModule())
+    // Register 'app://' protocol handlers and core IPC before any renderer windows load
+    .init(coreIpc())
+    .init(jsonPersistenceModule())
+    .init(appDirProtocol())
+    .init(
+      createWindowManagerModule({
+        initConfig,
+      }),
+    )
+    .init(terminateAppOnLastWindowClose())
+    .init(hardwareAccelerationMode({ enable: true }))
+    .init(autoUpdater())
+    .init(chromeDevToolsExtension({ extension: "REACT_DEVELOPER_TOOLS" }))
+    // Security
+    .init(
+      allowInternalOrigins(
+        new Set(
+          initConfig.renderer instanceof URL
+            ? [initConfig.renderer.origin]
+            : [],
+        ),
+      ),
+    );
+  // Native file dialog for renderer via preload
+  moduleRunner = moduleRunner.init(createNativeFileDialogModule());
+
+  await moduleRunner;
+}
