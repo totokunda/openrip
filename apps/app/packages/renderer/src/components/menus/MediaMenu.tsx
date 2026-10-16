@@ -243,6 +243,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             dateAddedMs: it.dateAddedMs,
             mediaInfo: result.value,
             hasProxy: it.hasProxy,
+            isPlayableCopy: it.isPlayableCopy,
           });
         } else {
           console.warn(`Failed to load media info for ${it.name} (skipping):`, result.reason);
@@ -349,6 +350,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             dateAddedMs: it.dateAddedMs,
             mediaInfo: result.value,
             hasProxy: it.hasProxy,
+            isPlayableCopy: it.isPlayableCopy,
           });
         } else {
           console.warn(`Failed to get media info for ${it.name}:`, result.reason);
@@ -443,6 +445,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             dateAddedMs: it.dateAddedMs,
             mediaInfo: result.value,
             hasProxy: it.hasProxy,
+            isPlayableCopy: it.isPlayableCopy,
           });
         } else {
           console.warn(`Failed to get media info for ${it.name}:`, result.reason);

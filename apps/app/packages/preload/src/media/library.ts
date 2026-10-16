@@ -32,6 +32,11 @@ export type ConvertedMediaItem = {
   dateAddedMs: number;
   type: ClipType;
   hasProxy?: boolean;
+  /**
+   * The proxy is a playable copy of a video this app can't decode itself (see
+   * makePlayable), not an optional speed-up: it can't be removed.
+   */
+  isPlayableCopy?: boolean;
 };
 
 function isSupportedExt(ext: string): boolean {
@@ -200,12 +205,14 @@ async function listConvertedMedia(
 
     let absPath = originalAbsPath;
     let hasProxy = false;
+    let isPlayableCopy = false;
 
     if (proxyIndex[name]) {
       const proxyPath = join(proxyAbs, proxyIndex[name]);
       if (fs.existsSync(proxyPath)) {
         absPath = proxyPath;
         hasProxy = true;
+        isPlayableCopy = proxyIndex[name].endsWith(PLAYABLE_SUFFIX);
       }
     }
 
@@ -237,6 +244,7 @@ async function listConvertedMedia(
       dateAddedMs,
       type,
       hasProxy,
+      isPlayableCopy,
     });
   }
 

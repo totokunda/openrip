@@ -94,6 +94,8 @@ export type MediaItem = {
   mediaInfo?: MediaInfo;
   fillCanvas?: boolean;
   hasProxy?: boolean;
+  /** The proxy is a playable copy of a format this app can't decode (ProRes): keep it. */
+  isPlayableCopy?: boolean;
 };
 
 interface ItemProps {
@@ -394,8 +396,11 @@ const Item: React.FC<ItemProps> = ({
           >
             <MediaThumb item={item} />
             {item.hasProxy && !isCreatingProxy && (
-              <span className="absolute bottom-1 right-1 text-[8.5px] bg-brand-background/90 text-brand-light/90 px-1.5 py-1 rounded border border-brand-light/10 shadow">
-                Proxy
+              <span
+                className="absolute bottom-1 right-1 text-[8.5px] bg-brand-background/90 text-brand-light/90 px-1.5 py-1 rounded border border-brand-light/10 shadow"
+                title={item.isPlayableCopy ? "Shown from an H.264 copy: this preview can't decode the original's format (e.g. ProRes)" : undefined}
+              >
+                {item.isPlayableCopy ? "Converted" : "Proxy"}
               </span>
             )}
             {isCreatingProxy && (
@@ -424,7 +429,7 @@ const Item: React.FC<ItemProps> = ({
                 align="start"
                 className="dark w-40 flex flex-col text-brand-light bg-brand-background font-poppins"
               >
-                {item.type === "video" && (
+                {item.type === "video" && !item.isPlayableCopy && (
                   <>
                     {!item.hasProxy ? (
                       <DropdownMenuItem
