@@ -38,6 +38,11 @@
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
 //!       and how long the exact frame takes to settle after release.
+//!   openrip-dev cover-parity <projects-root> [--save <dir>]
+//!       Compare our render of each draft's first frame with `draft_cover.jpg`, CapCut's own
+//!       render of it: PSNR and the share of pixels far off, per draft (numbered, no names)
+//!       and overall. Drafts with media missing at the first frame are left out. --save
+//!       writes ours | CapCut's | difference x4 for each.
 //!   openrip-dev thumbs-bench <media-file> [--count N] [--height H]
 //!       Timeline thumbnails across the whole file (default 40 at 64 px): the quick pass
 //!       (one keyframe per GOP), the exact pass, and the exact pass again from the disk cache.
@@ -65,6 +70,7 @@ fn main() -> ExitCode {
         Some("mix") if args.len() >= 3 => mix_cmd(&args).map_err(|e| e.to_string()),
         Some("playthrough") if args.len() >= 2 => playthrough(&args).map_err(|e| e.to_string()),
         Some("pipeline-bench") if args.len() >= 2 => pipeline_bench(&args).map_err(|e| e.to_string()),
+        Some("cover-parity") if args.len() >= 2 => cover_parity(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
         Some("thumbs-bench") if args.len() >= 2 => thumbs_bench(&args).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
@@ -813,5 +819,61 @@ fn thumbs_bench(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!("{name:<38} first {first:>6.1} ms  all {n:>3} in {total:>7.1} ms  ({:.1} ms each, {exact} exact)", total / n.max(1) as f64);
     }
     let _ = std::fs::remove_dir_all(&cache);
+    Ok(())
+}
+
+fn cover_parity(root: &Path, save: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)?.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.join("draft_info.json").exists() && p.join("draft_cover.jpg").exists()).collect();
+    dirs.sort();
+    if let Some(dir) = &save {
+        std::fs::create_dir_all(dir)?;
+    }
+    let (mut psnrs, mut skipped) = (Vec::new(), 0);
+    for (i, dir) in dirs.iter().enumerate() {
+        let Ok(Imported { project, .. }) = import_draft_dir(dir) else { continue };
+        // CapCut's cover, decoded like any still.
+        let mut d = openrip_media::VideoDecoder::open(&dir.join("draft_cover.jpg"), &openrip_media::DecoderOptions { hardware: openrip_media::HardwareMode::Off, ..Default::default() })?;
+        let Some(cover) = d.next_frame()?.map(|f| f.to_rgb()).transpose()? else { continue };
+        let mut engine = openrip_playback::PreviewEngine::new(project)?;
+        let (ours, report) = engine.render_image(openrip_model::Micros::ZERO, cover.width, cover.height)?;
+        if !report.missing.is_empty() {
+            skipped += 1;
+            continue;
+        }
+        let (mut se, mut far) = (0f64, 0usize);
+        let n = (cover.width * cover.height) as usize;
+        for k in 0..n {
+            for c in 0..3 {
+                let e = ours.data[k * 4 + c] as f64 - cover.data[k * 3 + c] as f64;
+                se += e * e;
+            }
+            if (0..3).any(|c| (ours.data[k * 4 + c] as i32 - cover.data[k * 3 + c] as i32).abs() > 32) {
+                far += 1;
+            }
+        }
+        let psnr = 10.0 * (255.0f64 * 255.0 / (se / (3 * n) as f64).max(1e-9)).log10();
+        println!("draft #{i:02}: {:>4} layers  PSNR {psnr:5.1} dB  pixels off by > 32: {:5.2}%", report.layers, 100.0 * far as f64 / n as f64);
+        psnrs.push(psnr);
+        if let Some(out) = &save {
+            let (w, h) = (cover.width, cover.height);
+            let mut img = openrip_render::RgbaImage { width: w * 3, height: h, data: vec![255; (w * 3 * h * 4) as usize] };
+            for y in 0..h as usize {
+                for x in 0..w as usize {
+                    let (o, c) = (y * w as usize + x, (y * w as usize * 3 + x) * 4);
+                    for ch in 0..3 {
+                        let (a, b) = (ours.data[o * 4 + ch], cover.data[o * 3 + ch]);
+                        img.data[c + ch] = a;
+                        img.data[c + w as usize * 4 + ch] = b;
+                        img.data[c + w as usize * 8 + ch] = ((a as i32 - b as i32).unsigned_abs() * 4).min(255) as u8;
+                    }
+                }
+            }
+            save_png(&out.join(format!("cover{i:02}.png")), &img)?;
+        }
+    }
+    psnrs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    if !psnrs.is_empty() {
+        println!("{} drafts compared ({skipped} left out: media missing at the first frame); PSNR p50 {:.1} dB, worst {:.1} dB", psnrs.len(), percentile(&psnrs, 0.5), psnrs[0]);
+    }
     Ok(())
 }

@@ -91,3 +91,48 @@ fn p210_prores_frames_convert_on_the_gpu() {
         check(p, PixelFormat::P210);
     }
 }
+
+/// HLG frames (iPhone HDR) are converted to SDR the way CapCut shows them: two grey levels
+/// against the curve fitted to CapCut's render (docs/parity/hdr.md).
+#[test]
+fn hlg_frames_are_tone_mapped_to_sdr() {
+    if Command::new("ffmpeg").arg("-version").output().is_err() {
+        return;
+    }
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let path = dir.join("hlg-greys.mov");
+    if !path.exists() {
+        // Left half HLG signal 0.5, right half 0.75 (10-bit limited range: 64 + 876 s).
+        let (w, h) = (128usize, 64usize);
+        let mut raw = Vec::new();
+        for _ in 0..10 {
+            let luma: Vec<u16> = (0..w * h).map(|i| if i % w < w / 2 { 502 } else { 721 }).collect();
+            raw.extend(luma.iter().flat_map(|v| v.to_le_bytes()));
+            raw.extend(std::iter::repeat_n(512u16.to_le_bytes(), w * h / 2).flatten());
+        }
+        let yuv = dir.join("hlg-greys.yuv");
+        std::fs::write(&yuv, raw).unwrap();
+        let out = Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "yuv420p10le", "-s", "128x64", "-r", "30", "-i"])
+            .arg(&yuv)
+            .args(["-c:v", "libx265", "-x265-params", "qp=0:log-level=error:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc", "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1"])
+            .args(["-color_range", "tv", "-colorspace", "bt2020nc", "-color_primaries", "bt2020", "-color_trc", "arib-std-b67"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let Ok(c) = Compositor::new() else { return };
+    let mut d = VideoDecoder::open(&path, &DecoderOptions::default()).unwrap();
+    let f = d.frame_at(Micros(100_000)).unwrap().unwrap();
+    assert_eq!(f.transfer(), openrip_media::Transfer::Hlg);
+    let img = c.render(128, 64, [0, 0, 0], &[Layer::from_model(Source::Video(&f), [128, 64], [0.0, 0.0], [1.0, 1.0], 0.0)]);
+    let px = |x: u32| &img.data[((32 * 128 + x) * 4) as usize..][..3];
+    // Signal 0.5: scene light 1/12 x 1.15, gamma 1/2.4 -> 0.3764 (96.0). Signal 0.75 ->
+    // 0.6095 before the shoulder, 0.6094 after (155.4).
+    for (x, want) in [(32, 96), (96, 155)] {
+        for &v in px(x) {
+            assert!((v as i32 - want).abs() <= 2, "x {x}: {v} vs {want}");
+        }
+    }
+}

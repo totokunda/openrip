@@ -134,6 +134,7 @@ pub struct VideoDecoder {
     origin: i64,
     info: VideoInfo,
     colorspace: ff::AVColorSpace,
+    trc: ff::AVColorTransferCharacteristic,
     hardware: bool,
     require_hardware: bool,
     /// Duration used when the container doesn't give one.
@@ -219,6 +220,7 @@ impl VideoDecoder {
                 origin: if (*st).start_time != ff::AV_NOPTS_VALUE { (*st).start_time } else { ff::AV_NOPTS_VALUE },
                 nominal: info.frame_rate.map(|r| r.frame_duration()).unwrap_or(Micros(33_333)),
                 colorspace: (*par).color_space,
+                trc: (*par).color_trc,
                 info,
                 hardware: !device.is_null(),
                 require_hardware: opts.hardware == HardwareMode::Require,
@@ -720,7 +722,7 @@ impl VideoDecoder {
                                 continue;
                             }
                             let time = self.time_of(pts);
-                            return Ok(Some(VideoFrame::from_pixel_buffer(buffer, self.colorspace, time, self.nominal)));
+                            return Ok(Some(VideoFrame::from_pixel_buffer(buffer, self.colorspace, self.trc, time, self.nominal)));
                         }
                         crate::vt::Next::Frame(_, None) => continue, // counted in vt.errors()
                         crate::vt::Next::Drained => return Ok(None),

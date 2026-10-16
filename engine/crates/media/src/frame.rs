@@ -11,6 +11,17 @@ pub enum Matrix {
     Bt2020,
 }
 
+/// How a frame's signal relates to light.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Transfer {
+    /// Standard dynamic range (BT.709/sRGB-like gamma, or unspecified).
+    Sdr,
+    /// HDR, hybrid log-gamma (BT.2100 HLG; iPhone HDR video).
+    Hlg,
+    /// HDR, perceptual quantizer (BT.2100 PQ / SMPTE ST 2084; HDR10).
+    Pq,
+}
+
 /// Memory layout of a decoded frame (for hardware frames, of the GPU surface).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PixelFormat {
@@ -46,7 +57,7 @@ enum Pixels {
     Av(*mut ff::AVFrame),
     /// A frame from the native VideoToolbox decoder.
     #[cfg(target_os = "macos")]
-    Cv { buffer: crate::vt::PixelBuffer, colorspace: ff::AVColorSpace },
+    Cv { buffer: crate::vt::PixelBuffer, colorspace: ff::AVColorSpace, trc: ff::AVColorTransferCharacteristic },
 }
 
 /// A decoded frame. Holds a reference on FFmpeg's buffer (or the hardware surface), so it
@@ -88,8 +99,8 @@ impl VideoFrame {
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn from_pixel_buffer(buffer: crate::vt::PixelBuffer, colorspace: ff::AVColorSpace, time: Micros, duration: Micros) -> Self {
-        VideoFrame { pixels: Pixels::Cv { buffer, colorspace }, time, duration }
+    pub(crate) fn from_pixel_buffer(buffer: crate::vt::PixelBuffer, colorspace: ff::AVColorSpace, trc: ff::AVColorTransferCharacteristic, time: Micros, duration: Micros) -> Self {
+        VideoFrame { pixels: Pixels::Cv { buffer, colorspace, trc }, time, duration }
     }
 
     /// Another reference to the same pixels (no copy).
@@ -97,9 +108,7 @@ impl VideoFrame {
         match &self.pixels {
             Pixels::Av(raw) => VideoFrame::reference(*raw, self.time, self.duration),
             #[cfg(target_os = "macos")]
-            Pixels::Cv { buffer, colorspace } => {
-                Ok(Self::from_pixel_buffer(crate::vt::PixelBuffer(buffer.0.clone()), *colorspace, self.time, self.duration))
-            }
+            Pixels::Cv { buffer, colorspace, trc } => Ok(Self::from_pixel_buffer(crate::vt::PixelBuffer(buffer.0.clone()), *colorspace, *trc, self.time, self.duration)),
         }
     }
 
@@ -162,6 +171,20 @@ impl VideoFrame {
         }
     }
 
+    /// The frame's transfer characteristic (SDR unless the stream says HLG or PQ).
+    pub fn transfer(&self) -> Transfer {
+        let trc = match &self.pixels {
+            Pixels::Av(raw) => unsafe { (**raw).color_trc },
+            #[cfg(target_os = "macos")]
+            Pixels::Cv { trc, .. } => *trc,
+        };
+        match trc {
+            ff::AVColorTransferCharacteristic::AVCOL_TRC_ARIB_STD_B67 => Transfer::Hlg,
+            ff::AVColorTransferCharacteristic::AVCOL_TRC_SMPTE2084 => Transfer::Pq,
+            _ => Transfer::Sdr,
+        }
+    }
+
     /// True for full-range ("pc"/JPEG) samples, false for limited (TV) range.
     pub fn full_range(&self) -> bool {
         match &self.pixels {
@@ -211,7 +234,7 @@ impl VideoFrame {
                 result
             },
             #[cfg(target_os = "macos")]
-            Pixels::Cv { buffer, colorspace } => unsafe { cv_to_rgb(&buffer.0, *colorspace) },
+            Pixels::Cv { buffer, colorspace, .. } => unsafe { cv_to_rgb(&buffer.0, *colorspace) },
         }
     }
 }

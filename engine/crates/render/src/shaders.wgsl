@@ -113,6 +113,7 @@ fn fs_place(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 //   inv0: (y offset, y range, c offset, c range) in code values
 //   inv1: (R from Cr, G from Cb, G from Cr, B from Cb)
 //   misc.z: code values per unit sample (255 for 8-bit, 65535 / 64 for P010/P210)
+//   misc.y: 1 for an HLG frame (converted to SDR, see hlg_to_sdr)
 //   misc.w: vertical chroma subsampling (2 for 4:2:0, 1 for 4:2:2)
 @group(0) @binding(2) var chroma: texture_2d<f32>;
 
@@ -135,8 +136,41 @@ fn fs_yuv(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let top = mix(chroma_at(p), chroma_at(p + vec2<i32>(1, 0)), f.x);
     let bottom = mix(chroma_at(p + vec2<i32>(0, 1)), chroma_at(p + vec2<i32>(1, 1)), f.x);
     let cbcr = (mix(top, bottom, f.y) * k - P.inv0.z) / P.inv0.w;
-    let rgb = vec3<f32>(y + P.inv1.x * cbcr.y, y + P.inv1.y * cbcr.x + P.inv1.z * cbcr.y, y + P.inv1.w * cbcr.x);
-    return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    let rgb = clamp(vec3<f32>(y + P.inv1.x * cbcr.y, y + P.inv1.y * cbcr.x + P.inv1.z * cbcr.y, y + P.inv1.w * cbcr.x), vec3<f32>(0.0), vec3<f32>(1.0));
+    if (P.misc.y > 0.5) {
+        return vec4<f32>(hlg_to_sdr(rgb), 1.0);
+    }
+    return vec4<f32>(rgb, 1.0);
+}
+
+// HLG (BT.2100, BT.2020 primaries) to SDR BT.709, as CapCut shows it. Fitted to CapCut's
+// own render of an iPhone HDR clip (docs/parity/hdr.md): scene light x 1.15, BT.2020 ->
+// BT.709 primaries, gamma 1/2.4, and a soft shoulder from 0.6 that reaches white at 1.4.
+fn hlg_inverse_oetf(e: f32) -> f32 {
+    if (e <= 0.5) {
+        return e * e / 3.0;
+    }
+    return (exp((e - 0.55991073) / 0.17883277) + 0.28466892) / 12.0;
+}
+
+fn sdr_shoulder(v: f32) -> f32 {
+    let vs = 0.6;
+    if (v <= vs) {
+        return v;
+    }
+    let x = min((v - vs) / (2.0 * (1.0 - vs)), 1.0);
+    return vs + 2.0 * (1.0 - vs) * (x - x * x / 2.0);
+}
+
+fn hlg_to_sdr(signal: vec3<f32>) -> vec3<f32> {
+    let e = vec3<f32>(hlg_inverse_oetf(signal.r), hlg_inverse_oetf(signal.g), hlg_inverse_oetf(signal.b));
+    let lin = 1.15 * vec3<f32>(
+        dot(vec3<f32>(1.6605, -0.5876, -0.0728), e),
+        dot(vec3<f32>(-0.1246, 1.1329, -0.0083), e),
+        dot(vec3<f32>(-0.0182, -0.1006, 1.1187), e),
+    );
+    let v = pow(max(lin, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4));
+    return vec3<f32>(sdr_shoulder(v.r), sdr_shoulder(v.g), sdr_shoulder(v.b));
 }
 
 // Export: RGBA canvas -> NV12 planes (BT.709, limited range), written straight into the

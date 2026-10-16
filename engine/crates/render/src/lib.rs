@@ -385,7 +385,8 @@ impl Compositor {
         let (w, h) = (frame.width(), frame.height());
         let rgba = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
         let (inv0, inv1, k) = yuv_params(frame.matrix(), frame.full_range(), ten_bit);
-        let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0, inv1, misc: [1.0, 0.0, k, sub_v] };
+        let hlg = (frame.transfer() == openrip_media::Transfer::Hlg) as u8 as f32;
+        let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0, inv1, misc: [1.0, hlg, k, sub_v] };
         self.pass_with(enc, &self.yuv, &luma, Some(&chroma), &rgba, params, Some(wgpu::Color::BLACK));
         Some((rgba, [luma, chroma]))
     }
