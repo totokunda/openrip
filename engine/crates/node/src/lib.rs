@@ -20,7 +20,7 @@ use napi::bindgen_prelude::{AsyncTask, Buffer};
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
 use openrip_model::{Micros, Project};
-use openrip_playback::{Player, PreviewEngine};
+use openrip_playback::{Player, PreviewEngine, PreviewPipeline};
 
 fn err(e: impl std::fmt::Display) -> Error {
     Error::from_reason(e.to_string())
@@ -33,9 +33,16 @@ struct Surface(objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer
 unsafe impl Send for Surface {}
 
 struct Session {
+    project: Project,
     engine: Arc<Mutex<PreviewEngine>>,
     /// Audio output and master clock (absent when there is no output device).
-    player: Option<Player>,
+    player: Option<Arc<Player>>,
+    /// The render-ahead preview, created on the first `setPreviewSize`.
+    #[cfg(target_os = "macos")]
+    pipeline: Option<PreviewPipeline>,
+    /// Frames handed to the app by `frameForDisplay`, until it releases them.
+    #[cfg(target_os = "macos")]
+    shown: HashMap<u32, openrip_playback::pipeline::Surface>,
     #[cfg(target_os = "macos")]
     held: HashMap<u32, Surface>,
     #[cfg(target_os = "macos")]
@@ -77,6 +84,24 @@ fn load(path: &Path) -> Result<(Project, &'static str)> {
 #[napi]
 pub fn open_project(path: String) -> Result<ProjectInfo> {
     let (project, source) = load(Path::new(&path))?;
+    start_session(project, source)
+}
+
+/// Open a project from JSON text: an OpenRip project, a v1 project (the app's own format)
+/// or a CapCut draft's `draft_info.json`.
+#[napi]
+pub fn open_project_json(json: String) -> Result<ProjectInfo> {
+    if let Ok(p) = serde_json::from_str::<Project>(&json) {
+        return start_session(p, "openrip");
+    }
+    let doc: serde_json::Value = serde_json::from_str(&json).map_err(err)?;
+    if doc.get("tracks").is_some() && doc.get("materials").is_some() {
+        return start_session(openrip_capcut::import_draft_json(&doc, "draft").map_err(err)?.project, "capcut");
+    }
+    start_session(openrip_v1::import_v1_json(&doc).map_err(err)?.project, "v1")
+}
+
+fn start_session(project: Project, source: &str) -> Result<ProjectInfo> {
     let info = ProjectInfo {
         name: project.name.clone(),
         width: project.canvas.width,
@@ -87,11 +112,18 @@ pub fn open_project(path: String) -> Result<ProjectInfo> {
         segments: project.segment_count() as u32,
         source: source.into(),
     };
-    let player = Player::new(project.clone()).ok();
-    let engine = PreviewEngine::new(project).map_err(err)?;
+    // Close the old session (and its audio output) before opening the new one.
+    session().lock().unwrap().take();
+    let player = Player::new(project.clone()).ok().map(Arc::new);
+    let engine = PreviewEngine::new(project.clone()).map_err(err)?;
     *session().lock().unwrap() = Some(Session {
+        project,
         engine: Arc::new(Mutex::new(engine)),
         player,
+        #[cfg(target_os = "macos")]
+        pipeline: None,
+        #[cfg(target_os = "macos")]
+        shown: HashMap::new(),
         #[cfg(target_os = "macos")]
         held: HashMap::new(),
         #[cfg(target_os = "macos")]
@@ -188,6 +220,12 @@ pub fn render_frame(time_us: i64, width: u32, height: u32) -> AsyncTask<RenderTa
 pub fn release(id: u32) {
     #[cfg(target_os = "macos")]
     if let Some(s) = session().lock().unwrap().as_mut() {
+        if let Some(surface) = s.shown.remove(&id) {
+            if let Some(p) = &s.pipeline {
+                p.recycle(surface);
+            }
+            return;
+        }
         if let Some(surface) = s.held.remove(&id) {
             if s.free.len() < 4 {
                 s.free.push(surface);
@@ -246,4 +284,96 @@ pub fn set_volume(volume: f64) {
     if let Some(p) = session().lock().unwrap().as_ref().and_then(|s| s.player.as_ref()) {
         p.set_volume(volume as f32);
     }
+}
+
+// ---- Render-ahead preview (what the app's preview uses) ----
+
+/// Size of the preview surfaces; creates the pipeline on first call.
+#[cfg(target_os = "macos")]
+#[napi]
+pub fn set_preview_size(width: u32, height: u32) -> Result<()> {
+    let mut guard = session().lock().unwrap();
+    let s = guard.as_mut().ok_or_else(|| err("no project open"))?;
+    match &s.pipeline {
+        Some(p) => p.resize(width, height),
+        None => s.pipeline = Some(PreviewPipeline::new(s.project.clone(), width, height).map_err(err)?),
+    }
+    Ok(())
+}
+
+/// Play from `fromUs`: sound starts and frames render ahead of the audio clock.
+#[cfg(target_os = "macos")]
+#[napi]
+pub fn start_playback(from_us: i64) -> Result<()> {
+    let guard = session().lock().unwrap();
+    let s = guard.as_ref().ok_or_else(|| err("no project open"))?;
+    let p = s.pipeline.as_ref().ok_or_else(|| err("call setPreviewSize first"))?;
+    match &s.player {
+        Some(player) => {
+            player.play(Micros(from_us));
+            let player = player.clone();
+            p.play(Arc::new(move || player.position()));
+        }
+        None => {
+            // No audio device: run by the wall clock.
+            let start = Instant::now();
+            p.play(Arc::new(move || Micros(from_us + start.elapsed().as_micros() as i64)));
+        }
+    }
+    Ok(())
+}
+
+/// Stop playing; the picture stays on the frame at the stop time.
+#[cfg(target_os = "macos")]
+#[napi]
+pub fn stop_playback() -> i64 {
+    let guard = session().lock().unwrap();
+    let Some(s) = guard.as_ref() else { return 0 };
+    let at = s.player.as_ref().map_or(Micros::ZERO, |p| {
+        let t = p.position();
+        p.pause();
+        t
+    });
+    if let Some(p) = &s.pipeline {
+        p.seek(at);
+    }
+    at.0
+}
+
+/// Show the frame at `timeUs` (paused; scrubbing). The newest request wins.
+#[cfg(target_os = "macos")]
+#[napi]
+pub fn seek(time_us: i64) {
+    if let Some(p) = session().lock().unwrap().as_ref().and_then(|s| s.pipeline.as_ref()) {
+        p.seek(Micros(time_us));
+    }
+}
+
+#[napi(object)]
+pub struct DisplayFrame {
+    pub id: u32,
+    /// IOSurfaceRef pointer bytes for `sharedTexture` (BGRA).
+    pub io_surface: Buffer,
+    pub width: u32,
+    pub height: u32,
+    pub time_us: i64,
+    pub render_ms: f64,
+}
+
+/// The frame to show now (the newest one due by the playback clock, or the last seek), or
+/// `null` if there is nothing new. Call `release(id)` when Electron is done with it.
+#[cfg(target_os = "macos")]
+#[napi]
+pub fn frame_for_display() -> Option<DisplayFrame> {
+    let mut guard = session().lock().unwrap();
+    let s = guard.as_mut()?;
+    let now = s.player.as_ref().map_or(Micros(i64::MAX), |p| p.position());
+    let f = s.pipeline.as_ref()?.frame(now)?;
+    let pb = &f.surface.0;
+    let ptr = objc2_core_video::CVPixelBufferGetIOSurface(Some(pb)).map(|io| objc2_core_foundation::CFRetained::as_ptr(&io).as_ptr() as usize as u64)?;
+    let (w, h) = (objc2_core_video::CVPixelBufferGetWidth(pb) as u32, objc2_core_video::CVPixelBufferGetHeight(pb) as u32);
+    s.next_id = s.next_id.wrapping_add(1);
+    let id = s.next_id;
+    s.shown.insert(id, f.surface);
+    Some(DisplayFrame { id, io_surface: Buffer::from(ptr.to_ne_bytes().to_vec()), width: w, height: h, time_us: f.time.0, render_ms: f.render_ms })
 }

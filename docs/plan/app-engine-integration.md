@@ -30,7 +30,7 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
 4. **Preview surface.**
    - Add `EnginePreview.tsx`: one canvas (or a `<video>` fed by `MediaStreamTrackGenerator`, cheaper per the spike) that draws frames received through `sharedTexture.setSharedTextureReceiver`.
    - It replaces the clip-mapping block in `Preview.tsx` and `FullscreenPreview.tsx`. Overlays stay.
-   - **To check first:** that the receiver works from the preload with `contextIsolation` on. The spikes ran with `nodeIntegration`, and `VideoFrame` has to cross the isolated world.
+   - **Verified:** `spikes/engine-preview` now runs exactly this way: `contextIsolation` on, the preload receives the frames and draws them into the page's canvas (the preload world shares the DOM, so no `VideoFrame` crosses `contextBridge`). A real draft plays at 23.9 of 24 fps.
 5. **Playback and scrubbing.**
    - Main runs the `PreviewPipeline` (render-ahead).
    - On each display tick it takes the frame for the `Player` clock and sends it.
@@ -39,18 +39,22 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
 6. **Export.** Switch `export-renderer` to `openrip-export` (GPU → VideoToolbox; it matches CapCut's own export at 57–64 dB on stills).
 7. **Remove the old path** once the engine path covers what the old one did: shapes, drawings, masks, filters, effects (some still need calibration sessions).
 
-## Addon API to add for this
+## Addon API
 
-- `openProjectJson(json)` / `updateProject(json)`. Today `openProject(path)` takes a CapCut draft or a project file.
-- Pipeline calls:
-  - `startPlayback(fromUs)` and `stopPlayback()`: the `Player` plus `PreviewPipeline.play(clock)`.
-  - `frameForDisplay()`: the newest due frame, as a handle.
-  - `seek(timeUs)`: render once while paused.
-  - `setPreviewSize(w, h)`.
-- Clock to the UI: `positionUs()` already exists. A push channel avoids polling.
+Done:
+- `openProject(path)` and `openProjectJson(json)` (OpenRip, v1 or CapCut `draft_info.json`).
+- `setPreviewSize(w, h)`.
+- `startPlayback(fromUs)` and `stopPlayback()`.
+- `seek(timeUs)`.
+- `frameForDisplay()` and `release(id)`.
+- `positionUs()` and `setVolume(v)`.
+
+To add:
+- `updateProject(json)`, which keeps decoders warm.
+- A push channel for the clock, to save polling.
 
 ## Risks
 
 - `sharedTexture` is experimental in Electron 44. The fallback, measured in the frame-transport spike, is a native CALayer under a transparent window region.
-- `contextIsolation` with `sharedTexture`: unverified (step 4).
+- ~~`contextIsolation` with `sharedTexture`~~: verified in the spike (step 4).
 - Feature gaps against the current preview: shapes, drawings, masks, filters and LUTs, transitions, keyframe easing. The engine renders what CapCut drafts mostly use (video, photos, text with stroke and background, opacity, transforms). The rest comes in order of use.

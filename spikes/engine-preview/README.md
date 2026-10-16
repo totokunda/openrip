@@ -20,4 +20,11 @@ First runs (M2 Max, 2026-10-16):
 
 A/V sync on the session 1 run: the picture handed over trails the sound being heard by 0 ms at p50 and 21 ms at p95, inside the ±45 ms usually taken as lip-sync tolerance.
 
-Like the frame-transport spike, this runs with `nodeIntegration` and no context isolation. The app needs a preload bridge.
+**Wired like the app will be** (since 2026-10-16):
+- `contextIsolation` on, `nodeIntegration` off.
+- `preload.cjs` receives the frames through `sharedTexture.setSharedTextureReceiver` and draws them into the page's canvas. The page gets only a stats function.
+- The main process drives the render-ahead pipeline at the display rate: `setPreviewSize`, `startPlayback`, `frameForDisplay`, `release`.
+
+| Project | Preview | Frames shown | Render p50 / p95 | A/V offset p50 / p95 |
+|---|---|---|---|---|
+| A real phone draft (4K H.264, PNG overlay, stroked caption), 24 fps, isolated | 406×720 | 23.9 fps (351 of 360 in 15 s, including start-up) | 7.2 / 12.7 ms | 9 / 20 ms |
