@@ -1239,6 +1239,7 @@ name = "openrip-playback"
 version = "0.0.0"
 dependencies = [
  "cpal",
+ "objc2-core-foundation",
  "objc2-core-video",
  "openrip-audio",
  "openrip-media",

@@ -13,10 +13,14 @@
 //!   The UI widens the tolerance with drag speed and sends one accurate request when the
 //!   drag ends.
 
+#[cfg(target_os = "macos")]
+pub mod pipeline;
 mod player;
 pub mod preview;
 mod server;
 
+#[cfg(target_os = "macos")]
+pub use pipeline::{Clock, PipelineStats, PreviewPipeline, RenderedFrame};
 pub use player::{Player, PlayerError};
 pub use preview::{FrameReport, PreviewEngine, PreviewError};
 pub use server::{Delivered, FrameServer, Quality, SeekMode, ServerStats};

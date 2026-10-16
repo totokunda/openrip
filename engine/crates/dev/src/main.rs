@@ -31,6 +31,9 @@
 //!   openrip-dev playthrough <project.json | draft-dir> [--seconds N] [--realtime] [--verbose]
 //!       Render every frame in order at 540p, as playback does: frame times overall and on
 //!       the frames where a clip starts (cuts).
+//!   openrip-dev pipeline-bench <project.json | draft-dir> [--seconds N]
+//!       Play through the render-ahead preview pipeline by the wall clock with a 60 Hz
+//!       display: frames shown on time, dropped, and the longest gap without a new frame.
 //!   openrip-dev scrub-bench <media-file>
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
@@ -58,6 +61,7 @@ fn main() -> ExitCode {
         Some("export") if args.len() >= 3 => export_cmd(&args).map_err(|e| e.to_string()),
         Some("mix") if args.len() >= 3 => mix_cmd(&args).map_err(|e| e.to_string()),
         Some("playthrough") if args.len() >= 2 => playthrough(&args).map_err(|e| e.to_string()),
+        Some("pipeline-bench") if args.len() >= 2 => pipeline_bench(&args).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
@@ -720,4 +724,53 @@ fn playthrough(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(target_os = "macos"))]
 fn playthrough(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Err("playthrough needs macOS".into())
+}
+
+#[cfg(target_os = "macos")]
+fn pipeline_bench(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_model::Micros;
+    use std::sync::Arc;
+    let project = load_project(Path::new(&args[1]))?;
+    let secs: f64 = args.iter().position(|a| a == "--seconds").and_then(|i| args.get(i + 1)).map(|s| s.parse()).transpose()?.unwrap_or(20.0);
+    let fps = project.fps;
+    let (cw, ch) = (project.canvas.width.max(1) as f64, project.canvas.height.max(1) as f64);
+    let (w, h) = if cw >= ch { ((540.0 * cw / ch).round() as u32 / 2 * 2, 540) } else { (540, (540.0 * ch / cw).round() as u32 / 2 * 2) };
+    let end = project.duration().as_secs_f64().min(secs);
+    let pipeline = openrip_playback::PreviewPipeline::new(project, w, h)?;
+    // Warm up on the first frame, as the app does when a project opens.
+    pipeline.seek(Micros::ZERO);
+    while pipeline.frame(Micros::ZERO).is_none() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let start = Arc::new(Instant::now());
+    let clock_start = start.clone();
+    pipeline.play(Arc::new(move || Micros((clock_start.elapsed().as_secs_f64() * 1e6) as i64)));
+    let tick = std::time::Duration::from_micros(16_667);
+    let (mut shown, mut late, mut last_new, mut max_gap) = (0u64, 0u64, Instant::now(), 0f64);
+    let budget = fps.frame_duration().0;
+    let mut i = 0u32;
+    while start.elapsed().as_secs_f64() < end {
+        i += 1;
+        std::thread::sleep((tick * i).saturating_sub(start.elapsed()));
+        let now = Micros((start.elapsed().as_secs_f64() * 1e6) as i64);
+        if let Some(f) = pipeline.frame(now) {
+            shown += 1;
+            if now.0 - f.time.0 > budget {
+                late += 1;
+            }
+            max_gap = max_gap.max(last_new.elapsed().as_secs_f64() * 1e3);
+            last_new = Instant::now();
+            pipeline.recycle(f.surface);
+        }
+    }
+    let st = pipeline.stats();
+    let expected = (end * fps.as_f64()) as u64;
+    println!("{end:.1} s at {:.2} fps, {w}x{h}: {shown} frames shown of {expected} ({late} more than a frame late), {} rendered, {} dropped", fps.as_f64(), st.rendered, st.dropped);
+    println!("longest time without a new frame: {max_gap:.1} ms (one frame = {:.1} ms)", budget as f64 / 1000.0);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pipeline_bench(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    Err("pipeline-bench needs macOS".into())
 }
