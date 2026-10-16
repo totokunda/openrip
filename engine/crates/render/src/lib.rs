@@ -136,11 +136,13 @@ pub struct Compositor {
     place: wgpu::RenderPipeline,
     /// The placement pass for BGRA targets (IOSurfaces handed to the app).
     place_bgra: wgpu::RenderPipeline,
-    /// Resampled textures of keyed images, by (key, width, height), with the frame they
-    /// were last drawn in.
-    cache: std::sync::Mutex<std::collections::HashMap<(u64, u32, u32), (wgpu::Texture, u64)>>,
+    /// Resampled textures of keyed images, with the frame they were last drawn in.
+    cache: std::sync::Mutex<std::collections::HashMap<CacheKey, (wgpu::Texture, u64)>>,
     frame: std::sync::atomic::AtomicU64,
 }
+
+/// A keyed image at a displayed size: (key, width, height).
+type CacheKey = (u64, u32, u32);
 
 /// Keyed images not drawn for this many frames leave the GPU cache.
 const CACHE_FRAMES: u64 = 3;
