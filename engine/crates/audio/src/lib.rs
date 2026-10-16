@@ -4,7 +4,7 @@
 //! are silent, every other clip's audio is summed at its volume (keyframes included) with
 //! its fades. Video clips contribute their own sound. Speed changes keep the pitch (CapCut's
 //! default; FFmpeg's atempo) unless the clip asks for the pitch to follow the speed
-//! (`change_pitch`), which resamples. Reversed clips are silent for now.
+//! (`change_pitch`), which resamples. Reversed clips play their audio backwards.
 
 mod decode;
 mod tempo;
@@ -60,10 +60,18 @@ struct Stretch {
     next_in: i64,
 }
 
+/// A decoded stretch of a reversed clip's source, so mixing backwards seeks about once a
+/// second rather than every block.
+struct ReverseWindow {
+    start: i64,
+    samples: Vec<f32>,
+}
+
 pub struct Mixer {
     project: Project,
     rate: u32,
     stretches: HashMap<String, Stretch>,
+    reversed: HashMap<String, ReverseWindow>,
     /// One decoder per clip; `None` once a clip turned out to have no usable audio.
     decoders: HashMap<String, Option<AudioDecoder>>,
     scratch: Vec<f32>,
@@ -77,11 +85,20 @@ impl Mixer {
     }
 
     pub fn with_rate(project: Project, rate: u32) -> Self {
-        Mixer { project, rate, stretches: HashMap::new(), decoders: HashMap::new(), scratch: Vec::new(), resampled: Vec::new() }
+        Mixer { project, rate, stretches: HashMap::new(), reversed: HashMap::new(), decoders: HashMap::new(), scratch: Vec::new(), resampled: Vec::new() }
     }
 
     pub fn rate(&self) -> u32 {
         self.rate
+    }
+
+    /// Replace the project after an edit, keeping decoders of clips that still exist.
+    pub fn set_project(&mut self, project: Project) {
+        let ids: std::collections::HashSet<&str> = project.tracks.iter().flat_map(|t| t.segments.iter().map(|s| s.id.as_str())).collect();
+        self.decoders.retain(|id, _| ids.contains(id.as_str()));
+        self.stretches.clear();
+        self.reversed.clear();
+        self.project = project;
     }
 
     /// Mix the timeline into `out` (interleaved stereo) starting at sample `start`.
@@ -96,7 +113,7 @@ impl Mixer {
             .tracks
             .iter()
             .filter(|t| matches!(t.kind, TrackKind::Video | TrackKind::Audio) && !t.muted && !t.hidden)
-            .flat_map(|t| t.segments.iter().filter(|s| s.visible && !s.reverse && sample_at(s.target.start, rate) < end && sample_at(s.target.end(), rate) > start).cloned())
+            .flat_map(|t| t.segments.iter().filter(|s| s.visible && sample_at(s.target.start, rate) < end && sample_at(s.target.end(), rate) > start).cloned())
             .collect();
         for seg in clips {
             let Some(media) = self.project.materials.media.iter().find(|m| m.id == seg.material) else { continue };
@@ -123,7 +140,30 @@ impl Mixer {
             let speed = if seg.speed > 0.0 { seg.speed } else { 1.0 };
             let src_at = source_start + (local as f64 * speed).round() as i64;
             self.scratch.resize(n * CHANNELS, 0.0);
-            let samples: &[f32] = if (speed - 1.0).abs() < 1e-9 {
+            let samples: &[f32] = if seg.reverse {
+                // Backwards from the out-point: sample i of the block is source sample
+                // last - (local + i) * speed.
+                let source_end = seg.source.map_or(0, |s| sample_at(s.end(), rate));
+                let hi = source_end - 1 - (local as f64 * speed).round() as i64;
+                let lo = hi - (n as f64 * speed).ceil() as i64;
+                let fits = self.reversed.get(&seg.id).is_some_and(|w| w.start <= lo.max(0) && hi < w.start + (w.samples.len() / CHANNELS) as i64);
+                if !fits {
+                    // Decode a second (plus this block) ending at `hi`, reading forward once.
+                    let start = (lo - rate as i64).max(0);
+                    let mut samples = vec![0f32; ((hi - start + 1).max(0) as usize) * CHANNELS];
+                    decoder.read(start, &mut samples)?;
+                    self.reversed.insert(seg.id.clone(), ReverseWindow { start, samples });
+                }
+                let w = &self.reversed[&seg.id];
+                for i in 0..n {
+                    let src = hi - (i as f64 * speed).round() as i64;
+                    let k = (src - w.start).clamp(0, (w.samples.len() / CHANNELS) as i64 - 1) as usize;
+                    for c in 0..CHANNELS {
+                        self.scratch[i * CHANNELS + c] = if src >= 0 { w.samples[k * CHANNELS + c] } else { 0.0 };
+                    }
+                }
+                &self.scratch
+            } else if (speed - 1.0).abs() < 1e-9 {
                 decoder.read(src_at, &mut self.scratch)?;
                 &self.scratch
             } else if !seg.change_pitch {

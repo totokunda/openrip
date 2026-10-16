@@ -91,18 +91,48 @@ pub fn open_project(path: String) -> Result<ProjectInfo> {
 /// or a CapCut draft's `draft_info.json`.
 #[napi]
 pub fn open_project_json(json: String) -> Result<ProjectInfo> {
-    if let Ok(p) = serde_json::from_str::<Project>(&json) {
-        return start_session(p, "openrip");
-    }
-    let doc: serde_json::Value = serde_json::from_str(&json).map_err(err)?;
-    if doc.get("tracks").is_some() && doc.get("materials").is_some() {
-        return start_session(openrip_capcut::import_draft_json(&doc, "draft").map_err(err)?.project, "capcut");
-    }
-    start_session(openrip_v1::import_v1_json(&doc).map_err(err)?.project, "v1")
+    let (project, source) = parse_json(&json)?;
+    start_session(project, source)
 }
 
-fn start_session(project: Project, source: &str) -> Result<ProjectInfo> {
-    let info = ProjectInfo {
+fn parse_json(json: &str) -> Result<(Project, &'static str)> {
+    if let Ok(p) = serde_json::from_str::<Project>(json) {
+        return Ok((p, "openrip"));
+    }
+    let doc: serde_json::Value = serde_json::from_str(json).map_err(err)?;
+    if doc.get("tracks").is_some() && doc.get("materials").is_some() {
+        return Ok((openrip_capcut::import_draft_json(&doc, "draft").map_err(err)?.project, "capcut"));
+    }
+    Ok((openrip_v1::import_v1_json(&doc).map_err(err)?.project, "v1"))
+}
+
+/// Replace the open project after an edit (same formats as `openProjectJson`). Decoders,
+/// the audio output and the playback state stay as they are, so this is cheap enough to
+/// call after every edit; paused, the current frame is rendered again. Opens the project
+/// if none is open.
+#[napi]
+pub fn update_project(json: String) -> Result<ProjectInfo> {
+    let (project, source) = parse_json(&json)?;
+    let mut guard = session().lock().unwrap();
+    let Some(s) = guard.as_mut() else {
+        drop(guard);
+        return start_session(project, source);
+    };
+    let info = project_info(&project, source);
+    s.engine.lock().unwrap().set_project(project.clone());
+    if let Some(p) = &s.player {
+        p.set_project(project.clone());
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(p) = &s.pipeline {
+        p.set_project(project.clone());
+    }
+    s.project = project;
+    Ok(info)
+}
+
+fn project_info(project: &Project, source: &str) -> ProjectInfo {
+    ProjectInfo {
         name: project.name.clone(),
         width: project.canvas.width,
         height: project.canvas.height,
@@ -111,7 +141,11 @@ fn start_session(project: Project, source: &str) -> Result<ProjectInfo> {
         tracks: project.tracks.len() as u32,
         segments: project.segment_count() as u32,
         source: source.into(),
-    };
+    }
+}
+
+fn start_session(project: Project, source: &str) -> Result<ProjectInfo> {
+    let info = project_info(&project, source);
     // Close the old session (and its audio output) before opening the new one.
     session().lock().unwrap().take();
     let player = Player::new(project.clone()).ok().map(Arc::new);

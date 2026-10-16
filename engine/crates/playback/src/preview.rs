@@ -33,7 +33,8 @@ struct PrefetchJob {
 }
 
 enum Prefetched {
-    Decoder(String, Box<VideoDecoder>),
+    /// Segment, media path, decoder.
+    Decoder(String, String, Box<VideoDecoder>),
     Still(String, RgbaImage),
 }
 
@@ -65,7 +66,7 @@ impl Prefetcher {
                         if d.frame_at(job.at).is_err() {
                             continue;
                         }
-                        Prefetched::Decoder(job.segment, Box::new(d))
+                        Prefetched::Decoder(job.segment, job.path, Box::new(d))
                     };
                     if ready_tx.send(done).is_err() {
                         return;
@@ -109,6 +110,12 @@ enum Pixels {
     Video(VideoFrame, i32),
     /// Rasterised text, its cache key, and the canvas point its image centre goes to.
     Text(std::sync::Arc<RgbaImage>, u64, [f64; 2]),
+}
+
+/// The media file a segment plays.
+fn media_path(p: &Project, segment: &str) -> Option<String> {
+    let s = p.tracks.iter().flat_map(|t| t.segments.iter()).find(|s| s.id == segment)?;
+    p.materials.media.iter().find(|m| m.id == s.material).map(|m| m.path.clone())
 }
 
 fn key_of(v: impl std::hash::Hash) -> u64 {
@@ -159,6 +166,24 @@ impl PreviewEngine {
         &self.project
     }
 
+    /// Replace the project after an edit, keeping every open decoder whose clip still exists
+    /// with the same media (so playback and scrubbing stay warm).
+    pub fn set_project(&mut self, project: Project) {
+        let old = std::mem::replace(&mut self.project, project);
+        let keep: Vec<String> = self.decoders.keys().filter(|id| self.media_path(id).is_some_and(|path| Some(path) == media_path(&old, id))).cloned().collect();
+        self.decoders.retain(|id, _| keep.contains(id));
+        self.failed.clear(); // files may have been relinked
+    }
+
+    /// Video decoders open (one per clip in use).
+    pub fn open_decoders(&self) -> usize {
+        self.decoders.len()
+    }
+
+    fn media_path(&self, segment: &str) -> Option<String> {
+        media_path(&self.project, segment)
+    }
+
     /// Render the frame at `t` and read it back.
     pub fn render_image(&mut self, t: Micros, width: u32, height: u32) -> Result<(RgbaImage, FrameReport), PreviewError> {
         let (pixels, report) = self.gather(t, width, height);
@@ -203,9 +228,13 @@ impl PreviewEngine {
 
     fn adopt(&mut self, done: Prefetched) {
         match done {
-            Prefetched::Decoder(segment, decoder) => {
+            Prefetched::Decoder(segment, path, decoder) => {
                 self.prefetch.pending.remove(&segment);
-                self.decoders.entry(segment).or_insert(OpenDecoder { decoder: *decoder, last_used: self.tick });
+                // The project may have been edited since: keep it only if the clip still
+                // plays that file.
+                if self.media_path(&segment).as_deref() == Some(path.as_str()) {
+                    self.decoders.entry(segment).or_insert(OpenDecoder { decoder: *decoder, last_used: self.tick });
+                }
             }
             Prefetched::Still(path, img) => {
                 self.prefetch.pending.remove(&path);

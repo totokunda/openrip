@@ -112,3 +112,30 @@ fn speed_keeps_pitch_unless_asked_not_to() {
         assert!((f - want).abs() < want * 0.03, "change_pitch={change_pitch}: {f:.1} Hz, want {want}");
     }
 }
+
+#[test]
+fn reversed_clips_play_their_audio_backwards() {
+    let Some(path) = noise() else { return };
+    let mut p = project(path.to_str().unwrap(), &[(false, false, 1.0)]);
+    p.tracks[0].segments[0].reverse = true;
+    let mut m = Mixer::new(p);
+    // Mix the clip (timeline 1..2 s) in playback-sized blocks.
+    let mut out = Vec::new();
+    let mut block = vec![0f32; 1024 * CHANNELS];
+    let (from, to) = (RATE as i64, 2 * RATE as i64);
+    let mut at = from;
+    while at < to {
+        m.mix(at, &mut block).unwrap();
+        out.extend_from_slice(&block);
+        at += 1024;
+    }
+    // Source 0.5..1.5 s, forwards.
+    let mut src = vec![0f32; RATE as usize * CHANNELS];
+    AudioDecoder::open(&path, RATE).unwrap().unwrap().read(RATE as i64 / 2, &mut src).unwrap();
+    let frames = RATE as usize;
+    for i in (0..frames).step_by(997) {
+        for c in 0..CHANNELS {
+            assert_eq!(out[i * CHANNELS + c], src[(frames - 1 - i) * CHANNELS + c], "frame {i}");
+        }
+    }
+}

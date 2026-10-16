@@ -36,6 +36,8 @@ struct State {
     playing: bool,
     /// Bumped on every play/seek so in-flight mixing for an old position is dropped.
     generation: u64,
+    /// An edited project for the mixer to switch to.
+    project: Option<Project>,
 }
 
 struct Shared {
@@ -59,7 +61,7 @@ impl Player {
     /// Open the default output device and start the (paused) mixer for `project`.
     pub fn new(project: Project) -> Result<Player, PlayerError> {
         let shared = Arc::new(Shared {
-            state: Mutex::new(State { ring: VecDeque::new(), ring_start: 0, next_mix: 0, playing: false, generation: 0 }),
+            state: Mutex::new(State { ring: VecDeque::new(), ring_start: 0, next_mix: 0, playing: false, generation: 0, project: None }),
             cond: Condvar::new(),
             played: AtomicI64::new(0),
             latency_us: AtomicI64::new(0),
@@ -129,6 +131,13 @@ impl Player {
         let t = played as i128 * 1_000_000 / self.rate as i128;
         let latency = if self.is_playing() { self.shared.latency_us.load(Ordering::Relaxed) } else { 0 };
         Micros((t as i64 - latency).max(0))
+    }
+
+    /// Switch to an edited project. While playing, the ~150 ms already mixed plays out
+    /// first, so the sound doesn't skip.
+    pub fn set_project(&self, project: Project) {
+        self.shared.state.lock().unwrap().project = Some(project);
+        self.shared.cond.notify_all();
     }
 
     /// Output gain (0 = silent; the clock keeps running).
@@ -203,6 +212,9 @@ fn run_mixer(mut mixer: Mixer, shared: &Shared, rate: u32) {
             loop {
                 if shared.quit.load(Ordering::Relaxed) {
                     return;
+                }
+                if let Some(p) = st.project.take() {
+                    mixer.set_project(p);
                 }
                 let buffered = (st.ring.len() / CHANNELS) as i64;
                 if st.playing && buffered < ahead {

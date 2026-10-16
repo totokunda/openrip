@@ -42,7 +42,12 @@ enum Mode {
 
 struct State {
     mode: Mode,
+    fps: FrameRate,
     size: (u32, u32),
+    /// An edited project for the worker to switch to.
+    project: Option<Project>,
+    /// The last time rendered while paused (re-rendered after an edit).
+    last: Option<Micros>,
     ready: VecDeque<RenderedFrame>,
     free: Vec<Surface>,
     /// The next frame index to render while playing.
@@ -68,7 +73,6 @@ struct Shared {
 
 pub struct PreviewPipeline {
     shared: Arc<Shared>,
-    fps: FrameRate,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -77,14 +81,34 @@ impl PreviewPipeline {
         let fps = project.fps;
         let mut engine = PreviewEngine::new(project)?;
         let shared = Arc::new(Shared {
-            state: Mutex::new(State { mode: Mode::Paused { want: None }, size: (width, height), ready: VecDeque::new(), free: Vec::new(), next: None, generation: 0, quit: false, stats: Default::default() }),
+            state: Mutex::new(State { mode: Mode::Paused { want: None }, fps, size: (width, height), project: None, last: None, ready: VecDeque::new(), free: Vec::new(), next: None, generation: 0, quit: false, stats: Default::default() }),
             cond: Condvar::new(),
         });
         let worker = {
             let shared = shared.clone();
-            std::thread::Builder::new().name("preview-render".into()).spawn(move || run(&mut engine, &shared, fps)).expect("spawn preview worker")
+            std::thread::Builder::new().name("preview-render".into()).spawn(move || run(&mut engine, &shared)).expect("spawn preview worker")
         };
-        Ok(PreviewPipeline { shared, fps, worker: Some(worker) })
+        Ok(PreviewPipeline { shared, worker: Some(worker) })
+    }
+
+    /// Switch to an edited project. Open decoders stay warm; frames rendered from the old
+    /// project are dropped, and while paused the current frame is rendered again.
+    pub fn set_project(&self, project: Project) {
+        let mut st = self.shared.state.lock().unwrap();
+        st.fps = project.fps;
+        st.project = Some(project);
+        st.generation += 1;
+        let drained: Vec<_> = st.ready.drain(..).map(|f| f.surface).collect();
+        st.free.extend(drained);
+        let (fps, last) = (st.fps, st.last);
+        match &mut st.mode {
+            Mode::Paused { want } => *want = want.or(last),
+            Mode::Playing { clock } => {
+                let n = fps.frame_of(clock());
+                st.next = Some(n);
+            }
+        }
+        self.shared.cond.notify_all();
     }
 
     /// Show the frame at `t` (paused): rendered at once, newest request wins.
@@ -100,7 +124,7 @@ impl PreviewPipeline {
     /// Play by `clock`: frames are rendered ahead of it.
     pub fn play(&self, clock: Clock) {
         let mut st = self.shared.state.lock().unwrap();
-        st.next = Some(self.fps.frame_of(clock()));
+        st.next = Some(st.fps.frame_of(clock()));
         st.mode = Mode::Playing { clock };
         st.generation += 1;
         let drained: Vec<_> = st.ready.drain(..).map(|f| f.surface).collect();
@@ -161,7 +185,7 @@ impl Drop for PreviewPipeline {
     }
 }
 
-fn run(engine: &mut PreviewEngine, shared: &Shared, fps: FrameRate) {
+fn run(engine: &mut PreviewEngine, shared: &Shared) {
     loop {
         // Decide what to render next (or wait).
         let (t, size, generation, mut surface) = {
@@ -170,8 +194,18 @@ fn run(engine: &mut PreviewEngine, shared: &Shared, fps: FrameRate) {
                 if st.quit {
                     return;
                 }
+                if let Some(p) = st.project.take() {
+                    engine.set_project(p);
+                }
+                let fps = st.fps;
                 let job = match &mut st.mode {
-                    Mode::Paused { want } => want.take(),
+                    Mode::Paused { want } => {
+                        let t = want.take();
+                        if t.is_some() {
+                            st.last = t;
+                        }
+                        t
+                    }
                     Mode::Playing { clock } => {
                         let now = clock();
                         let n = st.next.unwrap_or_else(|| fps.frame_of(now)).max(fps.frame_of(now));
@@ -190,7 +224,7 @@ fn run(engine: &mut PreviewEngine, shared: &Shared, fps: FrameRate) {
                     break (t, size, st.generation, surface);
                 }
                 let wait = match st.mode {
-                    Mode::Playing { .. } => std::time::Duration::from_micros(fps.frame_duration().0 as u64 / 2),
+                    Mode::Playing { .. } => std::time::Duration::from_micros(st.fps.frame_duration().0 as u64 / 2),
                     Mode::Paused { .. } => std::time::Duration::from_millis(250),
                 };
                 st = shared.cond.wait_timeout(st, wait).unwrap().0;

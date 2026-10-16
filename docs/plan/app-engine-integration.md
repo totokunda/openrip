@@ -25,7 +25,7 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
    - Load it in the main process.
 3. **Project in, kept in sync.**
    - The renderer already autosaves v1 JSON (`withJsonProjectPersistence`), and `openrip-v1` imports it in 1–2 ms.
-   - First cut: send the project on load and after each edit (debounced) with `openProjectJson(json)`, keeping decoders warm across reloads.
+   - First cut: send the project on load with `openProjectJson(json)` and after each edit (debounced) with `updateProject(json)`, which keeps decoders warm.
    - Later: send `openrip-model` `Edit` commands instead of whole projects.
 4. **Preview surface.**
    - Add `EnginePreview.tsx`: one canvas (or a `<video>` fed by `MediaStreamTrackGenerator`, cheaper per the spike) that draws frames received through `sharedTexture.setSharedTextureReceiver`.
@@ -48,9 +48,9 @@ Done:
 - `seek(timeUs)`.
 - `frameForDisplay()` and `release(id)`.
 - `positionUs()` and `setVolume(v)`.
+- `updateProject(json)`: swaps in an edited project without reopening anything. Decoders of clips that still play the same file stay open; audio already mixed (~150 ms) plays out; paused, the current frame is rendered again.
 
 To add:
-- `updateProject(json)`, which keeps decoders warm.
 - A push channel for the clock, to save polling.
 
 ## Risks
