@@ -676,11 +676,12 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                     });
                     true
                 }
-                "effects" | "video_effects" => {
+                "effects" | "video_effects" | "audio_effects" => {
                     let ty = s(m, "type");
                     let adjust = ADJUST_TYPES.iter().find(|(capcut, _)| *capcut == ty).map(|(_, ours)| *ours);
                     let category = match (table.as_str(), ty.as_str()) {
                         ("video_effects", _) => EffectCategory::VideoEffect,
+                        ("audio_effects", _) => EffectCategory::Audio,
                         (_, "filter") => EffectCategory::Filter,
                         _ if adjust.is_some() => EffectCategory::Adjust,
                         _ => EffectCategory::Other,
@@ -689,7 +690,8 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                     if let Some(v) = m.get("value").and_then(Value::as_f64) {
                         params.insert("intensity".to_string(), v);
                     }
-                    for p in arr(m, "adjust_params") {
+                    // A voice filter's sliders, by name (the bundle maps them onto its processors).
+                    for p in arr(m, "adjust_params").iter().chain(arr(m, "audio_adjust_params")) {
                         if let Some(v) = p.get("value").and_then(Value::as_f64) {
                             params.insert(s(p, "name"), v);
                         }
@@ -1195,6 +1197,16 @@ mod tests {
         assert_eq!(project.materials.media[0].matte.as_deref(), Some("##_draftpath_placeholder_X_##/matting/abc"));
         d["materials"]["videos"][0]["matting"]["flag"] = json!(0);
         assert_eq!(import_draft_json(&d, "hint").unwrap().project.materials.media[0].matte, None);
+    }
+
+    #[test]
+    fn imports_a_voice_filter_with_its_sliders() {
+        let mut d = sample_draft();
+        d["materials"]["audio_effects"] = json!([{"id": "AE", "type": "audio_effect", "name": "Deep", "resource_id": "7021052537344102913", "path": "/cache/deep",
+            "audio_adjust_params": [{"name": "change_voice_param_pitch", "value": 0.834}, {"name": "change_voice_param_timbre", "value": 1.0}]}]);
+        let Imported { project, .. } = import_draft_json(&d, "hint").unwrap();
+        let e = project.materials.effects.iter().find(|e| e.id.0 == "AE").unwrap();
+        assert_eq!((e.category, e.resource.as_deref(), e.params.get("change_voice_param_pitch").copied()), (EffectCategory::Audio, Some("/cache/deep"), Some(0.834)));
     }
 
     #[test]

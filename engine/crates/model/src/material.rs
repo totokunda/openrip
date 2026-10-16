@@ -428,6 +428,8 @@ pub enum EffectCategory {
     VideoEffect,
     /// Basic colour adjustments (exposure, contrast, …).
     Adjust,
+    /// A sound effect on a clip's audio (CapCut's voice filters).
+    Audio,
     Other,
 }
 

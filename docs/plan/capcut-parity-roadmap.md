@@ -18,7 +18,8 @@ Agreed 2026-10-16. What the engine draws next is chosen from two sources: what r
 | Speed changes, keyframes (opacity, position) | 14 and 12 uses | ✅ |
 | Stabilisation | 12, 2 drafts | ❌ |
 | Transitions | 8, 2 drafts | ✅ Blink, White Flash, White Fade ([transitions.md](../parity/transitions.md)) |
-| Voice effects, stickers, masks, video effects | 1–5 each | ❌ |
+| Voice effects | 8, 5 drafts | ✅ Deep, Low, Voice Crisper, Demonized; Deep 2 without its reverb ([voice-effects.md](../parity/voice-effects.md)) |
+| Stickers, masks, video effects | 1–4 each | ❌ |
 | AI features (matting, smart crop, AI denoise) | 1–29 | No models in OpenRip; background removal draws from the masks CapCut saved in the draft ([cutouts.md](../parity/cutouts.md)) |
 
 ## Library content
