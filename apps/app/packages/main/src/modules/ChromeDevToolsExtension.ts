@@ -41,7 +41,9 @@ export class ChromeDevToolsExtension implements AppModule {
         JQUERY_DEBUGGER: installer.JQUERY_DEBUGGER,
         MOBX_DEVTOOLS: installer.MOBX_DEVTOOLS,
       } as const;
-      const installExtension = installer.default as (
+      // v4 exports `installExtension` by name; its default export is the module object.
+      const installExtension = (installer.installExtension ??
+        installer.default?.installExtension) as (
         ext: unknown,
       ) => Promise<unknown>;
       await installExtension(dict[this.#extension]);
