@@ -55,6 +55,8 @@ pub struct DecodeStats {
     pub sessions_reset: u64,
     /// Requests answered from the frame cache.
     pub cache_hits: u64,
+    /// Pictures nothing references, skipped (not decoded) on the way to a seek target.
+    pub skipped_disposable: u64,
 }
 
 /// Frames worth decoding forward rather than seeking (a seek flushes and refills the decoder).
@@ -122,8 +124,8 @@ pub struct VideoDecoder {
     device: *mut ff::AVBufferRef,
     threads: i32,
     native_videotoolbox: bool,
-    /// Bitstream layout, for H.264/HEVC (to recognise IDR keyframes).
-    nal: Option<(nal::Codec, nal::Framing)>,
+    /// Bitstream layout, for H.264/HEVC (to recognise IDR keyframes and disposable pictures).
+    nal: Option<nal::Bitstream>,
     backend: Backend,
     /// Scratch frame for FFmpeg's decoder.
     frame: *mut ff::AVFrame,
@@ -241,7 +243,7 @@ impl VideoDecoder {
     unsafe fn new_backend(&self) -> Result<Backend, MediaError> {
         #[cfg(target_os = "macos")]
         if self.hardware && self.native_videotoolbox {
-            if let Some((codec, nal::Framing::LengthPrefixed(_))) = self.nal {
+            if let Some(nal::Bitstream { codec, framing: nal::Framing::LengthPrefixed(_), .. }) = self.nal {
                 let par = (*self.input.stream(self.stream)).codecpar;
                 if let Some(vt) = crate::vt::VtDecoder::new(codec, par, self.tb, self.info.bit_depth) {
                     return Ok(Backend::Native(vt));
@@ -411,35 +413,45 @@ impl VideoDecoder {
     /// will see. All candidates are known once a packet decodes after `t`: no later packet
     /// can present at or before it.
     fn prepare_target(&mut self, t: Micros) -> Result<(), MediaError> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Native(_) = self.backend {
-            if self.origin == ff::AV_NOPTS_VALUE {
-                return Ok(());
-            }
-            // Compare in microseconds, rounded exactly like frame times, so the frame chosen
-            // here is the one `frame_at` will pick.
-            let (origin, tb) = (self.origin, self.tb);
-            let after = move |ts: i64| ts != ff::AV_NOPTS_VALUE && unsafe { ff::av_rescale_q(ts - origin, tb, MICROS) } > t.0;
-            while !self.eof && self.queue.len() < MAX_LOOKAHEAD && !self.queue.back().is_some_and(|q| after(q.dts())) {
-                if let Some(q) = self.read_packet()? {
-                    self.queue.push_back(q);
-                }
-            }
-            let floor = self.drop_before;
-            let shown = self
-                .queue
-                .iter()
-                .map(Queued::pts)
-                .filter(|&p| p != ff::AV_NOPTS_VALUE && !after(p) && (floor == ff::AV_NOPTS_VALUE || p >= floor))
-                .max();
-            if let Some(shown) = shown {
-                for q in &mut self.queue {
-                    q.output = q.pts() == ff::AV_NOPTS_VALUE || q.pts() >= shown;
-                }
+        if self.origin == ff::AV_NOPTS_VALUE {
+            return Ok(());
+        }
+        // Compare in microseconds, rounded exactly like frame times, so the frame chosen
+        // here is the one `frame_at` will pick.
+        let (origin, tb) = (self.origin, self.tb);
+        let micros = move |ts: i64| Micros(unsafe { ff::av_rescale_q(ts - origin, tb, MICROS) });
+        let after = move |ts: i64| ts != ff::AV_NOPTS_VALUE && micros(ts) > t;
+        while !self.eof && self.queue.len() < MAX_LOOKAHEAD && !self.queue.back().is_some_and(|q| after(q.dts())) {
+            if let Some(q) = self.read_packet()? {
+                self.queue.push_back(q);
             }
         }
-        #[cfg(not(target_os = "macos"))]
-        let _ = t;
+        let floor = self.drop_before;
+        let shown = self
+            .queue
+            .iter()
+            .map(Queued::pts)
+            .filter(|&p| p != ff::AV_NOPTS_VALUE && !after(p) && (floor == ff::AV_NOPTS_VALUE || p >= floor))
+            .max();
+        let Some(shown) = shown else { return Ok(()) };
+        // Pictures before the target that nothing references aren't needed at all; the rest
+        // are decoded as references only.
+        let (bitstream, cache) = (self.nal, &mut self.cache);
+        let mut skipped = 0;
+        self.queue.retain_mut(|q| {
+            let pts = q.pts();
+            if pts == ff::AV_NOPTS_VALUE || pts >= shown {
+                return true;
+            }
+            q.output = false;
+            let disposable = bitstream.is_some_and(|bs| unsafe { bs.is_disposable(std::slice::from_raw_parts((*q.pkt).data, (*q.pkt).size as usize)) });
+            if disposable {
+                cache.hide(micros(pts));
+                skipped += 1;
+            }
+            !disposable
+        });
+        self.stats.skipped_disposable += skipped;
         Ok(())
     }
 
@@ -535,7 +547,7 @@ impl VideoDecoder {
     /// Whether `pkt` is a keyframe that doesn't reset reference pictures.
     unsafe fn open_gop_keyframe(&self, pkt: *const ff::AVPacket) -> bool {
         match self.nal {
-            Some((codec, framing)) => !nal::is_idr(codec, framing, std::slice::from_raw_parts((*pkt).data, (*pkt).size as usize)),
+            Some(bs) => !bs.is_idr(std::slice::from_raw_parts((*pkt).data, (*pkt).size as usize)),
             None => false,
         }
     }
