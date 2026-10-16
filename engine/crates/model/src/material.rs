@@ -173,8 +173,9 @@ pub enum SizeUnit {
 }
 
 /// Em size of one CapCut font-size unit, as a fraction of the canvas side
-/// (docs/parity/calibration.md: size 15 → 94.6 px em on a 1080 px canvas).
-pub const CAPCUT_SIZE_UNIT_EM: f32 = 0.005_84;
+/// (docs/parity/calibration.md: size 15 → 93.78 px em on a 1080 px canvas, fitted from
+/// the positions of all glyphs in a rendered line).
+pub const CAPCUT_SIZE_UNIT_EM: f32 = 0.005_789;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FontRef {

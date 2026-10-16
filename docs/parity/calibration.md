@@ -34,7 +34,7 @@ Note: CapCut set the canvas to **"original" 1:1, 1920×1920 at 24 fps** because 
 
 (The sub-pixel differences come from anti-aliased edges in the centroid and area estimates.) The inspector's "X 200" is therefore 200/1920 of the canvas width as a stored value, which renders as 100 px from centre on the 1920 canvas: half-canvas units.
 
-**Text size.** The default text ("Default text", CapCut's `SystemFont/en.ttf`, size 15) renders with a 65 px cap height in the 1080 px export. The font's cap height is 687/1000 em, so the em is ≈ 94.6 px: **0.00584 of the canvas per CapCut size unit.** The canvas was square, so whether this scales with width, height or the shorter side still needs a non-square check.
+**Text size.** The default text ("Default text", CapCut's `SystemFont/en.ttf`, size 15) renders with a 65 px cap height in the 1080 px export. A first estimate from the font's cap height (687/1000 em) gave an em of 94.6 px. Fitting the positions of every glyph in the rendered line instead gives **93.78 px, so one CapCut size unit = 0.005789 of the canvas as an em size** (the cap-height estimate was 0.9% high because of anti-aliasing at the glyph tops). The canvas was square, so whether this scales with width, height or the shorter side is settled in session 2.
 
 **Track flags (`attribute` bits).**
 
@@ -48,6 +48,40 @@ Note: CapCut set the canvas to **"original" 1:1, 1920×1920 at 24 fps** because 
 
 **Stacking.** The draft has `render_index_track_mode_on = true` and `free_render_index_mode_on = false`. In this default mode, **layer order follows track order** (`track_render_index`), not each segment's `render_index`; the overlay segments' own values (3, 2, 1) ran opposite to their track order (1, 2, 3). The importer now uses track order unless free-layer mode is on.
 
-**Side-by-side check.** `bench/calibration/compare.py` draws the imported OpenRip project with a reference renderer (Pillow, not the engine) and diffs it against CapCut's export: the marker differs in 0.39% of pixels (PSNR 33.4 dB) and the text in 0.34% (PSNR 27.4 dB), only along anti-aliased edges. The sheet is written to `bench/calibration/compare/comparison.png`.
+**Side-by-side check.** `bench/calibration/compare.py` draws the imported OpenRip project with a reference renderer (exact sub-pixel affine drawing with 4×4 supersampling, not the engine), passes it through a CapCut-like export (x264, BT.709, TV range), decodes both sides the same way and diffs them:
 
-**Still open:** check text-size scaling on a 16:9 canvas.
+| Frame | First pass | Now | Pixels off by > 64/255 |
+|---|---|---|---|
+| Marker (position, scale, rotation) | 33.4 dB | **35.7 dB** | 0.37% |
+| Default text, size 15 | 27.4 dB | **29.6 dB** | 0.27% |
+
+What is left is edges only. CapCut's image edges are **2.7 px wide** (10–90%) in its export against 1.6–1.8 px for an exact area-coverage edge put through the same encoders (x264 and VideoToolbox), so the softening comes from CapCut's renderer (its resampling or anti-aliasing), not the export. Text keeps a per-glyph residual of about ±0.7 px because the reference uses Pillow's basic layout (no HarfBuzz shaping or kerning). Session 2 measures the renderer's kernel directly. The sheet is written to `bench/calibration/compare/comparison.png`.
+
+## Session 2: rendering kernel, colour path and text scaling
+
+Session 1 settled the draft format. Session 2 measures how CapCut draws pixels, so OpenRip's compositor can match it:
+
+- **Resampling kernel and internal resolution.** How CapCut filters an image at 100%, at 50% and rotated, and whether a 4K export of a 1080p canvas is rendered at 4K or upscaled.
+- **Edge anti-aliasing.** The 2.7 px edge width from session 1, measured on a 5° slanted edge (ISO 12233 method).
+- **Colour path.** A 256-step grey ramp and primary/secondary patches show the tone curve, matrix and range from image to export.
+- **Text scaling.** Default text at sizes 10, 15 and 30 on a 16:9 canvas shows whether size follows the width, the height or the shorter side, and whether it is linear.
+
+It takes about 10 minutes.
+
+### Steps
+
+0. Generate the chart: `bench/calibration/make-assets.sh` → `bench/calibration/pattern.png` (1920×1080: 1-px checkerboard and line grids, a slanted edge, a grey ramp, colour patches). Its layout is written to `pattern.json`.
+1. In CapCut, create a new project named **`openrip-calibration-2`**. Set the ratio to **16:9**. Import `pattern.png` first so the canvas is 1920×1080.
+2. Main track, each clip exactly **1 second** long and back to back:
+   - **0–1 s:** `pattern.png`, all defaults.
+   - **1–2 s:** `pattern.png`, **Scale 50%**.
+   - **2–3 s:** `pattern.png`, **Scale 50%, Rotate 45°**.
+3. Text, on a text track, each **1 second** long and back to back, all other style settings at default:
+   - **3–4 s:** default text, size **15** (the default).
+   - **4–5 s:** default text, size **30**.
+   - **5–6 s:** default text, size **10**.
+4. Export twice into `bench/calibration/out/`, both **30 fps, H.264, bitrate Higher** (or the highest option offered):
+   - **1080p**, named `openrip-calibration-2`.
+   - **4K**, named `openrip-calibration-2-4k`.
+
+Then tell Claude it's done.
