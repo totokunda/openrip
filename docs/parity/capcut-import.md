@@ -40,7 +40,7 @@ The importer only reads CapCut's files; it never writes to CapCut's data folder.
 
 **Library items** (CapCut-only assets we can't ship; need built-in equivalents or placeholders): text effects 185, text shapes 122, animations 2,731, text templates 43, transitions 8, stickers 4, filters 3, a few video effects.
 
+**Calibrated against CapCut** (see [calibration.md](calibration.md)): transform units match the model (half-canvas, +y up, clockwise, contain-fit scale); track flags are 1 = muted (inferred), 2 = hidden, 4 = locked; hidden tracks are silent too; stacking follows track order in CapCut's default track mode; one text size unit = 0.00584 of the canvas as an em size.
+
 **Still to verify against CapCut exports:**
-- Track `attribute` bits (values seen: 0, 1, 2, 6). Probably mute/hide/lock; confirm by toggling them in a test project and diffing the draft.
 - The keyframe curve-control space. Every curve seen so far is `Line`, so non-linear curves are imported as linear for now.
-- Transform units: position is assumed to be in half-canvas units with (0, 0) at the centre. Confirm against a rendered export.

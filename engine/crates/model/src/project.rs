@@ -59,8 +59,10 @@ pub struct Track {
     #[serde(default)]
     pub name: String,
     pub segments: Vec<Segment>,
+    /// Audio of this track is silent.
     #[serde(default)]
     pub muted: bool,
+    /// The track is disabled entirely: no video and no audio (CapCut's "hide").
     #[serde(default)]
     pub hidden: bool,
     #[serde(default)]

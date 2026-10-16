@@ -14,6 +14,12 @@ use serde_json::Value;
 
 const APP: &str = "capcut";
 
+// Track `attribute` bits, from the calibration session (docs/parity/calibration.md).
+// Hidden = 2 is certain; mute/lock are 1/4 with mute = 1 inferred (pending confirmation).
+const ATTR_MUTED: i64 = 1;
+const ATTR_HIDDEN: i64 = 2;
+const ATTR_LOCKED: i64 = 4;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
     #[error("can't read {path}: {source}")]
@@ -133,7 +139,10 @@ pub fn import_draft_json(doc: &Value, name_hint: &str) -> Result<Imported, Impor
 
     import_materials(&doc["materials"], &mut project.materials, &mut report);
 
-    for t in arr(doc, "tracks") {
+    // In CapCut's default "track mode", stacking follows track order (`track_render_index`),
+    // not each segment's `render_index`; only "free layer" mode uses per-segment order.
+    let free_layers = b(doc, "free_render_index_mode_on", false);
+    for (track_pos, t) in arr(doc, "tracks").iter().enumerate() {
         let kind = match s(t, "type").as_str() {
             "video" => TrackKind::Video,
             "audio" => TrackKind::Audio,
@@ -147,19 +156,25 @@ pub fn import_draft_json(doc: &Value, name_hint: &str) -> Result<Imported, Impor
                 continue;
             }
         };
-        bump(&mut report.track_attributes, i(t, "attribute"));
+        let attribute = i(t, "attribute");
+        bump(&mut report.track_attributes, attribute);
         let mut track = Track {
             id: s(t, "id"),
             kind,
             name: s(t, "name"),
             segments: Vec::new(),
-            // TODO: decode `attribute` (mute/hide/lock bits) once verified against CapCut.
-            muted: false,
-            hidden: false,
-            locked: false,
+            muted: attribute & ATTR_MUTED != 0,
+            hidden: attribute & ATTR_HIDDEN != 0,
+            locked: attribute & ATTR_LOCKED != 0,
         };
         for seg in arr(t, "segments") {
-            if let Some(segment) = import_segment(seg, &mut report) {
+            if let Some(mut segment) = import_segment(seg, &mut report) {
+                if !free_layers {
+                    segment.render_index = seg
+                        .get("track_render_index")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(track_pos as i64) as i32;
+                }
                 track.segments.push(segment);
             }
         }
@@ -671,6 +686,23 @@ mod tests {
         assert_eq!(report.library_items.get("effects:text_effect"), Some(&1));
         assert_eq!(report.library_items.get("effects:brightness"), None);
         assert!(report.problems.is_empty(), "{:?}", report.problems);
+    }
+
+    #[test]
+    fn decodes_track_flags_and_track_mode_stacking() {
+        let mut d = sample_draft();
+        d["render_index_track_mode_on"] = json!(true);
+        d["tracks"][0]["attribute"] = json!(2 | 4);
+        d["tracks"][0]["segments"][0]["render_index"] = json!(99);
+        d["tracks"][0]["segments"][0]["track_render_index"] = json!(0);
+        d["tracks"][1]["attribute"] = json!(1);
+        let Imported { project, .. } = import_draft_json(&d, "x").unwrap();
+        let (a, b) = (&project.tracks[0], &project.tracks[1]);
+        assert!(!a.muted && a.hidden && a.locked);
+        assert!(b.muted && !b.hidden && !b.locked);
+        // Track mode: stacking comes from track order, not the segment's own render_index.
+        assert_eq!(a.segments[0].render_index, 0);
+        assert_eq!(b.segments[0].render_index, 1);
     }
 
     #[test]
