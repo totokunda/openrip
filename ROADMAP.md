@@ -104,6 +104,8 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
      - 4K phone footage seeks in 41 ms p50. See [results](docs/parity/results/2026-10-16-decode.md) and [how CapCut does it](docs/parity/capcut-decode.md).
    - Next: `openrip-playback`. Scrub and accurate seek modes where the newest seek wins; decoder pooling with the next clip pre-opened; clock and A/V sync.
 2. **M2 Compose.** Multi-track compositing, transforms, crop, opacity, adjustments, LUT filters.
+   - Started: `openrip-render`, a wgpu compositor with CapCut's measured resampling pipeline, transforms and opacity. It matches CapCut's exports as closely as the reference model does. `openrip-dev render-frame` renders imported projects.
+   - Next: zero-copy NV12/P010 IOSurface input from the decoder, crop, text, and presenting to the app preview through `sharedTexture`.
 3. **M3 Overlays.** Text, shapes, drawing, lasso/shape masks with keyframes.
 4. **M4 Audio.** Mixing, volume, fades, speed, detaching audio.
 5. **M5 Export.** Golden-corpus exports match within tolerance.

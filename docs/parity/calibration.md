@@ -103,6 +103,8 @@ The geometry agrees to 0.09 px at 45°.
 | Text 15 / 30 / 10 | 34.3 / 28.0 / 36.4 dB | 34.1 / 30.4 / 33.3 dB |
 | Session 1 marker (re-run) | 36.8 dB (was 35.7) | |
 
+**The engine's GPU compositor** (`engine/crates/render`, wgpu) implements the same pipeline. Its frames match the reference model to within ±1 code value (bit-exact at 100%). Against CapCut's exports it scores the same as the model: 44.4 dB at 100%, 41.7 / 36.1 dB on the 50% / 45° regions, and 36.8 dB on session 1's marker. Its tests check CapCut's measured values directly: 1-px lines at 50% come out at ~166 (CapCut 165–168), and a checkerboard at 2× at 95/160.
+
 **Still open: image borders.** Content edges inside an image now match, but CapCut softens the outer border of an image to about 3 px (10–90%) where our model gives 1.4 px, and its border sits about 1.6 px inside the nominal size (session 1 measured "536 of 540 px"). Session 2's chart has a black background, so its borders were invisible; session 3 tests them over grey.
 
 ## Session 3: image borders, other scale factors, opacity, portrait text

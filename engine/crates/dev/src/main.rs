@@ -13,6 +13,9 @@
 //!   openrip-dev decode-bench <media-file> [--sw | --ffmpeg-hw]
 //!       Measure sequential decode speed, random-seek latency and scrubbing (default: native
 //!       VideoToolbox where possible; --ffmpeg-hw uses FFmpeg's hwaccel, --sw software).
+//!   openrip-dev render-frame <project.json> <seconds> <width> <height> <out.png>
+//!       Render one frame of an imported project with the GPU compositor (images and video;
+//!       text is not rendered yet).
 //!   openrip-dev scrub-bench <media-file>
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
@@ -34,6 +37,7 @@ fn main() -> ExitCode {
         Some("v1-import") if args.len() >= 2 => v1_import(Path::new(&args[1]), flag(&args, "--out")).map_err(|e| e.to_string()),
         Some("v1-scan") if args.len() >= 2 => v1_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("probe") if args.len() >= 2 => probe(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("render-frame") if args.len() >= 6 => render_frame(&args[1..]).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
@@ -429,5 +433,78 @@ fn scrub_bench(file: &Path) -> Result<(), openrip_media::MediaError> {
         }
     }
     println!("* lag = time from the request to its frame being ready");
+    Ok(())
+}
+
+fn load_png(path: &Path) -> Result<openrip_render::RgbaImage, Box<dyn std::error::Error>> {
+    let mut dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path)?));
+    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = dec.read_info()?;
+    let mut buf = vec![0; reader.output_buffer_size().ok_or("png too large")?];
+    let info = reader.next_frame(&mut buf)?;
+    let px = &buf[..info.buffer_size()];
+    let data = match info.color_type {
+        png::ColorType::Rgba => px.to_vec(),
+        png::ColorType::Rgb => px.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
+        png::ColorType::GrayscaleAlpha => px.chunks_exact(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect(),
+        png::ColorType::Grayscale => px.iter().flat_map(|&g| [g, g, g, 255]).collect(),
+        png::ColorType::Indexed => return Err("indexed png after EXPAND".into()),
+    };
+    Ok(openrip_render::RgbaImage { width: info.width, height: info.height, data })
+}
+
+fn save_png(path: &Path, img: &openrip_render::RgbaImage) -> Result<(), Box<dyn std::error::Error>> {
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path)?), img.width, img.height);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header()?.write_image_data(&img.data)?;
+    Ok(())
+}
+
+fn render_frame(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_model::{MediaKind, Micros, TrackKind};
+    let project: Project = serde_json::from_str(&std::fs::read_to_string(&args[0])?)?;
+    let t = Micros::from_secs_f64(args[1].parse()?);
+    let (w, h): (u32, u32) = (args[2].parse()?, args[3].parse()?);
+    let mut active = Vec::new();
+    for track in project.tracks.iter().filter(|tr| tr.kind == TrackKind::Video && !tr.hidden) {
+        for seg in track.segments.iter().filter(|s| s.visible && s.target.contains(t)) {
+            active.push(seg);
+        }
+    }
+    active.sort_by_key(|s| s.render_index);
+    let mut images = Vec::new();
+    for seg in &active {
+        let media = project.materials.media.iter().find(|m| m.id == seg.material).ok_or("segment media not found")?;
+        let image = match media.kind {
+            MediaKind::Photo if media.path.to_lowercase().ends_with(".png") => load_png(Path::new(&media.path))?,
+            MediaKind::Video | MediaKind::Photo => {
+                let mut d = openrip_media::VideoDecoder::open(Path::new(&media.path), &Default::default())?;
+                let at = seg.source_time(t).unwrap_or(Micros::ZERO);
+                let rgb = d.frame_at(at)?.ok_or("no frame")?.to_rgb()?;
+                openrip_render::RgbaImage { width: rgb.width, height: rgb.height, data: rgb.data.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect() }
+            }
+            MediaKind::Audio => continue,
+        };
+        images.push((seg, image));
+    }
+    let layers: Vec<_> = images
+        .iter()
+        .map(|(seg, img)| {
+            let local = seg.local_time(t);
+            let tr = &seg.transform;
+            let (pos, scale) = (tr.position.sample(local), tr.scale.sample(local));
+            let mut layer = openrip_render::Layer::from_model(img, [w, h], [pos.x, pos.y], [scale.x, scale.y], tr.rotation.sample(local));
+            layer.flip_h ^= tr.flip_h;
+            layer.flip_v ^= tr.flip_v;
+            layer.opacity = seg.opacity.sample(local);
+            layer
+        })
+        .collect();
+    let compositor = openrip_render::Compositor::new()?;
+    let t0 = Instant::now();
+    let frame = compositor.render(w, h, [0, 0, 0], &layers);
+    println!("rendered {} layer(s) at {w}x{h} in {:.1} ms", layers.len(), t0.elapsed().as_secs_f64() * 1000.0);
+    save_png(Path::new(&args[4]), &frame)?;
     Ok(())
 }
