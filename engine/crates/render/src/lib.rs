@@ -14,6 +14,8 @@
 //! planes (NV12 / P010) become GPU textures without a copy and are converted to RGB on the
 //! GPU with the frame's own matrix and range.
 
+pub mod text;
+
 use openrip_media::{Matrix, PixelFormat, VideoFrame};
 use wgpu::util::DeviceExt;
 

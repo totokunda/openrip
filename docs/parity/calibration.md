@@ -105,6 +105,20 @@ The geometry agrees to 0.09 px at 45°.
 
 **The engine's GPU compositor** (`engine/crates/render`, wgpu) implements the same pipeline. Its frames match the reference model to within ±1 code value (bit-exact at 100%). Against CapCut's exports it scores the same as the model: 44.4 dB at 100%, 41.7 / 36.1 dB on the 50% / 45° regions, and 36.8 dB on session 1's marker. Its tests check CapCut's measured values directly: 1-px lines at 50% come out at ~166 (CapCut 165–168), and a checkerboard at 2× at 95/160. Video frames reach it with no copy. On session 1's 4K HEVC section (t = 5 s), the frame rendered from the hardware decoder matches CapCut's export at 32.0 dB. The neighbouring source frames score 26 dB, so timeline-to-media timing agrees with CapCut. On this moving content the remaining gap is mostly CapCut's 2.8 Mbps export encode.
 
+**Engine text** (`engine/crates/render/src/text.rs`: swash shaping with kerning and ligatures, unhinted outlines, the draft's own font, the block of line boxes centred on the position):
+
+| Text | Engine | Pillow reference | Notes |
+|---|---|---|---|
+| 16:9, size 15 | **38.1 dB** | 34.3 dB | bounding box identical to CapCut's within 1 px |
+| 16:9, size 30 | **29.8 dB** | 28.0 dB | |
+| 16:9, size 10 | 30.6 dB | 36.4 dB | ours 1.6 px high |
+| square, size 15 | **29.8 dB** | 29.5 dB | ours 1.4 px high |
+
+Horizontal placement is within 0.3 px everywhere; the shaping and kerning fixed Pillow's per-glyph drift. Two gaps remain:
+
+- **Vertical:** our text sits 0.4–1.6 px higher than CapCut's. With that shift removed, the four cases match at 42.4 / 35.0 / 45.6 / 44.4 dB. The offset is 0.0023 em at sizes 15 and 30 on 16:9, but 0.0147 em at size 10 and on the square canvas. The font's hhea, typo and win metrics all give a line box of exactly 1 em, so this looks like CapCut snapping the text box to whole pixels by a rule four samples can't pin down. Session 3's portrait text adds data points.
+- **Weight:** CapCut's glyphs carry about 1.8% more ink, which points to slight emboldening or gamma in its rasteriser.
+
 **Still open: image borders.** Content edges inside an image now match, but CapCut softens the outer border of an image to about 3 px (10–90%) where our model gives 1.4 px, and its border sits about 1.6 px inside the nominal size (session 1 measured "536 of 540 px"). Session 2's chart has a black background, so its borders were invisible; session 3 tests them over grey.
 
 ## Session 3: image borders, other scale factors, opacity, portrait text

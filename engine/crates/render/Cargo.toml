@@ -12,6 +12,7 @@ wgpu = "30"
 pollster = "0.4"
 bytemuck = { version = "1", features = ["derive"] }
 thiserror.workspace = true
+swash = "0.2"
 openrip-media.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

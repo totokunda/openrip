@@ -14,8 +14,8 @@
 //!       Measure sequential decode speed, random-seek latency and scrubbing (default: native
 //!       VideoToolbox where possible; --ffmpeg-hw uses FFmpeg's hwaccel, --sw software).
 //!   openrip-dev render-frame <project.json> <seconds> <width> <height> <out.png>
-//!       Render one frame of an imported project with the GPU compositor (images, and video
-//!       frames straight from the hardware decoder; text is not rendered yet).
+//!       Render one frame of an imported project with the GPU compositor: images, video
+//!       frames straight from the hardware decoder, and plain text (fill only so far).
 //!   openrip-dev play-bench <video> [<width> <height>]
 //!       Decode a video and composite every frame into an IOSurface preview surface (default
 //!       1920x1080), as playback will: per-frame decode and composite cost, and CPU use.
@@ -471,19 +471,57 @@ fn render_frame(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let t = Micros::from_secs_f64(args[1].parse()?);
     let (w, h): (u32, u32) = (args[2].parse()?, args[3].parse()?);
     let mut active = Vec::new();
-    for track in project.tracks.iter().filter(|tr| tr.kind == TrackKind::Video && !tr.hidden) {
+    for track in project.tracks.iter().filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text) && !tr.hidden) {
         for seg in track.segments.iter().filter(|s| s.visible && s.target.contains(t)) {
             active.push(seg);
         }
     }
+    // CapCut stacks by render index (text sits at 14000+, above video).
     active.sort_by_key(|s| s.render_index);
     enum Pixels {
         Image(openrip_render::RgbaImage),
         Video(openrip_media::VideoFrame),
+        /// Rasterised text and the canvas point its image centre goes to.
+        Text(openrip_render::RgbaImage, [f64; 2]),
     }
+    let mut fonts: std::collections::HashMap<String, openrip_render::text::Font> = Default::default();
     let mut sources = Vec::new();
     for seg in &active {
-        let media = project.materials.media.iter().find(|m| m.id == seg.material).ok_or("segment media not found")?;
+        if let Some(text) = project.materials.texts.iter().find(|m| m.id == seg.material) {
+            let Some(run) = text.runs.first() else { continue };
+            let path = if run.font.path.is_empty() { "/Applications/CapCut.app/Contents/Resources/Font/SystemFont/en.ttf" } else { run.font.path.as_str() };
+            if !fonts.contains_key(path) {
+                fonts.insert(path.to_string(), openrip_render::text::Font::from_file(Path::new(path))?);
+            }
+            let local = seg.local_time(t);
+            let (pos, scale) = (seg.transform.position.sample(local), seg.transform.scale.sample(local));
+            let em = match run.size_unit {
+                openrip_model::SizeUnit::CapCut => run.size * openrip_model::CAPCUT_SIZE_UNIT_EM * w as f32,
+                openrip_model::SizeUnit::CanvasHeight => run.size * h as f32,
+            } * scale.x.abs() as f32;
+            let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            let style = openrip_render::text::TextStyle {
+                font: &fonts[path],
+                size: em,
+                color: [to_u8(run.fill.r), to_u8(run.fill.g), to_u8(run.fill.b), to_u8(run.fill.a)],
+                align: match text.layout.alignment {
+                    0 => openrip_render::text::Align::Left,
+                    2 => openrip_render::text::Align::Right,
+                    _ => openrip_render::text::Align::Center,
+                },
+                letter_spacing: text.layout.letter_spacing,
+                line_spacing: text.layout.line_spacing,
+            };
+            let lay = openrip_render::text::layout(&text.text, &style);
+            // Block centre on the canvas; rasterise so the image sits on the pixel grid.
+            let (cx, cy) = (w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0);
+            let (x0, y0) = (cx - lay.width as f64 / 2.0, cy - lay.height as f64 / 2.0);
+            let r = lay.rasterize(&style, [x0.rem_euclid(1.0) as f32, y0.rem_euclid(1.0) as f32]);
+            let at = [cx - (r.center[0] - r.image.width as f64 / 2.0), cy - (r.center[1] - r.image.height as f64 / 2.0)];
+            sources.push((seg, Pixels::Text(r.image, at)));
+            continue;
+        }
+        let Some(media) = project.materials.media.iter().find(|m| m.id == seg.material) else { continue };
         let pixels = match media.kind {
             MediaKind::Photo if media.path.to_lowercase().ends_with(".png") => Pixels::Image(load_png(Path::new(&media.path))?),
             MediaKind::Video | MediaKind::Photo => {
@@ -498,17 +536,25 @@ fn render_frame(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let layers: Vec<_> = sources
         .iter()
         .map(|(seg, pixels)| {
-            let source = match pixels {
-                Pixels::Image(i) => openrip_render::Source::Image(i),
-                Pixels::Video(f) => openrip_render::Source::Video(f),
-            };
             let local = seg.local_time(t);
             let tr = &seg.transform;
             let (pos, scale) = (tr.position.sample(local), tr.scale.sample(local));
-            let mut layer = openrip_render::Layer::from_model(source, [w, h], [pos.x, pos.y], [scale.x, scale.y], tr.rotation.sample(local));
+            let mut layer = match pixels {
+                Pixels::Image(i) => openrip_render::Layer::from_model(i, [w, h], [pos.x, pos.y], [scale.x, scale.y], tr.rotation.sample(local)),
+                Pixels::Video(f) => openrip_render::Layer::from_model(openrip_render::Source::Video(f), [w, h], [pos.x, pos.y], [scale.x, scale.y], tr.rotation.sample(local)),
+                Pixels::Text(img, at) => openrip_render::Layer {
+                    source: openrip_render::Source::Image(img),
+                    center: *at,
+                    size: [img.width as f64, img.height as f64],
+                    rotation: tr.rotation.sample(local),
+                    flip_h: false,
+                    flip_v: false,
+                    opacity: 1.0,
+                },
+            };
             layer.flip_h ^= tr.flip_h;
             layer.flip_v ^= tr.flip_v;
-            layer.opacity = seg.opacity.sample(local);
+            layer.opacity *= seg.opacity.sample(local);
             layer
         })
         .collect();
