@@ -35,6 +35,7 @@ class Img:
     dx_px: float = 0.0  # offset from centre in canvas pixels, +x right
     dy_px: float = 0.0  # +y up
     alpha: float = 1.0
+    adjust: tuple = ()  # (CapCut adjust type, value -1..1) pairs, e.g. (("brightness", 0.5),)
 
 
 @dataclass
@@ -45,6 +46,12 @@ class Txt:
     stroke: float = 0.0  # CapCut stroke width (black), 0 = none
     background: float = 0.0  # CapCut background width/height (black, opaque, style 2, radius 0.4: the common real-world case), 0 = none
 
+
+# Session 4: one Adjust slider per clip on the chart, to measure CapCut's colour formulas.
+_ADJ4 = [("brightness", v) for v in (-1, -0.5, 0.5, 1)] + [("contrast", v) for v in (-1, -0.5, 0.5, 1)] + \
+        [("saturation", v) for v in (-1, -0.5, 0.5, 1)] + [("temperature", v) for v in (-1, -0.5, 0.5, 1)] + \
+        [(t, v) for t in ("tone", "highlight", "shadow", "white", "black", "light_sensation") for v in (-1, 1)] + \
+        [(t, v) for t in ("fade", "sharpen", "clear", "vignetting") for v in (0.5, 1)]
 
 SESSIONS = {
     "openrip-calibration-2": dict(canvas=(1920, 1080, "16:9"), tracks=[
@@ -60,6 +67,9 @@ SESSIONS = {
          Img("marker.png", 6, 1, 0.5), Img("marker.png", 7, 1, 0.5, 30), Img("marker.png", 8, 1, 0.25),
          Img("marker.png", 9, 1, MARKER_1TO1, 0, 0.37, -0.25), Img("pattern.png", 10, 1, alpha=0.5)],
         [Txt(11, 1, 15, stroke=0.06), Txt(12, 1, 15, stroke=0.15), Txt(13, 1, 15, background=0.28)],
+    ]),
+    "openrip-calibration-4": dict(canvas=(1920, 1080, "16:9"), tracks=[
+        [Img("pattern.png", 0, 1)] + [Img("pattern.png", 1 + i, 1, adjust=(a,)) for i, a in enumerate(_ADJ4)],
     ]),
     # Portrait canvas: text size vs width or longer side; pattern contain-fit at 1080/1920 = 0.5625.
     "openrip-calibration-3-portrait": dict(canvas=(1080, 1920, "9:16"), tracks=[
@@ -102,8 +112,29 @@ def us(seconds):
     return round(seconds * SEC)
 
 
+def adjust_templates(root: Path, kinds):
+    """One Adjust effect material of each kind, from existing drafts (read only)."""
+    found = {}
+    for f in sorted(root.glob("*/draft_info.json")):
+        try:
+            effects = json.loads(f.read_text()).get("materials", {}).get("effects", [])
+        except (OSError, ValueError):
+            continue
+        for e in effects:
+            if e.get("type") in kinds and e["type"] not in found and Path(e.get("path", "")).exists():
+                found[e["type"]] = e
+        if len(found) == len(kinds):
+            break
+    missing = set(kinds) - set(found)
+    if missing:
+        raise SystemExit(f"no existing draft uses these Adjust sliders, so there is no template: {sorted(missing)}")
+    return found
+
+
 def build(name, spec, template: Path, root: Path):
     src = json.loads((template / "draft_info.json").read_text())
+    kinds = {k for tr in spec["tracks"] for c in tr if isinstance(c, Img) for k, _ in c.adjust}
+    adjusts = adjust_templates(template.parent, kinds) if kinds else {}
     index = material_index(src["materials"])
     photo_track = next(t for t in src["tracks"] if t["type"] == "video" and t["segments"] and index[t["segments"][0]["material_id"]][1].get("type") == "photo")
     text_track = next(t for t in src["tracks"] if t["type"] == "text")
@@ -132,6 +163,11 @@ def build(name, spec, template: Path, root: Path):
                            track_render_index=ti, render_index=video_tracks)
                 seg["clip"].update(scale={"x": c.scale, "y": c.scale}, rotation=c.rot, alpha=c.alpha,
                                    transform={"x": c.dx_px / (W / 2), "y": c.dy_px / (H / 2)})
+                for kind, value in c.adjust:
+                    effect = copy.deepcopy(adjusts[kind]) | {"id": new_id(), "value": value}
+                    d["materials"]["effects"].append(effect)
+                    seg["extra_material_refs"].append(effect["id"])
+                    seg["enable_adjust"] = True
                 track["segments"].append(seg)
             video_tracks += 1
         else:

@@ -142,13 +142,27 @@ Session 3 is generated too (`make_draft.py`), as two drafts:
 
 **`openrip-calibration-3-portrait`** (9:16, 1080×1920): `pattern.png` contain-fit (a 0.5625 downscale) 0–1 s, `marker.png` 1:1 at 1–2 s, then default text size 15 over black at 2–3 s (width or longer side).
 
-### Steps
+### Steps (sessions 3 and 4 together)
 
-1. Install both drafts (quits CapCut, waits, writes them into CapCut's projects folder, reopens CapCut):
+1. Install the drafts. This quits CapCut, waits for it to close, writes the drafts into CapCut's projects folder, and reopens CapCut:
    ```
-   osascript -e 'quit app "CapCut"'; while pgrep -x CapCut >/dev/null; do sleep 1; done; python3 /Users/tosinkuye/openrip/bench/calibration/make_draft.py --template "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/1015" --register openrip-calibration-3 openrip-calibration-3-portrait && open -a CapCut
+   osascript -e 'quit app "CapCut"'; while pgrep -x CapCut >/dev/null; do sleep 1; done; python3 /Users/tosinkuye/openrip/bench/calibration/make_draft.py --template "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/1015" --register openrip-calibration-3 openrip-calibration-3-portrait openrip-calibration-4 && open -a CapCut
    ```
 2. In CapCut, export into `bench/calibration/out/`, all at **30 fps, H.264, bitrate Higher**:
    - `openrip-calibration-3` at **1080p**, named `openrip-calibration-3`.
-   - `openrip-calibration-3` at **720p**, named `openrip-calibration-3-720p` (does CapCut render at the export size when it is smaller than the canvas?).
+   - `openrip-calibration-3` at **720p**, named `openrip-calibration-3-720p`. This shows whether CapCut renders at the export size when it is smaller than the canvas.
    - `openrip-calibration-3-portrait` at **1080p**, named `openrip-calibration-3-portrait`.
+   - `openrip-calibration-4` at **1080p**, named `openrip-calibration-4`.
+
+## Session 4: colour adjustments
+
+CapCut stores each Adjust slider as an effect material: `type` names the slider, and `value` runs −1…1, the UI's −50…50 divided by 50. Every slider uses the same downloaded effect bundle. The formulas aren't public, so they are measured: `openrip-calibration-4` puts the chart at 100% with one slider per 1-second clip. The grey ramp gives each tone curve and the colour patches give saturation, temperature and tint.
+
+| Time | Adjustment |
+|---|---|
+| 0–1 s | none (reference) |
+| 1–17 s | brightness, contrast, saturation, temperature at −1, −0.5, +0.5, +1 |
+| 17–29 s | tone (tint), highlight, shadow, white, black, light_sensation (exposure) at −1 and +1 |
+| 29–37 s | fade, sharpen, clear (clarity), vignetting at +0.5 and +1 |
+
+The adjustments are cloned from ones your own drafts already use, so CapCut finds their effect bundle in its cache. Nothing is copied into the repo.
