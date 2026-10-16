@@ -457,16 +457,11 @@ impl TextLayout {
                 let (fw, fh) = (fp.width as i32, fp.height as i32);
                 let (pw, ph) = (fw + 2 * margin, fh + 2 * margin);
                 let at_fill = |c: i32, r: i32| if c >= 0 && r >= 0 && c < fw && r < fh { fill.data[(r * fw + c) as usize] as f32 / 255.0 } else { 0.0 };
-                let inside: Vec<bool> = (0..pw * ph).map(|i| at_fill(i % pw - margin, i / pw - margin) >= 0.5).collect();
-                let dist = distance_to(&inside, pw as usize, ph as usize);
+                let cov = grown(&at_fill, pw, ph, margin, grow, fade);
                 let mut px = vec![[0f32; 4]; (pw * ph) as usize];
                 for (i, p) in px.iter_mut().enumerate() {
                     let (col, row) = (i as i32 % pw, i as i32 / pw);
-                    // Distance from the pixel centre to the glyph's edge (half a pixel short
-                    // of the nearest inked pixel's centre).
-                    let beyond = (dist[i] - 0.5).max(0.0) - grow;
-                    let edge = if fade > 0.0 { 1.0 - beyond / fade } else { 0.5 - beyond };
-                    let cov = if inside[i] { 1.0 } else { edge.clamp(0.0, 1.0).max(at_fill(col - margin, row - margin)) };
+                    let cov = cov[i];
                     if cov > 0.0 {
                         let c = paint.at((fx - margin + col) as f32 + 0.5, (fy - margin + row) as f32 + 0.5, rect, g.char_index);
                         *p = c.map(|v| v * cov);
@@ -567,6 +562,55 @@ fn finish(px: Vec<[f32; 4]>, w: u32, h: u32, center: [f64; 2]) -> RenderedText {
 /// How far beyond its shape a layer of a CapCut text-style mesh fades out, in pixels: its
 /// vertex shader pushes the outer fringe vertices 2.5 px out at zero alpha.
 pub const MESH_EDGE_FADE: f32 = 2.5;
+
+/// Coverage of a glyph grown by `grow` px, on a `pw`×`ph` patch whose pixel (c, r) is the
+/// glyph image's (c − margin, r − margin) (`at_fill` gives its coverage). With a `fade`
+/// the shape fades out over that many pixels; without one its edge is anti-aliased by
+/// measuring at 3× resolution (whole-pixel distances leave visible steps).
+fn grown(at_fill: &dyn Fn(i32, i32) -> f32, pw: i32, ph: i32, margin: i32, grow: f32, fade: f32) -> Vec<f32> {
+    let ss = if fade > 0.0 { 1 } else { 3 };
+    let (sw, sh) = (pw * ss, ph * ss);
+    // The glyph's coverage sampled bilinearly at each sub-pixel centre, inside from 0.5.
+    let inside: Vec<bool> = (0..sw * sh)
+        .map(|i| {
+            if ss == 1 {
+                return at_fill(i % sw - margin, i / sw - margin) >= 0.5;
+            }
+            let (x, y) = (((i % sw) as f32 + 0.5) / ss as f32 - 0.5 - margin as f32, ((i / sw) as f32 + 0.5) / ss as f32 - 0.5 - margin as f32);
+            let (x0, y0) = (x.floor(), y.floor());
+            let (fx, fy) = (x - x0, y - y0);
+            let (x0, y0) = (x0 as i32, y0 as i32);
+            let v = (at_fill(x0, y0) * (1.0 - fx) + at_fill(x0 + 1, y0) * fx) * (1.0 - fy) + (at_fill(x0, y0 + 1) * (1.0 - fx) + at_fill(x0 + 1, y0 + 1) * fx) * fy;
+            v >= 0.5
+        })
+        .collect();
+    let dist = distance_to(&inside, sw as usize, sh as usize);
+    let half = 0.5 / ss as f32;
+    let mut out = vec![0f32; (pw * ph) as usize];
+    for (i, o) in out.iter_mut().enumerate() {
+        let (col, row) = (i as i32 % pw, i as i32 / pw);
+        let mut sum = 0.0;
+        for sy in 0..ss {
+            for sx in 0..ss {
+                let k = ((row * ss + sy) * sw + col * ss + sx) as usize;
+                // Distance from the sample to the glyph's edge (half a sample short of the
+                // nearest inside sample's centre), beyond the growth.
+                let beyond = ((dist[k] / ss as f32) - half).max(0.0) - grow;
+                sum += if inside[k] {
+                    1.0
+                } else if fade > 0.0 {
+                    (1.0 - beyond / fade).clamp(0.0, 1.0)
+                } else if beyond <= 0.0 {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+        }
+        *o = (sum / (ss * ss) as f32).max(at_fill(col - margin, row - margin));
+    }
+    out
+}
 
 /// Euclidean distance from each pixel to the nearest `inside` one (0 for those), by the
 /// Felzenszwalb–Huttenlocher squared distance transform, columns then rows.

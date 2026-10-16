@@ -87,3 +87,25 @@ fn texture_strips_go_to_characters_in_turn() {
     // A small piece of each character's own strip: the first "I" red, the second green.
     assert!(inked.first().unwrap()[0] > 200 && inked.last().unwrap()[1] > 200, "{:?} … {:?}", inked.first(), inked.last());
 }
+
+#[test]
+fn a_sharp_outline_reaches_equally_far_on_both_sides() {
+    let Some(f) = font() else { return };
+    for (grow, x) in [(4.0, 0.0), (4.0, 0.3), (4.5, 0.7)] {
+        let effect = Effect { fill: Some(Paint::Solid([1.0, 0.0, 0.0, 1.0])), strokes: vec![(grow, Paint::Solid([0.0, 0.0, 1.0, 1.0]))], shadows: vec![], edge_fade: 0.0 };
+        let s = TextStyle { effect: Some(&effect), size: 60.0, ..style(&f, None) };
+        let r = layout("I", &s).rasterize(&s, [x, 0.0]);
+        let y = r.center[1] as usize;
+        // Ink (any alpha) and fill along the middle row, as fractional extents: a partly
+        // covered end pixel counts for its coverage.
+        let alpha: Vec<f32> = (0..r.image.width as usize).map(|c| pixel(&r.image, c, y)[3] as f32 / 255.0).collect();
+        let red: Vec<f32> = (0..r.image.width as usize).map(|c| { let p = pixel(&r.image, c, y); p[0] as f32 / 255.0 * p[3] as f32 / 255.0 }).collect();
+        let edges = |v: &[f32]| {
+            let (first, last) = (v.iter().position(|&a| a > 0.0).unwrap(), v.iter().rposition(|&a| a > 0.0).unwrap());
+            (first as f32 + (1.0 - v[first]), last as f32 + v[last])
+        };
+        let ((a0, a1), (r0, r1)) = (edges(&alpha), edges(&red));
+        let (left, right) = (r0 - a0, a1 - r1);
+        assert!((left - right).abs() < 0.35 && (left - grow).abs() < 0.5, "grow {grow} at x {x}: left {left}, right {right}");
+    }
+}

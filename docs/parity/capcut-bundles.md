@@ -87,7 +87,7 @@ Styled text is slow to draw, so the preview keeps it as per-character pieces and
 ### How OpenRip draws SDF-effect styles
 
 The importer decodes `effect.prefab` with a Rust port of the format reader (`openrip_capcut::amg`) and finds the `SDFText` component's `effectLayers`. The first layer is drawn in front: in the measured style, layer 1's grey gradient sits entirely under layer 0's plain fill, and CapCut's export shows only the plain fill. So layer 0 becomes the fill and the rest, back to front, become shadows. Each layer is:
-- the glyphs grown by its outline `scale`, at **1.5 em per unit**, with sharp edges;
+- the glyphs grown by its outline `scale`, at **1.5 em per unit**, with sharp edges (the growth is measured at 3× resolution, so the outline's edge is smooth rather than stepped);
 - painted in the text's own colour, shifted by the layer's `hsbOffset`, with the stop colour's alpha. The default colour in the file is not used: a caption coloured white or yellow keeps that colour.
 
 The units were fitted on a 1080×1920 CapCut export with 50 captions in the "grey-white gradient + black outline" style. At size 11 (em 68.8 px), the outline crosses mid-grey about 5.4 px from the fill in both CapCut and OpenRip. Left/right are 5.43/5.38 px in CapCut and 5.36/5.45 px in OpenRip; up is 5.74 px in both.
