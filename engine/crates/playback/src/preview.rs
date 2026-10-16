@@ -11,7 +11,7 @@ use std::path::Path;
 use openrip_media::{DecoderOptions, MediaError, VideoDecoder, VideoFrame};
 use openrip_model::{EffectCategory, MediaKind, Micros, Project, Segment, SizeUnit, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_render::text::{self, Align, Font, TextStyle};
-use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, RenderError, RgbaImage, Source};
+use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source};
 
 /// CapCut's default font, used when a text run names none.
 const DEFAULT_FONT: &str = "/Applications/CapCut.app/Contents/Resources/Font/SystemFont/en.ttf";
@@ -114,6 +114,8 @@ enum Pixels {
     Video(VideoFrame, i32),
     /// Rasterised text, its cache key, and the canvas point its image centre goes to.
     Text(std::sync::Arc<RgbaImage>, u64, [f64; 2]),
+    /// A filter track's lookup table and strength, applied to everything below it.
+    Filter(std::sync::Arc<Lut3d>, f32),
 }
 
 /// The media file a segment plays.
@@ -148,6 +150,8 @@ pub struct PreviewEngine {
     texts: HashMap<u64, (std::sync::Arc<RgbaImage>, [f64; 2], u64)>,
     /// CapCut's exposure tables by colour-bundle path (`None` if they couldn't be read).
     exposure_luts: HashMap<String, Option<ExposureLuts>>,
+    /// Filter lookup tables by bundle path.
+    filters: HashMap<String, std::sync::Arc<Lut3d>>,
     prefetch: Prefetcher,
     tick: u64,
 }
@@ -164,6 +168,7 @@ impl PreviewEngine {
             failed: HashMap::new(),
             texts: HashMap::new(),
             exposure_luts: HashMap::new(),
+            filters: HashMap::new(),
             prefetch: Prefetcher::new(),
             tick: 0,
         })
@@ -226,7 +231,7 @@ impl PreviewEngine {
             .project
             .tracks
             .iter()
-            .filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text | TrackKind::Sticker) && !tr.hidden)
+            .filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text | TrackKind::Sticker | TrackKind::Filter) && !tr.hidden)
             .flat_map(|tr| tr.segments.iter().filter(|s| s.visible && s.target.contains(t)).cloned())
             .collect();
         active.sort_by_key(|s| s.render_index);
@@ -456,6 +461,19 @@ impl PreviewEngine {
             let at = [cx - (center[0] - image.width as f64 / 2.0), cy - (center[1] - image.height as f64 / 2.0)];
             return Ok(Some(Pixels::Text(image, key, at)));
         }
+        // A filter track's segment: CapCut's lookup table from the filter's bundle.
+        if let Some(effect) = self.project.materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter) {
+            let strength = effect.params.get("intensity").copied().unwrap_or(1.0) as f32;
+            let Some(bundle) = effect.resource.clone() else { return Ok(None) };
+            if let Some(why) = self.failed.get(&bundle) {
+                return Err((bundle.clone(), why.clone()));
+            }
+            if !self.filters.contains_key(&bundle) {
+                let lut = load_filter(Path::new(&bundle), key_of(&bundle)).map_err(|why| (bundle.clone(), why))?;
+                self.filters.insert(bundle.clone(), std::sync::Arc::new(lut));
+            }
+            return Ok(Some(Pixels::Filter(self.filters[&bundle].clone(), strength)));
+        }
         let Some(media) = self.project.materials.media.iter().find(|m| m.id == seg.material).cloned() else { return Ok(None) };
         if media.kind == MediaKind::Audio {
             return Ok(None);
@@ -518,6 +536,16 @@ impl PreviewEngine {
                 let mut layer = match p {
                     Pixels::Image(i, key) => Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot),
                     Pixels::Video(f, orientation) => Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation),
+                    Pixels::Filter(lut, strength) => Layer {
+                        source: Source::Filter(lut, *strength),
+                        center: [0.0, 0.0],
+                        size: [1.0, 1.0],
+                        rotation: 0.0,
+                        flip_h: false,
+                        flip_v: false,
+                        opacity: 1.0,
+                        adjust: None,
+                    },
                     Pixels::Text(img, key, at) => Layer {
                         source: Source::Cached(*key, img),
                         center: *at,
@@ -530,13 +558,24 @@ impl PreviewEngine {
                     },
                 };
                 layer.opacity *= seg.opacity.sample(local);
-                if !matches!(p, Pixels::Text(..)) {
+                if matches!(p, Pixels::Image(..) | Pixels::Video(..)) {
                     layer.adjust = self.adjust_of(seg);
                 }
                 layer
             })
             .collect()
     }
+}
+
+/// A CapCut filter's lookup table from its bundle: `AmazingFeature/texture/*.vf`. Filters
+/// with a skin/background pair use the background table, as CapCut does where it finds no
+/// skin.
+fn load_filter(bundle: &Path, key: u64) -> Result<Lut3d, String> {
+    let dir = bundle.join("AmazingFeature").join("texture");
+    let mut tables: Vec<_> = std::fs::read_dir(&dir).map_err(|e| e.to_string())?.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "vf")).collect();
+    tables.sort_by_key(|p| !p.file_name().is_some_and(|n| n.to_string_lossy().contains("bg")));
+    let file = tables.first().ok_or("no lookup table in the filter bundle")?;
+    Lut3d::from_vf(&std::fs::read(file).map_err(|e| e.to_string())?, key).ok_or_else(|| format!("unreadable lookup table {}", file.display()))
 }
 
 /// Decode a still image: PNG directly (keeps alpha), anything else through FFmpeg.

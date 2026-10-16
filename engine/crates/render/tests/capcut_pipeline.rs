@@ -214,3 +214,30 @@ fn sharpen_steepens_edges_like_capcut() {
     assert_eq!(at(4), 255);
     assert_eq!((at(1), at(6)), (100, 200));
 }
+
+/// A filter layer looks the canvas so far up in a 3D table and mixes it in: a table that
+/// maps everything to 0.2, at strength 0.5, takes 0.6 to 0.4. Layers above are untouched.
+#[test]
+fn filter_layers_apply_to_what_is_below() {
+    let Ok(c) = Compositor::new() else { return };
+    let n = 4u32;
+    let mut vf = b"VF_V".to_vec();
+    for _ in 0..3 {
+        vf.extend((n as u16).to_le_bytes());
+    }
+    for _ in 0..n * n * n * 3 {
+        vf.extend(0.2f32.to_le_bytes());
+    }
+    let lut = openrip_render::Lut3d::from_vf(&vf, 7).unwrap();
+    assert_eq!(lut.size, 4);
+    assert!(openrip_render::Lut3d::from_vf(b"nope", 7).is_none());
+    let grey = RgbaImage { width: 4, height: 4, data: [153u8, 153, 153, 255].repeat(16) };
+    let dot = RgbaImage { width: 2, height: 2, data: [255u8, 0, 0, 255].repeat(4) };
+    let below = Layer::from_model(Source::Image(&grey), [4, 4], [0.0, 0.0], [1.0, 1.0], 0.0);
+    let filter = Layer { source: Source::Filter(&lut, 0.5), ..below.clone() };
+    let above = Layer::from_model(Source::Image(&dot), [4, 4], [0.0, 0.0], [0.5, 0.5], 0.0);
+    let out = c.render(4, 4, [0, 0, 0], &[below, filter, above]);
+    assert!((out.data[0] as i32 - 102).abs() <= 1, "{}", out.data[0]);
+    let centre = |i: usize| ((2 * 4 + 2) * 4) + i;
+    assert_eq!((out.data[centre(0)], out.data[centre(1)]), (255, 0));
+}

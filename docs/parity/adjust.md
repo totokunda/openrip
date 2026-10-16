@@ -51,7 +51,15 @@ Not drawn yet:
 - vignette;
 - HSL and curves. In the local drafts, every curve is empty and only 3 HSL materials change anything;
 - log wheels;
-- filter tracks: library LUT filters on a track of their own, applied to everything below. Two of them cover the draft still at 20.8 dB;
+- LUT filters applied to a single clip (filter tracks are drawn; see below);
 - fade, which no local draft uses and whose table is in a bundle-specific format.
 
 All of them are in the same bundle.
+
+## Filter tracks
+
+A filter on a track of its own (CapCut's filter track) applies to everything drawn below it while it lasts. CapCut's filters are 3D lookup tables in their bundle (`AmazingFeature/texture/*.vf`). The format is "VF_V", three little-endian u16 sizes (32 or 64), then size³ RGB float32 entries, red fastest. A shader samples the table like a GPU 3D texture and mixes it in by the filter's strength.
+
+Some filters pair a skin table with a background table and blend them with an AI skin mask. Where CapCut finds no skin, its blend uses the background table, and OpenRip always does.
+
+`filter.wgsl` draws the canvas so far through the table into a temporary and back, at the filter's place in the stack. The draft with two filter tracks over HLG footage goes from 20.8 to **31.6 dB** against CapCut's export.

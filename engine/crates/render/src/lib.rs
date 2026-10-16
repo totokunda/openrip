@@ -19,6 +19,31 @@ pub mod text;
 
 pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
 
+/// A 3D colour lookup table (CapCut's filters): `size`³ RGB entries, red fastest, then
+/// green, then blue; `key` identifies it for the GPU cache.
+#[derive(Clone, Debug)]
+pub struct Lut3d {
+    pub key: u64,
+    pub size: u32,
+    pub rgb: Vec<f32>,
+}
+
+impl Lut3d {
+    /// Read CapCut's `.vf` table: "VF_V", three u16 sizes, then size³ RGB float32.
+    pub fn from_vf(bytes: &[u8], key: u64) -> Option<Lut3d> {
+        if bytes.get(..4)? != b"VF_V" {
+            return None;
+        }
+        let dim = |i: usize| u16::from_le_bytes([bytes[4 + 2 * i], bytes[5 + 2 * i]]) as u32;
+        let n = dim(0);
+        if !(2..=128).contains(&n) || dim(1) != n || dim(2) != n {
+            return None;
+        }
+        let body = bytes.get(10..10 + (n * n * n * 12) as usize)?;
+        Some(Lut3d { key, size: n, rgb: body.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect() })
+    }
+}
+
 use openrip_media::{Matrix, PixelFormat, VideoFrame};
 use wgpu::util::DeviceExt;
 
@@ -48,6 +73,9 @@ pub enum Source<'a> {
     /// already resampled, for as long as it keeps being drawn (stills, text).
     Cached(u64, &'a RgbaImage),
     Video(&'a VideoFrame),
+    /// Not an image: a colour lookup table applied to everything drawn below it, mixed in
+    /// by the given strength (a filter track).
+    Filter(&'a Lut3d, f32),
 }
 
 impl Source<'_> {
@@ -55,6 +83,7 @@ impl Source<'_> {
         match self {
             Source::Image(i) | Source::Cached(_, i) => (i.width, i.height),
             Source::Video(f) => (f.width(), f.height()),
+            Source::Filter(..) => (1, 1),
         }
     }
 }
@@ -148,6 +177,8 @@ pub struct Compositor {
     /// CapCut's Adjust sliders and its Sharpen (adjust.wgsl).
     adjust: wgpu::RenderPipeline,
     sharpen_luma: wgpu::RenderPipeline,
+    /// Filter tracks: a 3D lookup table over the canvas (filter.wgsl).
+    lut3d: wgpu::RenderPipeline,
     /// Exposure lookup tables on the GPU, by key, and a stand-in for clips without one.
     luts: std::sync::Mutex<std::collections::HashMap<u64, wgpu::Texture>>,
     no_lut: wgpu::Texture,
@@ -278,6 +309,25 @@ impl Compositor {
             luma: pipeline("fs_luma", wgpu::TextureFormat::R8Unorm, None),
             chroma: pipeline("fs_chroma", wgpu::TextureFormat::Rg8Unorm, None),
             sharpen_luma: adjust_pipeline("fs_sharpen_luma"),
+            lut3d: {
+                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("filter"), source: wgpu::ShaderSource::Wgsl(include_str!("filter.wgsl").into()) });
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("fs_lut3d"),
+                    layout: Some(&yuv_pipeline_layout),
+                    vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some("fs_lut3d"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState { format: CANVAS, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                    }),
+                    primitive: Default::default(),
+                    depth_stencil: None,
+                    multisample: Default::default(),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            },
             adjust: adjust_pipeline("fs_adjust"),
             luts: Default::default(),
             no_lut: device.create_texture(&wgpu::TextureDescriptor {
@@ -485,6 +535,85 @@ impl Compositor {
         pass.draw(0..3, 0..1);
     }
 
+    /// Apply a filter track to the canvas so far: look up into a temporary, then draw it
+    /// back over the canvas.
+    fn filter_canvas(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, place_pipeline: &wgpu::RenderPipeline, lut: &Lut3d, strength: f32, scratch: &mut Vec<wgpu::Texture>) {
+        let n = lut.size;
+        let table = {
+            let mut cache = self.luts.lock().unwrap();
+            cache
+                .entry(lut.key | 1 << 63)
+                .or_insert_with(|| {
+                    let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("filter lut"),
+                        size: wgpu::Extent3d { width: n * n, height: n, depth_or_array_layers: 1 },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba32Float,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    });
+                    // (r + n * b, g) <- entry r + n g + n² b.
+                    let mut texels = vec![0f32; (n * n * n * 4) as usize];
+                    for b in 0..n {
+                        for g in 0..n {
+                            for r in 0..n {
+                                let src = ((r + n * g + n * n * b) * 3) as usize;
+                                let dst = ((g * n * n + r + n * b) * 4) as usize;
+                                texels[dst..dst + 3].copy_from_slice(&lut.rgb[src..src + 3]);
+                                texels[dst + 3] = 1.0;
+                            }
+                        }
+                    }
+                    self.queue.write_texture(
+                        wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                        bytemuck::cast_slice(&texels),
+                        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(n * n * 16), rows_per_image: Some(n) },
+                        wgpu::Extent3d { width: n * n, height: n, depth_or_array_layers: 1 },
+                    );
+                    tex
+                })
+                .clone()
+        };
+        let (w, h) = (canvas.width(), canvas.height());
+        let tmp = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+        let params: [f32; 4] = [n as f32, strength.clamp(0.0, 1.0), 0.0, 0.0];
+        let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&params), usage: wgpu::BufferUsages::UNIFORM });
+        let (canvas_view, table_view, tmp_view) = (canvas.create_view(&Default::default()), table.create_view(&Default::default()), tmp.create_view(&Default::default()));
+        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.yuv_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&canvas_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&table_view) },
+            ],
+        });
+        {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &tmp_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.lut3d);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        // Back onto the canvas, pixel for pixel (opaque, so "over" replaces).
+        let back = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0: [1.0, 0.0, 0.0, 0.0], inv1: [0.0, 1.0, 0.0, 0.0], misc: [1.0, 0.0, 0.0, 0.0] };
+        self.pass(enc, place_pipeline, &tmp, canvas, back, None);
+        scratch.push(tmp);
+    }
+
     /// Whether a frame can go to the GPU without a copy (diagnostics).
     pub fn can_import(&self, frame: &VideoFrame) -> bool {
         let mut enc = self.device.create_command_encoder(&Default::default());
@@ -577,6 +706,10 @@ impl Compositor {
         let frame = self.frame.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let max = self.device.limits().max_texture_dimension_2d;
         for layer in layers {
+            if let Source::Filter(lut, strength) = layer.source {
+                self.filter_canvas(enc, canvas, place_pipeline, lut, strength, &mut scratch);
+                continue;
+            }
             let (dw, dh) = (layer.size[0], layer.size[1]);
             // A layer zoomed past the GPU's texture limit is staged at the limit; the
             // placement pass scales the rest.
@@ -594,6 +727,7 @@ impl Compositor {
                 None => {
                     let src = match layer.source {
                         Source::Image(img) | Source::Cached(_, img) => self.upload(img),
+                        Source::Filter(..) => unreachable!("filters are drawn above"),
                         Source::Video(frame) => match self.import_video(enc, frame) {
                             Some((rgba, planes)) => {
                                 keep.extend(planes);
