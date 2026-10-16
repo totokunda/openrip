@@ -9,6 +9,7 @@
 //! Hardware frames stay on the GPU: on macOS a decoded frame is a `CVPixelBuffer` backed by
 //! an `IOSurface` (NV12 for 8-bit, P010 for 10-bit), ready for zero-copy hand-off.
 
+mod cache;
 mod decode;
 mod error;
 mod frame;

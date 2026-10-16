@@ -258,3 +258,23 @@ fn hardware_frames_are_iosurface_backed_yuv() {
         assert_eq!(frame_number(&f), 30, "{name}");
     }
 }
+
+#[test]
+fn stepping_backward_is_exact_and_mostly_cached() {
+    let Some(dir) = fixtures_dir() else { return };
+    for c in clips() {
+        for mode in modes() {
+            let mut d = open_mode(&dir.join(c.name), mode);
+            for n in (0..FRAMES).rev() {
+                let f = d.frame_at((c.time)(n)).unwrap().unwrap();
+                assert_eq!(frame_number(&f), n, "{} {mode:?}: stepping back to frame {n}", c.name);
+            }
+            // One decode per GOP (48 frames) at most; every other step comes from the cache.
+            // (Intra-only ProRes needs no cache: each step decodes just the frame itself.)
+            let s = d.stats();
+            if c.name != "prores.mov" {
+                assert!(s.cache_hits as i64 >= FRAMES * 3 / 4, "{} {mode:?}: only {} cache hits", c.name, s.cache_hits);
+            }
+        }
+    }
+}

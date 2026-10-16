@@ -330,6 +330,7 @@ fn decode_bench(file: &Path, software: bool, ffmpeg_hw: bool) -> Result<(), open
     let after = d.stats();
     summary("random seek (frame-accurate)", seeks);
     println!("  frames decoded per seek: {:.1}", (after.frames_decoded - before.frames_decoded) as f64 / 60.0);
+    let before = d.stats();
 
     // Scrubbing forward and backward by one frame from mid-stream.
     let mid = Micros(dur / 2);
@@ -347,6 +348,7 @@ fn decode_bench(file: &Path, software: bool, ffmpeg_hw: bool) -> Result<(), open
         d.frame_at(Micros(mid.0 - i * step.0))?;
         back.push(t0.elapsed().as_secs_f64() * 1000.0);
     }
-    summary("step backward 1 frame (no cache)", back);
+    summary("step backward 1 frame", back);
+    println!("  answered from the frame cache: {} of 90 steps", d.stats().cache_hits - before.cache_hits);
     Ok(())
 }

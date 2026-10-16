@@ -3,6 +3,7 @@ use std::path::Path;
 
 use ffmpeg_sys_next as ff;
 
+use crate::cache::FrameCache;
 use crate::error::check;
 use crate::info::video_info;
 use crate::nal;
@@ -30,11 +31,14 @@ pub struct DecoderOptions {
     /// hwaccel: several frames in flight instead of one, and frames a seek only needs as
     /// references are never output. Several times faster; on by default.
     pub native_videotoolbox: bool,
+    /// Memory for recently decoded frames (so stepping backward doesn't re-decode a GOP
+    /// per frame). 0 disables the cache.
+    pub cache_bytes: usize,
 }
 
 impl Default for DecoderOptions {
     fn default() -> Self {
-        DecoderOptions { hardware: HardwareMode::Auto, threads: 0, native_videotoolbox: true }
+        DecoderOptions { hardware: HardwareMode::Auto, threads: 0, native_videotoolbox: true, cache_bytes: 384 << 20 }
     }
 }
 
@@ -49,6 +53,8 @@ pub struct DecodeStats {
     pub decode_errors: u64,
     /// Hardware sessions restarted after seeking to an open-GOP keyframe.
     pub sessions_reset: u64,
+    /// Requests answered from the frame cache.
+    pub cache_hits: u64,
 }
 
 /// Frames worth decoding forward rather than seeking (a seek flushes and refills the decoder).
@@ -57,6 +63,8 @@ const SEEK_COST_FRAMES: i64 = 8;
 const MAX_SKIP_TO_KEY: u32 = 1000;
 /// Rejected packets tolerated over a decoder's life before decoding is treated as broken.
 const MAX_DECODE_ERRORS: u64 = 100;
+/// A request this far behind the current frame counts as stepping backward.
+const REVERSE_WINDOW: i64 = 2_000_000;
 /// Packets read ahead to find the frame shown at a seek target.
 const MAX_LOOKAHEAD: usize = 1200;
 
@@ -143,6 +151,11 @@ pub struct VideoDecoder {
     /// Drop frames that start before this stream timestamp: the keyframe a seek landed on.
     /// Open-GOP leading pictures come before it and reference frames we never decoded.
     drop_before: i64,
+    cache: FrameCache,
+    /// Approximate size of one decoded frame.
+    frame_bytes: usize,
+    /// The time most recently asked for (cache eviction keeps frames near it).
+    request: Micros,
     stats: DecodeStats,
 }
 
@@ -182,6 +195,7 @@ impl VideoDecoder {
                     }
                 }
             }
+            let info_depth = info.bit_depth;
             let extra = if (*par).extradata.is_null() { &[][..] } else { std::slice::from_raw_parts((*par).extradata, (*par).extradata_size as usize) };
             let mut dec = VideoDecoder {
                 input,
@@ -207,6 +221,9 @@ impl VideoDecoder {
                 just_seeked: false,
                 skipped: 0,
                 drop_before: ff::AV_NOPTS_VALUE,
+                cache: FrameCache::new(opts.cache_bytes),
+                frame_bytes: ((*par).width.max(1) as usize * (*par).height.max(1) as usize * 3 / 2) << ((info_depth > 8) as usize),
+                request: Micros::ZERO,
                 stats: DecodeStats::default(),
             };
             dec.backend = dec.new_backend()?;
@@ -287,7 +304,7 @@ impl VideoDecoder {
     pub fn next_frame(&mut self) -> Result<Option<VideoFrame>, MediaError> {
         let next = match self.pending.take() {
             Some(f) => Some(f),
-            None => self.decode()?,
+            None => self.decode_cached()?,
         };
         match next {
             Some(f) => {
@@ -303,12 +320,20 @@ impl VideoDecoder {
     /// frame of the stream if `t` is past its end, the first if `t` is before it).
     pub fn frame_at(&mut self, t: Micros) -> Result<Option<VideoFrame>, MediaError> {
         let t = Micros(t.0.max(0));
+        self.request = t;
+        if let Some(f) = self.cache.get(t) {
+            self.stats.cache_hits += 1;
+            return f.map(Some);
+        }
+        // Stepping or playing backward: output the whole GOP up to `t` so the frames before it
+        // come from the cache next time. (A long jump back is just a seek.)
+        let backward = self.current.as_ref().is_some_and(|c| t < c.time && c.time.0 - t.0 <= REVERSE_WINDOW);
         if !self.can_reach_by_decoding(t) {
             self.seek_before(t, 0)?;
         }
         let mut retreat = 0;
         loop {
-            if self.pending.as_ref().is_none_or(|p| p.time <= t) {
+            if !backward && self.pending.as_ref().is_none_or(|p| p.time <= t) {
                 self.prepare_target(t)?;
             }
             // Decode forward until the next frame would start after `t`.
@@ -320,7 +345,7 @@ impl VideoDecoder {
                 }
                 let next = match self.pending.take() {
                     Some(f) => Some(f),
-                    None => self.decode()?,
+                    None => self.decode_cached()?,
                 };
                 match next {
                     Some(f) if f.time <= t => self.current = Some(f),
@@ -455,6 +480,7 @@ impl VideoDecoder {
         self.just_seeked = true;
         self.skipped = 0;
         self.drop_before = ff::AV_NOPTS_VALUE;
+        self.cache.break_chain();
         Ok(())
     }
 
@@ -527,6 +553,15 @@ impl VideoDecoder {
 
     fn dropped(&self, ts: i64) -> bool {
         self.drop_before != ff::AV_NOPTS_VALUE && ts != ff::AV_NOPTS_VALUE && ts < self.drop_before
+    }
+
+    /// [`Self::decode`], remembering the frame in the cache.
+    fn decode_cached(&mut self) -> Result<Option<VideoFrame>, MediaError> {
+        let f = self.decode()?;
+        if let Some(f) = &f {
+            self.cache.insert(f, self.frame_bytes, self.request)?;
+        }
+        Ok(f)
     }
 
     /// Pull the next frame out of the decoder, feeding it packets as needed.
@@ -607,6 +642,13 @@ impl VideoDecoder {
                         crate::vt::Next::NeedInput => {
                             if let Some(q) = self.next_packet()? {
                                 self.stats.frames_decoded += 1;
+                                if !q.output {
+                                    if self.origin != ff::AV_NOPTS_VALUE && q.pts() != ff::AV_NOPTS_VALUE {
+                                        self.cache.hide(Micros(unsafe { ff::av_rescale_q(q.pts() - self.origin, self.tb, MICROS) }));
+                                    } else {
+                                        self.cache.break_chain();
+                                    }
+                                }
                                 if let Backend::Native(vt) = &mut self.backend {
                                     vt.submit(q.pkt, q.output)?;
                                 }
@@ -624,6 +666,7 @@ impl Drop for VideoDecoder {
         self.current = None;
         self.pending = None;
         self.queue.clear();
+        self.cache = FrameCache::new(0);
         // Free the decoder (and its hold on the device) before the device.
         self.backend = Backend::Ffmpeg { ctx: CodecContext(std::ptr::null_mut()), flush_sent: false };
         unsafe {
