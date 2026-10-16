@@ -16,6 +16,8 @@ pub enum Matrix {
 pub enum PixelFormat {
     Nv12,
     P010,
+    /// 4:2:2 biplanar, 10 bits in 16 (ProRes 422 through VideoToolbox).
+    P210,
     Yuv420p,
     Yuv420p10,
     Yuv422p,
@@ -29,6 +31,7 @@ impl PixelFormat {
         match f {
             AV_PIX_FMT_NV12 => PixelFormat::Nv12,
             AV_PIX_FMT_P010LE => PixelFormat::P010,
+            AV_PIX_FMT_P210LE => PixelFormat::P210,
             AV_PIX_FMT_YUV420P | AV_PIX_FMT_YUVJ420P => PixelFormat::Yuv420p,
             AV_PIX_FMT_YUV420P10LE => PixelFormat::Yuv420p10,
             AV_PIX_FMT_YUV422P | AV_PIX_FMT_YUVJ422P => PixelFormat::Yuv422p,
@@ -68,6 +71,8 @@ fn cv_format(pb: &objc2_core_video::CVPixelBuffer) -> (PixelFormat, bool) {
         kCVPixelFormatType_420YpCbCr8BiPlanarFullRange => (PixelFormat::Nv12, true),
         kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange => (PixelFormat::P010, false),
         kCVPixelFormatType_420YpCbCr10BiPlanarFullRange => (PixelFormat::P010, true),
+        kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange => (PixelFormat::P210, false),
+        kCVPixelFormatType_422YpCbCr10BiPlanarFullRange => (PixelFormat::P210, true),
         other => (PixelFormat::Other(other as i32), false),
     }
 }
@@ -196,7 +201,11 @@ impl VideoFrame {
                     return convert_rgb(raw);
                 }
                 let mut tmp = ff::av_frame_alloc();
-                let r = ff::av_hwframe_transfer_data(tmp, raw, 0);
+                let mut r = ff::av_hwframe_transfer_data(tmp, raw, 0);
+                if r >= 0 {
+                    // The transfer copies pixels only; the matrix and range come with the props.
+                    r = ff::av_frame_copy_props(tmp, raw);
+                }
                 let result = if r < 0 { Err(MediaError::ffmpeg("av_hwframe_transfer_data", r)) } else { convert_rgb(tmp) };
                 ff::av_frame_free(&mut tmp);
                 result
@@ -215,6 +224,7 @@ unsafe fn cv_to_rgb(pb: &objc2_core_video::CVPixelBuffer, colorspace: ff::AVColo
     let av_format = match format {
         PixelFormat::Nv12 => ff::AVPixelFormat::AV_PIX_FMT_NV12,
         PixelFormat::P010 => ff::AVPixelFormat::AV_PIX_FMT_P010LE,
+        PixelFormat::P210 => ff::AVPixelFormat::AV_PIX_FMT_P210LE,
         _ => return Err(MediaError::Ffmpeg { op: "to_rgb", code: -1, msg: format!("unsupported pixel buffer format {format:?}") }),
     };
     if CVPixelBufferLockBaseAddress(pb, CVPixelBufferLockFlags::ReadOnly) != 0 {

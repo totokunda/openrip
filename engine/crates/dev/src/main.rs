@@ -28,6 +28,9 @@
 //!       CapCut drafts are imported on the fly.
 //!   openrip-dev mix <project.json | draft-dir> <out.wav> [<start-seconds> <seconds>]
 //!       Mix a project's audio (48 kHz stereo float WAV), as export and playback will.
+//!   openrip-dev playthrough <project.json | draft-dir> [--seconds N]
+//!       Render every frame in order at 540p, as playback does: frame times overall and on
+//!       the frames where a clip starts (cuts).
 //!   openrip-dev scrub-bench <media-file>
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
@@ -54,6 +57,7 @@ fn main() -> ExitCode {
         Some("preview-scan") if args.len() >= 2 => preview_scan(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
         Some("export") if args.len() >= 3 => export_cmd(&args).map_err(|e| e.to_string()),
         Some("mix") if args.len() >= 3 => mix_cmd(&args).map_err(|e| e.to_string()),
+        Some("playthrough") if args.len() >= 2 => playthrough(&args).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
@@ -667,4 +671,42 @@ fn mix_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::write(&args[2], wav)?;
     println!("mixed {secs:.2} s in {:.1} ms ({} missing files)", t0.elapsed().as_secs_f64() * 1000.0, missing.len());
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn playthrough(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_model::{Micros, TrackKind};
+    let project = load_project(Path::new(&args[1]))?;
+    let secs: f64 = args.iter().position(|a| a == "--seconds").and_then(|i| args.get(i + 1)).map(|s| s.parse()).transpose()?.unwrap_or(f64::MAX);
+    let fps = project.fps;
+    let (cw, ch) = (project.canvas.width.max(1) as f64, project.canvas.height.max(1) as f64);
+    let (w, h) = if cw >= ch { ((540.0 * cw / ch).round() as u32 / 2 * 2, 540) } else { (540, (540.0 * ch / cw).round() as u32 / 2 * 2) };
+    let cuts: std::collections::BTreeSet<i64> = project.tracks.iter().filter(|t| t.kind == TrackKind::Video).flat_map(|t| t.segments.iter().map(|s| fps.frame_of(s.target.start))).collect();
+    let end = Micros(project.duration().0.min((secs * 1e6) as i64));
+    let mut engine = openrip_playback::PreviewEngine::new(project)?;
+    let surface = openrip_render::Compositor::output_surface(w, h).ok_or("surface")?;
+    let (mut all, mut at_cuts) = (Vec::new(), Vec::new());
+    let mut n = 0;
+    while fps.frame_start(n) < end {
+        let t0 = Instant::now();
+        engine.render_to_surface(fps.frame_start(n), &surface)?;
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        all.push(ms);
+        if cuts.contains(&n) && n > 0 {
+            at_cuts.push(ms);
+        }
+        n += 1;
+    }
+    let budget = 1000.0 / fps.as_f64();
+    println!("{n} frames at {w}x{h}, {} cuts; frame budget {budget:.1} ms", at_cuts.len());
+    let over = all.iter().filter(|m| **m > budget).count();
+    summary("all frames", all);
+    summary("frames where a clip starts", at_cuts);
+    println!("frames over budget: {over}");
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn playthrough(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    Err("playthrough needs macOS".into())
 }

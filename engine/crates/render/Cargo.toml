@@ -27,3 +27,4 @@ openrip-model.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVBase", "CVReturn"] }
+

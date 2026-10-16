@@ -15,7 +15,8 @@ fn clip(name: &str, pix_fmt: &str, codec: &[&str]) -> Option<PathBuf> {
     }
     let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     if !path.exists() {
-        let tmp = path.with_extension("tmp.mp4");
+        let ext = path.extension().unwrap().to_str().unwrap().to_owned();
+        let tmp = path.with_extension(format!("tmp.{ext}"));
         let out = Command::new("ffmpeg")
             .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-frames:v", "30", "-pix_fmt", pix_fmt])
             .args(codec)
@@ -81,5 +82,12 @@ fn nv12_frames_convert_on_the_gpu() {
 fn p010_frames_convert_on_the_gpu() {
     if let Some(p) = clip("import-hevc10.mp4", "yuv420p10le", &["-c:v", "libx265", "-x265-params", "log-level=none", "-tag:v", "hvc1"]) {
         check(p, PixelFormat::P010);
+    }
+}
+
+#[test]
+fn p210_prores_frames_convert_on_the_gpu() {
+    if let Some(p) = clip("import-prores.mov", "yuv422p10le", &["-c:v", "prores_ks", "-profile:v", "2"]) {
+        check(p, PixelFormat::P210);
     }
 }

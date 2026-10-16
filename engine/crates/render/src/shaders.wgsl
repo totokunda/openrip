@@ -112,7 +112,8 @@ fn fs_place(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 // (H.264/HEVC default) and interpolated bilinearly, clamped at the edges.
 //   inv0: (y offset, y range, c offset, c range) in code values
 //   inv1: (R from Cr, G from Cb, G from Cr, B from Cb)
-//   misc.z: code values per unit sample (255 for 8-bit, 65535 / 64 for P010)
+//   misc.z: code values per unit sample (255 for 8-bit, 65535 / 64 for P010/P210)
+//   misc.w: vertical chroma subsampling (2 for 4:2:0, 1 for 4:2:2)
 @group(0) @binding(2) var chroma: texture_2d<f32>;
 
 fn chroma_at(p: vec2<i32>) -> vec2<f32> {
@@ -124,8 +125,10 @@ fn chroma_at(p: vec2<i32>) -> vec2<f32> {
 fn fs_yuv(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let k = P.misc.z;
     let y = (textureLoad(src, vec2<i32>(floor(pos.xy)), 0).r * k - P.inv0.x) / P.inv0.y;
-    // Chroma sample i sits at luma x = 2i (left) and between luma rows 2j and 2j + 1.
-    let c = vec2<f32>((floor(pos.x)) / 2.0, (pos.y - 1.0) / 2.0);
+    // Chroma sample i sits at luma x = 2i (left); vertically between luma rows 2j and 2j + 1
+    // for 4:2:0, on row j for 4:2:2.
+    let v = P.misc.w;
+    let c = vec2<f32>(floor(pos.x) / 2.0, (pos.y - v / 2.0) / v);
     let b = floor(c);
     let f = c - b;
     let p = vec2<i32>(b);

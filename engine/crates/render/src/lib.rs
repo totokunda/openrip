@@ -318,13 +318,22 @@ impl Compositor {
         pass.draw(0..3, 0..1);
     }
 
+    /// Whether a frame can go to the GPU without a copy (diagnostics).
+    pub fn can_import(&self, frame: &VideoFrame) -> bool {
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        self.import_video(&mut enc, frame).is_some()
+    }
+
     /// Convert a hardware frame's planes to an RGBA texture on the GPU, without copying them
     /// out of their IOSurface. `None` if the frame isn't a hardware NV12/P010 frame.
     #[cfg(target_os = "macos")]
     fn import_video(&self, enc: &mut wgpu::CommandEncoder, frame: &VideoFrame) -> Option<(wgpu::Texture, [wgpu::Texture; 2])> {
-        let ten_bit = match frame.pixel_format() {
-            PixelFormat::Nv12 => false,
-            PixelFormat::P010 if self.device.features().contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM) => true,
+        let wide = self.device.features().contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM);
+        // (16-bit planes, vertical chroma subsampling)
+        let (ten_bit, sub_v) = match frame.pixel_format() {
+            PixelFormat::Nv12 => (false, 2.0),
+            PixelFormat::P010 if wide => (true, 2.0),
+            PixelFormat::P210 if wide => (true, 1.0),
             _ => return None,
         };
         let pb = frame.pixel_buffer()?;
@@ -336,7 +345,7 @@ impl Compositor {
         let (w, h) = (frame.width(), frame.height());
         let rgba = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
         let (inv0, inv1, k) = yuv_params(frame.matrix(), frame.full_range(), ten_bit);
-        let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0, inv1, misc: [1.0, 0.0, k, 0.0] };
+        let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0, inv1, misc: [1.0, 0.0, k, sub_v] };
         self.pass_with(enc, &self.yuv, &luma, Some(&chroma), &rgba, params, Some(wgpu::Color::BLACK));
         Some((rgba, [luma, chroma]))
     }
