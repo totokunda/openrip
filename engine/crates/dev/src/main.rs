@@ -8,6 +8,10 @@
 //!   openrip-dev v1-import <project-N.json> [--out project.json]
 //!   openrip-dev v1-scan <projects-json-dir>
 //!       Same, for projects saved by the TypeScript app (format v1).
+//!   openrip-dev probe <media-file>
+//!       Print what the decoder sees in a media file (JSON).
+//!   openrip-dev decode-bench <media-file> [--sw]
+//!       Measure sequential decode speed, random-seek latency and scrubbing.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -24,8 +28,10 @@ fn main() -> ExitCode {
         Some("capcut-scan") if args.len() >= 2 => capcut_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("v1-import") if args.len() >= 2 => v1_import(Path::new(&args[1]), flag(&args, "--out")).map_err(|e| e.to_string()),
         Some("v1-scan") if args.len() >= 2 => v1_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("probe") if args.len() >= 2 => probe(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw")).map_err(|e| e.to_string()),
         _ => {
-            eprintln!("usage:\n  openrip-dev capcut-import <draft-dir> [--out project.json]\n  openrip-dev capcut-scan <projects-root>\n  openrip-dev v1-import <project-N.json> [--out project.json]\n  openrip-dev v1-scan <projects-json-dir>");
+            eprintln!("usage:\n  openrip-dev capcut-import <draft-dir> [--out project.json]\n  openrip-dev capcut-scan <projects-root>\n  openrip-dev v1-import <project-N.json> [--out project.json]\n  openrip-dev v1-scan <projects-json-dir>\n  openrip-dev probe <media-file>\n  openrip-dev decode-bench <media-file> [--sw]");
             return ExitCode::from(2);
         }
     };
@@ -243,5 +249,103 @@ fn v1_scan(dir: &Path) -> Result<(), openrip_v1::ImportError> {
     println!("dropped:            {:?}", dropped);
     println!("kept as foreign:    {:?}", foreign);
     println!("warnings:           {:?}", warnings);
+    Ok(())
+}
+
+fn probe(file: &Path) -> Result<(), openrip_media::MediaError> {
+    let info = openrip_media::probe(file)?;
+    println!("{}", serde_json::to_string_pretty(&info).unwrap());
+    Ok(())
+}
+
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    sorted[((sorted.len() - 1) as f64 * p).round() as usize]
+}
+
+fn summary(label: &str, mut ms: Vec<f64>) {
+    ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    println!(
+        "{label:<34} p50 {:6.1} ms   p95 {:6.1} ms   max {:6.1} ms   (n={})",
+        percentile(&ms, 0.5),
+        percentile(&ms, 0.95),
+        ms[ms.len() - 1],
+        ms.len()
+    );
+}
+
+fn decode_bench(file: &Path, software: bool) -> Result<(), openrip_media::MediaError> {
+    use openrip_media::{DecoderOptions, HardwareMode, Micros, VideoDecoder};
+    let opts = DecoderOptions { hardware: if software { HardwareMode::Off } else { HardwareMode::Auto }, ..Default::default() };
+    println!("{}", openrip_media::ffmpeg_versions());
+    let t0 = Instant::now();
+    let mut d = VideoDecoder::open(file, &opts)?;
+    let open_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let info = d.info().clone();
+    let fps = info.frame_rate.map(|r| r.as_f64()).unwrap_or(30.0);
+    let step = Micros((1_000_000.0 / fps).round() as i64);
+    println!(
+        "{} {}x{} {}-bit @ {:.3} fps, {:.1} s; decoder: {}; open {:.1} ms",
+        info.codec,
+        info.width,
+        info.height,
+        info.bit_depth,
+        fps,
+        info.duration.as_secs_f64(),
+        if d.hardware() { "hardware" } else { "software" },
+        open_ms
+    );
+
+    // First frame (cold start).
+    let t0 = Instant::now();
+    let first = d.next_frame()?.expect("no frames");
+    println!("first frame                        {:6.1} ms ({:?}, hardware: {})", t0.elapsed().as_secs_f64() * 1000.0, first.pixel_format(), first.is_hardware());
+    drop(first);
+
+    // Sequential decode, up to 10 s of media.
+    let t0 = Instant::now();
+    let mut n = 0u64;
+    let limit = Micros(10_000_000);
+    while let Some(f) = d.next_frame()? {
+        n += 1;
+        if f.time >= limit {
+            break;
+        }
+    }
+    let secs = t0.elapsed().as_secs_f64();
+    println!("sequential decode                  {:6.1} fps ({:.2} ms/frame, {:.1}x real time)", n as f64 / secs, secs * 1000.0 / n as f64, n as f64 / secs / fps);
+
+    // Random access: deterministic pseudo-random times across the whole stream.
+    let dur = info.duration.0.max(1);
+    let mut x: u64 = 0x9E3779B97F4A7C15;
+    let mut seeks = Vec::new();
+    let before = d.stats();
+    for _ in 0..60 {
+        x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let t = Micros(((x >> 11) % dur as u64) as i64);
+        let t0 = Instant::now();
+        d.frame_at(t)?;
+        seeks.push(t0.elapsed().as_secs_f64() * 1000.0);
+    }
+    let after = d.stats();
+    summary("random seek (frame-accurate)", seeks);
+    println!("  frames decoded per seek: {:.1}", (after.frames_decoded - before.frames_decoded) as f64 / 60.0);
+
+    // Scrubbing forward and backward by one frame from mid-stream.
+    let mid = Micros(dur / 2);
+    d.frame_at(mid)?;
+    let mut fwd = Vec::new();
+    for i in 1..=60 {
+        let t0 = Instant::now();
+        d.frame_at(Micros(mid.0 + i * step.0))?;
+        fwd.push(t0.elapsed().as_secs_f64() * 1000.0);
+    }
+    summary("step forward 1 frame", fwd);
+    let mut back = Vec::new();
+    for i in 1..=30 {
+        let t0 = Instant::now();
+        d.frame_at(Micros(mid.0 - i * step.0))?;
+        back.push(t0.elapsed().as_secs_f64() * 1000.0);
+    }
+    summary("step backward 1 frame (no cache)", back);
     Ok(())
 }
