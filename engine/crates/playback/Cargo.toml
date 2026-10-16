@@ -10,3 +10,9 @@ description = "Frame serving for preview: per-source decode workers, scrub and a
 [dependencies]
 openrip-media.workspace = true
 openrip-model.workspace = true
+openrip-render.workspace = true
+png = "0.18"
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVBase"] }

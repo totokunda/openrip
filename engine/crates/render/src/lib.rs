@@ -84,17 +84,28 @@ impl<'a> Layer<'a> {
     /// Place an image the way the project model does: `position` in half-canvas units
     /// (+y up), `scale` relative to contain-fit, `rotation` clockwise degrees.
     pub fn from_model(source: impl Into<Source<'a>>, canvas: [u32; 2], position: [f64; 2], scale: [f64; 2], rotation: f64) -> Self {
+        Self::from_model_oriented(source, canvas, position, scale, rotation, 0)
+    }
+
+    /// Like [`Layer::from_model`] for a source stored sideways or upside down (phone video:
+    /// `orientation` is the clockwise turn, 0/90/180/270, that displays it upright). Fit,
+    /// scale and flips apply to the upright picture.
+    pub fn from_model_oriented(source: impl Into<Source<'a>>, canvas: [u32; 2], position: [f64; 2], scale: [f64; 2], rotation: f64, orientation: i32) -> Self {
         let source = source.into();
         let (sw, sh) = source.size();
+        let sideways = orientation.rem_euclid(180) == 90;
+        let (uw, uh) = if sideways { (sh, sw) } else { (sw, sh) };
         let (w, h) = (canvas[0] as f64, canvas[1] as f64);
-        let fit = (w / sw as f64).min(h / sh as f64);
+        let fit = (w / uw as f64).min(h / uh as f64);
+        // The texture's own axes: swapped relative to the screen when sideways.
+        let (sx, sy) = if sideways { (scale[1], scale[0]) } else { (scale[0], scale[1]) };
         Layer {
             source,
             center: [w / 2.0 + position[0] * w / 2.0, h / 2.0 - position[1] * h / 2.0],
-            size: [sw as f64 * fit * scale[0].abs(), sh as f64 * fit * scale[1].abs()],
-            rotation,
-            flip_h: scale[0] < 0.0,
-            flip_v: scale[1] < 0.0,
+            size: [sw as f64 * fit * sx.abs(), sh as f64 * fit * sy.abs()],
+            rotation: rotation + orientation as f64,
+            flip_h: if sideways { sy < 0.0 } else { sx < 0.0 },
+            flip_v: if sideways { sx < 0.0 } else { sy < 0.0 },
             opacity: 1.0,
         }
     }

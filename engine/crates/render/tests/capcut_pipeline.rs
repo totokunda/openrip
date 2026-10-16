@@ -124,3 +124,17 @@ fn renders_into_an_iosurface_like_into_memory() {
         CVPixelBufferUnlockBaseAddress(&surface, CVPixelBufferLockFlags::ReadOnly);
     }
 }
+
+#[test]
+fn sideways_sources_are_shown_upright() {
+    let Some(c) = gpu() else { return };
+    // Stored 64x32, meant to be turned 90 degrees clockwise (a phone's portrait video).
+    let src = image(64, 32, |x, y| grey((x * 3 + y * 5) as u8));
+    let layer = Layer::from_model_oriented(&src, [32, 64], [0.0, 0.0], [1.0, 1.0], 0.0, 90);
+    let out = c.render(32, 64, [0, 0, 0], &[layer]);
+    for y in 0..32 {
+        for x in 0..64 {
+            assert_eq!(px(&out, 31 - y, x), px(&src, x, y), "({x}, {y})");
+        }
+    }
+}

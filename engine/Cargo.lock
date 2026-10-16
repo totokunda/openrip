@@ -811,8 +811,12 @@ dependencies = [
 name = "openrip-playback"
 version = "0.0.0"
 dependencies = [
+ "objc2-core-video",
  "openrip-media",
  "openrip-model",
+ "openrip-render",
+ "png",
+ "thiserror",
 ]
 
 [[package]]

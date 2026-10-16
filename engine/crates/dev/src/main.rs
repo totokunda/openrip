@@ -19,6 +19,10 @@
 //!   openrip-dev play-bench <video> [<width> <height>]
 //!       Decode a video and composite every frame into an IOSurface preview surface (default
 //!       1920x1080), as playback will: per-frame decode and composite cost, and CPU use.
+//!   openrip-dev preview-scan <projects-root> [--save <dir>]
+//!       Import every CapCut draft and render five frames of each with the preview engine:
+//!       aggregate counts of layers drawn, media skipped and errors, and frame times (no
+//!       names). --save writes the frames as PNGs for a visual check.
 //!   openrip-dev scrub-bench <media-file>
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
@@ -42,6 +46,7 @@ fn main() -> ExitCode {
         Some("probe") if args.len() >= 2 => probe(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("render-frame") if args.len() >= 6 => render_frame(&args[1..]).map_err(|e| e.to_string()),
         Some("play-bench") if args.len() >= 2 => play_bench(&args[1..]).map_err(|e| e.to_string()),
+        Some("preview-scan") if args.len() >= 2 => preview_scan(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
@@ -440,23 +445,6 @@ fn scrub_bench(file: &Path) -> Result<(), openrip_media::MediaError> {
     Ok(())
 }
 
-fn load_png(path: &Path) -> Result<openrip_render::RgbaImage, Box<dyn std::error::Error>> {
-    let mut dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path)?));
-    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = dec.read_info()?;
-    let mut buf = vec![0; reader.output_buffer_size().ok_or("png too large")?];
-    let info = reader.next_frame(&mut buf)?;
-    let px = &buf[..info.buffer_size()];
-    let data = match info.color_type {
-        png::ColorType::Rgba => px.to_vec(),
-        png::ColorType::Rgb => px.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
-        png::ColorType::GrayscaleAlpha => px.chunks_exact(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect(),
-        png::ColorType::Grayscale => px.iter().flat_map(|&g| [g, g, g, 255]).collect(),
-        png::ColorType::Indexed => return Err("indexed png after EXPAND".into()),
-    };
-    Ok(openrip_render::RgbaImage { width: info.width, height: info.height, data })
-}
-
 fn save_png(path: &Path, img: &openrip_render::RgbaImage) -> Result<(), Box<dyn std::error::Error>> {
     let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path)?), img.width, img.height);
     enc.set_color(png::ColorType::Rgba);
@@ -466,102 +454,16 @@ fn save_png(path: &Path, img: &openrip_render::RgbaImage) -> Result<(), Box<dyn 
 }
 
 fn render_frame(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    use openrip_model::{MediaKind, Micros, TrackKind};
     let project: Project = serde_json::from_str(&std::fs::read_to_string(&args[0])?)?;
-    let t = Micros::from_secs_f64(args[1].parse()?);
+    let t = openrip_model::Micros::from_secs_f64(args[1].parse()?);
     let (w, h): (u32, u32) = (args[2].parse()?, args[3].parse()?);
-    let mut active = Vec::new();
-    for track in project.tracks.iter().filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text) && !tr.hidden) {
-        for seg in track.segments.iter().filter(|s| s.visible && s.target.contains(t)) {
-            active.push(seg);
-        }
-    }
-    // CapCut stacks by render index (text sits at 14000+, above video).
-    active.sort_by_key(|s| s.render_index);
-    enum Pixels {
-        Image(openrip_render::RgbaImage),
-        Video(openrip_media::VideoFrame),
-        /// Rasterised text and the canvas point its image centre goes to.
-        Text(openrip_render::RgbaImage, [f64; 2]),
-    }
-    let mut fonts: std::collections::HashMap<String, openrip_render::text::Font> = Default::default();
-    let mut sources = Vec::new();
-    for seg in &active {
-        if let Some(text) = project.materials.texts.iter().find(|m| m.id == seg.material) {
-            let Some(run) = text.runs.first() else { continue };
-            let path = if run.font.path.is_empty() { "/Applications/CapCut.app/Contents/Resources/Font/SystemFont/en.ttf" } else { run.font.path.as_str() };
-            if !fonts.contains_key(path) {
-                fonts.insert(path.to_string(), openrip_render::text::Font::from_file(Path::new(path))?);
-            }
-            let local = seg.local_time(t);
-            let (pos, scale) = (seg.transform.position.sample(local), seg.transform.scale.sample(local));
-            let em = match run.size_unit {
-                openrip_model::SizeUnit::CapCut => run.size * openrip_model::CAPCUT_SIZE_UNIT_EM * w as f32,
-                openrip_model::SizeUnit::CanvasHeight => run.size * h as f32,
-            } * scale.x.abs() as f32;
-            let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-            let style = openrip_render::text::TextStyle {
-                font: &fonts[path],
-                size: em,
-                color: [to_u8(run.fill.r), to_u8(run.fill.g), to_u8(run.fill.b), to_u8(run.fill.a)],
-                align: match text.layout.alignment {
-                    0 => openrip_render::text::Align::Left,
-                    2 => openrip_render::text::Align::Right,
-                    _ => openrip_render::text::Align::Center,
-                },
-                letter_spacing: text.layout.letter_spacing,
-                line_spacing: text.layout.line_spacing,
-            };
-            let lay = openrip_render::text::layout(&text.text, &style);
-            // Block centre on the canvas; rasterise so the image sits on the pixel grid.
-            let (cx, cy) = (w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0);
-            let (x0, y0) = (cx - lay.width as f64 / 2.0, cy - lay.height as f64 / 2.0);
-            let r = lay.rasterize(&style, [x0.rem_euclid(1.0) as f32, y0.rem_euclid(1.0) as f32]);
-            let at = [cx - (r.center[0] - r.image.width as f64 / 2.0), cy - (r.center[1] - r.image.height as f64 / 2.0)];
-            sources.push((seg, Pixels::Text(r.image, at)));
-            continue;
-        }
-        let Some(media) = project.materials.media.iter().find(|m| m.id == seg.material) else { continue };
-        let pixels = match media.kind {
-            MediaKind::Photo if media.path.to_lowercase().ends_with(".png") => Pixels::Image(load_png(Path::new(&media.path))?),
-            MediaKind::Video | MediaKind::Photo => {
-                // Hardware frames go to the GPU without a copy.
-                let mut d = openrip_media::VideoDecoder::open(Path::new(&media.path), &Default::default())?;
-                Pixels::Video(d.frame_at(seg.source_time(t).unwrap_or(Micros::ZERO))?.ok_or("no frame")?)
-            }
-            MediaKind::Audio => continue,
-        };
-        sources.push((seg, pixels));
-    }
-    let layers: Vec<_> = sources
-        .iter()
-        .map(|(seg, pixels)| {
-            let local = seg.local_time(t);
-            let tr = &seg.transform;
-            let (pos, scale) = (tr.position.sample(local), tr.scale.sample(local));
-            let mut layer = match pixels {
-                Pixels::Image(i) => openrip_render::Layer::from_model(i, [w, h], [pos.x, pos.y], [scale.x, scale.y], tr.rotation.sample(local)),
-                Pixels::Video(f) => openrip_render::Layer::from_model(openrip_render::Source::Video(f), [w, h], [pos.x, pos.y], [scale.x, scale.y], tr.rotation.sample(local)),
-                Pixels::Text(img, at) => openrip_render::Layer {
-                    source: openrip_render::Source::Image(img),
-                    center: *at,
-                    size: [img.width as f64, img.height as f64],
-                    rotation: tr.rotation.sample(local),
-                    flip_h: false,
-                    flip_v: false,
-                    opacity: 1.0,
-                },
-            };
-            layer.flip_h ^= tr.flip_h;
-            layer.flip_v ^= tr.flip_v;
-            layer.opacity *= seg.opacity.sample(local);
-            layer
-        })
-        .collect();
-    let compositor = openrip_render::Compositor::new()?;
+    let mut engine = openrip_playback::PreviewEngine::new(project)?;
     let t0 = Instant::now();
-    let frame = compositor.render(w, h, [0, 0, 0], &layers);
-    println!("rendered {} layer(s) at {w}x{h} in {:.1} ms", layers.len(), t0.elapsed().as_secs_f64() * 1000.0);
+    let (frame, report) = engine.render_image(t, w, h)?;
+    println!("rendered {} layer(s) at {w}x{h} in {:.1} ms", report.layers, t0.elapsed().as_secs_f64() * 1000.0);
+    for (path, why) in &report.missing {
+        println!("  skipped {path}: {why}");
+    }
     save_png(Path::new(&args[4]), &frame)?;
     Ok(())
 }
@@ -626,4 +528,50 @@ fn play_bench(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(target_os = "macos"))]
 fn play_bench(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Err("play-bench needs macOS (IOSurface output)".into())
+}
+
+fn preview_scan(root: &Path, save: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)?.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.join("draft_info.json").exists()).collect();
+    dirs.sort();
+    if let Some(dir) = &save {
+        std::fs::create_dir_all(dir)?;
+    }
+    let (mut drafts, mut frames, mut errors, mut layers, mut skipped) = (0, 0, 0, 0, 0);
+    let mut missing_files = std::collections::BTreeSet::new();
+    let mut times = Vec::new();
+    for (i, dir) in dirs.iter().enumerate() {
+        let Ok(Imported { project, .. }) = import_draft_dir(dir) else { continue };
+        drafts += 1;
+        let duration = project.duration();
+        let (cw, ch) = (project.canvas.width.max(1) as f64, project.canvas.height.max(1) as f64);
+        let (w, h) = if cw >= ch { (960, ((960.0 * ch / cw).round() as u32).max(2)) } else { (((960.0 * cw / ch).round() as u32).max(2), 960) };
+        let mut engine = openrip_playback::PreviewEngine::new(project)?;
+        for k in 0..5 {
+            let t = openrip_model::Micros(duration.0 * (2 * k + 1) / 10);
+            let t0 = Instant::now();
+            match engine.render_image(t, w, h) {
+                Ok((img, report)) => {
+                    times.push(t0.elapsed().as_secs_f64() * 1000.0);
+                    frames += 1;
+                    layers += report.layers;
+                    skipped += report.missing.len();
+                    missing_files.extend(report.missing.into_iter().map(|m| m.0));
+                    if let Some(dir) = &save {
+                        save_png(&dir.join(format!("draft{i:02}_{k}.png")), &img)?;
+                    }
+                }
+                Err(e) => {
+                    errors += 1;
+                    eprintln!("draft #{i} frame {k}: {e}");
+                }
+            }
+        }
+    }
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    println!("drafts rendered: {drafts}, frames: {frames}, errors: {errors}");
+    println!("layers drawn: {layers}; layers skipped (media/font missing): {skipped} ({} distinct files)", missing_files.len());
+    if !times.is_empty() {
+        println!("frame time (first frame per draft includes opening decoders): p50 {:.1} ms, p95 {:.1} ms, max {:.1} ms", percentile(&times, 0.5), percentile(&times, 0.95), times[times.len() - 1]);
+    }
+    Ok(())
 }
