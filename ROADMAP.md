@@ -94,8 +94,15 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
    - Done: edits as serializable commands (add/remove/move/trim/split/speed/properties/tracks/materials). Undo/redo replays recorded inverses and is atomic, with gestures merged into one step. Verified by 2,000 randomized sequences (181k edits) undoing exactly to the original.
    - Done: `openrip-v1` importer for the TypeScript app's projects (exact frame recovery, geometry conversion, dB→gain, overlap repair). All 7 local projects import cleanly.
    - Done: colour-tool materials (HSL, tone curves with a bezier evaluator, primary/log wheels), mapped from CapCut.
-   - Next: decode CapCut track attribute bits and calibrate CapCut position/scale/text units against exports (needs a short CapCut test session); shapes, drawings and masks in the model.
+   - Done: CapCut calibration sessions 1–2 ([calibration.md](docs/parity/calibration.md)). Track attribute bits, transform units, the text size unit (proportional to canvas width) and CapCut's rendering pipeline (native export resolution, sharpened two-pass resampling, neutral colour path) are all measured. Session 3 (image borders, other scale factors, opacity, portrait text) is generated and waiting to be exported from CapCut.
+   - Next: shapes, drawings and masks in the model.
 1. **M1 Open and play.** Import a v1 project and play one video track with audio, A/V in sync.
+   - Done: `openrip-media` decoder.
+     - Native asynchronous VideoToolbox for H.264/HEVC, 3–4× FFmpeg's hwaccel; FFmpeg for everything else.
+     - Frame-accurate `frame_at` that skips pictures nothing references.
+     - Open-GOP handling, and a frame cache for stepping backward.
+     - 4K phone footage seeks in 41 ms p50. See [results](docs/parity/results/2026-10-16-decode.md) and [how CapCut does it](docs/parity/capcut-decode.md).
+   - Next: `openrip-playback`. Scrub and accurate seek modes where the newest seek wins; decoder pooling with the next clip pre-opened; clock and A/V sync.
 2. **M2 Compose.** Multi-track compositing, transforms, crop, opacity, adjustments, LUT filters.
 3. **M3 Overlays.** Text, shapes, drawing, lasso/shape masks with keyframes.
 4. **M4 Audio.** Mixing, volume, fades, speed, detaching audio.
