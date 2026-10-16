@@ -33,7 +33,7 @@ struct PrefetchJob {
 }
 
 enum Prefetched {
-    Decoder(String, VideoDecoder),
+    Decoder(String, Box<VideoDecoder>),
     Still(String, RgbaImage),
 }
 
@@ -65,7 +65,7 @@ impl Prefetcher {
                         if d.frame_at(job.at).is_err() {
                             continue;
                         }
-                        Prefetched::Decoder(job.segment, d)
+                        Prefetched::Decoder(job.segment, Box::new(d))
                     };
                     if ready_tx.send(done).is_err() {
                         return;
@@ -205,7 +205,7 @@ impl PreviewEngine {
         match done {
             Prefetched::Decoder(segment, decoder) => {
                 self.prefetch.pending.remove(&segment);
-                self.decoders.entry(segment).or_insert(OpenDecoder { decoder, last_used: self.tick });
+                self.decoders.entry(segment).or_insert(OpenDecoder { decoder: *decoder, last_used: self.tick });
             }
             Prefetched::Still(path, img) => {
                 self.prefetch.pending.remove(&path);
