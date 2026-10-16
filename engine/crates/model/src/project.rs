@@ -83,6 +83,10 @@ pub struct Segment {
     pub speed: f64,
     #[serde(default)]
     pub reverse: bool,
+    /// Let the pitch follow the speed (CapCut's "change pitch", `is_tone_modify`). Off by
+    /// default: speed changes keep the pitch.
+    #[serde(default)]
+    pub change_pitch: bool,
     pub visible: bool,
     /// Explicit stacking order; higher draws on top.
     pub render_index: i32,
@@ -229,6 +233,7 @@ mod tests {
             target: TimeRange::new(Micros(target.0), Micros(target.1)),
             speed,
             reverse,
+            change_pitch: false,
             visible: true,
             render_index: 0,
             transform: Transform::default(),

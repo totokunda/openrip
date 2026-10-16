@@ -76,3 +76,39 @@ fn clip_audio_lands_sample_exact() {
     assert_eq!(&out[at..at + src.len()], &src[..], "source 0.5 s .. 1.5 s at timeline 1 s");
     assert!(out[at + src.len()..].iter().all(|v| *v == 0.0), "silence after the clip");
 }
+
+/// A tone's frequency from zero crossings.
+fn frequency(x: &[f32], rate: u32) -> f64 {
+    let crossings = x.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+    crossings as f64 * rate as f64 / x.len() as f64
+}
+
+#[test]
+fn speed_keeps_pitch_unless_asked_not_to() {
+    if Command::new("ffmpeg").arg("-version").output().is_err() {
+        return;
+    }
+    let tone = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("mixer-tone.wav");
+    if !tone.exists() {
+        let st = Command::new("ffmpeg").args(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=4:r=48000", "-ac", "2"]).arg(&tone).status().unwrap();
+        assert!(st.success());
+    }
+    for (change_pitch, want) in [(false, 440.0), (true, 660.0)] {
+        let mut p = project(tone.to_str().unwrap(), &[(false, false, 1.0)]);
+        let seg = &mut p.tracks[0].segments[0];
+        seg.speed = 1.5;
+        seg.change_pitch = change_pitch;
+        seg.source = Some(openrip_model::TimeRange::new(openrip_model::Micros(0), openrip_model::Micros(1_500_000)));
+        let mut m = Mixer::new(p);
+        // Mix in small blocks, as playback does, from timeline 1.2 s for 0.6 s.
+        let mut left = Vec::new();
+        let mut block = vec![0f32; 1024 * CHANNELS];
+        let start = (1.2 * RATE as f64) as i64;
+        for i in 0..28 {
+            m.mix(start + i * 1024, &mut block).unwrap();
+            left.extend(block.iter().step_by(2));
+        }
+        let f = frequency(&left, RATE);
+        assert!((f - want).abs() < want * 0.03, "change_pitch={change_pitch}: {f:.1} Hz, want {want}");
+    }
+}

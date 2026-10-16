@@ -2,11 +2,12 @@
 //!
 //! Mixing follows CapCut (docs/parity/calibration.md, session 1): muted and hidden tracks
 //! are silent, every other clip's audio is summed at its volume (keyframes included) with
-//! its fades. Video clips contribute their own sound. Speed changes resample, so pitch moves
-//! with speed for now (CapCut keeps pitch by default; time-stretching comes later), and
-//! reversed clips are silent.
+//! its fades. Video clips contribute their own sound. Speed changes keep the pitch (CapCut's
+//! default; FFmpeg's atempo) unless the clip asks for the pitch to follow the speed
+//! (`change_pitch`), which resamples. Reversed clips are silent for now.
 
 mod decode;
+mod tempo;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -50,9 +51,19 @@ pub struct MixReport {
     pub missing: Vec<String>,
 }
 
+/// A sped-up clip's time-stretcher, kept while the mix stays continuous.
+struct Stretch {
+    tempo: tempo::Tempo,
+    /// Clip-local output sample the stretcher continues at.
+    next_out: i64,
+    /// Next source sample to feed it.
+    next_in: i64,
+}
+
 pub struct Mixer {
     project: Project,
     rate: u32,
+    stretches: HashMap<String, Stretch>,
     /// One decoder per clip; `None` once a clip turned out to have no usable audio.
     decoders: HashMap<String, Option<AudioDecoder>>,
     scratch: Vec<f32>,
@@ -66,7 +77,7 @@ impl Mixer {
     }
 
     pub fn with_rate(project: Project, rate: u32) -> Self {
-        Mixer { project, rate, decoders: HashMap::new(), scratch: Vec::new(), resampled: Vec::new() }
+        Mixer { project, rate, stretches: HashMap::new(), decoders: HashMap::new(), scratch: Vec::new(), resampled: Vec::new() }
     }
 
     pub fn rate(&self) -> u32 {
@@ -114,6 +125,26 @@ impl Mixer {
             self.scratch.resize(n * CHANNELS, 0.0);
             let samples: &[f32] = if (speed - 1.0).abs() < 1e-9 {
                 decoder.read(src_at, &mut self.scratch)?;
+                &self.scratch
+            } else if !seg.change_pitch {
+                // Keep the pitch: stream the source through atempo.
+                let rate = self.rate;
+                let fresh = !self.stretches.get(&seg.id).is_some_and(|st| st.next_out == local);
+                if fresh {
+                    self.stretches.insert(seg.id.clone(), Stretch { tempo: tempo::Tempo::new(rate, speed)?, next_out: local, next_in: src_at });
+                }
+                let st = self.stretches.get_mut(&seg.id).unwrap();
+                let chunk = 1024usize;
+                let mut feed = vec![0f32; chunk * CHANNELS];
+                let mut guard = 0;
+                while st.tempo.available() < n && guard < 10_000 {
+                    decoder.read(st.next_in, &mut feed)?;
+                    st.tempo.push(&feed)?;
+                    st.next_in += chunk as i64;
+                    guard += 1;
+                }
+                st.tempo.take(&mut self.scratch);
+                st.next_out += n as i64;
                 &self.scratch
             } else {
                 // Linear resampling: pitch follows speed until time-stretching lands.

@@ -785,6 +785,7 @@ mod tests {
             target: TimeRange::new(Micros(start), Micros(len)),
             speed: 1.0,
             reverse: false,
+        change_pitch: false,
             visible: true,
             render_index: 0,
             transform: Transform::default(),

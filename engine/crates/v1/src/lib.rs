@@ -510,6 +510,7 @@ fn convert_clip(
         target,
         speed,
         reverse: false,
+        change_pitch: false,
         visible: true,
         render_index: 0,
         transform,

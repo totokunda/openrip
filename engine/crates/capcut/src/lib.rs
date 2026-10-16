@@ -225,6 +225,7 @@ fn import_segment(seg: &Value, report: &mut ImportReport) -> Option<Segment> {
         target,
         speed: f(seg, "speed", 1.0),
         reverse: b(seg, "reverse", false),
+        change_pitch: b(seg, "is_tone_modify", false),
         visible: b(seg, "visible", true),
         render_index: i(seg, "render_index") as i32,
         transform,
