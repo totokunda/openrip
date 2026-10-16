@@ -581,6 +581,7 @@ impl PreviewEngine {
                 bold: if run.bold { 0.008 * em } else { 0.0 },
                 italic: if run.italic { 10.0 } else { 0.0 },
                 effect: effect.as_ref(),
+                curve: text.layout.curve,
                 char_colors: char_colors.as_deref(),
             };
             let lay = text::layout(&shown, &style);
@@ -620,7 +621,7 @@ impl PreviewEngine {
                 text.layout.alignment,
                 text.layout.letter_spacing.to_bits(),
                 text.layout.line_spacing.to_bits(),
-                (style.max_width.map(f32::to_bits), origin[0].to_bits(), origin[1].to_bits(), style.bold.to_bits(), style.italic.to_bits()),
+                (style.max_width.map(f32::to_bits), origin[0].to_bits(), origin[1].to_bits(), style.bold.to_bits(), style.italic.to_bits(), style.curve.to_bits()),
                 styled.as_ref().map(|(id, _)| id),
             ));
             let key = key_of((shape_key, char_alpha.as_ref().map(|a| a.iter().map(|v| (v * 255.0).round() as u8).collect::<Vec<_>>())));

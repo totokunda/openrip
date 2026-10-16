@@ -594,6 +594,7 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
             background,
             shadow,
             max_width: None,
+            curve: 0.0,
             // Konva draws v1 text inside its box (wrapping at the box's width), aligned by
             // textAlign and verticalAlign.
             frame: clip.get("transform").map(|t| TextFrame {

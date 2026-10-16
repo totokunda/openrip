@@ -81,6 +81,9 @@ pub struct TextStyle<'a> {
     pub italic: f32,
     /// A layered style that replaces `color` and `stroke`.
     pub effect: Option<&'a Effect>,
+    /// Bend each line along a circular arc spanning this many degrees: positive arches it
+    /// (ends lower), negative sags it (CapCut's curved text). 0 is straight.
+    pub curve: f32,
     /// Fill colour per character (indices as in the laid-out text, line breaks included),
     /// replacing `color`; characters past the end use `color`. Not used with `effect`.
     pub char_colors: Option<&'a [[u8; 4]]>,
@@ -193,6 +196,8 @@ struct Placed {
     glyph: u16,
     x: f32,
     baseline: f32,
+    advance: f32,
+    line: usize,
     /// Index of the glyph's (first) character in the text, counting every character
     /// including line breaks.
     char_index: usize,
@@ -234,7 +239,7 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
             let at = (cluster.source.start as usize).min(line.len());
             let mut c = Cluster { glyphs: Vec::new(), advance: 0.0, char_index: line_start + line[..at].chars().count(), ch: line[at..].chars().next().unwrap_or(' ') };
             for g in cluster.glyphs {
-                c.glyphs.push((g.id, c.advance + g.x));
+                c.glyphs.push((g.id, c.advance + g.x, g.advance));
                 c.advance += g.advance + spacing;
             }
             clusters.push(c);
@@ -243,7 +248,7 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
             let mut pen = 0.0f32;
             let mut glyphs = Vec::new();
             for c in row {
-                glyphs.extend(c.glyphs.iter().map(|&(id, x)| (id, pen + x, c.char_index)));
+                glyphs.extend(c.glyphs.iter().map(|&(id, x, adv)| (id, pen + x, c.char_index, adv)));
                 pen += c.advance;
             }
             let width = if glyphs.is_empty() { 0.0 } else { pen - spacing };
@@ -263,7 +268,7 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
         };
         let baseline = m.ascent + i as f32 * advance_y;
         boxes.push([x0, w, i as f32 * advance_y, line_box]);
-        glyphs.extend(line.into_iter().map(|(glyph, x, char_index)| Placed { glyph, x: x0 + x, baseline, char_index }));
+        glyphs.extend(line.into_iter().map(|(glyph, x, char_index, advance)| Placed { glyph, x: x0 + x, baseline, advance, line: i, char_index }));
     }
     TextLayout { glyphs, width, height, size: style.size, lines: boxes }
 }
@@ -271,7 +276,7 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
 /// A shaped cluster: its glyphs (id, x from the cluster's start) and advance, letter
 /// spacing included.
 struct Cluster {
-    glyphs: Vec<(u16, f32)>,
+    glyphs: Vec<(u16, f32, f32)>,
     advance: f32,
     char_index: usize,
     ch: char,
@@ -341,6 +346,35 @@ fn wrap(clusters: &[Cluster], max: Option<f32>) -> Vec<&[Cluster]> {
     rows
 }
 
+/// The height of the line a curved text's arc runs through, in ascents above the baseline.
+const CURVE_LINE_ARCH: f32 = 0.05;
+const CURVE_LINE_SAG: f32 = 0.75;
+
+/// Where a glyph's origin goes and how far it turns (radians, clockwise on screen) on a
+/// curved line, relative to its place on the straight one.
+fn curve_place(lay: &TextLayout, g: &Placed, curve: f32, ascent: f32) -> ([f32; 2], f32) {
+    let Some(&[x0, w, _, _]) = lay.lines.get(g.line) else { return ([g.x, g.baseline], 0.0) };
+    let theta = curve.abs().to_radians();
+    if theta < 1e-4 || w <= 0.0 {
+        return ([g.x, g.baseline], 0.0);
+    }
+    let k = curve.signum();
+    let r = w / theta;
+    let u = g.x + g.advance / 2.0 - (x0 + w / 2.0);
+    let phi = u / r;
+    let rot = k * phi;
+    // The arc runs through a line `m` above the baseline: about the baseline for an arch, about
+    // three quarters of the ascent for a sag (fitted on CapCut's export of two curved words;
+    // docs/parity/curved-text.md).
+    let m = if k > 0.0 { CURVE_LINE_ARCH } else { CURVE_LINE_SAG } * ascent;
+    let (cx, ry) = (x0 + w / 2.0, g.baseline - m);
+    let p = [cx + r * phi.sin(), ry + k * r * (1.0 - phi.cos())];
+    let (sn, cs) = rot.sin_cos();
+    // The glyph's baseline centre sits `m` below the arc, turned with it.
+    let base = [p[0] - m * sn, p[1] + m * cs];
+    ([base[0] - g.advance / 2.0 * cs, base[1] - g.advance / 2.0 * sn], rot)
+}
+
 impl TextLayout {
     /// Rasterise with the block's top-left corner at `origin` (fractional pixels) inside a
     /// margin, so a caller can line the image up with the canvas pixel grid.
@@ -358,7 +392,15 @@ impl TextLayout {
         let stroke = style.stroke.map_or(0.0, |s| s.1);
         let bg_pad = style.background.map_or([0.0, 0.0], |b| b.1);
         let shadow_reach = style.shadow.map_or(0.0, |(_, o, blur)| stroke + o[0].abs().max(o[1].abs()) + 2.0 * blur);
-        let pad = ((self.size * 0.5).max(stroke).max(bg_pad[0]).max(bg_pad[1]).max(shadow_reach).ceil() as i32) + 2;
+        let metrics = style.font.as_ref().metrics(&[]).scale(self.size);
+        // A curved line moves its ends by the arc's sagitta and turns its glyphs.
+        let bend = if style.curve != 0.0 {
+            let theta = style.curve.abs().to_radians();
+            self.lines.iter().map(|l| l[1] / theta * (1.0 - (theta / 2.0).cos())).fold(0.0, f32::max) + self.size
+        } else {
+            0.0
+        };
+        let pad = ((self.size * 0.5).max(stroke).max(bg_pad[0]).max(bg_pad[1]).max(shadow_reach) + bend).ceil() as i32 + 2;
         let (w, h) = ((self.width.ceil() as i32 + 2 * pad + 1) as u32, (self.height.ceil() as i32 + 2 * pad + 1) as u32);
         let (left, top) = (pad as f32 + origin[0], pad as f32 + origin[1]);
         let mut fill = vec![0f32; (w * h) as usize];
@@ -382,14 +424,34 @@ impl TextLayout {
             }
         };
         let shear = (style.italic != 0.0).then(|| Transform::skew(Angle::from_degrees(style.italic), Angle::ZERO));
+        let curved = |g: &Placed| if style.curve != 0.0 { curve_place(self, g, style.curve, metrics.ascent) } else { ([g.x, g.baseline], 0.0) };
+        // The bent glyphs' bounds are centred where the straight block was.
+        let shift = if style.curve != 0.0 {
+            let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+            for g in &self.glyphs {
+                let ([ox, oy], rot) = curved(g);
+                let (sn, cs) = rot.sin_cos();
+                for (cx, cy) in [(0.0, -metrics.ascent), (g.advance, -metrics.ascent), (0.0, metrics.descent), (g.advance, metrics.descent)] {
+                    let (px, py) = (ox + cx * cs - cy * sn, oy + cx * sn + cy * cs);
+                    lo = [lo[0].min(px), lo[1].min(py)];
+                    hi = [hi[0].max(px), hi[1].max(py)];
+                }
+            }
+            [self.width / 2.0 - (lo[0] + hi[0]) / 2.0, self.height / 2.0 - (lo[1] + hi[1]) / 2.0]
+        } else {
+            [0.0, 0.0]
+        };
         for g in &self.glyphs {
             let alpha = char_alpha.and_then(|a| a.get(g.char_index)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
             if alpha == 0.0 {
                 continue;
             }
             let [dx, dy] = synthetic_style_offset(style, self.size);
-            let (x, y) = (left + g.x + dx, top + g.baseline + dy);
+            let ([gx, gy], rot) = curved(g);
+            let (x, y) = (left + gx + dx + shift[0], top + gy + dy + shift[1]);
             let offset = Vector::new(x.fract(), y.fract());
+            // Turned along the curve (clockwise on screen is clockwise in the y-up glyph space).
+            let shear = if rot != 0.0 { Some(shear.unwrap_or(Transform::IDENTITY).then(&Transform::rotation(Angle::from_radians(-rot)))) } else { shear };
             if let Some(cov) = outline.as_mut() {
                 // Centred on the outline, so twice as wide as its reach outside the glyph.
                 let mut pen = Stroke::new(2.0 * stroke);

@@ -11,7 +11,7 @@ fn font() -> Option<Font> {
 }
 
 fn style(font: &Font, max_width: Option<f32>) -> TextStyle<'_> {
-    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, stroke: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, char_colors: None }
+    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, stroke: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None }
 }
 
 #[test]
@@ -123,4 +123,40 @@ fn a_sharp_outline_reaches_equally_far_on_both_sides() {
         let (left, right) = (r0 - a0, a1 - r1);
         assert!((left - right).abs() < 0.35 && (left - grow).abs() < 0.5, "grow {grow} at x {x}: left {left}, right {right}");
     }
+}
+
+/// Ink centroid height (y down) of the leftmost and middle tenth of the image's columns.
+fn end_and_middle(img: &openrip_render::RgbaImage) -> (f32, f32) {
+    let w = img.width as usize;
+    let centroid = |x0: usize, x1: usize| {
+        let (mut sum, mut n) = (0.0, 0.0);
+        for y in 0..img.height as usize {
+            for x in x0..x1 {
+                let a = img.data[(y * w + x) * 4 + 3] as f32;
+                sum += a * y as f32;
+                n += a;
+            }
+        }
+        sum / n.max(1.0)
+    };
+    let ink: Vec<usize> = (0..w).filter(|&x| (0..img.height as usize).any(|y| img.data[(y * w + x) * 4 + 3] > 0)).collect();
+    let (a, b) = (ink[0], ink[ink.len() - 1]);
+    let tenth = ((b - a) / 10).max(1);
+    let mid = (a + b) / 2;
+    (centroid(a, a + tenth), centroid(mid - tenth / 2, mid + tenth / 2))
+}
+
+#[test]
+fn curved_text_arches_or_sags_by_the_sign_of_its_angle() {
+    let Some(f) = font() else { return };
+    let text = "HHHHHHHHHH";
+    let straight = layout(text, &style(&f, None)).rasterize(&style(&f, None), [0.0, 0.0]);
+    let (end, mid) = end_and_middle(&straight.image);
+    assert!((end - mid).abs() < 1.0);
+    let arch = TextStyle { curve: 90.0, ..style(&f, None) };
+    let (end, mid) = end_and_middle(&layout(text, &arch).rasterize(&arch, [0.0, 0.0]).image);
+    assert!(end > mid + 10.0, "arch: ends {end} should sit below the middle {mid}");
+    let sag = TextStyle { curve: -90.0, ..style(&f, None) };
+    let (end, mid) = end_and_middle(&layout(text, &sag).rasterize(&sag, [0.0, 0.0]).image);
+    assert!(end < mid - 10.0, "sag: ends {end} should sit above the middle {mid}");
 }

@@ -243,6 +243,11 @@ pub struct TextLayout {
     /// `None` never wraps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_width: Option<f32>,
+    /// Curved text: each line bent along a circular arc spanning this many degrees,
+    /// arching up when positive and sagging when negative (CapCut's `text_curve`). 0 is
+    /// straight.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub curve: f32,
     /// A box the text sits in, centred on the clip's position (OpenRip's own text clips).
     /// Without one the block of lines is centred on the position, as CapCut does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -251,6 +256,10 @@ pub struct TextLayout {
 
 /// A text box: the block of lines sits inside it by [`TextLayout::alignment`] and
 /// `vertical_align`, and wraps at its width.
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextFrame {
     /// Fractions of the canvas width and height.
