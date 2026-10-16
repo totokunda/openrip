@@ -446,6 +446,9 @@ pub struct Paint {
 pub enum PaintKind {
     Solid(Rgba),
     Texture(TexturePaint),
+    /// The text's own colour shifted in HSB: hue in degrees, saturation and brightness as
+    /// offsets on 0..1 (CapCut's SDF text effects colour their layers this way).
+    TextColor { hue: f32, saturation: f32, brightness: f32 },
 }
 
 /// An image mapped onto each character: split into `columns` equal vertical strips, the

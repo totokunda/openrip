@@ -438,15 +438,6 @@ impl TextLayout {
                     r.render(scaler, g.glyph)
                 };
                 let Some(fill) = render(&mut scaler, None) else { continue };
-                // A grown glyph is the glyph plus an outline centred on its edge.
-                let ring = (grow > 0.0).then(|| {
-                    let mut pen = Stroke::new(2.0 * grow);
-                    pen.join(Join::Round).cap(Cap::Round);
-                    render(&mut scaler, Some(pen))
-                });
-                let shape = ring.flatten().unwrap_or_else(|| fill.clone());
-                let p = shape.placement;
-                let (gx, gy) = (x.floor() as i32 + p.left, y.floor() as i32 - p.top);
                 // Paint is mapped onto a square of 0.6 em centred on the glyph, in every
                 // layer: fitted against CapCut's exports (narrow letters get full-size
                 // pieces, so it isn't the glyph's box; the box with the outline is too big).
@@ -455,30 +446,32 @@ impl TextLayout {
                 let side = PAINT_BOX * self.size;
                 let (cx, cy) = (fx as f32 + fp.width as f32 / 2.0, fy as f32 + fp.height as f32 / 2.0);
                 let rect = [cx - side / 2.0, cy - side / 2.0, side, side];
-                let margin = if blur > 0.0 { (2.0 * blur).ceil() as i32 + 1 } else { 0 };
-                let (pw, ph) = (p.width as i32 + 2 * margin, p.height as i32 + 2 * margin);
+                // The shape: everything within `grow` of the glyph, fading out over
+                // EDGE_FADE beyond that as CapCut's text-style meshes do (their outer fringe
+                // vertices sit 2.5 px out with zero alpha). Measured by distance rather than
+                // by stroking the outline, which leaves holes in round letters' middles.
+                let margin = (grow + EDGE_FADE).ceil() as i32 + 1 + if blur > 0.0 { (2.0 * blur).ceil() as i32 + 1 } else { 0 };
+                let (fw, fh) = (fp.width as i32, fp.height as i32);
+                let (pw, ph) = (fw + 2 * margin, fh + 2 * margin);
+                let at_fill = |c: i32, r: i32| if c >= 0 && r >= 0 && c < fw && r < fh { fill.data[(r * fw + c) as usize] as f32 / 255.0 } else { 0.0 };
+                let inside: Vec<bool> = (0..pw * ph).map(|i| at_fill(i % pw - margin, i / pw - margin) >= 0.5).collect();
+                let dist = distance_to(&inside, pw as usize, ph as usize);
                 let mut px = vec![[0f32; 4]; (pw * ph) as usize];
-                for row in 0..p.height as i32 {
-                    for col in 0..p.width as i32 {
-                        let (qx, qy) = (gx + col, gy + row);
-                        let mut cov = shape.data[(row * p.width as i32 + col) as usize] as f32 / 255.0;
-                        if grow > 0.0 {
-                            let (ix, iy) = (qx - fx, qy - fy);
-                            if ix >= 0 && iy >= 0 && ix < fp.width as i32 && iy < fp.height as i32 {
-                                let f = fill.data[(iy * fp.width as i32 + ix) as usize] as f32 / 255.0;
-                                cov = cov + f - cov * f;
-                            }
-                        }
-                        if cov > 0.0 {
-                            let c = paint.at(qx as f32 + 0.5, qy as f32 + 0.5, rect, g.char_index);
-                            px[((row + margin) * pw + col + margin) as usize] = c.map(|v| v * cov);
-                        }
+                for (i, p) in px.iter_mut().enumerate() {
+                    let (col, row) = (i as i32 % pw, i as i32 / pw);
+                    // Distance from the pixel centre to the glyph's edge (half a pixel short
+                    // of the nearest inked pixel's centre).
+                    let beyond = (dist[i] - 0.5).max(0.0) - grow;
+                    let cov = if inside[i] { 1.0 } else { (1.0 - beyond / EDGE_FADE).clamp(0.0, 1.0).max(at_fill(col - margin, row - margin)) };
+                    if cov > 0.0 {
+                        let c = paint.at((fx - margin + col) as f32 + 0.5, (fy - margin + row) as f32 + 0.5, rect, g.char_index);
+                        *p = c.map(|v| v * cov);
                     }
                 }
                 if blur > 0.0 {
                     box_blur(&mut px, pw as usize, ph as usize, blur);
                 }
-                out.push(Patch { x: gx - margin, y: gy - margin, w: pw, h: ph, char_index: g.char_index, px });
+                out.push(Patch { x: fx - margin, y: fy - margin, w: pw, h: ph, char_index: g.char_index, px });
             }
             out
         };
@@ -567,6 +560,59 @@ fn finish(px: Vec<[f32; 4]>, w: u32, h: u32, center: [f64; 2]) -> RenderedText {
     RenderedText { image: RgbaImage { width: w, height: h, data }, center }
 }
 
+/// How far beyond its shape a text-style layer fades out, in pixels (CapCut's text-style
+/// vertex shader pushes the outer fringe vertices 2.5 px out at zero alpha).
+const EDGE_FADE: f32 = 2.5;
+
+/// Euclidean distance from each pixel to the nearest `inside` one (0 for those), by the
+/// Felzenszwalb–Huttenlocher squared distance transform, columns then rows.
+fn distance_to(inside: &[bool], w: usize, h: usize) -> Vec<f32> {
+    // Squared distances in f64: an "infinite" start value must still leave room for exact
+    // differences of squares.
+    let far = ((w + h) * (w + h)) as f64 * 4.0;
+    let mut d: Vec<f64> = inside.iter().map(|&i| if i { 0.0 } else { far }).collect();
+    let n = w.max(h);
+    let (mut f, mut v, mut z, mut out) = (vec![0f64; n], vec![0usize; n], vec![0f64; n + 1], vec![0f64; n]);
+    let mut pass = |d: &mut [f64], len: usize, at: &dyn Fn(usize) -> usize| {
+        for q in 0..len {
+            f[q] = d[at(q)];
+        }
+        let mut k = 0;
+        v[0] = 0;
+        z[0] = f64::NEG_INFINITY;
+        z[1] = f64::INFINITY;
+        for q in 1..len {
+            let parabola = |p: usize| ((f[q] + (q * q) as f64) - (f[p] + (p * p) as f64)) / (2.0 * (q as f64 - p as f64));
+            let mut s = parabola(v[k]);
+            while s <= z[k] {
+                k -= 1;
+                s = parabola(v[k]);
+            }
+            k += 1;
+            v[k] = q;
+            z[k] = s;
+            z[k + 1] = f64::INFINITY;
+        }
+        k = 0;
+        for (q, o) in out.iter_mut().enumerate().take(len) {
+            while z[k + 1] < q as f64 {
+                k += 1;
+            }
+            *o = (q as f64 - v[k] as f64).powi(2) + f[v[k]];
+        }
+        for q in 0..len {
+            d[at(q)] = out[q];
+        }
+    };
+    for x in 0..w {
+        pass(&mut d, h, &|q| q * w + x);
+    }
+    for y in 0..h {
+        pass(&mut d, w, &|q| y * w + q);
+    }
+    d.into_iter().map(|v| v.sqrt() as f32).collect()
+}
+
 /// Side of the square a text style's paint is mapped onto, in em (see `prepare_effect`).
 const PAINT_BOX: f32 = 0.6;
 
@@ -602,5 +648,23 @@ fn box_blur(px: &mut [[f32; 4]], w: usize, h: usize, radius: f32) {
             }
             px.copy_from_slice(&tmp);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distances_are_euclidean_to_the_nearest_inside_pixel() {
+        // One inside pixel at (2, 1) in a 6×4 grid.
+        let (w, h) = (6, 4);
+        let inside: Vec<bool> = (0..w * h).map(|i| i == w + 2).collect();
+        let d = distance_to(&inside, w, h);
+        assert_eq!(d[w + 2], 0.0);
+        assert!((d[w + 5] - 3.0).abs() < 1e-5);
+        assert!((d[3 * w] - (8.0f32).sqrt()).abs() < 1e-5);
+        // No inside pixel at all: every distance is large.
+        assert!(distance_to(&[false; 4], 2, 2).iter().all(|&v| v > 4.0));
     }
 }

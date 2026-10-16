@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+pub mod amg;
+
 use openrip_model::*;
 use serde::Serialize;
 use serde_json::Value;
@@ -364,7 +366,9 @@ const CAPCUT_WRAP: f32 = 0.82;
 /// docs/parity/capcut-bundles.md). `None` when the bundle isn't on this machine or is the
 /// other kind. Texture paths become absolute paths into the bundle.
 fn text_style(bundle: &Path) -> Option<TextEffect> {
-    let style: Value = serde_json::from_slice(&std::fs::read(bundle.join("effectStyle.json")).ok()?).ok()?;
+    let Some(style) = std::fs::read(bundle.join("effectStyle.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else {
+        return sdf_text_style(bundle);
+    };
     let paint = |layer: &Value| -> Option<Paint> {
         let content = layer.get("content")?;
         let kind = match s(content, "render_type").as_str() {
@@ -430,6 +434,61 @@ fn text_style(bundle: &Path) -> Option<TextEffect> {
             })
             .collect(),
     })
+}
+
+/// Names in an SDF text effect's `effect.prefab` (the file stores their hashes).
+const SDF_NAMES: &[&str] = &[
+    "Prefab", "Entity", "SDFText", "entities", "components", "effectTextParam", "EffectTextParam", "effectLayers", "EffectLayer", "grad",
+    "GradientChange", "ColorChange", "color1", "color2", "color3", "percent", "color", "hsbOffset", "alphaOffset", "change", "scale", "angle",
+    "smoothing", "offset", "textureLevel", "texture", "innerShadowEnabled",
+];
+
+/// An SDF text effect's outline `scale`, in em per unit (fitted against a CapCut export;
+/// see docs/parity/capcut-bundles.md).
+const SDF_OUTLINE_EM: f32 = 1.3;
+/// Its edge `smoothing`, in em per unit: small enough that a soft layer stays under the
+/// outlines, as in CapCut's export (no halo past them).
+const SDF_SMOOTHING_EM: f32 = 0.1;
+
+/// A library text style of the SDF-effect kind, from the `SDFText` component in its
+/// bundle's `effect.prefab`: a stack of layers, the first drawn in front. Each is the
+/// glyphs grown by an outline `scale` and softened by `smoothing`, in the text's colour
+/// shifted in HSB. The first layer becomes the fill, the rest (back to front) shadows.
+/// Layer `offset`s are left out: in CapCut's export they move nothing visibly (no
+/// extrusion, no offset shadow). Gradients use their first stop; texture overlays and
+/// inner shadows are left out (in the measured style they sit under the fill).
+fn sdf_text_style(bundle: &Path) -> Option<TextEffect> {
+    let roots = amg::decode(&std::fs::read(bundle.join("effect.prefab")).ok()?, SDF_NAMES)?;
+    fn find<'a>(v: &'a Value, class: &str) -> Option<&'a Value> {
+        match v {
+            Value::Object(o) if o.get("@class").and_then(Value::as_str) == Some(class) => Some(v),
+            Value::Object(o) => o.values().find_map(|x| find(x, class)),
+            Value::Array(a) => a.iter().find_map(|x| find(x, class)),
+            _ => None,
+        }
+    }
+    let layers = roots.iter().find_map(|r| find(r, "SDFText"))?.get("effectTextParam")?.get("effectLayers")?.as_array()?;
+    let num = |v: &Value, i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0) as f32;
+    let paint = |layer: &Value| -> Paint {
+        let stop = &layer["grad"]["color1"];
+        let hsb = &stop["hsbOffset"];
+        let alpha = stop["color"].get(3).and_then(Value::as_f64).unwrap_or(1.0) as f32 + f(stop, "alphaOffset", 0.0) as f32;
+        Paint { alpha: alpha.clamp(0.0, 1.0), kind: PaintKind::TextColor { hue: num(hsb, 0), saturation: num(hsb, 1), brightness: num(hsb, 2) } }
+    };
+    let mut effect = TextEffect { fill: layers.first().map(paint), ..Default::default() };
+    for layer in layers.iter().skip(1).rev() {
+        let grow = f(&layer["grad"], "scale", 0.0) as f32;
+        let paint = paint(layer);
+        let hidden = Paint { alpha: 0.0, kind: paint.kind.clone() };
+        effect.shadows.push(EffectShadow {
+            distance: 0.0,
+            angle_deg: 0.0,
+            blur: f(layer, "smoothing", 0.0) as f32 * SDF_SMOOTHING_EM,
+            strokes: if grow > 0.0 { vec![EffectStroke { width: grow * SDF_OUTLINE_EM, paint: paint.clone() }] } else { vec![] },
+            paint: if grow > 0.0 { hidden } else { paint },
+        });
+    }
+    Some(effect)
 }
 
 fn library_ref(m: &Value) -> LibraryRef {

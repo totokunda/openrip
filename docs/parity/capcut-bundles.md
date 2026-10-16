@@ -62,7 +62,9 @@ The importer reads `effectStyle.json` into the project (`Effect::text_style`). T
 - the strokes, last first;
 - the fill.
 
-Each layer is drawn glyph by glyph in text order. A stroke covers the glyph grown by its width; its unit is the same provisional unit as plain strokes until calibration session 3.
+Each layer is drawn glyph by glyph in text order. A stroke covers everything within its width of the glyph, measured by a distance transform: stroking the outline instead leaves holes in the middle of round letters at wide widths. Its unit is the plain strokes' unit, reach = width × em (calibration session 3). Calibration also checked a style-only factor: 1.5, 2 and 3 times that unit all score worse.
+
+Every layer fades out over 2.5 px beyond its shape. CapCut's text-style vertex shader pushes each mesh's outer fringe vertices 2.5 px out at zero alpha, which makes its styled letters look about a pixel bolder than plain ones. This added 0.3 dB on every styled frame of the export below.
 
 **Texture mapping.** This follows CapCut's text-style shader, whose GLSL source ships inside its engine library:
 - `range` splits the texture into that many vertical strips; character i (counting every character) takes the square around the middle of strip i mod `range`;
@@ -74,12 +76,24 @@ Two things the shader alone doesn't fix were fitted against a CapCut export (a 1
 - **`scale` magnifies the texture** (0.44 makes its pieces 1/0.44 times larger). The shader divides by its scale uniform, so CapCut evidently passes 1/`scale`.
 - **The character's box is a square of 0.6 em centred on the glyph.** Neither the glyph's own box (narrow letters then get slivers of paper, where CapCut gives them full pieces) nor the glyph plus its stroke (pieces too large) matches.
 
-Result on that export, at the frames with the styled captions: PSNR +1.5 to +2.8 dB (16.1–18.4 dB before, 18.9–20.0 dB after), and no frame worse. Text with a library style also wraps wider than plain text ([text-wrap.md](text-wrap.md)).
+Result on that export, at the frames with the styled captions: PSNR +1.9 to +3.1 dB (16.1–18.4 dB before, 19.0–20.3 dB after), and no frame worse. Text with a library style also wraps wider than plain text ([text-wrap.md](text-wrap.md)).
 
 Still approximate:
 - gradients are drawn with their first colour;
-- the shadow `diffuse` is a box blur of the shadow's body;
-- stroke widths use the provisional unit;
-- SDF-effect styles (the other kind) aren't drawn yet.
+- a box blur of the shadow's body stands in for its `diffuse`.
 
 Styled text is slow to draw, so the preview keeps it as per-character pieces and redraws only their opacity while a typing intro runs. On that draft's intro, playback p95 at 540p is 4.7 ms, against 20 ms when it was redrawn each frame.
+
+### How OpenRip draws SDF-effect styles
+
+The importer decodes `effect.prefab` with a Rust port of the format reader (`openrip_capcut::amg`) and finds the `SDFText` component's `effectLayers`. The first layer is drawn in front: in the measured style, layer 1's grey gradient sits entirely under layer 0's plain fill, and CapCut's export shows only the plain fill. So layer 0 becomes the fill and the rest, back to front, become shadows. Each layer is:
+- the glyphs grown by its outline `scale`, at **1.3 em per unit**;
+- painted in the text's own colour, shifted by the layer's `hsbOffset`, with the stop colour's alpha. The default colour in the file is not used: a caption coloured white or yellow keeps that colour.
+
+The units were fitted on a 1080×1920 CapCut export with 50 captions in the "grey-white gradient + black outline" style. At size 11 (em 68.8 px), the outline crosses mid-grey 5.4 px from the fill in CapCut and in OpenRip (left/right 5.43/5.38 against 5.39/5.39; up 5.74 against 5.70).
+
+The same export shows that the other parameters move nothing visibly:
+- **Offsets.** The layers' offsets (0.02 and 0.04 down-right) make no extrusion: left and right reach match within 0.1 px.
+- **The soft shadow.** Compared with a frame from just before the caption, nothing changes past about 4 px from the letters, so there is no halo.
+
+OpenRip therefore leaves offsets out, and keeps smoothing at 0.1 em per unit so soft layers stay under the outlines. Gradients beyond the first stop, texture overlays and inner shadows are left out; in the measured style they all sit under the fill.

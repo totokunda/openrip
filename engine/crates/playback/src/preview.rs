@@ -375,10 +375,14 @@ impl PreviewEngine {
 
     /// A text style at a font size of `em` pixels. Sizes are fractions of the font size, on
     /// the same provisional scale as a run's stroke.
-    fn text_effect(&mut self, fx: &TextEffect, em: f32) -> text::Effect {
+    fn text_effect(&mut self, fx: &TextEffect, em: f32, text_color: openrip_model::Rgba) -> text::Effect {
         let mut paint = |p: &openrip_model::Paint| -> Option<text::Paint> {
             Some(match &p.kind {
                 PaintKind::Solid(c) => text::Paint::Solid([c.r, c.g, c.b, c.a * p.alpha]),
+                PaintKind::TextColor { hue, saturation, brightness } => {
+                    let [r, g, b] = shift_hsb([text_color.r, text_color.g, text_color.b], *hue, *saturation, *brightness);
+                    text::Paint::Solid([r, g, b, text_color.a * p.alpha])
+                }
                 PaintKind::Texture(t) => {
                     let image = self.textures.entry(t.path.clone()).or_insert_with(|| load_png(Path::new(&t.path)).ok().map(|mut img| {
                         for px in img.data.chunks_exact_mut(4) {
@@ -461,7 +465,7 @@ impl PreviewEngine {
             let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
             // A library text style attached to the clip replaces the run's colour and stroke.
             let styled = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id).and_then(|e| Some((e.id.clone(), e.text_style.clone()?))));
-            let effect = styled.as_ref().map(|(_, fx)| self.text_effect(fx, em));
+            let effect = styled.as_ref().map(|(_, fx)| self.text_effect(fx, em, run.fill));
             let style = TextStyle {
                 font: &self.fonts[&path],
                 size: em,
@@ -674,6 +678,36 @@ pub(crate) fn load_still(path: &Path) -> Result<RgbaImage, String> {
     let mut d = VideoDecoder::open(path, &DecoderOptions { hardware: openrip_media::HardwareMode::Off, ..Default::default() }).map_err(|e| e.to_string())?;
     let rgb = d.next_frame().map_err(|e| e.to_string())?.ok_or("no picture")?.to_rgb().map_err(|e| e.to_string())?;
     Ok(RgbaImage { width: rgb.width, height: rgb.height, data: rgb.data.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect() })
+}
+
+/// An RGB colour (0..1) shifted in HSB: hue by degrees, saturation and brightness by
+/// offsets, each kept in range.
+fn shift_hsb([r, g, b]: [f32; 3], hue: f32, saturation: f32, brightness: f32) -> [f32; 3] {
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let d = max - min;
+    let h = if d == 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+    let s = if max > 0.0 { d / max } else { 0.0 };
+    let (h, s, v) = ((h + hue).rem_euclid(360.0), (s + saturation).clamp(0.0, 1.0), (max + brightness).clamp(0.0, 1.0));
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0).rem_euclid(2.0) - 1.0).abs());
+    let (r, g, b) = match (h / 60.0) as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = v - c;
+    [r + m, g + m, b + m]
 }
 
 pub fn load_png(path: &Path) -> Result<RgbaImage, Box<dyn std::error::Error>> {
