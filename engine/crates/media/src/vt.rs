@@ -158,6 +158,9 @@ impl VtDecoder {
                     if timeout.timed_out() {
                         // Shouldn't happen (every submitted frame gets a callback), but never
                         // deadlock on it: once the session is idle nothing is in flight.
+                        if std::env::var_os("OPENRIP_TRACE").is_some() {
+                            eprintln!("[vt] flow-control timeout with {} in flight, {} wanted, {} done", st.in_flight, st.wanted.len(), st.done.len());
+                        }
                         drop(st);
                         self.session.wait_for_asynchronous_frames();
                         st = self.shared.state.lock().unwrap();
@@ -225,7 +228,11 @@ impl VtDecoder {
                 return Next::Frame(pts, buffer);
             }
             // Submitted and settled but still decoding: wait for it rather than feed more.
+            let t0 = std::time::Instant::now();
             st = self.shared.cond.wait(st).unwrap();
+            if t0.elapsed().as_millis() >= 10 && std::env::var_os("OPENRIP_TRACE").is_some() {
+                eprintln!("[vt] waited {:.1} ms for pts {pts} ({} wanted, {} done)", t0.elapsed().as_secs_f64() * 1e3, st.wanted.len(), st.done.len());
+            }
         }
     }
 

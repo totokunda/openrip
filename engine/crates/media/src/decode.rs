@@ -334,9 +334,14 @@ impl VideoDecoder {
             self.seek_before(t, 0)?;
         }
         let mut retreat = 0;
+        let trace = std::env::var_os("OPENRIP_TRACE").is_some();
         loop {
+            let t_prep = std::time::Instant::now();
             if !backward && self.pending.as_ref().is_none_or(|p| p.time <= t) {
                 self.prepare_target(t)?;
+            }
+            if trace && t_prep.elapsed().as_millis() >= 10 {
+                eprintln!("[decode] read-ahead to {:.3}s took {:.1} ms ({} queued)", t.as_secs_f64(), t_prep.elapsed().as_secs_f64() * 1e3, self.queue.len());
             }
             // Decode forward until the next frame would start after `t`.
             loop {
@@ -538,7 +543,12 @@ impl VideoDecoder {
         unsafe {
             loop {
                 let q = Queued { pkt: ff::av_packet_alloc(), output: true };
-                if ff::av_read_frame(self.input.0, q.pkt) < 0 {
+                let t0 = std::time::Instant::now();
+                let r = ff::av_read_frame(self.input.0, q.pkt);
+                if t0.elapsed().as_millis() >= 10 && std::env::var_os("OPENRIP_TRACE").is_some() {
+                    eprintln!("[decode] av_read_frame took {:.1} ms (pos {})", t0.elapsed().as_secs_f64() * 1e3, (*q.pkt).pos);
+                }
+                if r < 0 {
                     // End of file (or a read error).
                     self.eof = true;
                     return Ok(None);

@@ -17,6 +17,74 @@ use openrip_render::{Compositor, Layer, RenderError, RgbaImage, Source};
 const DEFAULT_FONT: &str = "/Applications/CapCut.app/Contents/Resources/Font/SystemFont/en.ttf";
 /// Decoders kept open; the least recently used is closed beyond this.
 const MAX_DECODERS: usize = 12;
+/// Decoded-frame cache per preview decoder: room to step back through a 1080p GOP without
+/// holding gigabytes across a dozen open clips.
+const DECODER_CACHE: usize = 128 << 20;
+/// Clips starting this soon get their decoder opened and positioned in the background.
+const PREFETCH: Micros = Micros(1_500_000);
+
+/// Media to get ready off the render thread: a decoder positioned at a clip's in-point, or
+/// a still image decoded.
+struct PrefetchJob {
+    segment: String,
+    path: String,
+    at: Micros,
+    still: bool,
+}
+
+enum Prefetched {
+    Decoder(String, VideoDecoder),
+    Still(String, RgbaImage),
+}
+
+/// Opens decoders for clips about to start, so a cut doesn't stall the frame.
+struct Prefetcher {
+    jobs: Option<std::sync::mpsc::Sender<PrefetchJob>>,
+    ready: std::sync::mpsc::Receiver<Prefetched>,
+    /// Segments (or still paths) with a job in flight.
+    pending: std::collections::HashSet<String>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Prefetcher {
+    fn new() -> Prefetcher {
+        let (job_tx, job_rx) = std::sync::mpsc::channel::<PrefetchJob>();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::Builder::new()
+            .name("decoder-prefetch".into())
+            .spawn(move || {
+                for job in job_rx {
+                    let done = if job.still {
+                        match load_still(Path::new(&job.path)) {
+                            Ok(img) => Prefetched::Still(job.path, img),
+                            Err(_) => continue,
+                        }
+                    } else {
+                        let Ok(mut d) = VideoDecoder::open(Path::new(&job.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() }) else { continue };
+                        // Decode the first frame now (it stays in the decoder's cache).
+                        if d.frame_at(job.at).is_err() {
+                            continue;
+                        }
+                        Prefetched::Decoder(job.segment, d)
+                    };
+                    if ready_tx.send(done).is_err() {
+                        return;
+                    }
+                }
+            })
+            .ok();
+        Prefetcher { jobs: Some(job_tx), ready: ready_rx, pending: Default::default(), worker }
+    }
+}
+
+impl Drop for Prefetcher {
+    fn drop(&mut self) {
+        self.jobs.take(); // ends the worker's loop
+        if let Some(w) = self.worker.take() {
+            let _ = w.join();
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum PreviewError {
@@ -67,6 +135,7 @@ pub struct PreviewEngine {
     failed: HashMap<String, String>,
     /// Rasterised text by content/style/size/sub-pixel origin, with the tick last used.
     texts: HashMap<u64, (std::sync::Arc<RgbaImage>, [f64; 2], u64)>,
+    prefetch: Prefetcher,
     tick: u64,
 }
 
@@ -81,6 +150,7 @@ impl PreviewEngine {
             fonts: HashMap::new(),
             failed: HashMap::new(),
             texts: HashMap::new(),
+            prefetch: Prefetcher::new(),
             tick: 0,
         })
     }
@@ -131,12 +201,72 @@ impl PreviewEngine {
         active
     }
 
+    fn adopt(&mut self, done: Prefetched) {
+        match done {
+            Prefetched::Decoder(segment, decoder) => {
+                self.prefetch.pending.remove(&segment);
+                self.decoders.entry(segment).or_insert(OpenDecoder { decoder, last_used: self.tick });
+            }
+            Prefetched::Still(path, img) => {
+                self.prefetch.pending.remove(&path);
+                self.images.entry(path).or_insert_with(|| std::sync::Arc::new(img));
+            }
+        }
+    }
+
+    /// If the prefetcher is already preparing `key`, wait for it rather than duplicate the
+    /// work on the render thread (bounded, in case the job failed).
+    fn await_prefetch(&mut self, key: &str) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        while self.prefetch.pending.contains(key) {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match self.prefetch.ready.recv_timeout(left) {
+                Ok(done) => self.adopt(done),
+                Err(_) => {
+                    self.prefetch.pending.remove(key);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Adopt decoders the prefetcher has finished, and queue clips starting soon after `t`.
+    fn run_prefetch(&mut self, t: Micros) {
+        while let Ok(done) = self.prefetch.ready.try_recv() {
+            self.adopt(done);
+        }
+        let Some(jobs) = &self.prefetch.jobs else { return };
+        for track in self.project.tracks.iter().filter(|tr| matches!(tr.kind, TrackKind::Video) && !tr.hidden) {
+            for seg in track.segments.iter().filter(|s| s.visible && s.target.start > t && s.target.start.0 <= t.0 + PREFETCH.0) {
+                let Some(media) = self.project.materials.media.iter().find(|m| m.id == seg.material && m.kind != MediaKind::Audio) else { continue };
+                let still = media.kind == MediaKind::Photo;
+                // Stills are shared by path; decoders belong to a segment.
+                let key = if still { media.path.clone() } else { seg.id.clone() };
+                let ready = if still { self.images.contains_key(&key) } else { self.decoders.contains_key(&key) };
+                if ready || self.prefetch.pending.contains(&key) || self.failed.contains_key(&media.path) {
+                    continue;
+                }
+                let job = PrefetchJob { segment: seg.id.clone(), path: media.path.clone(), at: seg.source_time(seg.target.start).unwrap_or(Micros::ZERO), still };
+                if jobs.send(job).is_ok() {
+                    self.prefetch.pending.insert(key);
+                }
+            }
+        }
+    }
+
     fn gather(&mut self, t: Micros, w: u32, h: u32) -> (Vec<(Segment, Pixels)>, FrameReport) {
         self.tick += 1;
+        self.run_prefetch(t);
         let mut report = FrameReport::default();
         let mut out = Vec::new();
+        let trace = std::env::var_os("OPENRIP_TRACE").is_some();
         for seg in self.active(t) {
-            match self.pixels(&seg, t, w, h) {
+            let t0 = std::time::Instant::now();
+            let got = self.pixels(&seg, t, w, h);
+            if trace && t0.elapsed().as_millis() >= 10 {
+                eprintln!("[preview] t={:.3}s segment {} took {:.1} ms", t.as_secs_f64(), seg.id, t0.elapsed().as_secs_f64() * 1e3);
+            }
+            match got {
                 Ok(Some(p)) => out.push((seg, p)),
                 Ok(None) => {}
                 Err((path, why)) => {
@@ -234,6 +364,7 @@ impl PreviewEngine {
         }
         let fail = |e: &dyn std::fmt::Display| (media.path.clone(), e.to_string());
         if media.kind == MediaKind::Photo {
+            self.await_prefetch(&media.path);
             if !self.images.contains_key(&media.path) {
                 let img = load_still(Path::new(&media.path)).map_err(|e| fail(&e))?;
                 self.images.insert(media.path.clone(), std::sync::Arc::new(img));
@@ -241,14 +372,29 @@ impl PreviewEngine {
             return Ok(Some(Pixels::Image(self.images[&media.path].clone(), key_of(&media.path))));
         }
         let key = seg.id.clone();
+        self.await_prefetch(&key);
         if !self.decoders.contains_key(&key) {
-            let decoder = VideoDecoder::open(Path::new(&media.path), &DecoderOptions::default()).map_err(|e| fail(&e))?;
+            let decoder = VideoDecoder::open(Path::new(&media.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() }).map_err(|e| fail(&e))?;
             self.decoders.insert(key.clone(), OpenDecoder { decoder, last_used: 0 });
         }
         let d = self.decoders.get_mut(&key).unwrap();
         d.last_used = self.tick;
         let orientation = d.decoder.info().rotation;
-        let frame = d.decoder.frame_at(seg.source_time(t).unwrap_or(Micros::ZERO)).map_err(|e| fail(&e))?;
+        let before = d.decoder.stats();
+        let t0 = std::time::Instant::now();
+        let at = seg.source_time(t).unwrap_or(Micros::ZERO);
+        let frame = d.decoder.frame_at(at).map_err(|e| fail(&e))?;
+        if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 10 {
+            let after = d.decoder.stats();
+            eprintln!(
+                "[preview]   decoder: source {:.3}s, {} seeks, {} pictures decoded, {} session resets, {} skipped",
+                at.as_secs_f64(),
+                after.seeks - before.seeks,
+                after.frames_decoded - before.frames_decoded,
+                after.sessions_reset - before.sessions_reset,
+                after.skipped_disposable - before.skipped_disposable
+            );
+        }
         Ok(frame.map(|f| Pixels::Video(f, orientation)))
     }
 

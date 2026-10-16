@@ -28,7 +28,7 @@
 //!       CapCut drafts are imported on the fly.
 //!   openrip-dev mix <project.json | draft-dir> <out.wav> [<start-seconds> <seconds>]
 //!       Mix a project's audio (48 kHz stereo float WAV), as export and playback will.
-//!   openrip-dev playthrough <project.json | draft-dir> [--seconds N]
+//!   openrip-dev playthrough <project.json | draft-dir> [--seconds N] [--realtime] [--verbose]
 //!       Render every frame in order at 540p, as playback does: frame times overall and on
 //!       the frames where a clip starts (cuts).
 //!   openrip-dev scrub-bench <media-file>
@@ -677,6 +677,9 @@ fn mix_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 fn playthrough(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     use openrip_model::{Micros, TrackKind};
     let project = load_project(Path::new(&args[1]))?;
+    let verbose = args.iter().any(|a| a == "--verbose");
+    // Pace frames like real playback (prefetch then has the time it has in the app).
+    let realtime = args.iter().any(|a| a == "--realtime");
     let secs: f64 = args.iter().position(|a| a == "--seconds").and_then(|i| args.get(i + 1)).map(|s| s.parse()).transpose()?.unwrap_or(f64::MAX);
     let fps = project.fps;
     let (cw, ch) = (project.canvas.width.max(1) as f64, project.canvas.height.max(1) as f64);
@@ -687,10 +690,18 @@ fn playthrough(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let surface = openrip_render::Compositor::output_surface(w, h).ok_or("surface")?;
     let (mut all, mut at_cuts) = (Vec::new(), Vec::new());
     let mut n = 0;
+    let started = Instant::now();
     while fps.frame_start(n) < end {
+        if realtime {
+            let due = std::time::Duration::from_micros(fps.frame_start(n).0 as u64);
+            std::thread::sleep(due.saturating_sub(started.elapsed()));
+        }
         let t0 = Instant::now();
         engine.render_to_surface(fps.frame_start(n), &surface)?;
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        if verbose && ms > 1000.0 / fps.as_f64() {
+            println!("  slow frame {n} (t = {:.3} s): {ms:.1} ms", fps.frame_start(n).as_secs_f64());
+        }
         all.push(ms);
         if cuts.contains(&n) && n > 0 {
             at_cuts.push(ms);
