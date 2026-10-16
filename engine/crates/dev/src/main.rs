@@ -43,9 +43,9 @@
 //!       render of it: PSNR and the share of pixels far off, per draft (numbered, no names)
 //!       and overall. Drafts with media missing at the first frame are left out. --save
 //!       writes ours | CapCut's | difference x4 for each.
-//!   openrip-dev export-parity <draft-dir> <capcut-export.mp4> [--every S] [--save <dir>]
+//!   openrip-dev export-parity <draft-dir> <capcut-export.mp4> [--every S] [--all] [--save <dir>]
 //!       Compare our render with CapCut's export of the same draft every S seconds (default
-//!       2) at half size: PSNR per sample, overall, and the worst samples (--save writes
+//!       2) at half size: PSNR overall and the worst samples (--all lists every sample; --save writes
 //!       ours | CapCut's | difference x4 for the five worst).
 //!   openrip-dev wrap-probe <draft-dir> <capcut-export.mp4>
 //!       For each text clip, sweep the line-wrap width (fraction of the canvas width, on
@@ -1009,6 +1009,11 @@ fn export_parity(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     ps.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let missing = samples.iter().filter(|s| s.2 > 0).count();
     println!("{} samples every {every} s ({missing} with media missing): PSNR p50 {:.1} dB, p10 {:.1} dB, worst {:.1} dB", samples.len(), percentile(&ps, 0.5), percentile(&ps, 0.1), ps[0]);
+    if args.iter().any(|a| a == "--all") {
+        for s in &samples {
+            println!("  sample: {:7.2} s  {:5.1} dB{}", s.0, s.1, if s.2 > 0 { "  (media missing)" } else { "" });
+        }
+    }
     let mut worst: Vec<_> = samples.iter().collect();
     worst.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
     for s in worst.iter().take(5) {

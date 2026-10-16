@@ -70,6 +70,108 @@ pub struct TextStyle<'a> {
     pub bold: f32,
     /// Synthetic italic: shear of the glyphs (degrees, tops to the right); 0 for none.
     pub italic: f32,
+    /// A layered style that replaces `color` and `stroke`.
+    pub effect: Option<&'a Effect>,
+}
+
+/// A layered text style (CapCut's library text styles): shadows at the back, then strokes
+/// (the last at the back), then the fill. Sizes are in pixels.
+#[derive(Clone, Debug, Default)]
+pub struct Effect {
+    pub fill: Option<Paint>,
+    /// Width (how far it reaches outside the glyphs) and paint.
+    pub strokes: Vec<(f32, Paint)>,
+    pub shadows: Vec<Shadow>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Shadow {
+    pub paint: Paint,
+    /// Offset in image pixels (+y down).
+    pub offset: [f32; 2],
+    /// Blur radius of the shadow itself (not its strokes).
+    pub blur: f32,
+    pub strokes: Vec<(f32, Paint)>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Paint {
+    /// Straight-alpha colour with the layer's opacity folded in.
+    Solid([f32; 4]),
+    Texture(TexturePaint),
+}
+
+/// An image mapped onto each character as CapCut's text-style shader maps it: split into
+/// `columns` vertical strips, the character with index i takes the square around the middle
+/// of strip i mod `columns`, laid over a square around the glyph (`stretch`: 0 fit, 1 fill,
+/// 2 stretch), turned by `radians` and magnified by `scale`, repeating beyond its edges.
+#[derive(Clone, Debug)]
+pub struct TexturePaint {
+    /// Premultiplied pixels.
+    pub image: Arc<RgbaImage>,
+    pub columns: u32,
+    pub radians: f32,
+    pub scale: f32,
+    pub stretch: u8,
+    /// The texture's and the layer's opacity together.
+    pub alpha: f32,
+}
+
+impl Paint {
+    /// Premultiplied colour at `(x, y)` inside a character's box `rect` (x, y, w, h).
+    fn at(&self, x: f32, y: f32, rect: [f32; 4], index: usize) -> [f32; 4] {
+        match self {
+            Paint::Solid(c) => [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]],
+            Paint::Texture(t) => {
+                let img = &t.image;
+                let (rw, rh) = (rect[2].max(1e-3), rect[3].max(1e-3));
+                let (tw, th) = (img.width as f32, img.height as f32);
+                let (rect_ar, tex_ar) = (rw / rh, tw / th);
+                let mut s = [1.0f32, 1.0];
+                if t.stretch != 2 {
+                    let wider = rw / tw > rh / th;
+                    if (t.stretch == 0) == wider {
+                        s[0] = rect_ar / tex_ar;
+                    } else {
+                        s[1] = tex_ar / rect_ar;
+                    }
+                }
+                // CapCut's shader divides by its scale uniform; matched against CapCut's
+                // exports, the style's `scale` magnifies the image, so that uniform is 1/scale.
+                let (s0, s1) = (s[0] * t.scale, s[1] * t.scale);
+                let (mut u, mut v) = ((x - rect[0]) / rw - 0.5, (y - rect[1]) / rh - 0.5);
+                let square = t.stretch != 2;
+                if square {
+                    if rect_ar > 1.0 { u *= rect_ar } else { v /= rect_ar }
+                }
+                let (sin, cos) = t.radians.sin_cos();
+                (u, v) = (cos * u - sin * v, sin * u + cos * v);
+                if square {
+                    if rect_ar > 1.0 { u /= rect_ar } else { v *= rect_ar }
+                }
+                let n = t.columns.max(1) as f32;
+                let u = u * s0 / n + (0.5 + (index % t.columns.max(1) as usize) as f32) / n;
+                let v = v * s1 / n + 0.5;
+                let c = sample_repeat(img, u * tw - 0.5, v * th - 0.5);
+                [c[0] * t.alpha, c[1] * t.alpha, c[2] * t.alpha, c[3] * t.alpha]
+            }
+        }
+    }
+}
+
+/// Bilinear sample of premultiplied pixels at pixel coordinates, wrapping around.
+fn sample_repeat(img: &RgbaImage, x: f32, y: f32) -> [f32; 4] {
+    let (w, h) = (img.width as i64, img.height as i64);
+    let (x0, y0) = (x.floor(), y.floor());
+    let (fx, fy) = (x - x0, y - y0);
+    let px = |xi: i64, yi: i64| {
+        let i = ((yi.rem_euclid(h) * w + xi.rem_euclid(w)) * 4) as usize;
+        let d = &img.data[i..i + 4];
+        [d[0] as f32 / 255.0, d[1] as f32 / 255.0, d[2] as f32 / 255.0, d[3] as f32 / 255.0]
+    };
+    let (x0, y0) = (x0 as i64, y0 as i64);
+    let (a, b, c, d) = (px(x0, y0), px(x0 + 1, y0), px(x0, y0 + 1), px(x0 + 1, y0 + 1));
+    std::array::from_fn(|k| (a[k] * (1.0 - fx) + b[k] * fx) * (1.0 - fy) + (c[k] * (1.0 - fx) + d[k] * fx) * fy)
 }
 
 struct Placed {
@@ -220,6 +322,9 @@ impl TextLayout {
     /// background stays), as text animations reveal text. Characters past the end of
     /// `char_alpha` are opaque.
     pub fn rasterize_with_alpha(&self, style: &TextStyle, origin: [f32; 2], char_alpha: Option<&[f32]>) -> RenderedText {
+        if let Some(effect) = style.effect {
+            return self.prepare_effect(style, effect, origin).composite(char_alpha);
+        }
         let stroke = style.stroke.map_or(0.0, |s| s.1);
         let bg_pad = style.background.map_or([0.0, 0.0], |b| b.1);
         let pad = ((self.size * 0.5).max(stroke).max(bg_pad[0]).max(bg_pad[1]).ceil() as i32) + 2;
@@ -263,8 +368,24 @@ impl TextLayout {
                 draw(&mut fill, &img, x, y, alpha);
             }
         }
-        // Background box, anti-aliased by distance to its rounded edge.
-        let background = style.background.map(|(color, [px, py], radius)| {
+        let background = self.background(style, left, top, w, h);
+        // Composite background, then stroke, then fill (premultiplied), back to straight alpha.
+        let mut px = vec![[0f32; 4]; (w * h) as usize];
+        for (i, px) in px.iter_mut().enumerate() {
+            if let Some((c, cov)) = &background {
+                *px = premul(*c, cov[i]);
+            }
+            if let (Some((c, _)), Some(cov)) = (style.stroke, &outline) {
+                *px = over(premul(c, cov[i]), *px);
+            }
+            *px = over(premul(style.color, fill[i]), *px);
+        }
+        finish(px, w, h, [(left + self.width / 2.0) as f64, (top + self.height / 2.0) as f64])
+    }
+
+    /// Background box coverage, anti-aliased by distance to its rounded edge.
+    fn background(&self, style: &TextStyle, left: f32, top: f32, w: u32, h: u32) -> Option<([u8; 4], Vec<f32>)> {
+        style.background.map(|(color, [px, py], radius)| {
             let (x0, y0, x1, y1) = (left - px, top - py, left + self.width + px, top + self.height + py);
             let r = radius.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
             let (cx, cy, hx, hy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0, (x1 - x0) / 2.0 - r, (y1 - y0) / 2.0 - r);
@@ -278,30 +399,208 @@ impl TextLayout {
                 })
                 .collect();
             (color, cov)
-        });
-        // Composite background, then stroke, then fill (premultiplied), back to straight alpha.
-        let premul = |c: [u8; 4], cov: f32| {
-            let a = cov * c[3] as f32 / 255.0;
-            [c[0] as f32 / 255.0 * a, c[1] as f32 / 255.0 * a, c[2] as f32 / 255.0 * a, a]
-        };
-        let over = |top: [f32; 4], under: [f32; 4]| [top[0] + under[0] * (1.0 - top[3]), top[1] + under[1] * (1.0 - top[3]), top[2] + under[2] * (1.0 - top[3]), top[3] + under[3] * (1.0 - top[3])];
-        let mut data = Vec::with_capacity((w * h * 4) as usize);
-        for i in 0..(w * h) as usize {
-            let mut px = [0f32; 4];
-            if let Some((c, cov)) = &background {
-                px = premul(*c, cov[i]);
+        })
+    }
+
+    /// A layered style, drawn into per-character pieces that [`PreparedText::composite`]
+    /// puts together with any per-character opacity. Every layer is drawn glyph by glyph in
+    /// text order (a later character covers an earlier one), each glyph's paint mapped onto a
+    /// square around it, as CapCut's text-style shader does.
+    pub fn prepare_effect(&self, style: &TextStyle, effect: &Effect, origin: [f32; 2]) -> PreparedText {
+        let reach = |strokes: &[(f32, Paint)]| strokes.iter().map(|s| s.0).fold(0.0, f32::max);
+        let shadow_reach = effect.shadows.iter().map(|sh| sh.offset[0].abs().max(sh.offset[1].abs()) + reach(&sh.strokes).max(2.0 * sh.blur)).fold(0.0, f32::max);
+        let bg_pad = style.background.map_or([0.0, 0.0], |b| b.1);
+        let pad = ((self.size * 0.5).max(reach(&effect.strokes)).max(shadow_reach).max(bg_pad[0]).max(bg_pad[1]).ceil() as i32) + 2;
+        let (w, h) = ((self.width.ceil() as i32 + 2 * pad + 1) as u32, (self.height.ceil() as i32 + 2 * pad + 1) as u32);
+        let (left, top) = (pad as f32 + origin[0], pad as f32 + origin[1]);
+        let mut ctx = ScaleContext::new();
+        let mut scaler = ctx.builder(style.font.as_ref()).size(self.size).hint(false).build();
+        let shear = (style.italic != 0.0).then(|| Transform::skew(Angle::from_degrees(style.italic), Angle::ZERO));
+        let mut base = vec![[0f32; 4]; (w * h) as usize];
+        if let Some((c, cov)) = self.background(style, left, top, w, h) {
+            for (p, cov) in base.iter_mut().zip(cov) {
+                *p = premul(c, cov);
             }
-            if let (Some((c, _)), Some(cov)) = (style.stroke, &outline) {
-                px = over(premul(c, cov[i]), px);
-            }
-            px = over(premul(style.color, fill[i]), px);
-            let a = px[3];
-            let un = |v: f32| if a > 0.0 { (v / a * 255.0).round().clamp(0.0, 255.0) as u8 } else { 0 };
-            data.extend_from_slice(&[un(px[0]), un(px[1]), un(px[2]), (a * 255.0).round() as u8]);
         }
-        RenderedText {
-            image: RgbaImage { width: w, height: h, data },
-            center: [(left + self.width / 2.0) as f64, (top + self.height / 2.0) as f64],
+        // One layer: every glyph's shape grown by `grow` (0 = the glyph), moved by `offset`,
+        // and softened by `blur`.
+        let mut layer = |paint: &Paint, grow: f32, offset: [f32; 2], blur: f32| -> Vec<Patch> {
+            let mut out = Vec::new();
+            for g in &self.glyphs {
+                let (x, y) = (left + g.x + offset[0], top + g.baseline + offset[1]);
+                let at = Vector::new(x.fract(), y.fract());
+                let render = |scaler: &mut swash::scale::Scaler, pen: Option<Stroke>| {
+                    let mut r = Render::new(&[GlyphSource::Outline]);
+                    r.format(Format::Alpha).embolden(style.bold).transform(shear).offset(at);
+                    if let Some(pen) = pen {
+                        r.style(pen);
+                    }
+                    r.render(scaler, g.glyph)
+                };
+                let Some(fill) = render(&mut scaler, None) else { continue };
+                // A grown glyph is the glyph plus an outline centred on its edge.
+                let ring = (grow > 0.0).then(|| {
+                    let mut pen = Stroke::new(2.0 * grow);
+                    pen.join(Join::Round).cap(Cap::Round);
+                    render(&mut scaler, Some(pen))
+                });
+                let shape = ring.flatten().unwrap_or_else(|| fill.clone());
+                let p = shape.placement;
+                let (gx, gy) = (x.floor() as i32 + p.left, y.floor() as i32 - p.top);
+                // Paint is mapped onto a square of 0.6 em centred on the glyph, in every
+                // layer: fitted against CapCut's exports (narrow letters get full-size
+                // pieces, so it isn't the glyph's box; the box with the outline is too big).
+                let fp = fill.placement;
+                let (fx, fy) = (x.floor() as i32 + fp.left, y.floor() as i32 - fp.top);
+                let side = PAINT_BOX * self.size;
+                let (cx, cy) = (fx as f32 + fp.width as f32 / 2.0, fy as f32 + fp.height as f32 / 2.0);
+                let rect = [cx - side / 2.0, cy - side / 2.0, side, side];
+                let margin = if blur > 0.0 { (2.0 * blur).ceil() as i32 + 1 } else { 0 };
+                let (pw, ph) = (p.width as i32 + 2 * margin, p.height as i32 + 2 * margin);
+                let mut px = vec![[0f32; 4]; (pw * ph) as usize];
+                for row in 0..p.height as i32 {
+                    for col in 0..p.width as i32 {
+                        let (qx, qy) = (gx + col, gy + row);
+                        let mut cov = shape.data[(row * p.width as i32 + col) as usize] as f32 / 255.0;
+                        if grow > 0.0 {
+                            let (ix, iy) = (qx - fx, qy - fy);
+                            if ix >= 0 && iy >= 0 && ix < fp.width as i32 && iy < fp.height as i32 {
+                                let f = fill.data[(iy * fp.width as i32 + ix) as usize] as f32 / 255.0;
+                                cov = cov + f - cov * f;
+                            }
+                        }
+                        if cov > 0.0 {
+                            let c = paint.at(qx as f32 + 0.5, qy as f32 + 0.5, rect, g.char_index);
+                            px[((row + margin) * pw + col + margin) as usize] = c.map(|v| v * cov);
+                        }
+                    }
+                }
+                if blur > 0.0 {
+                    box_blur(&mut px, pw as usize, ph as usize, blur);
+                }
+                out.push(Patch { x: gx - margin, y: gy - margin, w: pw, h: ph, char_index: g.char_index, px });
+            }
+            out
+        };
+        let mut layers = Vec::new();
+        for sh in &effect.shadows {
+            for (width, paint) in sh.strokes.iter().rev() {
+                layers.push(layer(paint, *width, sh.offset, 0.0));
+            }
+            layers.push(layer(&sh.paint, 0.0, sh.offset, sh.blur));
+        }
+        for (width, paint) in effect.strokes.iter().rev() {
+            layers.push(layer(paint, *width, [0.0, 0.0], 0.0));
+        }
+        if let Some(paint) = &effect.fill {
+            layers.push(layer(paint, 0.0, [0.0, 0.0], 0.0));
+        }
+        PreparedText { w, h, left, top, width: self.width, height: self.height, base, layers }
+    }
+}
+
+/// Styled text drawn as per-character pieces, ready to put together at any per-character
+/// opacity (text animations change only that from frame to frame).
+pub struct PreparedText {
+    w: u32,
+    h: u32,
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+    /// The background box, premultiplied.
+    base: Vec<[f32; 4]>,
+    /// Back to front; each layer's pieces in text order.
+    layers: Vec<Vec<Patch>>,
+}
+
+/// One character's premultiplied pixels in one layer.
+struct Patch {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    char_index: usize,
+    px: Vec<[f32; 4]>,
+}
+
+impl PreparedText {
+    /// Put the pieces together, each character at its opacity in `char_alpha` (past its end,
+    /// or with none, opaque).
+    pub fn composite(&self, char_alpha: Option<&[f32]>) -> RenderedText {
+        let (w, h) = (self.w as i32, self.h as i32);
+        let mut px = self.base.clone();
+        for patch in self.layers.iter().flatten() {
+            let a = char_alpha.and_then(|a| a.get(patch.char_index)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            if a == 0.0 {
+                continue;
+            }
+            for row in 0..patch.h {
+                let y = patch.y + row;
+                if y < 0 || y >= h {
+                    continue;
+                }
+                for col in 0..patch.w {
+                    let x = patch.x + col;
+                    let c = patch.px[(row * patch.w + col) as usize];
+                    if x < 0 || x >= w || c[3] <= 0.0 {
+                        continue;
+                    }
+                    let t = &mut px[(y * w + x) as usize];
+                    *t = over(c.map(|v| v * a), *t);
+                }
+            }
+        }
+        finish(px, self.w, self.h, [(self.left + self.width / 2.0) as f64, (self.top + self.height / 2.0) as f64])
+    }
+}
+
+/// Premultiplied pixels to the straight-alpha image; `center` is where the centre of the
+/// block of line boxes is.
+fn finish(px: Vec<[f32; 4]>, w: u32, h: u32, center: [f64; 2]) -> RenderedText {
+    let mut data = Vec::with_capacity((w * h * 4) as usize);
+    for p in px {
+        let a = p[3];
+        let un = |v: f32| if a > 0.0 { (v / a * 255.0).round().clamp(0.0, 255.0) as u8 } else { 0 };
+        data.extend_from_slice(&[un(p[0]), un(p[1]), un(p[2]), (a * 255.0).round() as u8]);
+    }
+    RenderedText { image: RgbaImage { width: w, height: h, data }, center }
+}
+
+/// Side of the square a text style's paint is mapped onto, in em (see `prepare_effect`).
+const PAINT_BOX: f32 = 0.6;
+
+fn premul(c: [u8; 4], cov: f32) -> [f32; 4] {
+    let a = cov * c[3] as f32 / 255.0;
+    [c[0] as f32 / 255.0 * a, c[1] as f32 / 255.0 * a, c[2] as f32 / 255.0 * a, a]
+}
+
+/// Premultiplied `top` over `under`.
+fn over(top: [f32; 4], under: [f32; 4]) -> [f32; 4] {
+    std::array::from_fn(|k| top[k] + under[k] * (1.0 - top[3]))
+}
+
+/// Three box passes, close to a Gaussian of the given radius.
+fn box_blur(px: &mut [[f32; 4]], w: usize, h: usize, radius: f32) {
+    let r = ((radius / 3.0f32.sqrt()).round() as usize).max(1);
+    let mut tmp = vec![[0f32; 4]; px.len()];
+    for _ in 0..3 {
+        for (len, stride, lines, step) in [(w, 1, h, w), (h, w, w, 1)] {
+            for line in 0..lines {
+                let base = line * step;
+                let mut acc = [0f32; 4];
+                let at = |i: isize| -> [f32; 4] { if i < 0 || i >= len as isize { [0.0; 4] } else { px[base + i as usize * stride] } };
+                for i in -(r as isize)..=(r as isize) {
+                    let v = at(i);
+                    acc = std::array::from_fn(|k| acc[k] + v[k]);
+                }
+                for i in 0..len as isize {
+                    tmp[base + i as usize * stride] = acc.map(|v| v / (2 * r + 1) as f32);
+                    let (add, sub) = (at(i + r as isize + 1), at(i - r as isize));
+                    acc = std::array::from_fn(|k| acc[k] + add[k] - sub[k]);
+                }
+            }
+            px.copy_from_slice(&tmp);
         }
     }
 }

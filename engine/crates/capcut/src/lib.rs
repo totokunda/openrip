@@ -360,6 +360,78 @@ const BUILTIN_ANIMATIONS: &[(&str, &str)] = &[("6724920249654710791", "type_1"),
 /// (measured; see `import_text`). It is CapCut's default `line_max_width`.
 const CAPCUT_WRAP: f32 = 0.82;
 
+/// A library text style from its bundle's `effectStyle.json` (the declarative kind; see
+/// docs/parity/capcut-bundles.md). `None` when the bundle isn't on this machine or is the
+/// other kind. Texture paths become absolute paths into the bundle.
+fn text_style(bundle: &Path) -> Option<TextEffect> {
+    let style: Value = serde_json::from_slice(&std::fs::read(bundle.join("effectStyle.json")).ok()?).ok()?;
+    let paint = |layer: &Value| -> Option<Paint> {
+        let content = layer.get("content")?;
+        let kind = match s(content, "render_type").as_str() {
+            "texture" => {
+                let t = content.get("texture")?;
+                let file = s(t, "path");
+                if file.is_empty() {
+                    return None;
+                }
+                PaintKind::Texture(TexturePaint {
+                    path: bundle.join(file).to_string_lossy().into_owned(),
+                    columns: i(t, "range").max(1) as u32,
+                    angle_deg: f(t, "angle", 0.0) as f32,
+                    scale: f(t, "scale", 1.0) as f32,
+                    stretch: match s(t, "stretchMode").as_str() {
+                        "fill" => TextureStretch::Fill,
+                        "stretch" => TextureStretch::Stretch,
+                        _ => TextureStretch::Fit,
+                    },
+                    alpha: f(t, "alpha", 1.0) as f32,
+                })
+            }
+            // Gradients are drawn with their first colour for now.
+            "gradient" => {
+                let g = content.get("gradient")?;
+                let c = g.get("color")?.get(0)?;
+                let ch = |k: usize| c.get(k).and_then(Value::as_f64).unwrap_or(0.0) as f32;
+                let a = g.get("alpha").and_then(|a| a.get(0)).and_then(Value::as_f64).unwrap_or(1.0) as f32;
+                PaintKind::Solid(Rgba { r: ch(0), g: ch(1), b: ch(2), a })
+            }
+            _ => {
+                let solid = content.get("solid")?;
+                let c = solid.get("color")?;
+                let ch = |k: usize| c.get(k).and_then(Value::as_f64).unwrap_or(0.0) as f32;
+                PaintKind::Solid(Rgba { r: ch(0), g: ch(1), b: ch(2), a: f(solid, "alpha", 1.0) as f32 })
+            }
+        };
+        Some(Paint { alpha: f(layer, "alpha", 1.0) as f32, kind })
+    };
+    let strokes = |layers: &[Value]| -> Vec<EffectStroke> {
+        layers
+            .iter()
+            .filter(|l| b(l, "enable", true) && f(l, "width", 0.0) > 0.0 && f(l, "alpha", 1.0) > 0.0)
+            .filter_map(|l| Some(EffectStroke { width: f(l, "width", 0.0) as f32, paint: paint(l)? }))
+            .collect()
+    };
+    Some(TextEffect {
+        fill: style.get("fill").and_then(paint),
+        strokes: strokes(arr(&style, "strokes")),
+        shadows: arr(&style, "shadows")
+            .iter()
+            .filter(|sh| b(sh, "enable", true))
+            .filter_map(|sh| {
+                let strokes = strokes(arr(sh, "strokes"));
+                let paint = paint(sh)?;
+                (paint.alpha > 0.0 || !strokes.is_empty()).then(|| EffectShadow {
+                    paint,
+                    distance: f(sh, "distance", 0.0) as f32,
+                    angle_deg: f(sh, "angle", 0.0) as f32,
+                    blur: f(sh, "diffuse", 0.0) as f32,
+                    strokes,
+                })
+            })
+            .collect(),
+    })
+}
+
 fn library_ref(m: &Value) -> LibraryRef {
     let resource = [s(m, "resource_id"), s(m, "effect_id"), s(m, "third_resource_id")]
         .into_iter()
@@ -507,6 +579,7 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         // CapCut's downloaded bundle (for Adjust: its exposure tables).
                         resource: Some(s(m, "path")).filter(|p| !p.is_empty()),
                         library,
+                        text_style: (ty == "text_effect").then(|| text_style(Path::new(&s(m, "path")))).flatten().map(Box::new),
                     });
                     true
                 }
@@ -765,6 +838,35 @@ mod tests {
         let json = serde_json::to_string(&project).unwrap();
         let back: Project = serde_json::from_str(&json).unwrap();
         assert_eq!(project, back);
+    }
+
+    #[test]
+    fn reads_a_library_text_style_from_its_bundle() {
+        let dir = std::env::temp_dir().join(format!("openrip-style-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let tex = |path: &str, range: u32, scale: f64| json!({"render_type": "texture", "texture": {"path": path, "range": range, "scale": scale, "angle": 90.0, "alpha": 1.0, "stretchMode": "fit"}});
+        let style = json!({
+            "fill": {"alpha": 1.0, "content": tex("ink.png", 2, 1.0)},
+            // Zero-width strokes are placeholders and draw nothing.
+            "strokes": [{"alpha": 0.0, "width": 0.0, "content": {"render_type": "solid", "solid": {"color": [0, 0, 0]}}}],
+            "shadows": [
+                {"enable": true, "alpha": 0.0, "angle": -45.0, "distance": 0.0, "diffuse": 0.0, "content": {"render_type": "solid", "solid": {"color": [1, 0, 0]}}, "strokes": []},
+                {"enable": true, "alpha": 0.0, "angle": -45.0, "distance": 0.0, "diffuse": 0.17, "content": {"render_type": "solid", "solid": {"color": [1, 0, 0]}},
+                 "strokes": [{"enable": true, "alpha": 1.0, "width": 0.4, "content": tex("paper.png", 4, 0.44)}]}
+            ]
+        });
+        std::fs::write(dir.join("effectStyle.json"), style.to_string()).unwrap();
+        let fx = text_style(&dir).unwrap();
+        let PaintKind::Texture(fill) = &fx.fill.as_ref().unwrap().kind else { panic!("fill is a texture") };
+        assert_eq!((fill.columns, fill.path.clone()), (2, dir.join("ink.png").to_string_lossy().into_owned()));
+        assert!(fx.strokes.is_empty());
+        // The invisible shadow with no strokes is dropped; the one carrying paper is kept.
+        assert_eq!(fx.shadows.len(), 1);
+        let paper = &fx.shadows[0].strokes[0];
+        assert_eq!(paper.width, 0.4);
+        assert!(matches!(&paper.paint.kind, PaintKind::Texture(t) if t.columns == 4 && (t.scale - 0.44).abs() < 1e-6));
+        assert!(text_style(&dir.join("missing")).is_none());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

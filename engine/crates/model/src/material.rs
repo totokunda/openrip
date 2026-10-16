@@ -393,6 +393,84 @@ pub struct Effect {
     pub resource: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library: Option<LibraryRef>,
+    /// A library text style's layers, for an effect attached to a text clip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_style: Option<Box<TextEffect>>,
+}
+
+/// A layered text style (CapCut's library "text styles"): shadows at the back, then
+/// strokes, then the fill, each painted with a colour or a texture. Sizes are fractions of
+/// the font size, like [`Stroke::width`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TextEffect {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Paint>,
+    /// Outlines, first drawn on top (the outermost is usually last).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub strokes: Vec<EffectStroke>,
+    /// Drawn in order, back to front, behind the strokes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadows: Vec<EffectShadow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EffectStroke {
+    pub width: f32,
+    pub paint: Paint,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EffectShadow {
+    /// The shadow of the glyphs themselves.
+    pub paint: Paint,
+    /// Offset length (fraction of the font size) and direction (degrees, counter-clockwise
+    /// from +x, +y up).
+    pub distance: f32,
+    pub angle_deg: f32,
+    /// Softness (CapCut's `diffuse`).
+    pub blur: f32,
+    /// Outlines of the shadow, drawn under it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub strokes: Vec<EffectStroke>,
+}
+
+/// What a text layer is painted with, and its opacity.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Paint {
+    pub alpha: f32,
+    pub kind: PaintKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaintKind {
+    Solid(Rgba),
+    Texture(TexturePaint),
+}
+
+/// An image mapped onto each character: split into `columns` equal vertical strips, the
+/// character with index i takes the square around the middle of strip i mod `columns`,
+/// fitted to a square around the glyph, turned by `angle_deg`, and magnified by `scale`
+/// (repeating beyond its edges).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TexturePaint {
+    pub path: String,
+    pub columns: u32,
+    pub angle_deg: f32,
+    pub scale: f32,
+    pub stretch: TextureStretch,
+    pub alpha: f32,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextureStretch {
+    /// Keep the image's aspect, fitting inside the box.
+    Fit,
+    /// Keep the image's aspect, covering the box.
+    Fill,
+    /// Stretch to the box.
+    Stretch,
 }
 
 /// HSL adjustment for one colour range (CapCut's HSL panel: one material per range).

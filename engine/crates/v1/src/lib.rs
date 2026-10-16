@@ -423,6 +423,7 @@ fn convert_clip(
                 builtin: Some("lut".into()),
                 resource,
                 library: None,
+                text_style: None,
             });
             mid
         }
@@ -468,6 +469,7 @@ fn convert_clip(
                     builtin: Some(format!("v1:{name}")),
                     resource: None,
                     library: None,
+                    text_style: None,
                 });
                 attachments.push(mid);
             }

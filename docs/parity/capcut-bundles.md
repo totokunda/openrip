@@ -39,7 +39,7 @@ Because each object property carries its byte size, an unknown kind costs only t
 
 ## Text styles ("text_effect" materials)
 
-There are two kinds of library text style:
+A text style is a `text_effect` material attached to the text clip. There are two kinds:
 
 - **Declarative.** An `effectStyle.json` holds a `fill`, `strokes` and `shadows`, in the same schema a draft's own text styles use, plus textures (PNG) for fills and strokes. ART EN PAPER-style looks are this kind.
 - **SDF effect.** An `SDFText` component in `effect.prefab` holds an `effectTextParam` with a stack of `effectLayers`, which `xshader/effect.frag` draws over a signed-distance glyph atlas. Each layer has:
@@ -54,3 +54,32 @@ There are two kinds of library text style:
   2. a vertical gradient from the text colour (at 33%) to it shifted −165° hue, −0.2 saturation, −0.44 brightness (at 66%), under a paper texture, with an inner shadow;
   3. three near-black outlines of 0.04 at offsets (0, 0), (0.02, −0.02) and (0.04, −0.04), forming a 3D extrusion;
   4. a soft shadow, 59% opaque, smoothing 0.19, at (0.03, −0.03).
+
+### How OpenRip draws declarative styles
+
+The importer reads `effectStyle.json` into the project (`Effect::text_style`). Texture paths point into CapCut's bundle and are loaded at run time. The renderer (`render::text::TextLayout::prepare_effect`) draws:
+- the shadows, in order; each one's strokes go under its own body;
+- the strokes, last first;
+- the fill.
+
+Each layer is drawn glyph by glyph in text order. A stroke covers the glyph grown by its width; its unit is the same provisional unit as plain strokes until calibration session 3.
+
+**Texture mapping.** This follows CapCut's text-style shader, whose GLSL source ships inside its engine library:
+- `range` splits the texture into that many vertical strips; character i (counting every character) takes the square around the middle of strip i mod `range`;
+- `stretchMode` fits, fills or stretches that square to the character's box, keeping aspect for fit and fill;
+- `angle` turns it;
+- the texture repeats beyond its edges.
+
+Two things the shader alone doesn't fix were fitted against a CapCut export (a 1080×1920 export of a draft whose captions use the "ART EN PAPER" style):
+- **`scale` magnifies the texture** (0.44 makes its pieces 1/0.44 times larger). The shader divides by its scale uniform, so CapCut evidently passes 1/`scale`.
+- **The character's box is a square of 0.6 em centred on the glyph.** Neither the glyph's own box (narrow letters then get slivers of paper, where CapCut gives them full pieces) nor the glyph plus its stroke (pieces too large) matches.
+
+Result on that export, at the frames with the styled captions: PSNR +1.5 to +2.8 dB (16.1–18.4 dB before, 18.9–20.0 dB after), and no frame worse. Text with a library style also wraps wider than plain text ([text-wrap.md](text-wrap.md)).
+
+Still approximate:
+- gradients are drawn with their first colour;
+- the shadow `diffuse` is a box blur of the shadow's body;
+- stroke widths use the provisional unit;
+- SDF-effect styles (the other kind) aren't drawn yet.
+
+Styled text is slow to draw, so the preview keeps it as per-character pieces and redraws only their opacity while a typing intro runs. On that draft's intro, playback p95 at 540p is 4.7 ms, against 20 ms when it was redrawn each frame.

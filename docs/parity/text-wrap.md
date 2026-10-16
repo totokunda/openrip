@@ -39,6 +39,10 @@ Together these give 0.794–0.855, and 0.82 fits every case. These rules don't:
 - **Each text's own `line_max_width`.** C's 0.78 breaks its first line one word early; rendering C's cover at 0.78 against 0.80–0.84 confirms it.
 - **A width in em.**
 
+## Text with a library text style
+
+Styled text (a `text_effect` attached to the clip) wraps wider. In one CapCut export, two styled captions wrap. Their first lines measure 0.839 and 0.871 of the canvas width and stay whole; adding the next word would make them 1.046 and 1.209. So the width is 0.871–1.046, above anything plain captions allow (at most 0.855). OpenRip uses 0.95 for styled text until more cases pin it.
+
 ## Still to measure
 
 Calibration session 5's wrap clips (box widths 600 and 900, a scaled clip, size 10, landscape) should all wrap at 0.82 of the canvas width. It also shows whether a long auto box wraps on a portrait canvas.

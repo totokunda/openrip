@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use openrip_media::{DecoderOptions, MediaError, VideoDecoder, VideoFrame};
-use openrip_model::{EffectCategory, MediaKind, Micros, Project, Segment, SizeUnit, TrackKind, CAPCUT_SIZE_UNIT_EM};
+use openrip_model::{EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_render::text::{self, Align, Font, TextStyle};
 use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source};
 
@@ -152,9 +152,18 @@ pub struct PreviewEngine {
     exposure_luts: HashMap<String, Option<ExposureLuts>>,
     /// Filter lookup tables by bundle path.
     filters: HashMap<String, std::sync::Arc<Lut3d>>,
+    /// Styled text in pieces (see `PreparedText`), by everything but per-character opacity.
+    prepared: HashMap<u64, (std::sync::Arc<text::PreparedText>, u64)>,
+    /// Text-style textures (premultiplied) by path; `None` if unreadable.
+    textures: HashMap<String, Option<std::sync::Arc<RgbaImage>>>,
     prefetch: Prefetcher,
     tick: u64,
 }
+
+/// Where a fixed-width text box with a library text style wraps, as a fraction of the
+/// canvas width on screen. Provisional: one CapCut export bounds it to 0.871–1.046, wider
+/// than plain text's 0.82.
+const STYLED_WRAP: f32 = 0.95;
 
 impl PreviewEngine {
     pub fn new(project: Project) -> Result<Self, PreviewError> {
@@ -169,6 +178,8 @@ impl PreviewEngine {
             texts: HashMap::new(),
             exposure_luts: HashMap::new(),
             filters: HashMap::new(),
+            textures: HashMap::new(),
+            prepared: HashMap::new(),
             prefetch: Prefetcher::new(),
             tick: 0,
         })
@@ -324,6 +335,7 @@ impl PreviewEngine {
         self.evict_decoders();
         let tick = self.tick;
         self.texts.retain(|_, (_, _, last)| tick - *last < 3);
+        self.prepared.retain(|_, (_, last)| tick - *last < 3);
         (out, report)
     }
 
@@ -361,6 +373,57 @@ impl PreviewEngine {
         Some((a, bundle.and_then(|b| self.exposure_luts.get(b)).and_then(Option::as_ref)))
     }
 
+    /// A text style at a font size of `em` pixels. Sizes are fractions of the font size, on
+    /// the same provisional scale as a run's stroke.
+    fn text_effect(&mut self, fx: &TextEffect, em: f32) -> text::Effect {
+        let mut paint = |p: &openrip_model::Paint| -> Option<text::Paint> {
+            Some(match &p.kind {
+                PaintKind::Solid(c) => text::Paint::Solid([c.r, c.g, c.b, c.a * p.alpha]),
+                PaintKind::Texture(t) => {
+                    let image = self.textures.entry(t.path.clone()).or_insert_with(|| load_png(Path::new(&t.path)).ok().map(|mut img| {
+                        for px in img.data.chunks_exact_mut(4) {
+                            let a = px[3] as u32;
+                            for c in &mut px[..3] {
+                                *c = ((*c as u32 * a + 127) / 255) as u8;
+                            }
+                        }
+                        std::sync::Arc::new(img)
+                    }));
+                    text::Paint::Texture(text::TexturePaint {
+                        image: image.clone()?,
+                        columns: t.columns.max(1),
+                        radians: t.angle_deg.to_radians(),
+                        scale: if t.scale > 0.0 { t.scale } else { 1.0 },
+                        stretch: match t.stretch {
+                            TextureStretch::Fit => 0,
+                            TextureStretch::Fill => 1,
+                            TextureStretch::Stretch => 2,
+                        },
+                        alpha: t.alpha * p.alpha,
+                    })
+                }
+            })
+        };
+        let strokes = |list: &[openrip_model::EffectStroke], paint: &mut dyn FnMut(&openrip_model::Paint) -> Option<text::Paint>| list.iter().filter_map(|s| Some((s.width * em, paint(&s.paint)?))).collect::<Vec<_>>();
+        text::Effect {
+            fill: fx.fill.as_ref().and_then(&mut paint),
+            strokes: strokes(&fx.strokes, &mut paint),
+            shadows: fx
+                .shadows
+                .iter()
+                .filter_map(|sh| {
+                    let a = sh.angle_deg.to_radians();
+                    Some(text::Shadow {
+                        paint: paint(&sh.paint)?,
+                        offset: [sh.distance * em * a.cos(), -sh.distance * em * a.sin()],
+                        blur: sh.blur * em,
+                        strokes: strokes(&sh.strokes, &mut paint),
+                    })
+                })
+                .collect(),
+        }
+    }
+
     /// Read the exposure tables from a clip's CapCut colour bundle, once per bundle.
     fn load_exposure_luts(&mut self, seg: &Segment) {
         let bundles: Vec<String> = seg
@@ -396,6 +459,9 @@ impl PreviewEngine {
                 SizeUnit::CanvasHeight => run.size * h as f32,
             } * scale.x.abs() as f32;
             let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            // A library text style attached to the clip replaces the run's colour and stroke.
+            let styled = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id).and_then(|e| Some((e.id.clone(), e.text_style.clone()?))));
+            let effect = styled.as_ref().map(|(_, fx)| self.text_effect(fx, em));
             let style = TextStyle {
                 font: &self.fonts[&path],
                 size: em,
@@ -417,12 +483,14 @@ impl PreviewEngine {
                     ([to_u8(b.color.r), to_u8(b.color.g), to_u8(b.color.b), to_u8(b.color.a)], pad, radius)
                 }),
                 // A fraction of the canvas width on screen; the clip's scale doesn't change it.
-                max_width: text.layout.max_width.map(|f| f * w as f32),
+                // Text with a library style wraps wider (docs/parity/text-wrap.md).
+                max_width: text.layout.max_width.map(|f| if styled.is_some() { STYLED_WRAP } else { f } * w as f32),
                 // CapCut's synthetic styles: bold widens the glyphs by `bold_width` (0.008 in
                 // every local draft) in the stroke's unit, italic shears them by
                 // `italic_degree` (always 10). Both provisional until calibration session 5.
                 bold: if run.bold { 0.008 * em } else { 0.0 },
                 italic: if run.italic { 10.0 } else { 0.0 },
+                effect: effect.as_ref(),
             };
             let lay = text::layout(&text.text, &style);
             // Library text animations (typing reveals) as per-character opacity.
@@ -432,7 +500,8 @@ impl PreviewEngine {
             let (cx, cy) = (w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0);
             let (x0, y0) = (cx - lay.width as f64 / 2.0, cy - lay.height as f64 / 2.0);
             let origin = [x0.rem_euclid(1.0) as f32, y0.rem_euclid(1.0) as f32];
-            let key = key_of((
+            // Everything but the per-character opacity, which animations change every frame.
+            let shape_key = key_of((
                 &path,
                 &text.text,
                 em.to_bits(),
@@ -443,8 +512,9 @@ impl PreviewEngine {
                 text.layout.letter_spacing.to_bits(),
                 text.layout.line_spacing.to_bits(),
                 (style.max_width.map(f32::to_bits), origin[0].to_bits(), origin[1].to_bits(), style.bold.to_bits(), style.italic.to_bits()),
-                char_alpha.as_ref().map(|a| a.iter().map(|v| (v * 255.0).round() as u8).collect::<Vec<_>>()),
+                styled.as_ref().map(|(id, _)| id),
             ));
+            let key = key_of((shape_key, char_alpha.as_ref().map(|a| a.iter().map(|v| (v * 255.0).round() as u8).collect::<Vec<_>>())));
             let tick = self.tick;
             let (image, center) = match self.texts.get_mut(&key) {
                 Some((img, center, last)) => {
@@ -452,7 +522,25 @@ impl PreviewEngine {
                     (img.clone(), *center)
                 }
                 None => {
-                    let r = lay.rasterize_with_alpha(&style, origin, char_alpha.as_deref());
+                    let r = match style.effect {
+                        // Styled text is slow to draw: keep its pieces, so an animation only
+                        // puts them together again.
+                        Some(fx) => {
+                            let prepared = match self.prepared.get_mut(&shape_key) {
+                                Some((p, last)) => {
+                                    *last = tick;
+                                    p.clone()
+                                }
+                                None => {
+                                    let p = std::sync::Arc::new(lay.prepare_effect(&style, fx, origin));
+                                    self.prepared.insert(shape_key, (p.clone(), tick));
+                                    p
+                                }
+                            };
+                            prepared.composite(char_alpha.as_deref())
+                        }
+                        None => lay.rasterize_with_alpha(&style, origin, char_alpha.as_deref()),
+                    };
                     let img = std::sync::Arc::new(r.image);
                     self.texts.insert(key, (img.clone(), r.center, tick));
                     (img, r.center)
