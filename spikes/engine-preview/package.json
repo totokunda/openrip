@@ -1,0 +1,7 @@
+{
+  "name": "engine-preview-spike",
+  "private": true,
+  "version": "0.0.0",
+  "main": "main.cjs",
+  "description": "Plays a project (CapCut draft or OpenRip JSON) through the Rust engine into an Electron window via sharedTexture"
+}
