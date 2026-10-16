@@ -13,8 +13,10 @@
 //!   The UI widens the tolerance with drag speed and sends one accurate request when the
 //!   drag ends.
 
+mod player;
 pub mod preview;
 mod server;
 
+pub use player::{Player, PlayerError};
 pub use preview::{FrameReport, PreviewEngine, PreviewError};
 pub use server::{Delivered, FrameServer, Quality, SeekMode, ServerStats};

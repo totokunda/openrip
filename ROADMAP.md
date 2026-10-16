@@ -102,7 +102,12 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
      - Frame-accurate `frame_at` that skips pictures nothing references.
      - Open-GOP handling, and a frame cache for stepping backward.
      - 4K phone footage seeks in 41 ms p50. See [results](docs/parity/results/2026-10-16-decode.md) and [how CapCut does it](docs/parity/capcut-decode.md).
-   - Next: `openrip-playback`. Scrub and accurate seek modes where the newest seek wins; decoder pooling with the next clip pre-opened; clock and A/V sync.
+   - Done: `openrip-playback`.
+     - `FrameServer`: scrub and accurate seeks, newest seek wins.
+     - `PreviewEngine`: project + time → frame.
+     - `Player`: cpal audio output whose played samples are the master clock.
+     - In `spikes/engine-preview`, CapCut drafts play with sound, the picture following the audio clock (A/V offset p50 0 ms, p95 21 ms).
+   - Next: decoder pre-open of the next clip, and moving this into the app (Electron 44).
 2. **M2 Compose.** Multi-track compositing, transforms, crop, opacity, adjustments, LUT filters.
    - Started: `openrip-render`, a wgpu compositor with CapCut's measured resampling pipeline, transforms and opacity. It matches CapCut's exports as closely as the reference model does. `openrip-dev render-frame` renders imported projects.
    - Done: zero-copy NV12/P010 IOSurface input from the decoder, rendering into IOSurfaces, and text (shaping, stroke, background). `PreviewEngine` renders all 58 local CapCut drafts. `openrip-node` plus `spikes/engine-preview` play a CapCut draft in Electron 44 through `sharedTexture`, end to end with no copies.

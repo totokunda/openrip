@@ -20,7 +20,7 @@ use napi::bindgen_prelude::{AsyncTask, Buffer};
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
 use openrip_model::{Micros, Project};
-use openrip_playback::PreviewEngine;
+use openrip_playback::{Player, PreviewEngine};
 
 fn err(e: impl std::fmt::Display) -> Error {
     Error::from_reason(e.to_string())
@@ -34,6 +34,8 @@ unsafe impl Send for Surface {}
 
 struct Session {
     engine: Arc<Mutex<PreviewEngine>>,
+    /// Audio output and master clock (absent when there is no output device).
+    player: Option<Player>,
     #[cfg(target_os = "macos")]
     held: HashMap<u32, Surface>,
     #[cfg(target_os = "macos")]
@@ -85,9 +87,11 @@ pub fn open_project(path: String) -> Result<ProjectInfo> {
         segments: project.segment_count() as u32,
         source: source.into(),
     };
+    let player = Player::new(project.clone()).ok();
     let engine = PreviewEngine::new(project).map_err(err)?;
     *session().lock().unwrap() = Some(Session {
         engine: Arc::new(Mutex::new(engine)),
+        player,
         #[cfg(target_os = "macos")]
         held: HashMap::new(),
         #[cfg(target_os = "macos")]
@@ -208,4 +212,38 @@ pub fn render_image(time_us: i64, width: u32, height: u32) -> Result<Image> {
     let engine = session().lock().unwrap().as_ref().map(|s| s.engine.clone()).ok_or_else(|| err("no project open"))?;
     let (img, _) = engine.lock().unwrap().render_image(Micros(time_us), width, height).map_err(err)?;
     Ok(Image { width: img.width, height: img.height, data: Buffer::from(img.data) })
+}
+
+/// Start playback (audio, and the master clock) at `timeUs`. False without an output device.
+#[napi]
+pub fn play(time_us: i64) -> bool {
+    match session().lock().unwrap().as_ref().and_then(|s| s.player.as_ref()) {
+        Some(p) => {
+            p.play(Micros(time_us));
+            true
+        }
+        None => false,
+    }
+}
+
+#[napi]
+pub fn pause() {
+    if let Some(p) = session().lock().unwrap().as_ref().and_then(|s| s.player.as_ref()) {
+        p.pause();
+    }
+}
+
+/// The timeline time being heard now (the clock to pick video frames by), or -1 without
+/// audio output.
+#[napi]
+pub fn position_us() -> i64 {
+    session().lock().unwrap().as_ref().and_then(|s| s.player.as_ref()).map_or(-1, |p| p.position().0)
+}
+
+/// Output gain; 0 mutes (the clock keeps running).
+#[napi]
+pub fn set_volume(volume: f64) {
+    if let Some(p) = session().lock().unwrap().as_ref().and_then(|s| s.player.as_ref()) {
+        p.set_volume(volume as f32);
+    }
 }
