@@ -927,6 +927,7 @@ name = "openrip-dev"
 version = "0.1.0"
 dependencies = [
  "openrip-capcut",
+ "openrip-export",
  "openrip-media",
  "openrip-model",
  "openrip-playback",
@@ -934,6 +935,19 @@ dependencies = [
  "openrip-v1",
  "png",
  "serde_json",
+]
+
+[[package]]
+name = "openrip-export"
+version = "0.0.0"
+dependencies = [
+ "ffmpeg-sys-next",
+ "objc2-core-foundation",
+ "objc2-core-video",
+ "openrip-model",
+ "openrip-playback",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

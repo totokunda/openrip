@@ -18,5 +18,6 @@ openrip-v1.workspace = true
 openrip-media.workspace = true
 openrip-playback.workspace = true
 openrip-render.workspace = true
+openrip-export.workspace = true
 png = "0.18"
 serde_json.workspace = true

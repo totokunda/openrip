@@ -23,6 +23,9 @@
 //!       Import every CapCut draft and render five frames of each with the preview engine:
 //!       aggregate counts of layers drawn, media skipped and errors, and frame times (no
 //!       names). --save writes the frames as PNGs for a visual check.
+//!   openrip-dev export <project.json | draft-dir> <out.mp4> [--size WxH] [--fps N] [--hevc] [--mbps N]
+//!       Render and encode a project (video only for now; default: canvas size, project fps,
+//!       H.264). CapCut drafts are imported on the fly.
 //!   openrip-dev scrub-bench <media-file>
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
@@ -47,6 +50,7 @@ fn main() -> ExitCode {
         Some("render-frame") if args.len() >= 6 => render_frame(&args[1..]).map_err(|e| e.to_string()),
         Some("play-bench") if args.len() >= 2 => play_bench(&args[1..]).map_err(|e| e.to_string()),
         Some("preview-scan") if args.len() >= 2 => preview_scan(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
+        Some("export") if args.len() >= 3 => export_cmd(&args).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
@@ -573,5 +577,49 @@ fn preview_scan(root: &Path, save: Option<PathBuf>) -> Result<(), Box<dyn std::e
     if !times.is_empty() {
         println!("frame time (first frame per draft includes opening decoders): p50 {:.1} ms, p95 {:.1} ms, max {:.1} ms", percentile(&times, 0.5), percentile(&times, 0.95), times[times.len() - 1]);
     }
+    Ok(())
+}
+
+fn load_project(path: &Path) -> Result<Project, Box<dyn std::error::Error>> {
+    if path.is_dir() {
+        return Ok(import_draft_dir(path)?.project);
+    }
+    Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
+}
+
+fn export_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let project = load_project(Path::new(&args[1]))?;
+    let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    let (w, h) = match opt("--size") {
+        Some(s) => {
+            let (a, b) = s.split_once('x').ok_or("--size WxH")?;
+            (a.parse()?, b.parse()?)
+        }
+        None => (project.canvas.width, project.canvas.height),
+    };
+    let fps = match opt("--fps") {
+        Some(f) => openrip_model::FrameRate::from_f64(f.parse()?),
+        None => project.fps,
+    };
+    let codec = if args.iter().any(|a| a == "--hevc") { openrip_export::Codec::Hevc } else { openrip_export::Codec::H264 };
+    let mbps: f64 = opt("--mbps").map(|m| m.parse()).transpose()?.unwrap_or(10.0);
+    let duration = project.duration().as_secs_f64();
+    let o = openrip_export::ExportOptions { width: w, height: h, fps, codec, bitrate: (mbps * 1e6) as u64 };
+    println!("exporting {:.1} s at {w}x{h} {:.3} fps, {codec:?} {mbps} Mbps", duration, fps.as_f64());
+    let stats = openrip_export::export(project, Path::new(&args[2]), &o, |n, total| {
+        if n % 60 == 0 || n == total {
+            eprint!("\r  frame {n}/{total}");
+        }
+    })?;
+    eprintln!();
+    println!(
+        "{} frames in {:.2} s = {:.1}x real time (render {:.2} s, encode {:.2} s); {} layer-frames skipped for missing media",
+        stats.frames,
+        stats.seconds,
+        duration / stats.seconds,
+        stats.render_seconds,
+        stats.encode_seconds,
+        stats.skipped_layers
+    );
     Ok(())
 }

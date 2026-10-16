@@ -135,3 +135,24 @@ fn fs_yuv(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let rgb = vec3<f32>(y + P.inv1.x * cbcr.y, y + P.inv1.y * cbcr.x + P.inv1.z * cbcr.y, y + P.inv1.w * cbcr.x);
     return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }
+
+// Export: RGBA canvas -> NV12 planes (BT.709, limited range), written straight into the
+// encoder's IOSurface. Luma per pixel; chroma averaged over each 2x2 block.
+//   inv1: (Kr, Kg, Kb, unused)
+@fragment
+fn fs_luma(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let c = textureLoad(src, vec2<i32>(floor(pos.xy)), 0).rgb;
+    let y = dot(c, P.inv1.xyz);
+    return vec4<f32>((16.0 + 219.0 * y) / 255.0, 0.0, 0.0, 1.0);
+}
+
+@fragment
+fn fs_chroma(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let p = vec2<i32>(floor(pos.xy)) * 2;
+    let c = (texel(p).rgb + texel(p + vec2<i32>(1, 0)).rgb + texel(p + vec2<i32>(0, 1)).rgb + texel(p + vec2<i32>(1, 1)).rgb) * 0.25;
+    let k = P.inv1.xyz;
+    let y = dot(c, k);
+    let cb = (c.b - y) / (2.0 * (1.0 - k.z));
+    let cr = (c.r - y) / (2.0 * (1.0 - k.x));
+    return vec4<f32>((128.0 + 224.0 * cb) / 255.0, (128.0 + 224.0 * cr) / 255.0, 0.0, 1.0);
+}

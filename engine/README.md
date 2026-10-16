@@ -11,7 +11,8 @@ Cargo workspace for the engine that replaces the TypeScript media pipeline. See 
 | `openrip-playback` | started | `PreviewEngine`: project + time → composited frame, read back or rendered into an IOSurface for the app. Keeps decoders, stills and fonts cached; skips and reports missing media; shows phone video upright. Also a per-source `FrameServer` (newest request wins; accurate and scrub seeks, CapCut-style) |
 | `openrip-render` | started | wgpu compositor reproducing CapCut's measured image pipeline (sharpened area downscale / bilinear upscale, then Catmull-Rom placement, 8-bit canvas). Matches the reference model to ±1 code value and CapCut's exports at the model's PSNR. Hardware video frames are used in place: IOSurface NV12/P010 planes become textures with no copy, and YUV→RGB runs on the GPU |
 | `openrip-node` | started | napi addon for Electron: `openProject` (CapCut draft / OpenRip JSON / v1), `renderFrame` (async, IOSurface handle for `sharedTexture`), `release`, `renderImage`. See `spikes/engine-preview` |
-| `openrip-dev` | started | Developer CLI (`capcut-import`, `capcut-scan`, `v1-import`, `v1-scan`, `probe`, `decode-bench`, `scrub-bench`, `play-bench`, `render-frame`, `preview-scan`) |
+| `openrip-export` | started | Export: GPU composite straight into NV12 IOSurfaces, VideoToolbox H.264/HEVC via FFmpeg hardware frames, MP4 mux. Video only so far. Matches CapCut's export at 57–64 dB on stills |
+| `openrip-dev` | started | Developer CLI (`capcut-import`, `capcut-scan`, `v1-import`, `v1-scan`, `probe`, `decode-bench`, `scrub-bench`, `play-bench`, `render-frame`, `preview-scan`, `export`) |
 
 ```bash
 cd engine

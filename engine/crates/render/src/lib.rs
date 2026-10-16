@@ -136,6 +136,9 @@ pub struct Compositor {
     place: wgpu::RenderPipeline,
     /// The placement pass for BGRA targets (IOSurfaces handed to the app).
     place_bgra: wgpu::RenderPipeline,
+    /// RGBA canvas -> NV12 planes for the encoder.
+    luma: wgpu::RenderPipeline,
+    chroma: wgpu::RenderPipeline,
     /// Resampled textures of keyed images, with the frame they were last drawn in.
     cache: std::sync::Mutex<std::collections::HashMap<CacheKey, (wgpu::Texture, u64)>>,
     frame: std::sync::atomic::AtomicU64,
@@ -225,6 +228,8 @@ impl Compositor {
             bilinear: pipeline("fs_bilinear", CANVAS, None),
             place: pipeline("fs_place", CANVAS, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             place_bgra: pipeline("fs_place", wgpu::TextureFormat::Bgra8Unorm, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
+            luma: pipeline("fs_luma", wgpu::TextureFormat::R8Unorm, None),
+            chroma: pipeline("fs_chroma", wgpu::TextureFormat::Rg8Unorm, None),
             device,
             queue,
             layout,
@@ -488,6 +493,41 @@ impl Compositor {
         let canvas = self.wrap_surface(&surface, 0, (w, h), wgpu::TextureFormat::Bgra8Unorm, true).ok_or_else(|| RenderError::Device("can't render into that surface".into()))?;
         let mut enc = self.device.create_command_encoder(&Default::default());
         let keep = self.encode_frame(&mut enc, &canvas, background, layers);
+        self.queue.submit([enc.finish()]);
+        self.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| RenderError::Device(e.to_string()))?;
+        drop(keep);
+        Ok(())
+    }
+
+    /// A new IOSurface-backed NV12 (BT.709 limited range) pixel buffer for the encoder.
+    #[cfg(target_os = "macos")]
+    pub fn output_surface_nv12(width: u32, height: u32) -> Option<objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>> {
+        use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString, CFType};
+        use objc2_core_video::*;
+        let props = CFDictionary::<CFString, CFType>::from_slices(&[], &[]);
+        let attrs = unsafe { CFDictionary::<CFString, CFType>::from_slices(&[kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey], &[props.as_ref(), CFBoolean::new(true).as_ref()]) };
+        let mut out: *mut CVPixelBuffer = std::ptr::null_mut();
+        let r = unsafe { CVPixelBufferCreate(None, width as usize, height as usize, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, Some(attrs.as_opaque()), std::ptr::NonNull::from(&mut out)) };
+        (r == 0 && !out.is_null()).then(|| unsafe { CFRetained::from_raw(std::ptr::NonNull::new_unchecked(out)) })
+    }
+
+    /// Render into an NV12 pixel buffer for the encoder: composite as usual, then convert
+    /// to BT.709 limited-range YCbCr on the GPU, written straight into the buffer's planes.
+    #[cfg(target_os = "macos")]
+    pub fn render_to_nv12(&self, target: &objc2_core_video::CVPixelBuffer, background: [u8; 3], layers: &[Layer]) -> Result<(), RenderError> {
+        use objc2_core_video::*;
+        let plane = |i| (CVPixelBufferGetWidthOfPlane(target, i) as u32, CVPixelBufferGetHeightOfPlane(target, i) as u32);
+        let surface = CVPixelBufferGetIOSurface(Some(target)).ok_or_else(|| RenderError::Device("target has no IOSurface".into()))?;
+        let luma = self.wrap_surface(&surface, 0, plane(0), wgpu::TextureFormat::R8Unorm, true).ok_or_else(|| RenderError::Device("can't render into the luma plane".into()))?;
+        let chroma = self.wrap_surface(&surface, 1, plane(1), wgpu::TextureFormat::Rg8Unorm, true).ok_or_else(|| RenderError::Device("can't render into the chroma plane".into()))?;
+        let (w, h) = plane(0);
+        let canvas = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        let keep = self.encode_frame(&mut enc, &canvas, background, layers);
+        let (kr, kb) = (0.2126f32, 0.0722f32);
+        let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0: [0.0; 4], inv1: [kr, 1.0 - kr - kb, kb, 0.0], misc: [0.0; 4] };
+        self.pass(&mut enc, &self.luma, &canvas, &luma, params, Some(wgpu::Color::BLACK));
+        self.pass(&mut enc, &self.chroma, &canvas, &chroma, params, Some(wgpu::Color::BLACK));
         self.queue.submit([enc.finish()]);
         self.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| RenderError::Device(e.to_string()))?;
         drop(keep);

@@ -107,6 +107,16 @@ impl PreviewEngine {
         Ok(report)
     }
 
+    /// Render the frame at `t` into an NV12 pixel buffer for the encoder (export).
+    #[cfg(target_os = "macos")]
+    pub fn render_to_nv12(&mut self, t: Micros, target: &objc2_core_video::CVPixelBuffer) -> Result<FrameReport, PreviewError> {
+        let (w, h) = (objc2_core_video::CVPixelBufferGetWidth(target) as u32, objc2_core_video::CVPixelBufferGetHeight(target) as u32);
+        let (pixels, report) = self.gather(t, w, h);
+        let layers = self.layers(&pixels, t, w, h);
+        self.compositor.render_to_nv12(target, [0, 0, 0], &layers)?;
+        Ok(report)
+    }
+
     /// The segments visible at `t`, bottom first (CapCut stacks by render index; text sits
     /// at 14000+, above video).
     fn active(&self, t: Micros) -> Vec<Segment> {

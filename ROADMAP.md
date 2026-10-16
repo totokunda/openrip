@@ -110,6 +110,7 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
 3. **M3 Overlays.** Text, shapes, drawing, lasso/shape masks with keyframes.
 4. **M4 Audio.** Mixing, volume, fades, speed, detaching audio.
 5. **M5 Export.** Golden-corpus exports match within tolerance.
+   - Started: `openrip-export` (video only). Session 2's draft exported by OpenRip matches CapCut's own export at 57–64 dB on stills and 42 dB rotated. 6–8× real time. See [results](docs/parity/results/2026-10-16-export.md).
 6. **M6 Editor UI parity.** Timeline editing (trim, split, group, snap, copy/paste), properties panels, media library and proxies, autosave.
 7. **M7 Ship.** CI on macOS, Windows and Linux; signed installers; auto-update from `totokunda/openrip` releases.
 
