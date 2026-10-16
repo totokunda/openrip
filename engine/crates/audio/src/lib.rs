@@ -206,7 +206,9 @@ impl Mixer {
             };
             // Volume (keyframes interpolated across the block) and fades.
             let fade = seg.attachments.iter().find_map(|id| self.project.materials.audio_fades.iter().find(|f| &f.id == id)).cloned();
-            let (g0, g1) = (seg.volume.sample(time_at(local, rate)), seg.volume.sample(time_at(local + n as i64, rate)));
+            // CapCut's loudness normalisation scales the clip as a whole.
+            let norm = seg.attachments.iter().find_map(|id| self.project.materials.loudness.iter().find(|l| &l.id == id)).map_or(1.0, |l| l.gain());
+            let (g0, g1) = (norm * seg.volume.sample(time_at(local, rate)), norm * seg.volume.sample(time_at(local + n as i64, rate)));
             let len = (s1 - s0).max(1);
             let base = (from - start) as usize * CHANNELS;
             for i in 0..n {

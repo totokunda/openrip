@@ -423,6 +423,17 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                     out.canvas_fills.push(CanvasFill { id, fill });
                     true
                 }
+                "loudnesses" => {
+                    let p = m.get("loudness_param").unwrap_or(&Value::Null);
+                    out.loudness.push(Loudness {
+                        id,
+                        enabled: b(m, "enable", false),
+                        target: f(m, "target_loudness", -23.0) as f32,
+                        measured: p.get("avg_loudness").and_then(Value::as_f64).map(|v| v as f32),
+                        peak: f(p, "peak_loudness", 0.0) as f32,
+                    });
+                    true
+                }
                 "audio_fades" => {
                     out.audio_fades.push(AudioFade {
                         id,

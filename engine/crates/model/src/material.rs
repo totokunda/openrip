@@ -44,6 +44,8 @@ pub struct Materials {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub animations: Vec<Animations>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loudness: Vec<Loudness>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreign: Vec<Foreign>,
 }
 
@@ -61,6 +63,7 @@ pub enum MaterialRef<'a> {
     Curves(&'a ColorCurves),
     ColorWheels(&'a ColorWheels),
     Animations(&'a Animations),
+    Loudness(&'a Loudness),
     Foreign(&'a Foreign),
 }
 
@@ -84,6 +87,7 @@ impl Materials {
         find!(curves, Curves);
         find!(color_wheels, ColorWheels);
         find!(animations, Animations);
+        find!(loudness, Loudness);
         find!(foreign, Foreign);
         None
     }
@@ -104,6 +108,7 @@ impl Materials {
             + self.curves.len()
             + self.color_wheels.len()
             + self.animations.len()
+            + self.loudness.len()
             + self.foreign.len()
     }
 
@@ -300,6 +305,30 @@ pub struct Transition {
     pub library: Option<LibraryRef>,
 }
 
+/// Loudness normalisation of a clip's sound (CapCut's "Normalize loudness"): the clip is
+/// turned up or down to `target` from the loudness measured over its range.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Loudness {
+    pub id: MaterialId,
+    pub enabled: bool,
+    /// Integrated loudness to reach, LUFS (CapCut: -23).
+    pub target: f32,
+    /// The clip's measured integrated loudness (LUFS) and sample peak (dBFS); `None`
+    /// before the source app has measured it.
+    pub measured: Option<f32>,
+    pub peak: f32,
+}
+
+impl Loudness {
+    /// Linear gain to apply: the difference to the target, held back so the peak stays
+    /// below full scale (provisional: not yet measured against CapCut's output).
+    pub fn gain(&self) -> f32 {
+        let Some(measured) = self.measured.filter(|m| self.enabled && m.is_finite() && *m > -70.0) else { return 1.0 };
+        let db = (self.target - measured).min(-self.peak.min(0.0));
+        10f32.powf(db / 20.0)
+    }
+}
+
 /// A clip's animations: an intro, an outro and a loop (at most one of each in CapCut), or a
 /// caption style.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -489,6 +518,7 @@ pub enum AnyMaterial {
     Curves(ColorCurves),
     ColorWheels(ColorWheels),
     Animations(Animations),
+    Loudness(Loudness),
     Foreign(Foreign),
 }
 
@@ -506,6 +536,7 @@ impl AnyMaterial {
             AnyMaterial::Curves(m) => &m.id,
             AnyMaterial::ColorWheels(m) => &m.id,
             AnyMaterial::Animations(m) => &m.id,
+            AnyMaterial::Loudness(m) => &m.id,
             AnyMaterial::Foreign(m) => &m.id,
         }
     }
@@ -530,6 +561,7 @@ impl Materials {
             AnyMaterial::Curves(m) => put(&mut self.curves, m, index),
             AnyMaterial::ColorWheels(m) => put(&mut self.color_wheels, m, index),
             AnyMaterial::Animations(m) => put(&mut self.animations, m, index),
+            AnyMaterial::Loudness(m) => put(&mut self.loudness, m, index),
             AnyMaterial::Foreign(m) => put(&mut self.foreign, m, index),
         }
     }
@@ -554,6 +586,7 @@ impl Materials {
         take!(curves, Curves);
         take!(color_wheels, ColorWheels);
         take!(animations, Animations);
+        take!(loudness, Loudness);
         take!(foreign, Foreign);
         None
     }

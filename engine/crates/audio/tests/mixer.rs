@@ -139,3 +139,25 @@ fn reversed_clips_play_their_audio_backwards() {
         }
     }
 }
+
+#[test]
+fn loudness_normalisation_turns_the_clip_to_the_target() {
+    let Some(path) = noise() else { return };
+    let plain = mix(project(path.to_str().unwrap(), &[(false, false, 1.0)]));
+    let with = |measured: f32, peak: f32| {
+        let mut p = project(path.to_str().unwrap(), &[(false, false, 1.0)]);
+        p.materials.loudness.push(openrip_model::Loudness { id: openrip_model::MaterialId("L".into()), enabled: true, target: -23.0, measured: Some(measured), peak });
+        p.tracks[0].segments[0].attachments.push(openrip_model::MaterialId("L".into()));
+        mix(p)
+    };
+    let ratio = |a: &[f32], b: &[f32]| {
+        let e = |v: &[f32]| v.iter().map(|x| (*x as f64).powi(2)).sum::<f64>();
+        (e(a) / e(b)).sqrt()
+    };
+    // Measured -36 LUFS, peak -18 dBFS: +13 dB.
+    assert!((ratio(&with(-36.0, -18.0), &plain) - 10f64.powf(13.0 / 20.0)).abs() < 1e-3);
+    // Peak -6 dBFS: held to +6 dB so the peak stays below full scale.
+    assert!((ratio(&with(-36.0, -6.0), &plain) - 10f64.powf(6.0 / 20.0)).abs() < 1e-3);
+    // Louder than the target: turned down.
+    assert!((ratio(&with(-13.0, -1.0), &plain) - 10f64.powf(-10.0 / 20.0)).abs() < 1e-3);
+}
