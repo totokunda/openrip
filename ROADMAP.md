@@ -107,7 +107,8 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
      - `PreviewEngine`: project + time → frame.
      - `Player`: cpal audio output whose played samples are the master clock.
      - In `spikes/engine-preview`, CapCut drafts play with sound, the picture following the audio clock (A/V offset p50 0 ms, p95 21 ms).
-   - Next: decoder pre-open of the next clip, and moving this into the app (Electron 44).
+   - Done since then: prefetch of upcoming clips, and the render-ahead `PreviewPipeline` (every frame on time on the hardest local drafts).
+   - Next: move the app's preview onto the engine. The step-by-step plan is in [docs/plan/app-engine-integration.md](docs/plan/app-engine-integration.md).
 2. **M2 Compose.** Multi-track compositing, transforms, crop, opacity, adjustments, LUT filters.
    - Started: `openrip-render`, a wgpu compositor with CapCut's measured resampling pipeline, transforms and opacity. It matches CapCut's exports as closely as the reference model does. `openrip-dev render-frame` renders imported projects.
    - Done: zero-copy NV12/P010 IOSurface input from the decoder, rendering into IOSurfaces, and text (shaping, stroke, background). `PreviewEngine` renders all 58 local CapCut drafts. `openrip-node` plus `spikes/engine-preview` play a CapCut draft in Electron 44 through `sharedTexture`, end to end with no copies.
