@@ -213,6 +213,20 @@ name = "objc2-core-foundation"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
+name = "objc2-core-media"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05ec576860167a15dd9fce7fbee7512beb4e31f532159d3482d1f9c6caedf31d"
+dependencies = [
+ "bitflags",
+ "objc2-core-foundation",
+ "objc2-core-video",
+]
 
 [[package]]
 name = "objc2-core-video"
@@ -233,6 +247,18 @@ checksum = "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d"
 dependencies = [
  "bitflags",
  "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-video-toolbox"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05bf9a3c14831a7d9641b0d81d87dd913ee238a012b2fde27db5a84b56f5df3e"
+dependencies = [
+ "bitflags",
+ "objc2-core-foundation",
+ "objc2-core-media",
+ "objc2-core-video",
 ]
 
 [[package]]
@@ -268,8 +294,10 @@ version = "0.0.0"
 dependencies = [
  "ffmpeg-sys-next",
  "objc2-core-foundation",
+ "objc2-core-media",
  "objc2-core-video",
  "objc2-io-surface",
+ "objc2-video-toolbox",
  "openrip-model",
  "serde",
  "thiserror",

@@ -10,8 +10,9 @@
 //!       Same, for projects saved by the TypeScript app (format v1).
 //!   openrip-dev probe <media-file>
 //!       Print what the decoder sees in a media file (JSON).
-//!   openrip-dev decode-bench <media-file> [--sw]
-//!       Measure sequential decode speed, random-seek latency and scrubbing.
+//!   openrip-dev decode-bench <media-file> [--sw | --ffmpeg-hw]
+//!       Measure sequential decode speed, random-seek latency and scrubbing (default: native
+//!       VideoToolbox where possible; --ffmpeg-hw uses FFmpeg's hwaccel, --sw software).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -29,7 +30,7 @@ fn main() -> ExitCode {
         Some("v1-import") if args.len() >= 2 => v1_import(Path::new(&args[1]), flag(&args, "--out")).map_err(|e| e.to_string()),
         Some("v1-scan") if args.len() >= 2 => v1_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("probe") if args.len() >= 2 => probe(Path::new(&args[1])).map_err(|e| e.to_string()),
-        Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw")).map_err(|e| e.to_string()),
+        Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
             eprintln!("usage:\n  openrip-dev capcut-import <draft-dir> [--out project.json]\n  openrip-dev capcut-scan <projects-root>\n  openrip-dev v1-import <project-N.json> [--out project.json]\n  openrip-dev v1-scan <projects-json-dir>\n  openrip-dev probe <media-file>\n  openrip-dev decode-bench <media-file> [--sw]");
             return ExitCode::from(2);
@@ -273,9 +274,9 @@ fn summary(label: &str, mut ms: Vec<f64>) {
     );
 }
 
-fn decode_bench(file: &Path, software: bool) -> Result<(), openrip_media::MediaError> {
+fn decode_bench(file: &Path, software: bool, ffmpeg_hw: bool) -> Result<(), openrip_media::MediaError> {
     use openrip_media::{DecoderOptions, HardwareMode, Micros, VideoDecoder};
-    let opts = DecoderOptions { hardware: if software { HardwareMode::Off } else { HardwareMode::Auto }, ..Default::default() };
+    let opts = DecoderOptions { hardware: if software { HardwareMode::Off } else { HardwareMode::Auto }, native_videotoolbox: !ffmpeg_hw, ..Default::default() };
     println!("{}", openrip_media::ffmpeg_versions());
     let t0 = Instant::now();
     let mut d = VideoDecoder::open(file, &opts)?;
@@ -291,7 +292,7 @@ fn decode_bench(file: &Path, software: bool) -> Result<(), openrip_media::MediaE
         info.bit_depth,
         fps,
         info.duration.as_secs_f64(),
-        if d.hardware() { "hardware" } else { "software" },
+        if d.native_videotoolbox() { "native VideoToolbox" } else if d.hardware() { "VideoToolbox via FFmpeg" } else { "software" },
         open_ms
     );
 

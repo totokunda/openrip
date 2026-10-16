@@ -7,7 +7,7 @@ Cargo workspace for the engine that replaces the TypeScript media pipeline. See 
 | `openrip-model` | started | Project format: microsecond time with exact frame-rate maths, `Animated<T>` keyframes, tracks → segments → materials mirroring CapCut's drafts. Edits as serializable commands (`Edit`) with exact undo/redo (`Document`) |
 | `openrip-capcut` | started | CapCut draft importer (read-only) with an import report — coverage in [docs/parity/capcut-import.md](../docs/parity/capcut-import.md) |
 | `openrip-v1` | started | Importer for projects saved by the TypeScript app (format v1) |
-| `openrip-media` | started | Demux/decode through FFmpeg 9 with VideoToolbox hardware decode (frames stay in IOSurface-backed NV12/P010). Frame-accurate `frame_at(t)` with forward-decode vs seek cost model, open-GOP handling, probe (codec, rate, rotation, colour). Needs FFmpeg dev libraries (`brew install ffmpeg pkgconf`) |
+| `openrip-media` | started | Demux through FFmpeg 9; decode with a native asynchronous VideoToolbox path for H.264/HEVC in MP4/MOV (3–4× FFmpeg's hwaccel), FFmpeg (hwaccel or software) for everything else. Frames stay in IOSurface-backed NV12/P010. Frame-accurate `frame_at(t)` with forward-decode vs seek cost model, open-GOP handling, probe (codec, rate, rotation, colour). Needs FFmpeg dev libraries (`brew install ffmpeg pkgconf`) |
 | `openrip-dev` | started | Developer CLI (`capcut-import`, `capcut-scan`, `v1-import`, `v1-scan`, `probe`, `decode-bench`) |
 
 ```bash

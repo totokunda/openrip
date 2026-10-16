@@ -120,12 +120,29 @@ fn frame_number(f: &VideoFrame) -> i64 {
     (0..10).map(|bit| ((img.pixel(bit * 64 + 32, 64)[0] > 128) as i64) << bit).sum()
 }
 
-fn modes() -> Vec<HardwareMode> {
+/// Decoder set-ups to test: native VideoToolbox, VideoToolbox through FFmpeg, software.
+#[derive(Copy, Clone, Debug)]
+enum Mode {
+    Native,
+    FfmpegHw,
+    Software,
+}
+
+fn modes() -> Vec<Mode> {
     if cfg!(target_os = "macos") {
-        vec![HardwareMode::Auto, HardwareMode::Off]
+        vec![Mode::Native, Mode::FfmpegHw, Mode::Software]
     } else {
-        vec![HardwareMode::Off]
+        vec![Mode::Software]
     }
+}
+
+fn open_mode(path: &Path, mode: Mode) -> VideoDecoder {
+    let opts = match mode {
+        Mode::Native => DecoderOptions::default(),
+        Mode::FfmpegHw => DecoderOptions { native_videotoolbox: false, ..Default::default() },
+        Mode::Software => DecoderOptions { hardware: HardwareMode::Off, ..Default::default() },
+    };
+    VideoDecoder::open(path, &opts).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
 fn open(path: &Path, hardware: HardwareMode) -> VideoDecoder {
@@ -137,7 +154,7 @@ fn sequential_decode_returns_every_frame_in_order() {
     let Some(dir) = fixtures_dir() else { return };
     for c in clips() {
         for mode in modes() {
-            let mut d = open(&dir.join(c.name), mode);
+            let mut d = open_mode(&dir.join(c.name), mode);
             let mut n = 0;
             while let Some(f) = d.next_frame().unwrap() {
                 assert_eq!(frame_number(&f), n, "{} {mode:?}: frame {n}", c.name);
@@ -163,7 +180,7 @@ fn random_access_is_frame_accurate() {
     let Some(dir) = fixtures_dir() else { return };
     for c in clips() {
         for mode in modes() {
-            let mut d = open(&dir.join(c.name), mode);
+            let mut d = open_mode(&dir.join(c.name), mode);
             let mut rng = Lcg(42);
             let mut n = 0;
             for step in 0..240 {
@@ -181,7 +198,7 @@ fn random_access_is_frame_accurate() {
                     1 => Micros((start.0 + end.0) / 2),
                     _ => Micros(end.0 - 1),
                 };
-                let f = d.frame_at(t).unwrap().unwrap();
+                let f = d.frame_at(t).unwrap_or_else(|e| panic!("{} {mode:?}: frame_at({}) step {step}: {e}", c.name, t.0)).unwrap();
                 assert_eq!(frame_number(&f), n, "{} {mode:?}: frame_at({}) step {step}", c.name, t.0);
                 assert_eq!(f.time, start, "{} {mode:?}: time at step {step}", c.name);
             }
@@ -233,6 +250,7 @@ fn hardware_frames_are_iosurface_backed_yuv() {
     let Some(dir) = fixtures_dir() else { return };
     for (name, format) in [("h264_bframes.mp4", PixelFormat::Nv12), ("hevc.mp4", PixelFormat::Nv12), ("hevc_10bit.mp4", PixelFormat::P010)] {
         let mut d = open(&dir.join(name), HardwareMode::Require);
+        assert!(d.native_videotoolbox(), "{name}: expected the native VideoToolbox path");
         let f = d.frame_at(Micros(1_000_000)).unwrap().unwrap();
         assert!(f.is_hardware(), "{name}");
         assert_eq!(f.pixel_format(), format, "{name}");

@@ -14,6 +14,8 @@ serde.workspace = true
 openrip-model.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVImageBuffer", "CVBuffer", "CVReturn", "objc2-io-surface"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "objc2-io-surface"] }
 objc2-io-surface = { version = "0.3", default-features = false, features = ["std", "IOSurfaceRef", "IOSurfaceTypes", "objc2-core-foundation"] }
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFData", "CFString", "CFNumber", "CFBase"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMBase", "CMTime", "CMFormatDescription", "CMBlockBuffer", "CMSampleBuffer", "CMSync", "objc2-core-video"] }
+objc2-video-toolbox = { version = "0.3", default-features = false, features = ["std", "VTBase", "VTErrors", "VTSession", "VTDecompressionSession", "VTDecompressionProperties", "objc2-core-media", "objc2-core-video"] }

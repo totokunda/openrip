@@ -15,6 +15,8 @@ mod frame;
 mod info;
 mod nal;
 mod util;
+#[cfg(target_os = "macos")]
+mod vt;
 
 pub use decode::{DecodeStats, DecoderOptions, HardwareMode, VideoDecoder};
 pub use error::MediaError;

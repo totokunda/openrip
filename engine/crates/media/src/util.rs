@@ -27,11 +27,28 @@ pub(crate) fn cstr_or(p: *const c_char, fallback: &str) -> String {
 
 pub(crate) const MICROS: ff::AVRational = ff::AVRational { num: 1, den: 1_000_000 };
 
+/// Keep FFmpeg quiet below errors (real-world files trigger a stream of harmless warnings);
+/// `OPENRIP_FFMPEG_LOG=info|verbose|debug` turns it up.
+fn init_logging() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let level = match std::env::var("OPENRIP_FFMPEG_LOG").as_deref() {
+            Ok("warning") => ff::AV_LOG_WARNING,
+            Ok("info") => ff::AV_LOG_INFO,
+            Ok("verbose") => ff::AV_LOG_VERBOSE,
+            Ok("debug") => ff::AV_LOG_DEBUG,
+            _ => ff::AV_LOG_ERROR,
+        };
+        unsafe { ff::av_log_set_level(level) };
+    });
+}
+
 /// Owns an opened `AVFormatContext`.
 pub(crate) struct Input(pub *mut ff::AVFormatContext);
 
 impl Input {
     pub(crate) fn open(path: &Path) -> Result<Input, MediaError> {
+        init_logging();
         let c = c_path(path)?;
         let mut fmt: *mut ff::AVFormatContext = std::ptr::null_mut();
         unsafe {

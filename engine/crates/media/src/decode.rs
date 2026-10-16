@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::Path;
 
 use ffmpeg_sys_next as ff;
@@ -25,18 +26,22 @@ pub struct DecoderOptions {
     pub hardware: HardwareMode,
     /// Software decoding threads; 0 picks automatically.
     pub threads: u32,
+    /// Drive VideoToolbox directly for H.264/HEVC in MP4/MOV, instead of through FFmpeg's
+    /// hwaccel: several frames in flight instead of one, and frames a seek only needs as
+    /// references are never output. Several times faster; on by default.
+    pub native_videotoolbox: bool,
 }
 
 impl Default for DecoderOptions {
     fn default() -> Self {
-        DecoderOptions { hardware: HardwareMode::Auto, threads: 0 }
+        DecoderOptions { hardware: HardwareMode::Auto, threads: 0, native_videotoolbox: true }
     }
 }
 
 /// Counters for benchmarks and diagnostics.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct DecodeStats {
-    /// Frames that came out of the decoder (including ones skipped while seeking).
+    /// Pictures decoded, including ones only needed as references while seeking.
     pub frames_decoded: u64,
     /// Demuxer seeks performed.
     pub seeks: u64,
@@ -48,29 +53,77 @@ pub struct DecodeStats {
 
 /// Frames worth decoding forward rather than seeking (a seek flushes and refills the decoder).
 const SEEK_COST_FRAMES: i64 = 8;
-
 /// Packets skipped after a seek while looking for a keyframe, before giving up and feeding them anyway.
 const MAX_SKIP_TO_KEY: u32 = 1000;
 /// Rejected packets tolerated over a decoder's life before decoding is treated as broken.
 const MAX_DECODE_ERRORS: u64 = 100;
+/// Packets read ahead to find the frame shown at a seek target.
+const MAX_LOOKAHEAD: usize = 1200;
+
+/// A demuxed packet waiting for the decoder.
+struct Queued {
+    pkt: *mut ff::AVPacket,
+    /// Whether its picture is needed as output (false: decode it only as a reference).
+    output: bool,
+}
+
+impl Queued {
+    fn pts(&self) -> i64 {
+        unsafe { (*self.pkt).pts }
+    }
+    /// Decode timestamp, or the presentation one when the container has none.
+    fn dts(&self) -> i64 {
+        unsafe {
+            if (*self.pkt).dts != ff::AV_NOPTS_VALUE {
+                (*self.pkt).dts
+            } else {
+                (*self.pkt).pts
+            }
+        }
+    }
+}
+
+impl Drop for Queued {
+    fn drop(&mut self) {
+        unsafe { ff::av_packet_free(&mut self.pkt) }
+    }
+}
+
+/// Owns an opened FFmpeg codec context.
+struct CodecContext(*mut ff::AVCodecContext);
+
+impl Drop for CodecContext {
+    fn drop(&mut self) {
+        unsafe { ff::avcodec_free_context(&mut self.0) }
+    }
+}
+
+enum Backend {
+    /// FFmpeg's decoder: software, or VideoToolbox through FFmpeg's hwaccel.
+    Ffmpeg { ctx: CodecContext, flush_sent: bool },
+    #[cfg(target_os = "macos")]
+    Native(crate::vt::VtDecoder),
+}
 
 /// Decodes one video stream, sequentially or by time.
 pub struct VideoDecoder {
     input: Input,
     stream: i32,
     codec: *const ff::AVCodec,
-    /// VideoToolbox device, when decoding on the GPU (owned reference).
+    /// VideoToolbox device for FFmpeg's hwaccel, when decoding on the GPU (owned reference).
     device: *mut ff::AVBufferRef,
     threads: i32,
+    native_videotoolbox: bool,
     /// Bitstream layout, for H.264/HEVC (to recognise IDR keyframes).
     nal: Option<(nal::Codec, nal::Framing)>,
-    ctx: *mut ff::AVCodecContext,
-    pkt: *mut ff::AVPacket,
+    backend: Backend,
+    /// Scratch frame for FFmpeg's decoder.
     frame: *mut ff::AVFrame,
     tb: ff::AVRational,
     /// Stream timestamp of time zero (the first frame).
     origin: i64,
     info: VideoInfo,
+    colorspace: ff::AVColorSpace,
     hardware: bool,
     require_hardware: bool,
     /// Duration used when the container doesn't give one.
@@ -79,9 +132,11 @@ pub struct VideoDecoder {
     current: Option<VideoFrame>,
     /// A frame decoded past a seek target, to be returned next.
     pending: Option<VideoFrame>,
-    /// All packets have been sent and the decoder is draining.
-    flushing: bool,
-    /// Right after a seek, before the first packet has been sent.
+    /// Packets read ahead of the decoder.
+    queue: VecDeque<Queued>,
+    /// The demuxer has no more packets.
+    eof: bool,
+    /// Right after a seek, before the first packet has been read.
     just_seeked: bool,
     /// Packets skipped since the seek while waiting for a keyframe.
     skipped: u32,
@@ -127,34 +182,34 @@ impl VideoDecoder {
                     }
                 }
             }
+            let extra = if (*par).extradata.is_null() { &[][..] } else { std::slice::from_raw_parts((*par).extradata, (*par).extradata_size as usize) };
             let mut dec = VideoDecoder {
                 input,
                 stream,
                 codec,
                 device,
                 threads: opts.threads as i32,
-                nal: {
-                    let extra = if (*par).extradata.is_null() { &[][..] } else { std::slice::from_raw_parts((*par).extradata, (*par).extradata_size as usize) };
-                    nal::detect((*par).codec_id, extra)
-                },
-                ctx: std::ptr::null_mut(),
-                pkt: ff::av_packet_alloc(),
+                native_videotoolbox: opts.native_videotoolbox,
+                nal: nal::detect((*par).codec_id, extra),
+                backend: Backend::Ffmpeg { ctx: CodecContext(std::ptr::null_mut()), flush_sent: false },
                 frame: ff::av_frame_alloc(),
                 tb: (*st).time_base,
                 origin: if (*st).start_time != ff::AV_NOPTS_VALUE { (*st).start_time } else { ff::AV_NOPTS_VALUE },
                 nominal: info.frame_rate.map(|r| r.frame_duration()).unwrap_or(Micros(33_333)),
+                colorspace: (*par).color_space,
                 info,
                 hardware: !device.is_null(),
                 require_hardware: opts.hardware == HardwareMode::Require,
                 current: None,
                 pending: None,
-                flushing: false,
+                queue: VecDeque::new(),
+                eof: false,
                 just_seeked: false,
                 skipped: 0,
                 drop_before: ff::AV_NOPTS_VALUE,
                 stats: DecodeStats::default(),
             };
-            dec.ctx = dec.new_context()?;
+            dec.backend = dec.new_backend()?;
             if dec.origin == ff::AV_NOPTS_VALUE {
                 // No start time in the container: the first frame defines time zero.
                 if let Some(first) = dec.decode()? {
@@ -165,32 +220,39 @@ impl VideoDecoder {
         }
     }
 
-    /// A configured, opened codec context for the stream.
-    unsafe fn new_context(&self) -> Result<*mut ff::AVCodecContext, MediaError> {
-        let st = self.input.stream(self.stream);
-        let mut ctx = ff::avcodec_alloc_context3(self.codec);
-        let result = (|| {
-            check("avcodec_parameters_to_context", ff::avcodec_parameters_to_context(ctx, (*st).codecpar))?;
-            (*ctx).pkt_timebase = (*st).time_base;
-            // Never hand out frames the decoder knows are damaged (e.g. before a recovery point).
-            (*ctx).flags &= !(ff::AV_CODEC_FLAG_OUTPUT_CORRUPT as i32);
-            (*ctx).thread_count = self.threads;
-            (*ctx).thread_type = ff::FF_THREAD_FRAME | ff::FF_THREAD_SLICE;
-            if !self.device.is_null() {
-                (*ctx).hw_device_ctx = ff::av_buffer_ref(self.device);
-                (*ctx).get_format = Some(pick_hw_format);
-                // The GPU does the work; frame threads around it only add latency.
-                (*ctx).thread_count = 1;
-            }
-            check("avcodec_open2", ff::avcodec_open2(ctx, self.codec, std::ptr::null_mut()))
-        })();
-        match result {
-            Ok(_) => Ok(ctx),
-            Err(e) => {
-                ff::avcodec_free_context(&mut ctx);
-                Err(e)
+    /// The native VideoToolbox decoder when it can take the stream, FFmpeg's otherwise.
+    unsafe fn new_backend(&self) -> Result<Backend, MediaError> {
+        #[cfg(target_os = "macos")]
+        if self.hardware && self.native_videotoolbox {
+            if let Some((codec, nal::Framing::LengthPrefixed(_))) = self.nal {
+                let par = (*self.input.stream(self.stream)).codecpar;
+                if let Some(vt) = crate::vt::VtDecoder::new(codec, par, self.tb, self.info.bit_depth) {
+                    return Ok(Backend::Native(vt));
+                }
             }
         }
+        Ok(Backend::Ffmpeg { ctx: self.new_context()?, flush_sent: false })
+    }
+
+    /// A configured, opened FFmpeg codec context for the stream.
+    unsafe fn new_context(&self) -> Result<CodecContext, MediaError> {
+        let st = self.input.stream(self.stream);
+        let ctx = CodecContext(ff::avcodec_alloc_context3(self.codec));
+        let c = ctx.0;
+        check("avcodec_parameters_to_context", ff::avcodec_parameters_to_context(c, (*st).codecpar))?;
+        (*c).pkt_timebase = (*st).time_base;
+        // Never hand out frames the decoder knows are damaged (e.g. before a recovery point).
+        (*c).flags &= !(ff::AV_CODEC_FLAG_OUTPUT_CORRUPT as i32);
+        (*c).thread_count = self.threads;
+        (*c).thread_type = ff::FF_THREAD_FRAME | ff::FF_THREAD_SLICE;
+        if !self.device.is_null() {
+            (*c).hw_device_ctx = ff::av_buffer_ref(self.device);
+            (*c).get_format = Some(pick_hw_format);
+            // The GPU does the work; frame threads around it only add latency.
+            (*c).thread_count = 1;
+        }
+        check("avcodec_open2", ff::avcodec_open2(c, self.codec, std::ptr::null_mut()))?;
+        Ok(ctx)
     }
 
     pub fn info(&self) -> &VideoInfo {
@@ -203,8 +265,22 @@ impl VideoDecoder {
         self.hardware
     }
 
+    /// True if frames come from the native VideoToolbox path.
+    pub fn native_videotoolbox(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        if let Backend::Native(_) = self.backend {
+            return true;
+        }
+        false
+    }
+
     pub fn stats(&self) -> DecodeStats {
-        self.stats
+        let mut s = self.stats;
+        #[cfg(target_os = "macos")]
+        if let Backend::Native(vt) = &self.backend {
+            s.decode_errors += vt.errors();
+        }
+        s
     }
 
     /// The next frame in presentation order, or `None` at the end of the stream.
@@ -232,6 +308,9 @@ impl VideoDecoder {
         }
         let mut retreat = 0;
         loop {
+            if self.pending.as_ref().is_none_or(|p| p.time <= t) {
+                self.prepare_target(t)?;
+            }
             // Decode forward until the next frame would start after `t`.
             loop {
                 if let Some(p) = &self.pending {
@@ -302,6 +381,43 @@ impl VideoDecoder {
         t.0 - cur.time.0 <= 2_000_000
     }
 
+    /// Read ahead to the frame shown at `t` and mark every queued picture before it as
+    /// reference-only, so the native decoder doesn't output (or allocate) pictures nobody
+    /// will see. All candidates are known once a packet decodes after `t`: no later packet
+    /// can present at or before it.
+    fn prepare_target(&mut self, t: Micros) -> Result<(), MediaError> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Native(_) = self.backend {
+            if self.origin == ff::AV_NOPTS_VALUE {
+                return Ok(());
+            }
+            // Compare in microseconds, rounded exactly like frame times, so the frame chosen
+            // here is the one `frame_at` will pick.
+            let (origin, tb) = (self.origin, self.tb);
+            let after = move |ts: i64| ts != ff::AV_NOPTS_VALUE && unsafe { ff::av_rescale_q(ts - origin, tb, MICROS) } > t.0;
+            while !self.eof && self.queue.len() < MAX_LOOKAHEAD && !self.queue.back().is_some_and(|q| after(q.dts())) {
+                if let Some(q) = self.read_packet()? {
+                    self.queue.push_back(q);
+                }
+            }
+            let floor = self.drop_before;
+            let shown = self
+                .queue
+                .iter()
+                .map(Queued::pts)
+                .filter(|&p| p != ff::AV_NOPTS_VALUE && !after(p) && (floor == ff::AV_NOPTS_VALUE || p >= floor))
+                .max();
+            if let Some(shown) = shown {
+                for q in &mut self.queue {
+                    q.output = q.pts() == ff::AV_NOPTS_VALUE || q.pts() >= shown;
+                }
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = t;
+        Ok(())
+    }
+
     /// Seek the demuxer to the keyframe at or before `t` (moved back by 2^attempt - 1 seconds
     /// on retries) and reset the decoder.
     fn seek_before(&mut self, t: Micros, attempt: u32) -> Result<(), MediaError> {
@@ -322,113 +438,180 @@ impl VideoDecoder {
                 // Some demuxers can't seek backward from a timestamp; fall back to the start.
                 check("av_seek_frame", ff::av_seek_frame(self.input.0, self.stream, i64::MIN / 2, ff::AVSEEK_FLAG_BACKWARD))?;
             }
-            ff::avcodec_flush_buffers(self.ctx);
+            match &mut self.backend {
+                Backend::Ffmpeg { ctx, flush_sent } => {
+                    ff::avcodec_flush_buffers(ctx.0);
+                    *flush_sent = false;
+                }
+                #[cfg(target_os = "macos")]
+                Backend::Native(vt) => vt.reset(),
+            }
         }
         self.stats.seeks += 1;
         self.current = None;
         self.pending = None;
-        self.flushing = false;
+        self.queue.clear();
+        self.eof = false;
         self.just_seeked = true;
         self.skipped = 0;
         self.drop_before = ff::AV_NOPTS_VALUE;
         Ok(())
     }
 
-    /// Whether the packet in `self.pkt` is a keyframe that doesn't reset reference pictures.
-    unsafe fn open_gop_keyframe(&self) -> bool {
-        match self.nal {
-            Some((codec, framing)) => {
-                let data = std::slice::from_raw_parts((*self.pkt).data, (*self.pkt).size as usize);
-                !nal::is_idr(codec, framing, data)
-            }
-            None => false,
-        }
-    }
-
-    /// Pull the next frame out of the decoder, feeding it packets as needed.
-    fn decode(&mut self) -> Result<Option<VideoFrame>, MediaError> {
+    /// Next packet of our stream from the demuxer. After a seek, skips to the first keyframe
+    /// and, if that keyframe is open-GOP, restarts a hardware decoder.
+    fn read_packet(&mut self) -> Result<Option<Queued>, MediaError> {
         unsafe {
             loop {
-                let r = ff::avcodec_receive_frame(self.ctx, self.frame);
-                if r == 0 {
-                    self.stats.frames_decoded += 1;
-                    let f = self.frame;
-                    let mut ts = (*f).best_effort_timestamp;
-                    if ts == ff::AV_NOPTS_VALUE {
-                        ts = (*f).pts;
-                    }
-                    if self.drop_before != ff::AV_NOPTS_VALUE && ts != ff::AV_NOPTS_VALUE && ts < self.drop_before {
-                        ff::av_frame_unref(f);
-                        continue;
-                    }
-                    if self.origin == ff::AV_NOPTS_VALUE && ts != ff::AV_NOPTS_VALUE {
-                        self.origin = ts;
-                    }
-                    let time = if ts == ff::AV_NOPTS_VALUE {
-                        self.current.as_ref().map(|c| c.time + c.duration).unwrap_or(Micros::ZERO)
-                    } else {
-                        Micros(ff::av_rescale_q(ts - self.origin, self.tb, MICROS))
-                    };
-                    let duration = if (*f).duration > 0 { Micros(ff::av_rescale_q((*f).duration, self.tb, MICROS)) } else { self.nominal };
-                    let frame = VideoFrame::reference(f, time, duration);
-                    ff::av_frame_unref(f);
-                    let frame = frame?;
-                    if self.require_hardware && !frame.is_hardware() {
-                        return Err(MediaError::Ffmpeg { op: "hardware decode", code: -1, msg: format!("{} was decoded in software", self.info.codec) });
-                    }
-                    return Ok(Some(frame));
-                }
-                if r == ff::AVERROR_EOF {
+                let q = Queued { pkt: ff::av_packet_alloc(), output: true };
+                if ff::av_read_frame(self.input.0, q.pkt) < 0 {
+                    // End of file (or a read error).
+                    self.eof = true;
                     return Ok(None);
                 }
-                if r != ff::AVERROR(ff::EAGAIN) {
-                    return Err(MediaError::ffmpeg("avcodec_receive_frame", r));
-                }
-                if self.flushing {
-                    return Ok(None);
-                }
-                let r = ff::av_read_frame(self.input.0, self.pkt);
-                if r < 0 {
-                    // End of file (or a read error): drain what the decoder still holds.
-                    ff::avcodec_send_packet(self.ctx, std::ptr::null());
-                    self.flushing = true;
-                    continue;
-                }
-                if (*self.pkt).stream_index != self.stream {
-                    ff::av_packet_unref(self.pkt);
+                if (*q.pkt).stream_index != self.stream {
                     continue;
                 }
                 if self.just_seeked {
+                    let key = (*q.pkt).flags & ff::AV_PKT_FLAG_KEY != 0;
                     // Containers without an index (MPEG-TS) land near a keyframe, not on one:
                     // start feeding the decoder at the first keyframe.
-                    if (*self.pkt).flags & ff::AV_PKT_FLAG_KEY == 0 && self.skipped < MAX_SKIP_TO_KEY {
+                    if !key && self.skipped < MAX_SKIP_TO_KEY {
                         self.skipped += 1;
-                        ff::av_packet_unref(self.pkt);
                         continue;
                     }
                     self.just_seeked = false;
-                    if (*self.pkt).flags & ff::AV_PKT_FLAG_KEY != 0 {
-                        self.drop_before = (*self.pkt).pts;
-                        if self.hardware && self.open_gop_keyframe() {
+                    if key {
+                        self.drop_before = (*q.pkt).pts;
+                        if self.hardware && self.open_gop_keyframe(q.pkt) {
                             // VideoToolbox keeps its own reference pictures, which a flush
                             // doesn't clear, and only an IDR picture resets them. After an
                             // open-GOP keyframe it would resolve references to stale surfaces
                             // from before the seek, so start a fresh session.
-                            let ctx = self.new_context()?;
-                            ff::avcodec_free_context(&mut self.ctx);
-                            self.ctx = ctx;
+                            self.backend = self.new_backend()?;
                             self.stats.sessions_reset += 1;
                         }
                     }
                 }
-                let r = ff::avcodec_send_packet(self.ctx, self.pkt);
-                ff::av_packet_unref(self.pkt);
-                if r < 0 && r != ff::AVERROR(ff::EAGAIN) {
-                    // A damaged packet (or one picture the hardware rejected) costs that
-                    // picture, not the stream.
-                    self.stats.decode_errors += 1;
-                    if self.stats.decode_errors > MAX_DECODE_ERRORS {
-                        return Err(MediaError::ffmpeg("avcodec_send_packet", r));
+                return Ok(Some(q));
+            }
+        }
+    }
+
+    fn next_packet(&mut self) -> Result<Option<Queued>, MediaError> {
+        match self.queue.pop_front() {
+            Some(q) => Ok(Some(q)),
+            None if self.eof => Ok(None),
+            None => self.read_packet(),
+        }
+    }
+
+    /// Whether `pkt` is a keyframe that doesn't reset reference pictures.
+    unsafe fn open_gop_keyframe(&self, pkt: *const ff::AVPacket) -> bool {
+        match self.nal {
+            Some((codec, framing)) => !nal::is_idr(codec, framing, std::slice::from_raw_parts((*pkt).data, (*pkt).size as usize)),
+            None => false,
+        }
+    }
+
+    fn time_of(&mut self, ts: i64) -> Micros {
+        if self.origin == ff::AV_NOPTS_VALUE && ts != ff::AV_NOPTS_VALUE {
+            self.origin = ts;
+        }
+        if ts == ff::AV_NOPTS_VALUE {
+            self.current.as_ref().map(|c| c.time + c.duration).unwrap_or(Micros::ZERO)
+        } else {
+            Micros(unsafe { ff::av_rescale_q(ts - self.origin, self.tb, MICROS) })
+        }
+    }
+
+    fn dropped(&self, ts: i64) -> bool {
+        self.drop_before != ff::AV_NOPTS_VALUE && ts != ff::AV_NOPTS_VALUE && ts < self.drop_before
+    }
+
+    /// Pull the next frame out of the decoder, feeding it packets as needed.
+    fn decode(&mut self) -> Result<Option<VideoFrame>, MediaError> {
+        loop {
+            match &mut self.backend {
+                Backend::Ffmpeg { ctx, flush_sent } => unsafe {
+                    let r = ff::avcodec_receive_frame(ctx.0, self.frame);
+                    if r == 0 {
+                        self.stats.frames_decoded += 1;
+                        let f = self.frame;
+                        let mut ts = (*f).best_effort_timestamp;
+                        if ts == ff::AV_NOPTS_VALUE {
+                            ts = (*f).pts;
+                        }
+                        if self.dropped(ts) {
+                            ff::av_frame_unref(f);
+                            continue;
+                        }
+                        let time = self.time_of(ts);
+                        let duration = if (*f).duration > 0 { Micros(ff::av_rescale_q((*f).duration, self.tb, MICROS)) } else { self.nominal };
+                        let frame = VideoFrame::reference(f, time, duration);
+                        ff::av_frame_unref(f);
+                        let frame = frame?;
+                        if self.require_hardware && !frame.is_hardware() {
+                            return Err(MediaError::Ffmpeg { op: "hardware decode", code: -1, msg: format!("{} was decoded in software", self.info.codec) });
+                        }
+                        return Ok(Some(frame));
+                    }
+                    if r == ff::AVERROR_EOF {
+                        return Ok(None);
+                    }
+                    if r != ff::AVERROR(ff::EAGAIN) {
+                        return Err(MediaError::ffmpeg("avcodec_receive_frame", r));
+                    }
+                    if *flush_sent {
+                        return Ok(None);
+                    }
+                    // Reading may restart the decoder (open-GOP keyframe after a seek), so
+                    // look the context up again afterwards.
+                    let packet = self.next_packet()?;
+                    let Backend::Ffmpeg { ctx, .. } = &self.backend else { continue };
+                    let ctx = ctx.0;
+                    match packet {
+                        Some(q) => {
+                            let r = ff::avcodec_send_packet(ctx, q.pkt);
+                            if r < 0 && r != ff::AVERROR(ff::EAGAIN) {
+                                // A damaged packet (or one picture the hardware rejected) costs
+                                // that picture, not the stream.
+                                self.stats.decode_errors += 1;
+                                if self.stats.decode_errors > MAX_DECODE_ERRORS {
+                                    return Err(MediaError::ffmpeg("avcodec_send_packet", r));
+                                }
+                            }
+                        }
+                        None => {
+                            // Drain what the decoder still holds.
+                            ff::avcodec_send_packet(ctx, std::ptr::null());
+                            if let Backend::Ffmpeg { flush_sent, .. } = &mut self.backend {
+                                *flush_sent = true;
+                            }
+                        }
+                    }
+                },
+                #[cfg(target_os = "macos")]
+                Backend::Native(vt) => {
+                    let done = self.eof && self.queue.is_empty();
+                    match vt.next(done) {
+                        crate::vt::Next::Frame(pts, Some(buffer)) => {
+                            if self.dropped(pts) {
+                                continue;
+                            }
+                            let time = self.time_of(pts);
+                            return Ok(Some(VideoFrame::from_pixel_buffer(buffer, self.colorspace, time, self.nominal)));
+                        }
+                        crate::vt::Next::Frame(_, None) => continue, // counted in vt.errors()
+                        crate::vt::Next::Drained => return Ok(None),
+                        crate::vt::Next::NeedInput => {
+                            if let Some(q) = self.next_packet()? {
+                                self.stats.frames_decoded += 1;
+                                if let Backend::Native(vt) = &mut self.backend {
+                                    vt.submit(q.pkt, q.output)?;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -440,10 +623,11 @@ impl Drop for VideoDecoder {
     fn drop(&mut self) {
         self.current = None;
         self.pending = None;
+        self.queue.clear();
+        // Free the decoder (and its hold on the device) before the device.
+        self.backend = Backend::Ffmpeg { ctx: CodecContext(std::ptr::null_mut()), flush_sent: false };
         unsafe {
             ff::av_frame_free(&mut self.frame);
-            ff::av_packet_free(&mut self.pkt);
-            ff::avcodec_free_context(&mut self.ctx);
             ff::av_buffer_unref(&mut self.device);
         }
     }
