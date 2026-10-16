@@ -31,7 +31,8 @@ fn fs_lut3d(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     }
     let c = clamp(px.rgb / px.a, vec3<f32>(0.0), vec3<f32>(1.0));
     let top = F.n - 1.0;
-    let p = clamp(c * F.n - 0.5, vec3<f32>(0.0), vec3<f32>(top));
+    // Entries at texel centres (CapCut) or at the cube's corners (Hald CLUTs; unused.x = 1).
+    let p = clamp(select(c * F.n - 0.5, c * top, F.unused.x > 0.5), vec3<f32>(0.0), vec3<f32>(top));
     let i = floor(p);
     let j = min(i + 1.0, vec3<f32>(top));
     let f = p - i;

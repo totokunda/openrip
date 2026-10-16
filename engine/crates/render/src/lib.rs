@@ -26,6 +26,9 @@ pub struct Lut3d {
     pub key: u64,
     pub size: u32,
     pub rgb: Vec<f32>,
+    /// Entries sit at the cube's corners (a colour c reads entry c × (size − 1), as
+    /// ImageMagick reads Hald CLUTs) rather than at texel centres (CapCut's tables).
+    pub edge_aligned: bool,
 }
 
 impl Lut3d {
@@ -40,7 +43,28 @@ impl Lut3d {
             return None;
         }
         let body = bytes.get(10..10 + (n * n * n * 12) as usize)?;
-        Some(Lut3d { key, size: n, rgb: body.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect() })
+        Some(Lut3d { key, size: n, rgb: body.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect(), edge_aligned: false })
+    }
+
+    /// A Hald CLUT image (the app's own filters): a square of side level³ holding level⁶
+    /// entries, entry r + n·g + n²·b (n = level²) at that index read row by row, read
+    /// edge-aligned with trilinear interpolation, as ImageMagick and the app's preview do.
+    pub fn from_hald(img: &RgbaImage, key: u64) -> Option<Lut3d> {
+        let side = img.width.min(img.height);
+        let level = (2..=16u32).find(|l| l * l * l >= side)?;
+        let n = level * level;
+        let entries = (n * n * n) as usize;
+        if (img.width as usize) * (img.height as usize) < entries {
+            return None;
+        }
+        let w = img.width as usize;
+        let rgb = (0..entries)
+            .flat_map(|i| {
+                let px = &img.data[((i / w) * w + i % w) * 4..][..3];
+                [px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0]
+            })
+            .collect();
+        Some(Lut3d { key, size: n, rgb, edge_aligned: true })
     }
 }
 
@@ -702,7 +726,7 @@ impl Compositor {
         };
         let (w, h) = (canvas.width(), canvas.height());
         let tmp = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
-        let params: [f32; 4] = [n as f32, strength.clamp(0.0, 1.0), 0.0, 0.0];
+        let params: [f32; 4] = [n as f32, strength.clamp(0.0, 1.0), if lut.edge_aligned { 1.0 } else { 0.0 }, 0.0];
         let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&params), usage: wgpu::BufferUsages::UNIFORM });
         let (canvas_view, table_view, tmp_view) = (canvas.create_view(&Default::default()), table.create_view(&Default::default()), tmp.create_view(&Default::default()));
         let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {

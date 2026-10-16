@@ -667,7 +667,13 @@ impl PreviewEngine {
                 return Err((bundle.clone(), why.clone()));
             }
             if !self.filters.contains_key(&bundle) {
-                let lut = load_filter(Path::new(&bundle), key_of(&bundle)).map_err(|why| (bundle.clone(), why))?;
+                // The app's own filters are Hald CLUT images; CapCut's are bundles with a table.
+                let lut = if effect.builtin.as_deref() == Some("lut") {
+                    load_still(Path::new(&bundle)).and_then(|img| Lut3d::from_hald(&img, key_of(&bundle)).ok_or_else(|| "not a Hald CLUT image".to_string()))
+                } else {
+                    load_filter(Path::new(&bundle), key_of(&bundle))
+                }
+                .map_err(|why| (bundle.clone(), why))?;
                 self.filters.insert(bundle.clone(), std::sync::Arc::new(lut));
             }
             return Ok(Some(Pixels::Filter(self.filters[&bundle].clone(), strength)));
