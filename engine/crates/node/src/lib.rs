@@ -411,3 +411,92 @@ pub fn frame_for_display() -> Option<DisplayFrame> {
     s.shown.insert(id, f.surface);
     Some(DisplayFrame { id, io_surface: Buffer::from(ptr.to_ne_bytes().to_vec()), width: w, height: h, time_us: f.time.0, render_ms: f.render_ms })
 }
+
+// ---- Timeline thumbnails ----
+
+/// One thumbnailer per pass, so a long exact pass doesn't hold up a quick one.
+struct Thumbnailers {
+    quick: Mutex<Option<openrip_playback::Thumbnailer>>,
+    exact: Mutex<Option<openrip_playback::Thumbnailer>>,
+    cache_dir: Mutex<Option<std::path::PathBuf>>,
+}
+
+fn thumbnailers() -> &'static Thumbnailers {
+    static T: OnceLock<Thumbnailers> = OnceLock::new();
+    T.get_or_init(|| Thumbnailers { quick: Mutex::new(None), exact: Mutex::new(None), cache_dir: Mutex::new(None) })
+}
+
+/// Keep exact thumbnails in `dir` across runs (e.g. under the app's cache folder).
+#[napi]
+pub fn set_thumbnail_cache_dir(dir: String) {
+    let t = thumbnailers();
+    *t.cache_dir.lock().unwrap() = Some(dir.into());
+    // Rebuilt with the new folder on next use.
+    t.quick.lock().unwrap().take();
+    t.exact.lock().unwrap().take();
+}
+
+#[napi(object)]
+pub struct Thumbnail {
+    /// Index into the requested times.
+    pub index: u32,
+    pub time_us: i64,
+    /// False for a stand-in (the keyframe of the GOP the time falls in); ask again with
+    /// `exact` for the real frame.
+    pub exact: bool,
+    pub width: u32,
+    pub height: u32,
+    /// RGBA, `width * height * 4` bytes.
+    pub rgba: Buffer,
+}
+
+pub struct ThumbnailTask {
+    path: String,
+    times: Vec<Micros>,
+    height: u32,
+    exact: bool,
+}
+
+pub struct RawThumb {
+    index: u32,
+    time: Micros,
+    exact: bool,
+    image: openrip_render::RgbaImage,
+}
+
+impl Task for ThumbnailTask {
+    type Output = Vec<RawThumb>;
+    type JsValue = Vec<Thumbnail>;
+
+    fn compute(&mut self) -> Result<Vec<RawThumb>> {
+        let t = thumbnailers();
+        let slot = if self.exact { &t.exact } else { &t.quick };
+        let mut guard = slot.lock().unwrap();
+        if guard.is_none() {
+            *guard = Some(openrip_playback::Thumbnailer::new(t.cache_dir.lock().unwrap().clone()).map_err(err)?);
+        }
+        let pass = if self.exact { openrip_playback::Pass::Exact } else { openrip_playback::Pass::Quick };
+        let mut out = Vec::with_capacity(self.times.len());
+        guard.as_mut().unwrap().thumbnails(Path::new(&self.path), &self.times, self.height, pass, |th| {
+            out.push(RawThumb { index: th.index as u32, time: th.time, exact: th.exact, image: th.image });
+            true
+        })
+        .map_err(err)?;
+        out.sort_by_key(|t| t.index);
+        Ok(out)
+    }
+
+    fn resolve(&mut self, _env: Env, out: Vec<RawThumb>) -> Result<Vec<Thumbnail>> {
+        Ok(out.into_iter().map(|t| Thumbnail { index: t.index, time_us: t.time.0, exact: t.exact, width: t.image.width, height: t.image.height, rgba: Buffer::from(t.image.data) }).collect())
+    }
+}
+
+/// Thumbnails `height` px tall of the video or still at `path`, at source times `timesUs`,
+/// on a worker thread. Quick (`exact` false) returns each GOP's keyframe for every time in
+/// it, a few decodes per strip; then ask with `exact` true for the frames themselves.
+/// Exact thumbnails are kept in the cache folder, and either kind of request returns them
+/// from there.
+#[napi]
+pub fn thumbnails(path: String, times_us: Vec<i64>, height: u32, exact: bool) -> AsyncTask<ThumbnailTask> {
+    AsyncTask::new(ThumbnailTask { path, times: times_us.into_iter().map(Micros).collect(), height, exact })
+}

@@ -142,6 +142,18 @@ pub struct Compositor {
     /// Resampled textures of keyed images, with the frame they were last drawn in.
     cache: std::sync::Mutex<std::collections::HashMap<CacheKey, (wgpu::Texture, u64)>>,
     frame: std::sync::atomic::AtomicU64,
+    /// Intermediate textures from earlier frames, with the frame they were last used in.
+    /// Allocating a 4K texture costs milliseconds; the same sizes come back every frame.
+    pool: std::sync::Mutex<Vec<(wgpu::Texture, u64)>>,
+    /// The last readback buffer, reused when the next readback is the same size.
+    readback: std::sync::Mutex<Option<wgpu::Buffer>>,
+}
+
+/// Textures the GPU still needs for a recorded frame: `keep` must merely live until the work
+/// is submitted; `scratch` can go back to the pool afterwards.
+struct FrameTextures {
+    _keep: Vec<wgpu::Texture>,
+    scratch: Vec<wgpu::Texture>,
 }
 
 /// A keyed image at a displayed size: (key, width, height).
@@ -149,6 +161,10 @@ type CacheKey = (u64, u32, u32);
 
 /// Keyed images not drawn for this many frames leave the GPU cache.
 const CACHE_FRAMES: u64 = 3;
+/// Pooled textures not reused for this many frames are freed, and the pool never holds more
+/// than `POOL_MAX`.
+const POOL_FRAMES: u64 = 3;
+const POOL_MAX: usize = 32;
 
 const CANVAS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const WIDE: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -236,10 +252,21 @@ impl Compositor {
             yuv_layout,
             cache: Default::default(),
             frame: Default::default(),
+            pool: Default::default(),
+            readback: Default::default(),
         })
     }
 
+    /// A texture to render into: one from the pool if it fits, else a new one. Its contents
+    /// are undefined; every caller clears or overwrites it.
     fn texture(&self, w: u32, h: u32, format: wgpu::TextureFormat, extra: wgpu::TextureUsages) -> wgpu::Texture {
+        let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | extra;
+        {
+            let mut pool = self.pool.lock().unwrap();
+            if let Some(i) = pool.iter().position(|(t, _)| t.width() == w && t.height() == h && t.format() == format && t.usage() == usage) {
+                return pool.swap_remove(i).0;
+            }
+        }
         self.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
@@ -247,9 +274,22 @@ impl Compositor {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | extra,
+            usage,
             view_formats: &[],
         })
+    }
+
+    /// Return textures to the pool once their frame is submitted (the queue runs in order,
+    /// so the next frame's writes come after this frame's reads).
+    fn recycle(&self, textures: Vec<wgpu::Texture>) {
+        let frame = self.frame.load(std::sync::atomic::Ordering::Relaxed);
+        let mut pool = self.pool.lock().unwrap();
+        pool.extend(textures.into_iter().map(|t| (t, frame)));
+        pool.retain(|(_, last)| frame - *last < POOL_FRAMES);
+        if pool.len() > POOL_MAX {
+            pool.sort_by_key(|(_, last)| std::cmp::Reverse(*last));
+            pool.truncate(POOL_MAX);
+        }
     }
 
     fn upload(&self, img: &RgbaImage) -> wgpu::Texture {
@@ -396,13 +436,14 @@ impl Compositor {
 
     /// Record the passes that draw `layers` (bottom first) over `background` into `canvas`.
     /// Returns the intermediate textures, which must live until the work is submitted.
-    fn encode_frame(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, background: [u8; 3], layers: &[Layer]) -> Vec<wgpu::Texture> {
+    fn encode_frame(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, background: [u8; 3], layers: &[Layer]) -> FrameTextures {
         let (width, height) = (canvas.width(), canvas.height());
         let place_pipeline = if canvas.format() == wgpu::TextureFormat::Bgra8Unorm { &self.place_bgra } else { &self.place };
         let bg = wgpu::Color { r: background[0] as f64 / 255.0, g: background[1] as f64 / 255.0, b: background[2] as f64 / 255.0, a: 1.0 };
         // Clear the canvas with an empty placement pass.
         let blank = self.texture(1, 1, CANVAS, wgpu::TextureUsages::empty());
         let mut keep = Vec::new(); // textures must outlive the submission
+        let mut scratch = Vec::new(); // ... and these can be reused after it
         let off = Params { src_size: [1.0, 1.0], dst_size: [1.0, 1.0], inv0: [0.0, 0.0, -100.0, 0.0], inv1: [0.0, 0.0, -100.0, 0.0], misc: [0.0; 4] };
         self.pass(enc, place_pipeline, &blank, canvas, off, Some(bg));
         let frame = self.frame.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
@@ -438,12 +479,12 @@ impl Compositor {
                         self.pass(enc, &self.area, &src, &wide, resize, Some(wgpu::Color::TRANSPARENT));
                         let sharp = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
                         self.pass(enc, &self.sharpen, &wide, &sharp, resize, Some(wgpu::Color::TRANSPARENT));
-                        keep.extend([src, wide]);
+                        scratch.extend([src, wide]);
                         sharp
                     } else {
                         let up = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
                         self.pass(enc, &self.bilinear, &src, &up, resize, Some(wgpu::Color::TRANSPARENT));
-                        keep.push(src);
+                        scratch.push(src);
                         up
                     };
                     if let Source::Cached(key, _) = layer.source {
@@ -472,11 +513,16 @@ impl Compositor {
                 misc: [layer.opacity, 0.0, 0.0, 0.0],
             };
             self.pass(enc, place_pipeline, &stage, canvas, place, None);
-            keep.push(stage);
+            // A keyed image's stage lives on in the cache; anything else is scratch.
+            if matches!(layer.source, Source::Cached(..)) {
+                keep.push(stage);
+            } else {
+                scratch.push(stage);
+            }
         }
-        keep.push(blank);
+        scratch.push(blank);
         self.cache.lock().unwrap().retain(|_, (_, last)| frame - *last < CACHE_FRAMES);
-        keep
+        FrameTextures { _keep: keep, scratch }
     }
 
     /// A new IOSurface-backed BGRA pixel buffer to render into with
@@ -501,10 +547,10 @@ impl Compositor {
         let surface = objc2_core_video::CVPixelBufferGetIOSurface(Some(target)).ok_or_else(|| RenderError::Device("target has no IOSurface".into()))?;
         let canvas = self.wrap_surface(&surface, 0, (w, h), wgpu::TextureFormat::Bgra8Unorm, true).ok_or_else(|| RenderError::Device("can't render into that surface".into()))?;
         let mut enc = self.device.create_command_encoder(&Default::default());
-        let keep = self.encode_frame(&mut enc, &canvas, background, layers);
+        let textures = self.encode_frame(&mut enc, &canvas, background, layers);
         self.queue.submit([enc.finish()]);
         self.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| RenderError::Device(e.to_string()))?;
-        drop(keep);
+        self.recycle(textures.scratch);
         Ok(())
     }
 
@@ -532,14 +578,15 @@ impl Compositor {
         let (w, h) = plane(0);
         let canvas = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
         let mut enc = self.device.create_command_encoder(&Default::default());
-        let keep = self.encode_frame(&mut enc, &canvas, background, layers);
+        let mut textures = self.encode_frame(&mut enc, &canvas, background, layers);
         let (kr, kb) = (0.2126f32, 0.0722f32);
         let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0: [0.0; 4], inv1: [kr, 1.0 - kr - kb, kb, 0.0], misc: [0.0; 4] };
         self.pass(&mut enc, &self.luma, &canvas, &luma, params, Some(wgpu::Color::BLACK));
         self.pass(&mut enc, &self.chroma, &canvas, &chroma, params, Some(wgpu::Color::BLACK));
         self.queue.submit([enc.finish()]);
         self.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| RenderError::Device(e.to_string()))?;
-        drop(keep);
+        textures.scratch.push(canvas);
+        self.recycle(textures.scratch);
         Ok(())
     }
 
@@ -548,10 +595,14 @@ impl Compositor {
     pub fn render(&self, width: u32, height: u32, background: [u8; 3], layers: &[Layer]) -> RgbaImage {
         let canvas = self.texture(width, height, CANVAS, wgpu::TextureUsages::COPY_SRC);
         let mut enc = self.device.create_command_encoder(&Default::default());
-        let keep = self.encode_frame(&mut enc, &canvas, background, layers);
+        let mut textures = self.encode_frame(&mut enc, &canvas, background, layers);
         // Read back (rows padded to 256 bytes).
         let row = (width * 4).div_ceil(256) * 256;
-        let buf = self.device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (row * height) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let size = (row * height) as u64;
+        let buf = match self.readback.lock().unwrap().take() {
+            Some(b) if b.size() == size => b,
+            _ => self.device.create_buffer(&wgpu::BufferDescriptor { label: None, size, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false }),
+        };
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo { texture: &canvas, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(height) } },
@@ -566,7 +617,10 @@ impl Compositor {
             data.extend_from_slice(&mapped[y * row as usize..y * row as usize + width as usize * 4]);
         }
         drop(mapped);
-        drop(keep);
+        buf.unmap();
+        *self.readback.lock().unwrap() = Some(buf);
+        textures.scratch.push(canvas);
+        self.recycle(textures.scratch);
         RgbaImage { width, height, data }
     }
 }

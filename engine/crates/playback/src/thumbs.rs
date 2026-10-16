@@ -154,14 +154,47 @@ impl Thumbnailer {
         Ok(())
     }
 
-    /// The picture upright and `height` tall, area-averaged down like the preview.
+    /// The picture upright and `height` tall, area-averaged down.
     fn scale(&mut self, source: Source<'_>, height: u32, rotation: i32) -> RgbaImage {
         let (w, h) = source.size();
         let (uw, uh) = if rotation.rem_euclid(180) == 90 { (h, w) } else { (w, h) };
         let width = ((height as f64 * uw as f64 / uh.max(1) as f64).round() as u32).max(1);
-        let layer = Layer::from_model_oriented(source, [width, height], [0.0, 0.0], [1.0, 1.0], 0.0, rotation);
-        self.compositor.render(width, height, [0, 0, 0], &[layer])
+        // The GPU area filter loops over each output pixel's footprint, so a 4K frame down
+        // to 64 px is ~1,000 reads per pixel on few threads (9 ms). Stop the GPU at up to
+        // 6x reduction and finish with an exact box filter on the CPU.
+        let k = ((uh as f64 / height as f64 / 6.0).ceil() as u32).max(1);
+        let layer = Layer::from_model_oriented(source, [width * k, height * k], [0.0, 0.0], [1.0, 1.0], 0.0, rotation);
+        let big = self.compositor.render(width * k, height * k, [0, 0, 0], &[layer]);
+        box_down(&big, k)
     }
+}
+
+/// Average each `k`x`k` block (the image is an exact multiple of `k` on both sides).
+fn box_down(img: &RgbaImage, k: u32) -> RgbaImage {
+    if k == 1 {
+        return img.clone();
+    }
+    let (w, h) = (img.width / k, img.height / k);
+    let mut data = vec![0u8; (w * h * 4) as usize];
+    let n = k * k;
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = [0u32; 4];
+            for dy in 0..k {
+                let row = ((y * k + dy) * img.width + x * k) as usize * 4;
+                for px in img.data[row..row + k as usize * 4].chunks_exact(4) {
+                    for c in 0..4 {
+                        sum[c] += px[c] as u32;
+                    }
+                }
+            }
+            let o = ((y * w + x) * 4) as usize;
+            for c in 0..4 {
+                data[o + c] = ((sum[c] + n / 2) / n) as u8;
+            }
+        }
+    }
+    RgbaImage { width: w, height: h, data }
 }
 
 /// Whether `frame` (a keyframe) is the frame shown at `t`: `t` falls before the next frame.

@@ -2,7 +2,7 @@
 //! same file, and frames follow the edited project. Uses a barcoded clip (frame number in
 //! 64-px blocks) made with the `ffmpeg` CLI (tests skip without it).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use openrip_model::{FrameRate, Micros, Project};
@@ -28,7 +28,7 @@ fn clip(name: &str) -> Option<PathBuf> {
 }
 
 /// One full-canvas clip of `path` from source frame `from`.
-fn project(path: &PathBuf, from: i64) -> Project {
+fn project(path: &Path, from: i64) -> Project {
     let fps = FrameRate::new(30, 1);
     serde_json::from_value(serde_json::json!({
         "format": 2, "id": "p", "name": "edit test", "canvas": { "width": 640, "height": 128 }, "fps": { "num": 30, "den": 1 },

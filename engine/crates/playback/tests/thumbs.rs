@@ -1,7 +1,7 @@
 //! Timeline thumbnails on a barcoded clip (frame number in 64-px blocks, a keyframe every 48
 //! frames) made with the `ffmpeg` CLI (tests skip without it).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use openrip_model::{FrameRate, Micros};
@@ -31,7 +31,7 @@ fn at(n: i64) -> Micros {
 }
 
 /// (index, exact, frame number) per thumbnail, sorted by index.
-fn run(t: &mut Thumbnailer, path: &PathBuf, frames: &[i64], pass: Pass) -> Vec<(usize, bool, i64)> {
+fn run(t: &mut Thumbnailer, path: &Path, frames: &[i64], pass: Pass) -> Vec<(usize, bool, i64)> {
     let times: Vec<_> = frames.iter().map(|&n| at(n)).collect();
     let mut out = Vec::new();
     t.thumbnails(path, &times, 128, pass, |th| {
