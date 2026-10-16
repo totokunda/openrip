@@ -36,6 +36,8 @@ Note: CapCut set the canvas to **"original" 1:1, 1920×1920 at 24 fps** because 
 
 **Text size.** The default text ("Default text", CapCut's `SystemFont/en.ttf`, size 15) renders with a 65 px cap height in the 1080 px export. A first estimate from the font's cap height (687/1000 em) gave an em of 94.6 px. Fitting the positions of every glyph in the rendered line instead gives **93.78 px, so one CapCut size unit = 0.005789 of the canvas as an em size** (the cap-height estimate was 0.9% high because of anti-aliasing at the glyph tops). The canvas was square, so whether this scales with width, height or the shorter side is settled in session 2.
 
+*Correction (2026-10-16):* the size sets the font's **line box** (hhea ascent + descent), not its em: one unit is a line box of 0.005789 of the canvas width. `en.ttf`'s line box is exactly 1 em, so the two can't be told apart with it. Captions in four other fonts settle it: CapCut's em is 0.005789 × size × canvas width × clip scale ÷ the line box in em for line boxes of 0.856, 1.040 and 1.400 em (within 0.3%), where the em reading was off by up to 40% ([captions.md](captions.md)).
+
 **Track flags (`attribute` bits).**
 
 | Bit | Meaning | Evidence |

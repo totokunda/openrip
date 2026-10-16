@@ -13,7 +13,11 @@ CapCut breaks long text lines; OpenRip didn't wrap at all until 2026-10-16, so l
 
 **An auto-sized box (`fixed_width` −1) doesn't wrap**, in portrait or landscape.
 
-Lines break greedily between words, and between any two CJK characters. Spaces at a break aren't drawn, but **the next line is measured with them in front**: a continuation line has one space less room than the first. No single width reproduces CapCut's breaks without this. A word longer than a whole line breaks between characters.
+Lines break greedily between words, and between any two CJK characters. CapCut fills a line character by character, and where it breaks depends on what doesn't fit:
+- **A space that doesn't fit** ends the line before it, and **the next line starts with it**: it's measured with that space in front, so it has one space less room. No single width reproduces CapCut's breaks without this.
+- **A word that doesn't fit** ends the line after the spaces before it, and **the line keeps them**.
+
+The spaces count in the line's width, so a centred line with a trailing space sits half a space to the left, a line with a leading space half a space to the right, and one with both is centred as if it had neither. A background box spans them too. A word longer than a whole line breaks between characters.
 
 Text with a library text style follows the same rule.
 
@@ -49,6 +53,20 @@ E bounds the constant from below at 0.001335. An earlier reading of these covers
 
 **A CapCut export with styled captions** (a library text style; box 775.3, scale 1, 1080 wide). It keeps lines of 0.839 and 0.871 of the canvas width whole and breaks before a word that would make 1.046, so the constant is below 0.001344. OpenRip had used a separate 0.95 for styled text; the general rule gives 1.039, inside the bound.
 
-## Still open
+## Centring of wrapped lines
 
-**Centring of wrapped lines.** Some wrapped lines are centred as if they kept the space they broke at: they sit exactly half a space to the left. Others are centred without it. In session 5 that is lines 3–4 of 5 for the 600 box, both wrapped lines at size 10, and neither line in the two-copies clip. No width-based rule tried (whether the space fits, how full the line is, whether the break fell on the space or inside a word) separates them. OpenRip centres without the space, which is right for about half the lines and half a space off for the rest.
+Which wrapped lines sit half a space to the left looked random until the break rule above: it's every line that ended at a word that didn't fit. Every case seen fits it:
+
+| Clip | Line | Break | Centred |
+|---|---|---|---|
+| Session 5, 13 words, box 600, size 15 | 1 | space didn't fit | without the space |
+| | 2 | starts with that space, a word didn't fit | as if without (one space each side) |
+| | 3, 4 | a word didn't fit | with the space |
+| same, size 10 | 1, 2 | a word didn't fit | with the space |
+| Session 5, two copies of a line | 1 | space didn't fit | without |
+| | 2 | starts with that space, a word didn't fit | as if without |
+| A caption with a background (export) | 1 | space didn't fit | without; box without it |
+| A styled caption (export) | 1 | a word didn't fit | with the space |
+| A subtitle-template caption page (export) | 1 | a word didn't fit | with the space; box 0.29 em wider |
+
+With it, session 5's wrapped clips go from 15.6–22.2 dB to 23.6–27.5 dB, the landscape clips from 12.5–13.4 to 17.4–19.8 dB, five draft covers gain 2.3–6.9 dB and none gets worse.

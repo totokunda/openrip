@@ -33,6 +33,12 @@ impl Font {
         Some(Font { data: Arc::new(data), offset, key })
     }
 
+    /// Height of the font's line box (ascent + descent) in em.
+    pub fn line_box_em(&self) -> f32 {
+        let m = self.as_ref().metrics(&[]);
+        if m.units_per_em == 0 { 1.0 } else { (m.ascent + m.descent) / m.units_per_em as f32 }
+    }
+
     fn as_ref(&self) -> swash::FontRef<'_> {
         swash::FontRef { data: &self.data, offset: self.offset, key: self.key }
     }
@@ -72,6 +78,9 @@ pub struct TextStyle<'a> {
     pub italic: f32,
     /// A layered style that replaces `color` and `stroke`.
     pub effect: Option<&'a Effect>,
+    /// Fill colour per character (indices as in the laid-out text, line breaks included),
+    /// replacing `color`; characters past the end use `color`. Not used with `effect`.
+    pub char_colors: Option<&'a [[u8; 4]]>,
 }
 
 /// A layered text style (CapCut's library text styles): shadows at the back, then strokes
@@ -269,59 +278,60 @@ fn is_cjk(c: char) -> bool {
     matches!(c as u32, 0x2E80..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF | 0x20000..=0x2FFFF)
 }
 
-/// Greedy line breaking: break before a word (after spaces) or before/after a CJK character
-/// when the line would get wider than `max`. Spaces at a break are dropped from the drawn
-/// lines, but, as in CapCut, the next line is measured with them in front (calibration
-/// session 5: no single width reproduces its breaks otherwise). A piece wider than a whole
-/// line breaks between characters.
+/// Greedy line breaking, as CapCut fills a line character by character
+/// (docs/parity/text-wrap.md): when a space doesn't fit, the line ends before it and the next
+/// line starts with it; when a word doesn't fit, the line ends after the spaces before the
+/// word, keeping them. Either way the spaces are in the line's width, so they move it when
+/// it's centred. A CJK character can start a line anywhere; a word wider than a whole line
+/// breaks between characters.
 fn wrap(clusters: &[Cluster], max: Option<f32>) -> Vec<&[Cluster]> {
     let Some(max) = max.filter(|m| *m > 0.0) else { return vec![clusters] };
+    let width = |from: usize, to: usize| clusters[from..to].iter().map(|c| c.advance).sum::<f32>();
     let mut rows = Vec::new();
     let mut start = 0; // first cluster of the row
-    let mut carry = 0.0; // width of the spaces the row was broken at, counted against it
     let mut i = 0;
     while i < clusters.len() {
+        let has_ink = |i: usize| clusters[start..i].iter().any(|c| c.ch != ' ');
+        if clusters[i].ch == ' ' {
+            if has_ink(i) && width(start, i + 1) > max {
+                rows.push(&clusters[start..i]);
+                start = i;
+            }
+            i += 1;
+            continue;
+        }
         // The next unbreakable piece: a CJK character, or a run up to the next space or CJK
-        // character, plus the spaces after it.
+        // character.
         let mut end = i + 1;
         if !is_cjk(clusters[i].ch) {
-            while end < clusters.len() && clusters[end].ch != ' ' && !is_cjk(clusters[end].ch) && clusters[i].ch != ' ' {
+            while end < clusters.len() && clusters[end].ch != ' ' && !is_cjk(clusters[end].ch) {
                 end += 1;
             }
         }
-        while end < clusters.len() && clusters[end].ch == ' ' {
-            end += 1;
-        }
-        let ink_end = (i..end).rev().find(|&k| clusters[k].ch != ' ').map_or(i, |k| k + 1);
-        let width = |from: usize, to: usize| clusters[from..to].iter().map(|c| c.advance).sum::<f32>();
-        if ink_end > i && carry + width(start, ink_end) > max {
-            if start < i {
-                // Break before this piece (dropping the spaces that ended the row).
-                let row_end = (start..i).rev().find(|&k| clusters[k].ch != ' ').map_or(start, |k| k + 1);
-                rows.push(&clusters[start..row_end]);
-                carry = width(row_end, i);
+        if width(start, end) > max {
+            if has_ink(i) {
+                // Break before the piece, the spaces before it staying on the row.
+                rows.push(&clusters[start..i]);
                 start = i;
                 continue;
             }
-            if width(start, ink_end) <= max {
-                // Only the carried space makes it too wide: the piece takes the line.
+            if width(i, end) <= max {
+                // Only the spaces the row starts with make it too wide: the piece takes the line.
                 i = end;
                 continue;
             }
             // The piece alone is too wide: break it between characters.
             let mut k = i + 1;
-            while k < ink_end && width(start, k + 1) <= max {
+            while k < end && width(start, k + 1) <= max {
                 k += 1;
             }
             rows.push(&clusters[start..k]);
-            carry = 0.0;
             start = k;
             i = k;
             continue;
         }
         i = end;
     }
-    // The last row keeps its trailing spaces, as an unwrapped line does.
     if start < clusters.len() || rows.is_empty() {
         rows.push(&clusters[start..]);
     }
@@ -348,6 +358,8 @@ impl TextLayout {
         let (w, h) = ((self.width.ceil() as i32 + 2 * pad + 1) as u32, (self.height.ceil() as i32 + 2 * pad + 1) as u32);
         let (left, top) = (pad as f32 + origin[0], pad as f32 + origin[1]);
         let mut fill = vec![0f32; (w * h) as usize];
+        // With a colour per character: premultiplied colour, each glyph over those before it.
+        let mut tinted = style.char_colors.map(|_| vec![[0f32; 4]; (w * h) as usize]);
         let mut outline = style.stroke.map(|_| vec![0f32; (w * h) as usize]);
         let mut ctx = ScaleContext::new();
         let mut scaler = ctx.builder(style.font.as_ref()).size(self.size).hint(false).build();
@@ -383,7 +395,24 @@ impl TextLayout {
                 }
             }
             if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).embolden(style.bold).transform(shear).offset(offset).render(&mut scaler, g.glyph) {
-                draw(&mut fill, &img, x, y, alpha);
+                match tinted.as_mut() {
+                    None => draw(&mut fill, &img, x, y, alpha),
+                    Some(tinted) => {
+                        let color = style.char_colors.and_then(|c| c.get(g.char_index)).copied().unwrap_or(style.color);
+                        let (gx, gy) = (x.floor() as i32 + img.placement.left, y.floor() as i32 - img.placement.top);
+                        for row in 0..img.placement.height as i32 {
+                            for col in 0..img.placement.width as i32 {
+                                let (px, py) = (gx + col, gy + row);
+                                if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 {
+                                    continue;
+                                }
+                                let a = img.data[(row * img.placement.width as i32 + col) as usize] as f32 / 255.0 * alpha;
+                                let t = &mut tinted[(py * w as i32 + px) as usize];
+                                *t = over(premul(color, a), *t);
+                            }
+                        }
+                    }
+                }
             }
         }
         let background = self.background(style, left, top, w, h);
@@ -396,7 +425,7 @@ impl TextLayout {
             if let (Some((c, _)), Some(cov)) = (style.stroke, &outline) {
                 *px = over(premul(c, cov[i]), *px);
             }
-            *px = over(premul(style.color, fill[i]), *px);
+            *px = over(tinted.as_ref().map_or_else(|| premul(style.color, fill[i]), |t| t[i]), *px);
         }
         finish(px, w, h, [(left + self.width / 2.0) as f64, (top + self.height / 2.0) as f64])
     }

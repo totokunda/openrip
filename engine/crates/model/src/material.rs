@@ -147,6 +147,22 @@ pub struct Text {
     pub text: String,
     pub runs: Vec<TextRun>,
     pub layout: TextLayout,
+    /// When each word is spoken, for captions that follow the speech (word-by-word
+    /// highlighting): the words of `text` in order, spaces excluded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<SpokenWord>,
+}
+
+/// A word of a caption and when it's spoken.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpokenWord {
+    /// Character range `[start, end)` into `Text::text` (Unicode scalar values), with any
+    /// punctuation that's part of the word.
+    pub range: (u32, u32),
+    /// Clip-local time the word starts and ends; equal when it isn't spoken (a word typed in
+    /// after the speech was transcribed).
+    pub start: Micros,
+    pub end: Micros,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -174,16 +190,18 @@ pub struct TextRun {
 #[serde(rename_all = "snake_case")]
 pub enum SizeUnit {
     /// CapCut's own font-size unit: one unit is [`CAPCUT_SIZE_UNIT_EM`] of the canvas
-    /// width as an em size, linear in the size value.
+    /// width as the height of the font's line box (ascent + descent), linear in the size
+    /// value.
     #[default]
     CapCut,
     /// Fraction of the canvas height.
     CanvasHeight,
 }
 
-/// Em size of one CapCut font-size unit, as a fraction of the canvas width
+/// Line-box height of one CapCut font-size unit, as a fraction of the canvas width
 /// (docs/parity/calibration.md: 0.005789 on a square canvas, 0.005786–0.005789 at sizes
-/// 10, 15 and 30 on 16:9 at 1080p and 4K; a portrait check of width vs longer side is pending).
+/// 10, 15 and 30 on 16:9 at 1080p and 4K, all with CapCut's default font, whose line box is
+/// exactly 1 em; fonts with other line boxes confirm it's the line box that's sized).
 pub const CAPCUT_SIZE_UNIT_EM: f32 = 0.005_789;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

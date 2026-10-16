@@ -8,7 +8,7 @@ Agreed 2026-10-16. What the engine draws next is chosen from two sources: what r
 |---|---|---|
 | Video and photo clips | 59 drafts | ✅ |
 | Caption text clips (`subtitle`) | 1,840 clips, 27 drafts | ✅ stroke (1,755), background, wrap, bold/italic |
-| Word-by-word captions (`caption` animations) and subtitle templates (`text_templates`) | 43 + 43, 6 drafts | ❌ |
+| Word-by-word captions (`caption` animations) and subtitle templates (`text_templates`) | 43 + 43, 6 drafts | ✅ the word-colour style (35 of 43, [captions.md](../parity/captions.md)); ❌ "pop" (3), multi-line (5) |
 | Library text styles (`text_effect`) | 185, 16 drafts | ✅ both kinds ([capcut-bundles.md](../parity/capcut-bundles.md)) |
 | Text shapes (`text_shape`) | 122, 5 drafts | ❌ |
 | Text intros | 47, 22 drafts | ✅ Type 1, Type 2, Typewriter (40); ❌ 7 others |

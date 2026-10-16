@@ -141,6 +141,17 @@ pub fn import_draft_json(doc: &Value, name_hint: &str) -> Result<Imported, Impor
 
     import_materials(&doc["materials"], &mut project.materials, &mut report);
 
+    // A subtitle template's segment points at the template, which wraps one text (and the
+    // text's caption animation): the segment draws that text.
+    let templates: BTreeMap<String, (MaterialId, Vec<MaterialId>)> = arr(&doc["materials"], "text_templates")
+        .iter()
+        .filter_map(|t| {
+            let inner = arr(t, "text_info_resources").first()?;
+            let refs = arr(inner, "extra_material_refs").iter().filter_map(Value::as_str).map(MaterialId::from).collect();
+            Some((s(t, "id"), (MaterialId(s(inner, "text_material_id")), refs)))
+        })
+        .collect();
+
     // In CapCut's default "track mode", stacking follows track order (`track_render_index`),
     // not each segment's `render_index`; only "free layer" mode uses per-segment order.
     let free_layers = b(doc, "free_render_index_mode_on", false);
@@ -171,6 +182,14 @@ pub fn import_draft_json(doc: &Value, name_hint: &str) -> Result<Imported, Impor
         };
         for seg in arr(t, "segments") {
             if let Some(mut segment) = import_segment(seg, &mut report) {
+                if let Some((text, refs)) = templates.get(&segment.material.0) {
+                    segment.material = text.clone();
+                    for r in refs {
+                        if !segment.attachments.contains(r) {
+                            segment.attachments.push(r.clone());
+                        }
+                    }
+                }
                 if !free_layers {
                     segment.render_index = seg
                         .get("track_render_index")
@@ -356,7 +375,14 @@ const ADJUST_TYPES: &[(&str, &str)] = &[
 
 /// CapCut library animations OpenRip draws itself, by resource id. Their behaviour comes
 /// from the scripts CapCut downloads with them (docs/parity/text-animations.md).
-const BUILTIN_ANIMATIONS: &[(&str, &str)] = &[("6724920249654710791", "type_1"), ("6724920636403094028", "type_2"), ("7210980292243231233", "typewriter")];
+const BUILTIN_ANIMATIONS: &[(&str, &str)] = &[
+    ("6724920249654710791", "type_1"),
+    ("6724920636403094028", "type_2"),
+    ("7210980292243231233", "typewriter"),
+    // The caption style of CapCut's word-by-word subtitle templates (逐词高亮 and 逐词显色):
+    // pages of up to three words, the word being spoken in its colour (yellow if white).
+    ("7289356246623195649", "caption_word_color"),
+];
 
 /// Where CapCut wraps a fixed-size text box: this fraction of the canvas width per unit of
 /// its `fixed_width`, at the clip's scale 1 (calibration session 5 bounds it to
@@ -767,10 +793,12 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             smoothing: f(m, "shadow_smoothing", 0.0) as f32,
         }
     });
+    let words = spoken_words(&text, m.get("words").unwrap_or(&Value::Null));
     Text {
         id,
         text,
         runs,
+        words,
         layout: TextLayout {
             alignment: i(m, "alignment") as u8,
             letter_spacing: f(m, "letter_spacing", 0.0) as f32,
@@ -784,6 +812,104 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             frame: None,
         },
     }
+}
+
+/// The words of a caption's text with when they're spoken, from the speech-to-text words
+/// CapCut keeps with it (`words`: parallel `text`, `start_time`, `end_time` arrays in ms,
+/// spaces included as words of their own).
+///
+/// The text may have been edited since it was transcribed. CapCut then matches the text's
+/// words to the transcribed ones; what its exports show:
+/// - The same number of words (punctuation, capitals or spelling changed): each takes the
+///   time of the transcribed word in its place, punctuation included.
+/// - Otherwise (a caption split in two keeps every transcribed word, those of the other part
+///   at 0 ms or past the clip's end): words that match one transcribed word (case-sensitive,
+///   ignoring punctuation) take its time; between matches, as many words as transcribed ones
+///   take theirs in order, and any other number of words isn't spoken (it shows, never
+///   highlighted, from where the next word starts).
+fn spoken_words(text: &str, words: &Value) -> Vec<SpokenWord> {
+    let column = |k: &str| arr(words, k).to_vec();
+    let (said, starts, ends) = (column("text"), column("start_time"), column("end_time"));
+    let heard: Vec<(String, i64, i64)> = said
+        .iter()
+        .zip(starts.iter().zip(&ends))
+        .filter_map(|(t, (s, e))| {
+            let t = t.as_str()?.trim();
+            let (s, e) = (s.as_i64()?, e.as_i64()?);
+            (!t.is_empty()).then(|| (t.to_string(), s * 1000, e.max(s) * 1000))
+        })
+        .collect();
+    // The text's words: runs of non-space characters, by character index.
+    let mut tokens: Vec<(u32, u32)> = Vec::new();
+    let mut start: Option<u32> = None;
+    let mut count = 0u32;
+    for (k, c) in text.chars().enumerate() {
+        let k = k as u32;
+        match (c.is_whitespace(), start) {
+            (false, None) => start = Some(k),
+            (true, Some(s)) => {
+                tokens.push((s, k));
+                start = None;
+            }
+            _ => {}
+        }
+        count = k + 1;
+    }
+    if let Some(s) = start {
+        tokens.push((s, count));
+    }
+    if heard.is_empty() || tokens.is_empty() {
+        return Vec::new();
+    }
+    let word = |r: (u32, u32), (s, e): (i64, i64)| SpokenWord { range: r, start: Micros(s), end: Micros(e) };
+    if tokens.len() == heard.len() {
+        return tokens.iter().zip(&heard).map(|(&r, h)| word(r, (h.1, h.2))).collect();
+    }
+    // Longest common subsequence of the words without their punctuation, taking the earliest
+    // transcribed word where there's a choice.
+    let chars: Vec<char> = text.chars().collect();
+    let bare = |w: &str| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string();
+    let new: Vec<String> = tokens.iter().map(|&(a, b)| bare(&chars[a as usize..b as usize].iter().collect::<String>())).collect();
+    let old: Vec<String> = heard.iter().map(|h| bare(&h.0)).collect();
+    let (n, m) = (old.len(), new.len());
+    let mut lcs = vec![vec![0u32; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            lcs[i][j] = if old[i] == new[j] && !old[i].is_empty() { lcs[i + 1][j + 1] + 1 } else { lcs[i + 1][j].max(lcs[i][j + 1]) };
+        }
+    }
+    let mut pairs = Vec::new(); // (old, new) indices that match
+    let (mut i, mut j) = (0, 0);
+    while i < n && j < m {
+        if old[i] == new[j] && !old[i].is_empty() && lcs[i][j] == lcs[i + 1][j + 1] + 1 {
+            pairs.push((i, j));
+            i += 1;
+            j += 1;
+        } else if lcs[i + 1][j] >= lcs[i][j + 1] {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    pairs.push((n, m));
+    let mut out = Vec::with_capacity(m);
+    let (mut oi, mut nj) = (0, 0);
+    for &(pi, pj) in &pairs {
+        if pi - oi == pj - nj {
+            for k in 0..pj - nj {
+                out.push(word(tokens[nj + k], (heard[oi + k].1, heard[oi + k].2)));
+            }
+        } else {
+            // Not spoken: from the next matched word's start (or the last one's end).
+            let at = heard.get(pi).map(|h| h.1).or_else(|| oi.checked_sub(1).map(|k| heard[k].2)).unwrap_or(0);
+            out.extend(tokens[nj..pj].iter().map(|&r| word(r, (at, at))));
+        }
+        if pi < n {
+            out.push(word(tokens[pj], (heard[pi].1, heard[pi].2)));
+        }
+        (oi, nj) = (pi + 1, pj + 1);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -951,6 +1077,57 @@ mod tests {
         assert!(import_draft_json(&d, "hint").unwrap().project.materials.texts[0].layout.background.is_none());
         d["materials"]["texts"][0]["check_flag"] = json!(23);
         assert!(import_draft_json(&d, "hint").unwrap().project.materials.texts[0].layout.background.is_some());
+    }
+
+    /// `words` as CapCut stores them: parallel arrays, spaces as words of their own.
+    fn heard(words: &[(&str, i64, i64)]) -> Value {
+        let mut out = (Vec::new(), Vec::new(), Vec::new());
+        for (k, &(t, s, e)) in words.iter().enumerate() {
+            if k > 0 {
+                out.0.push(" ");
+                out.1.push(s);
+                out.2.push(s);
+            }
+            out.0.push(t);
+            out.1.push(s);
+            out.2.push(e);
+        }
+        json!({"text": out.0, "start_time": out.1, "end_time": out.2})
+    }
+
+    fn timing(text: &str, words: &[SpokenWord]) -> Vec<(String, i64, i64)> {
+        let chars: Vec<char> = text.chars().collect();
+        words.iter().map(|w| (chars[w.range.0 as usize..w.range.1 as usize].iter().collect(), w.start.0 / 1000, w.end.0 / 1000)).collect()
+    }
+
+    #[test]
+    fn edited_captions_keep_the_spoken_timing() {
+        let said = heard(&[("red", 0, 300), ("green", 400, 700), ("blu", 700, 900)]);
+        // Same number of words: by position, punctuation and all.
+        let t = "Red green, blue!";
+        assert_eq!(timing(t, &spoken_words(t, &said)), [("Red".into(), 0, 300), ("green,".into(), 400, 700), ("blue!".into(), 700, 900)]);
+        // A split caption keeps every word; the other part's are at 0 ms. A word that doesn't
+        // match one of the same count isn't spoken: it shows from the next word's start.
+        let said = heard(&[("one", 0, 0), ("two", 0, 0), ("three", 300, 600), ("four", 600, 900), ("five", 900, 1200)]);
+        let t = "Three four five.";
+        assert_eq!(timing(t, &spoken_words(t, &said)), [("Three".into(), 600, 600), ("four".into(), 600, 900), ("five.".into(), 900, 1200)]);
+        let said = heard(&[("one", 0, 300), ("two", 300, 600), ("three", 900, 1200), ("four", 1200, 1500)]);
+        let t = "One two.";
+        assert_eq!(timing(t, &spoken_words(t, &said)), [("One".into(), 0, 300), ("two.".into(), 300, 600)]);
+    }
+
+    #[test]
+    fn a_subtitle_template_segment_draws_its_text_with_the_caption_style() {
+        let mut d = sample_draft();
+        d["materials"]["texts"][0]["words"] = heard(&[("hi", 0, 500)]);
+        d["materials"]["material_animations"] = json!([{"id": "A1", "animations": [{"type": "caption", "resource_id": "7289356246623195649", "start": 0, "duration": 1_000_000}]}]);
+        d["materials"]["text_templates"] = json!([{"id": "TT", "text_info_resources": [{"text_material_id": "T1", "extra_material_refs": ["A1"]}]}]);
+        d["tracks"][1]["segments"][0]["material_id"] = json!("TT");
+        let Imported { project, .. } = import_draft_json(&d, "hint").unwrap();
+        let seg = &project.tracks[1].segments[0];
+        assert_eq!((seg.material.0.as_str(), seg.attachments.contains(&MaterialId::from("A1"))), ("T1", true));
+        assert_eq!(project.materials.animations[0].items[0].builtin.as_deref(), Some("caption_word_color"));
+        assert_eq!(project.materials.texts[0].words.len(), 1);
     }
 
     #[test]

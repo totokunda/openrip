@@ -581,6 +581,7 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
             underline: s(clip, "textDecoration") == "underline",
         }],
         text,
+        words: Vec::new(),
         layout: TextLayout {
             alignment: match s(clip, "textAlign").as_str() {
                 "center" => 1,

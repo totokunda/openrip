@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use openrip_media::{DecoderOptions, MediaError, VideoDecoder, VideoFrame};
-use openrip_model::{EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
+use openrip_model::{Animation, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_render::text::{self, Align, Font, TextStyle};
 use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source};
 
@@ -463,10 +463,38 @@ impl PreviewEngine {
             let local = seg.local_time(t);
             let (pos, scale) = (seg.transform.position.sample(local), seg.transform.scale.sample(local));
             let em = match run.size_unit {
-                SizeUnit::CapCut => run.size * CAPCUT_SIZE_UNIT_EM * w as f32,
+                // The size sets the font's line box, not its em (docs/parity/calibration.md).
+                SizeUnit::CapCut => run.size * CAPCUT_SIZE_UNIT_EM * w as f32 / self.fonts[&path].line_box_em().max(0.1),
                 SizeUnit::CanvasHeight => run.size * h as f32,
             } * scale.x.abs() as f32;
             let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            let rgba = |c: openrip_model::Rgba| [to_u8(c.r), to_u8(c.g), to_u8(c.b), to_u8(c.a)];
+            let animations: Vec<Animation> = seg.attachments.iter().filter_map(|id| self.project.materials.animations.iter().find(|m| &m.id == id)).flat_map(|m| m.items.iter().cloned()).collect();
+            // Each character's own fill colour, from its run.
+            let own: Vec<[u8; 4]> = {
+                let mut own = vec![rgba(run.fill); text.text.chars().count()];
+                for r in &text.runs[1..] {
+                    for c in own.iter_mut().take(r.range.1 as usize).skip(r.range.0 as usize) {
+                        *c = rgba(r.fill);
+                    }
+                }
+                own
+            };
+            // A caption that follows the speech shows a page of its words at a time.
+            let (shown, char_colors) = match crate::caption::caption_frame(&animations, &text.text, &text.words, local) {
+                Some(None) => return Ok(None),
+                Some(Some(f)) => {
+                    let (a, b) = (f.page.0 as usize, f.page.1 as usize);
+                    let mut colors = own[a..b].to_vec();
+                    for (k, w) in f.words.iter().enumerate() {
+                        for c in w.0 as usize..w.1 as usize {
+                            colors[c - a] = f.style.color(own[c], f.reading == Some(k));
+                        }
+                    }
+                    (text.text.chars().skip(a).take(b - a).collect::<String>(), Some(colors))
+                }
+                None => (text.text.clone(), own.iter().any(|c| *c != own[0]).then(|| own.clone())),
+            };
             // A library text style attached to the clip replaces the run's colour and stroke.
             let styled = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id).and_then(|e| Some((e.id.clone(), e.text_style.clone()?))));
             let effect = styled.as_ref().map(|(_, fx)| self.text_effect(fx, em, run.fill));
@@ -500,11 +528,11 @@ impl PreviewEngine {
                 bold: if run.bold { 0.008 * em } else { 0.0 },
                 italic: if run.italic { 10.0 } else { 0.0 },
                 effect: effect.as_ref(),
+                char_colors: char_colors.as_deref(),
             };
-            let lay = text::layout(&text.text, &style);
+            let lay = text::layout(&shown, &style);
             // Library text animations (typing reveals) as per-character opacity.
-            let animations = seg.attachments.iter().filter_map(|id| self.project.materials.animations.iter().find(|m| &m.id == id)).flat_map(|m| &m.items);
-            let char_alpha = crate::animation::char_alpha(animations, text.text.chars().count(), local);
+            let char_alpha = crate::animation::char_alpha(&animations, shown.chars().count(), local);
             // Block centre on the canvas; rasterise so the image sits on the pixel grid. In a text
             // box the block sits at the box's side or middle, by its alignments.
             let (mut cx, mut cy) = (w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0);
@@ -527,7 +555,8 @@ impl PreviewEngine {
             // Everything but the per-character opacity, which animations change every frame.
             let shape_key = key_of((
                 &path,
-                &text.text,
+                &shown,
+                &char_colors,
                 em.to_bits(),
                 style.color,
                 style.stroke.map(|(c, r)| (c, r.to_bits())),

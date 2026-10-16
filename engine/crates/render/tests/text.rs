@@ -11,7 +11,7 @@ fn font() -> Option<Font> {
 }
 
 fn style(font: &Font, max_width: Option<f32>) -> TextStyle<'_> {
-    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, stroke: None, background: None, max_width, bold: 0.0, italic: 0.0, effect: None }
+    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, stroke: None, background: None, max_width, bold: 0.0, italic: 0.0, effect: None, char_colors: None }
 }
 
 #[test]
@@ -23,6 +23,10 @@ fn lines_wrap_between_words_and_long_words_break() {
     let wrapped = layout("alpha beta gamma", &style(&f, Some(two_words + 5.0)));
     assert!((wrapped.height / one.height - 2.0).abs() < 0.3, "{} vs {}", wrapped.height, one.height);
     assert!(wrapped.width <= two_words + 5.0);
+    // With room for it, the first line keeps the space it broke at, in its width.
+    let with_space = layout("alpha beta ", &style(&f, None)).width;
+    let roomy = layout("alpha beta gamma", &style(&f, Some(with_space + 1.0)));
+    assert!((roomy.width - with_space).abs() < 0.01 && roomy.height > one.height * 1.5, "{}", roomy.width);
     // A width for one word: three lines.
     let narrow = layout("alpha beta gamma", &style(&f, Some(layout("gamma", &style(&f, None)).width + 1.0)));
     assert!((narrow.height / one.height - 3.0).abs() < 0.5, "{}", narrow.height / one.height);
