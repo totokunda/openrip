@@ -21,7 +21,7 @@ The importer only reads CapCut's files; it never writes to CapCut's data folder.
 | Import time | 3.4 ms average, 13.4 ms max per draft |
 | Media files missing on this machine | 740 of 1,026 (→ relink is a P0 feature) |
 
-**Mapped to OpenRip types:** videos, photos, audios, texts (rich runs, stroke, shadow, background), speeds, canvas fills, audio fades, transitions, Adjust sliders (brightness, contrast, saturation, sharpen, highlights, shadows, temperature, tint, vignette, blacks, whites, exposure, fade, clarity), filters/effects, and keyframes (position, scale, rotation, opacity, volume).
+**Mapped to OpenRip types:** videos, photos, audios, texts (rich runs, stroke, shadow, background), speeds, canvas fills, audio fades, transitions, Adjust sliders (brightness, contrast, saturation, sharpen, highlights, shadows, temperature, tint, vignette, blacks, whites, exposure, fade, clarity), **HSL (8 named ranges plus custom colour, −100…100), tone curves (bezier anchors per luma/R/G/B channel), primary and log colour wheels (lift/gamma/gain/offset)**, filters/effects, and keyframes (position, scale, rotation, opacity, volume).
 
 **Kept verbatim, not interpreted yet** (ordered by how much real projects use them):
 
@@ -34,7 +34,6 @@ The importer only reads CapCut's files; it never writes to CapCut's data folder.
 | `material_colors` | 835 | Investigate. |
 | `loudnesses` | 313 | Loudness normalisation; implement in `openrip-audio`. |
 | `beats` | 191 | Beat markers; P2 DSP feature. |
-| `hsl` / `color_curves` / `primary_color_wheels` | 160 / 56 / 26 | Built-in colour tools: map in the colour milestone. |
 | `text_templates` | 43 | Library text templates: placeholder plus base text. |
 | `realtime_denoises`, `smart_crops`, `vocal_beautifys` | 29 / 10 / 5 | AI features; unsupported by design. |
 | `audio_effects`, `stickers`, `time_marks`, `common_mask`, `drafts` | 8 / 4 / 4 / 2 / 2 | Map as their features land (masks first). |

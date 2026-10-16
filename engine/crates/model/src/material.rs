@@ -36,6 +36,12 @@ pub struct Materials {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<Effect>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hsl: Vec<HslAdjust>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub curves: Vec<ColorCurves>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub color_wheels: Vec<ColorWheels>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreign: Vec<Foreign>,
 }
 
@@ -49,6 +55,9 @@ pub enum MaterialRef<'a> {
     AudioFade(&'a AudioFade),
     Transition(&'a Transition),
     Effect(&'a Effect),
+    Hsl(&'a HslAdjust),
+    Curves(&'a ColorCurves),
+    ColorWheels(&'a ColorWheels),
     Foreign(&'a Foreign),
 }
 
@@ -68,6 +77,9 @@ impl Materials {
         find!(audio_fades, AudioFade);
         find!(transitions, Transition);
         find!(effects, Effect);
+        find!(hsl, Hsl);
+        find!(curves, Curves);
+        find!(color_wheels, ColorWheels);
         find!(foreign, Foreign);
         None
     }
@@ -84,6 +96,9 @@ impl Materials {
             + self.audio_fades.len()
             + self.transitions.len()
             + self.effects.len()
+            + self.hsl.len()
+            + self.curves.len()
+            + self.color_wheels.len()
             + self.foreign.len()
     }
 
@@ -289,6 +304,103 @@ pub struct Effect {
     pub library: Option<LibraryRef>,
 }
 
+/// HSL adjustment for one colour range (CapCut's HSL panel: one material per range).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HslAdjust {
+    pub id: MaterialId,
+    /// CapCut's colour-range index: 1–8 are its named ranges (red, orange, yellow, green,
+    /// cyan, blue, purple, magenta — order still to be verified), 9 is a custom colour.
+    pub range: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_color: Option<Rgba>,
+    /// −100…100 each.
+    pub hue: f32,
+    pub saturation: f32,
+    pub lightness: f32,
+}
+
+/// One curve anchor with bezier handles, all in 0…1 (x = input level, y = output level).
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CurvePoint {
+    pub anchor: (f64, f64),
+    pub left: (f64, f64),
+    pub right: (f64, f64),
+}
+
+/// Tone curves per channel. An empty channel is the identity curve.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColorCurves {
+    pub id: MaterialId,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub luma: Vec<CurvePoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub red: Vec<CurvePoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub green: Vec<CurvePoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blue: Vec<CurvePoint>,
+}
+
+/// Evaluate a curve at input level `x` (0…1): cubic bezier segments between anchors,
+/// using each anchor's right handle and the next anchor's left handle.
+pub fn eval_curve(points: &[CurvePoint], x: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    match points.len() {
+        0 => return x,
+        1 => return points[0].anchor.1,
+        _ => {}
+    }
+    if x <= points[0].anchor.0 {
+        return points[0].anchor.1;
+    }
+    let last = points.len() - 1;
+    if x >= points[last].anchor.0 {
+        return points[last].anchor.1;
+    }
+    let i = points.partition_point(|p| p.anchor.0 <= x).max(1);
+    let (a, b) = (points[i - 1], points[i]);
+    let (p0, p1, p2, p3) = (a.anchor, a.right, b.left, b.anchor);
+    let bez = |t: f64, c0: f64, c1: f64, c2: f64, c3: f64| {
+        let u = 1.0 - t;
+        u * u * u * c0 + 3.0 * u * u * t * c1 + 3.0 * u * t * t * c2 + t * t * t * c3
+    };
+    // Solve x(t) = x by bisection (x is monotonic for well-formed curves).
+    let (mut lo, mut hi) = (0.0, 1.0);
+    for _ in 0..60 {
+        let mid = 0.5 * (lo + hi);
+        if bez(mid, p0.0, p1.0, p2.0, p3.0) < x {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    bez(0.5 * (lo + hi), p0.1, p1.1, p2.1, p3.1).clamp(0.0, 1.0)
+}
+
+/// Values for one colour wheel.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WheelValue {
+    pub red: f64,
+    pub green: f64,
+    pub blue: f64,
+    pub luma: f64,
+    pub saturation: f64,
+}
+
+/// Lift / gamma / gain / offset colour wheels (CapCut's primary or log wheels).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColorWheels {
+    pub id: MaterialId,
+    /// Log wheels (with range bounds in CapCut) rather than primary wheels.
+    #[serde(default)]
+    pub log: bool,
+    pub lift: WheelValue,
+    pub gamma: WheelValue,
+    pub gain: WheelValue,
+    pub offset: WheelValue,
+    pub intensity: f64,
+}
+
 /// A material OpenRip doesn't interpret yet, kept verbatim.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Foreign {
@@ -311,6 +423,9 @@ pub enum AnyMaterial {
     AudioFade(AudioFade),
     Transition(Transition),
     Effect(Effect),
+    Hsl(HslAdjust),
+    Curves(ColorCurves),
+    ColorWheels(ColorWheels),
     Foreign(Foreign),
 }
 
@@ -324,6 +439,9 @@ impl AnyMaterial {
             AnyMaterial::AudioFade(m) => &m.id,
             AnyMaterial::Transition(m) => &m.id,
             AnyMaterial::Effect(m) => &m.id,
+            AnyMaterial::Hsl(m) => &m.id,
+            AnyMaterial::Curves(m) => &m.id,
+            AnyMaterial::ColorWheels(m) => &m.id,
             AnyMaterial::Foreign(m) => &m.id,
         }
     }
@@ -344,6 +462,9 @@ impl Materials {
             AnyMaterial::AudioFade(m) => put(&mut self.audio_fades, m, index),
             AnyMaterial::Transition(m) => put(&mut self.transitions, m, index),
             AnyMaterial::Effect(m) => put(&mut self.effects, m, index),
+            AnyMaterial::Hsl(m) => put(&mut self.hsl, m, index),
+            AnyMaterial::Curves(m) => put(&mut self.curves, m, index),
+            AnyMaterial::ColorWheels(m) => put(&mut self.color_wheels, m, index),
             AnyMaterial::Foreign(m) => put(&mut self.foreign, m, index),
         }
     }
@@ -364,7 +485,38 @@ impl Materials {
         take!(audio_fades, AudioFade);
         take!(transitions, Transition);
         take!(effects, Effect);
+        take!(hsl, Hsl);
+        take!(curves, Curves);
+        take!(color_wheels, ColorWheels);
         take!(foreign, Foreign);
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_and_bezier_curves() {
+        assert_eq!(eval_curve(&[], 0.3), 0.3);
+        // A straight diagonal written as bezier anchors with handles on the line.
+        let line = [
+            CurvePoint { anchor: (0.0, 0.0), left: (0.0, 0.0), right: (1.0 / 3.0, 1.0 / 3.0) },
+            CurvePoint { anchor: (1.0, 1.0), left: (2.0 / 3.0, 2.0 / 3.0), right: (1.0, 1.0) },
+        ];
+        for i in 0..=10 {
+            let x = i as f64 / 10.0;
+            assert!((eval_curve(&line, x) - x).abs() < 1e-6, "{x}");
+        }
+        // A lifted black point: output at 0 is the first anchor's y.
+        let lifted = [
+            CurvePoint { anchor: (0.0, 0.1), left: (0.0, 0.1), right: (0.33, 0.4) },
+            CurvePoint { anchor: (1.0, 0.9), left: (0.67, 0.6), right: (1.0, 0.9) },
+        ];
+        assert!((eval_curve(&lifted, 0.0) - 0.1).abs() < 1e-9);
+        assert!((eval_curve(&lifted, 1.0) - 0.9).abs() < 1e-9);
+        let mid = eval_curve(&lifted, 0.5);
+        assert!(mid > 0.4 && mid < 0.6, "{mid}");
     }
 }

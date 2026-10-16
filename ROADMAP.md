@@ -93,7 +93,8 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
    - Done: `openrip-model` (µs time with exact frame-rate maths, `Animated<T>`, CapCut-shaped tracks/segments/materials) and `openrip-capcut`. All 56 local CapCut drafts import with zero structural problems ([coverage](docs/parity/capcut-import.md)).
    - Done: edits as serializable commands (add/remove/move/trim/split/speed/properties/tracks/materials). Undo/redo replays recorded inverses and is atomic, with gestures merged into one step. Verified by 2,000 randomized sequences (181k edits) undoing exactly to the original.
    - Done: `openrip-v1` importer for the TypeScript app's projects (exact frame recovery, geometry conversion, dB→gain, overlap repair). All 7 local projects import cleanly.
-   - Next: decode CapCut track attribute bits and calibrate CapCut position/scale/text units against exports; map the colour-tool materials (HSL, curves, wheels); shapes, drawings and masks in the model.
+   - Done: colour-tool materials (HSL, tone curves with a bezier evaluator, primary/log wheels), mapped from CapCut.
+   - Next: decode CapCut track attribute bits and calibrate CapCut position/scale/text units against exports (needs a short CapCut test session); shapes, drawings and masks in the model.
 1. **M1 Open and play.** Import a v1 project and play one video track with audio, A/V in sync.
 2. **M2 Compose.** Multi-track compositing, transforms, crop, opacity, adjustments, LUT filters.
 3. **M3 Overlays.** Text, shapes, drawing, lasso/shape masks with keyframes.

@@ -453,6 +453,57 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                     });
                     true
                 }
+                "hsl" => {
+                    let custom = s(m, "custom_color");
+                    out.hsl.push(HslAdjust {
+                        id,
+                        range: i(m, "hsl_color_type").clamp(0, 255) as u8,
+                        custom_color: (!custom.is_empty()).then(|| Rgba::from_hex(&custom)).flatten(),
+                        hue: f(m, "hue", 0.0) as f32,
+                        saturation: f(m, "saturation", 0.0) as f32,
+                        lightness: f(m, "lightness", 0.0) as f32,
+                    });
+                    true
+                }
+                "color_curves" => {
+                    let channel = |name: &str| -> Vec<CurvePoint> {
+                        let pt = |v: Option<&Value>| v.map(|p| (f(p, "x", 0.0), f(p, "y", 0.0))).unwrap_or((0.0, 0.0));
+                        arr(m, name)
+                            .iter()
+                            .map(|c| CurvePoint { anchor: pt(c.get("anchor")), left: pt(c.get("left_control")), right: pt(c.get("right_control")) })
+                            .collect()
+                    };
+                    out.curves.push(ColorCurves {
+                        id,
+                        luma: channel("luma"),
+                        red: channel("red"),
+                        green: channel("green"),
+                        blue: channel("blue"),
+                    });
+                    true
+                }
+                "primary_color_wheels" | "log_color_wheels" => {
+                    let wheel = |name: &str| {
+                        let w = m.get(name).cloned().unwrap_or(Value::Null);
+                        WheelValue {
+                            red: f(&w, "red", 0.0),
+                            green: f(&w, "green", 0.0),
+                            blue: f(&w, "blue", 0.0),
+                            luma: f(&w, "luma", 0.0),
+                            saturation: f(&w, "saturation", 0.0),
+                        }
+                    };
+                    out.color_wheels.push(ColorWheels {
+                        id,
+                        log: table == "log_color_wheels",
+                        lift: wheel("lift"),
+                        gamma: wheel("gamma"),
+                        gain: wheel("gain"),
+                        offset: wheel("offset"),
+                        intensity: f(m, "intensity", 1.0),
+                    });
+                    true
+                }
                 _ => false,
             };
             if mapped {
