@@ -129,7 +129,7 @@ impl Mixer {
             } else if !seg.change_pitch {
                 // Keep the pitch: stream the source through atempo.
                 let rate = self.rate;
-                let fresh = !self.stretches.get(&seg.id).is_some_and(|st| st.next_out == local);
+                let fresh = self.stretches.get(&seg.id).is_none_or(|st| st.next_out != local);
                 if fresh {
                     self.stretches.insert(seg.id.clone(), Stretch { tempo: tempo::Tempo::new(rate, speed)?, next_out: local, next_in: src_at });
                 }
