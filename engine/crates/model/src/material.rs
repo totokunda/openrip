@@ -42,6 +42,8 @@ pub struct Materials {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub color_wheels: Vec<ColorWheels>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub animations: Vec<Animations>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreign: Vec<Foreign>,
 }
 
@@ -58,6 +60,7 @@ pub enum MaterialRef<'a> {
     Hsl(&'a HslAdjust),
     Curves(&'a ColorCurves),
     ColorWheels(&'a ColorWheels),
+    Animations(&'a Animations),
     Foreign(&'a Foreign),
 }
 
@@ -80,6 +83,7 @@ impl Materials {
         find!(hsl, Hsl);
         find!(curves, Curves);
         find!(color_wheels, ColorWheels);
+        find!(animations, Animations);
         find!(foreign, Foreign);
         None
     }
@@ -99,6 +103,7 @@ impl Materials {
             + self.hsl.len()
             + self.curves.len()
             + self.color_wheels.len()
+            + self.animations.len()
             + self.foreign.len()
     }
 
@@ -205,6 +210,10 @@ pub struct TextLayout {
     pub background: Option<TextBackground>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TextShadow>,
+    /// Lines longer than this break between words (anywhere in CJK text): a fraction of the
+    /// canvas width, scaled with the clip. `None` never wraps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_width: Option<f32>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -289,6 +298,43 @@ pub struct Transition {
     pub builtin: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library: Option<LibraryRef>,
+}
+
+/// A clip's animations: an intro, an outro and a loop (at most one of each in CapCut), or a
+/// caption style.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Animations {
+    pub id: MaterialId,
+    pub items: Vec<Animation>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Animation {
+    pub kind: AnimationKind,
+    /// Clip-local time the animation starts, and how long it runs.
+    pub start: Micros,
+    pub duration: Micros,
+    /// Built-in OpenRip animation this maps to, if any (e.g. "type_1").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builtin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<LibraryRef>,
+    /// The source app's downloaded copy of the animation, for animations that draw images
+    /// from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnimationKind {
+    In,
+    Out,
+    Loop,
+    /// Applies for the whole clip (CapCut's caption styles).
+    Caption,
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -442,6 +488,7 @@ pub enum AnyMaterial {
     Hsl(HslAdjust),
     Curves(ColorCurves),
     ColorWheels(ColorWheels),
+    Animations(Animations),
     Foreign(Foreign),
 }
 
@@ -458,6 +505,7 @@ impl AnyMaterial {
             AnyMaterial::Hsl(m) => &m.id,
             AnyMaterial::Curves(m) => &m.id,
             AnyMaterial::ColorWheels(m) => &m.id,
+            AnyMaterial::Animations(m) => &m.id,
             AnyMaterial::Foreign(m) => &m.id,
         }
     }
@@ -481,6 +529,7 @@ impl Materials {
             AnyMaterial::Hsl(m) => put(&mut self.hsl, m, index),
             AnyMaterial::Curves(m) => put(&mut self.curves, m, index),
             AnyMaterial::ColorWheels(m) => put(&mut self.color_wheels, m, index),
+            AnyMaterial::Animations(m) => put(&mut self.animations, m, index),
             AnyMaterial::Foreign(m) => put(&mut self.foreign, m, index),
         }
     }
@@ -504,6 +553,7 @@ impl Materials {
         take!(hsl, Hsl);
         take!(curves, Curves);
         take!(color_wheels, ColorWheels);
+        take!(animations, Animations);
         take!(foreign, Foreign);
         None
     }

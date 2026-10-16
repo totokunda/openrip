@@ -142,17 +142,19 @@ Session 3 is generated too (`make_draft.py`), as two drafts:
 
 **`openrip-calibration-3-portrait`** (9:16, 1080×1920): `pattern.png` contain-fit (a 0.5625 downscale) 0–1 s, `marker.png` 1:1 at 1–2 s, then default text size 15 over black at 2–3 s (width or longer side).
 
-### Steps (sessions 3 and 4 together)
+### Steps (sessions 3, 4 and 5 together)
 
 1. Install the drafts. This quits CapCut, waits for it to close, writes the drafts into CapCut's projects folder, and reopens CapCut:
    ```
-   osascript -e 'quit app "CapCut"'; while pgrep -x CapCut >/dev/null; do sleep 1; done; python3 /Users/tosinkuye/openrip/bench/calibration/make_draft.py --template "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/1015" --register openrip-calibration-3 openrip-calibration-3-portrait openrip-calibration-4 && open -a CapCut
+   osascript -e 'quit app "CapCut"'; while pgrep -x CapCut >/dev/null; do sleep 1; done; python3 /Users/tosinkuye/openrip/bench/calibration/make_draft.py --template "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/1015" --register openrip-calibration-3 openrip-calibration-3-portrait openrip-calibration-4 openrip-calibration-5 openrip-calibration-5-landscape && open -a CapCut
    ```
 2. In CapCut, export into `bench/calibration/out/`, all at **30 fps, H.264, bitrate Higher**:
    - `openrip-calibration-3` at **1080p**, named `openrip-calibration-3`.
    - `openrip-calibration-3` at **720p**, named `openrip-calibration-3-720p`. This shows whether CapCut renders at the export size when it is smaller than the canvas.
    - `openrip-calibration-3-portrait` at **1080p**, named `openrip-calibration-3-portrait`.
    - `openrip-calibration-4` at **1080p**, named `openrip-calibration-4`.
+   - `openrip-calibration-5` at **1080p**, named `openrip-calibration-5`.
+   - `openrip-calibration-5-landscape` at **1080p**, named `openrip-calibration-5-landscape`.
 
 ## Session 4: colour adjustments
 
@@ -166,3 +168,23 @@ CapCut stores each Adjust slider as an effect material: `type` names the slider,
 | 29–37 s | fade, sharpen, clear (clarity), vignetting at +0.5 and +1 |
 
 The adjustments are cloned from ones your own drafts already use, so CapCut finds their effect bundle in its cache. Nothing is copied into the repo.
+
+## Session 5: text intros and line wrapping
+
+Two things real drafts use that session 2's short default text never showed: library intros that reveal text character by character (85 animated clips in the local drafts: "Type 2", "Typewriter", "Type 1"), and line wrapping. What is implemented already, and why, is in [text-animations.md](text-animations.md) and [text-wrap.md](text-wrap.md); this session measures it. The animations are cloned from drafts that already use them, so CapCut finds their bundles in its cache.
+
+**`openrip-calibration-5`** (9:16, 1080×1920), white text over black:
+
+| Time | Clip | Tests |
+|---|---|---|
+| 0–3 s | "OpenRip types this line", size 11, Type 1 over 2 s | when each character appears; whether spaces count as characters |
+| 3–6 s | same, Type 2 over 2 s | each character's fade start and length |
+| 6–9 s | same, Typewriter over 2 s | the character rhythm and the caret (size, position, blink) |
+| 9–11 s | "in the park", size 15, Typewriter over 1/3 s | the fast rhythm table, as in a real draft |
+| 11 / 12 / 13 / 14 s | 13 number words, size 15: box width 600; 600 at scale 0.6; 900; 600 at size 10 | the unit of `fixed_width`, and whether wrapping scales with the clip and font size |
+| 15 s | same words, auto-sized box | whether an auto box wraps (session 2 says not, in landscape) |
+| 16 s | a line break, then the words, box 600 | wrapping after an explicit line break |
+| 17 s | two copies of the line with a background box, box 600 | the background around wrapped lines |
+| 18–20 s | Type 1 with a black stroke 0.08 | whether the stroke appears with its character |
+
+**`openrip-calibration-5-landscape`** (16:9, 1920×1080): the words with box widths 600 and 1200, then an auto box at size 8: whether `fixed_width` is relative to the canvas width.

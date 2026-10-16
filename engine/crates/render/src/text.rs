@@ -63,12 +63,18 @@ pub struct TextStyle<'a> {
     /// Box behind the text: colour, padding around the block of line boxes (px, x and y),
     /// corner radius (px).
     pub background: Option<([u8; 4], [f32; 2], f32)>,
+    /// Wrap lines wider than this (px) between words, or between any two characters of
+    /// CJK text; a word wider than the whole line breaks between characters.
+    pub max_width: Option<f32>,
 }
 
 struct Placed {
     glyph: u16,
     x: f32,
     baseline: f32,
+    /// Index of the glyph's (first) character in the text, counting every character
+    /// including line breaks.
+    char_index: usize,
 }
 
 /// Laid-out text, ready to rasterise.
@@ -96,19 +102,31 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
     let spacing = style.letter_spacing * style.size;
     let mut ctx = ShapeContext::new();
     let mut lines = Vec::new();
+    let mut line_start = 0; // characters before this line
     for line in text.split('\n') {
         let mut shaper = ctx.builder(font).size(style.size).build();
         shaper.add_str(line);
-        let mut pen = 0.0f32;
-        let mut glyphs = Vec::new();
+        let mut clusters = Vec::new();
         shaper.shape_with(|cluster| {
+            let at = (cluster.source.start as usize).min(line.len());
+            let mut c = Cluster { glyphs: Vec::new(), advance: 0.0, char_index: line_start + line[..at].chars().count(), ch: line[at..].chars().next().unwrap_or(' ') };
             for g in cluster.glyphs {
-                glyphs.push((g.id, pen + g.x));
-                pen += g.advance + spacing;
+                c.glyphs.push((g.id, c.advance + g.x));
+                c.advance += g.advance + spacing;
             }
+            clusters.push(c);
         });
-        let width = if glyphs.is_empty() { 0.0 } else { pen - spacing };
-        lines.push((glyphs, width));
+        for row in wrap(&clusters, style.max_width) {
+            let mut pen = 0.0f32;
+            let mut glyphs = Vec::new();
+            for c in row {
+                glyphs.extend(c.glyphs.iter().map(|&(id, x)| (id, pen + x, c.char_index)));
+                pen += c.advance;
+            }
+            let width = if glyphs.is_empty() { 0.0 } else { pen - spacing };
+            lines.push((glyphs, width));
+        }
+        line_start += line.chars().count() + 1;
     }
     let width = lines.iter().map(|l| l.1).fold(0.0, f32::max);
     let height = line_box + advance_y * (lines.len().saturating_sub(1)) as f32;
@@ -120,15 +138,84 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
             Align::Right => width - w,
         };
         let baseline = m.ascent + i as f32 * advance_y;
-        glyphs.extend(line.into_iter().map(|(glyph, x)| Placed { glyph, x: x0 + x, baseline }));
+        glyphs.extend(line.into_iter().map(|(glyph, x, char_index)| Placed { glyph, x: x0 + x, baseline, char_index }));
     }
     TextLayout { glyphs, width, height, size: style.size }
+}
+
+/// A shaped cluster: its glyphs (id, x from the cluster's start) and advance, letter
+/// spacing included.
+struct Cluster {
+    glyphs: Vec<(u16, f32)>,
+    advance: f32,
+    char_index: usize,
+    ch: char,
+}
+
+fn is_cjk(c: char) -> bool {
+    matches!(c as u32, 0x2E80..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF | 0x20000..=0x2FFFF)
+}
+
+/// Greedy line breaking: break before a word (after spaces) or before/after a CJK character
+/// when the line would get wider than `max`. Spaces at a break are dropped. A piece wider
+/// than a whole line breaks between characters.
+fn wrap(clusters: &[Cluster], max: Option<f32>) -> Vec<&[Cluster]> {
+    let Some(max) = max.filter(|m| *m > 0.0) else { return vec![clusters] };
+    let mut rows = Vec::new();
+    let mut start = 0; // first cluster of the row
+    let mut i = 0;
+    while i < clusters.len() {
+        // The next unbreakable piece: a CJK character, or a run up to the next space or CJK
+        // character, plus the spaces after it.
+        let mut end = i + 1;
+        if !is_cjk(clusters[i].ch) {
+            while end < clusters.len() && clusters[end].ch != ' ' && !is_cjk(clusters[end].ch) && clusters[i].ch != ' ' {
+                end += 1;
+            }
+        }
+        while end < clusters.len() && clusters[end].ch == ' ' {
+            end += 1;
+        }
+        let ink_end = (i..end).rev().find(|&k| clusters[k].ch != ' ').map_or(i, |k| k + 1);
+        let width = |from: usize, to: usize| clusters[from..to].iter().map(|c| c.advance).sum::<f32>();
+        if ink_end > i && width(start, ink_end) > max {
+            if start < i {
+                // Break before this piece (dropping the spaces that ended the row).
+                let row_end = (start..i).rev().find(|&k| clusters[k].ch != ' ').map_or(start, |k| k + 1);
+                rows.push(&clusters[start..row_end]);
+                start = i;
+                continue;
+            }
+            // The piece alone is too wide: break it between characters.
+            let mut k = i + 1;
+            while k < ink_end && width(start, k + 1) <= max {
+                k += 1;
+            }
+            rows.push(&clusters[start..k]);
+            start = k;
+            i = k;
+            continue;
+        }
+        i = end;
+    }
+    // The last row keeps its trailing spaces, as an unwrapped line does.
+    if start < clusters.len() || rows.is_empty() {
+        rows.push(&clusters[start..]);
+    }
+    rows
 }
 
 impl TextLayout {
     /// Rasterise with the block's top-left corner at `origin` (fractional pixels) inside a
     /// margin, so a caller can line the image up with the canvas pixel grid.
     pub fn rasterize(&self, style: &TextStyle, origin: [f32; 2]) -> RenderedText {
+        self.rasterize_with_alpha(style, origin, None)
+    }
+
+    /// [`TextLayout::rasterize`] with an opacity per character (fill and stroke; the
+    /// background stays), as text animations reveal text. Characters past the end of
+    /// `char_alpha` are opaque.
+    pub fn rasterize_with_alpha(&self, style: &TextStyle, origin: [f32; 2], char_alpha: Option<&[f32]>) -> RenderedText {
         let stroke = style.stroke.map_or(0.0, |s| s.1);
         let bg_pad = style.background.map_or([0.0, 0.0], |b| b.1);
         let pad = ((self.size * 0.5).max(stroke).max(bg_pad[0]).max(bg_pad[1]).ceil() as i32) + 2;
@@ -138,7 +225,7 @@ impl TextLayout {
         let mut outline = style.stroke.map(|_| vec![0f32; (w * h) as usize]);
         let mut ctx = ScaleContext::new();
         let mut scaler = ctx.builder(style.font.as_ref()).size(self.size).hint(false).build();
-        let draw = |cov: &mut [f32], img: &swash::scale::image::Image, x: f32, y: f32| {
+        let draw = |cov: &mut [f32], img: &swash::scale::image::Image, x: f32, y: f32, alpha: f32| {
             let (gx, gy) = (x.floor() as i32 + img.placement.left, y.floor() as i32 - img.placement.top);
             for row in 0..img.placement.height as i32 {
                 for col in 0..img.placement.width as i32 {
@@ -146,13 +233,17 @@ impl TextLayout {
                     if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 {
                         continue;
                     }
-                    let a = img.data[(row * img.placement.width as i32 + col) as usize] as f32 / 255.0;
+                    let a = img.data[(row * img.placement.width as i32 + col) as usize] as f32 / 255.0 * alpha;
                     let c = &mut cov[(py * w as i32 + px) as usize];
                     *c = *c + a - *c * a; // union of overlapping glyphs
                 }
             }
         };
         for g in &self.glyphs {
+            let alpha = char_alpha.and_then(|a| a.get(g.char_index)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+            if alpha == 0.0 {
+                continue;
+            }
             let (x, y) = (left + g.x, top + g.baseline);
             let offset = Vector::new(x.fract(), y.fract());
             if let Some(cov) = outline.as_mut() {
@@ -160,11 +251,11 @@ impl TextLayout {
                 let mut pen = Stroke::new(2.0 * stroke);
                 pen.join(Join::Round).cap(Cap::Round);
                 if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).style(pen).offset(offset).render(&mut scaler, g.glyph) {
-                    draw(cov, &img, x, y);
+                    draw(cov, &img, x, y, alpha);
                 }
             }
             if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).offset(offset).render(&mut scaler, g.glyph) {
-                draw(&mut fill, &img, x, y);
+                draw(&mut fill, &img, x, y, alpha);
             }
         }
         // Background box, anti-aliased by distance to its rounded edge.

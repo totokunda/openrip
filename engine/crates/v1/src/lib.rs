@@ -589,6 +589,7 @@ fn convert_text(id: &MaterialId, clip: &Value) -> Text {
             line_spacing: 0.0,
             background,
             shadow,
+            max_width: None,
         },
     }
 }

@@ -356,8 +356,13 @@ impl PreviewEngine {
                     let radius = if b.style == 2 { b.corner_radius * (em / 2.0 + pad[1]) } else { 0.0 };
                     ([to_u8(b.color.r), to_u8(b.color.g), to_u8(b.color.b), to_u8(b.color.a)], pad, radius)
                 }),
+                // A fraction of the canvas width, scaled with the clip like the text.
+                max_width: text.layout.max_width.map(|f| f * w as f32 * scale.x.abs() as f32),
             };
             let lay = text::layout(&text.text, &style);
+            // Library text animations (typing reveals) as per-character opacity.
+            let animations = seg.attachments.iter().filter_map(|id| self.project.materials.animations.iter().find(|m| &m.id == id)).flat_map(|m| &m.items);
+            let char_alpha = crate::animation::char_alpha(animations, text.text.chars().count(), local);
             // Block centre on the canvas; rasterise so the image sits on the pixel grid.
             let (cx, cy) = (w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0);
             let (x0, y0) = (cx - lay.width as f64 / 2.0, cy - lay.height as f64 / 2.0);
@@ -372,8 +377,8 @@ impl PreviewEngine {
                 text.layout.alignment,
                 text.layout.letter_spacing.to_bits(),
                 text.layout.line_spacing.to_bits(),
-                origin[0].to_bits(),
-                origin[1].to_bits(),
+                (style.max_width.map(f32::to_bits), origin[0].to_bits(), origin[1].to_bits()),
+                char_alpha.as_ref().map(|a| a.iter().map(|v| (v * 255.0).round() as u8).collect::<Vec<_>>()),
             ));
             let tick = self.tick;
             let (image, center) = match self.texts.get_mut(&key) {
@@ -382,7 +387,7 @@ impl PreviewEngine {
                     (img.clone(), *center)
                 }
                 None => {
-                    let r = lay.rasterize(&style, origin);
+                    let r = lay.rasterize_with_alpha(&style, origin, char_alpha.as_deref());
                     let img = std::sync::Arc::new(r.image);
                     self.texts.insert(key, (img.clone(), r.center, tick));
                     (img, r.center)

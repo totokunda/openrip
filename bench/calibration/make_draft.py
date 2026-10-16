@@ -45,6 +45,17 @@ class Txt:
     size: float
     stroke: float = 0.0  # CapCut stroke width (black), 0 = none
     background: float = 0.0  # CapCut background width/height (black, opaque, style 2, radius 0.4: the common real-world case), 0 = none
+    text: str = ""  # replaces the template's text ("Default text") when set
+    anim: str = ""  # library intro animation by resource id (see ANIMS), cloned from an existing draft
+    anim_dur: float = 0.0
+    fixed_width: float = -1.0  # CapCut text box width (-1 = auto-sized box)
+    scale: float = 1.0
+
+
+# Library text intros used in the drafts, by CapCut resource id.
+ANIMS = {"type_1": "6724920249654710791", "type_2": "6724920636403094028", "typewriter": "7210980292243231233"}
+_LINE = "OpenRip types this line"
+_WRAP = "one two three four five six seven eight nine ten eleven twelve thirteen"
 
 
 # Session 4: one Adjust slider per clip on the chart, to measure CapCut's colour formulas.
@@ -70,6 +81,23 @@ SESSIONS = {
     ]),
     "openrip-calibration-4": dict(canvas=(1920, 1080, "16:9"), tracks=[
         [Img("pattern.png", 0, 1)] + [Img("pattern.png", 1 + i, 1, adjust=(a,)) for i, a in enumerate(_ADJ4)],
+    ]),
+    # Text intros (character timing, and the typewriter's caret), then line wrapping: the
+    # same words in boxes of several fixed widths and clip scales, and an auto-sized box.
+    "openrip-calibration-5": dict(canvas=(1080, 1920, "9:16"), tracks=[
+        [Img("black.png", 0, 20)],
+        # Size 11 keeps the line (767 px) inside the canvas, so nothing wraps or overflows.
+        [Txt(0, 3, 11, text=_LINE, anim="type_1", anim_dur=2), Txt(3, 3, 11, text=_LINE, anim="type_2", anim_dur=2),
+         Txt(6, 3, 11, text=_LINE, anim="typewriter", anim_dur=2), Txt(9, 2, 15, text="in the park", anim="typewriter", anim_dur=1 / 3),
+         Txt(11, 1, 15, text=_WRAP, fixed_width=600), Txt(12, 1, 15, text=_WRAP, fixed_width=600, scale=0.6),
+         Txt(13, 1, 15, text=_WRAP, fixed_width=900), Txt(14, 1, 10, text=_WRAP, fixed_width=600),
+         Txt(15, 1, 15, text=_WRAP), Txt(16, 1, 15, text="one two three\n" + _WRAP, fixed_width=600),
+         Txt(17, 1, 15, text=_LINE + " " + _LINE, background=0.28, fixed_width=600), Txt(18, 2, 11, text=_LINE, anim="type_1", anim_dur=2, stroke=0.08)],
+    ]),
+    # Landscape: does the fixed width scale with the canvas width?
+    "openrip-calibration-5-landscape": dict(canvas=(1920, 1080, "16:9"), tracks=[
+        [Img("black.png", 0, 3)],
+        [Txt(0, 1, 15, text=_WRAP, fixed_width=600), Txt(1, 1, 15, text=_WRAP, fixed_width=1200), Txt(2, 1, 8, text=_WRAP)],
     ]),
     # Portrait canvas: text size vs width or longer side; pattern contain-fit at 1080/1920 = 0.5625.
     "openrip-calibration-3-portrait": dict(canvas=(1080, 1920, "9:16"), tracks=[
@@ -131,10 +159,31 @@ def adjust_templates(root: Path, kinds):
     return found
 
 
+def anim_templates(root: Path, wanted):
+    """One animation entry per wanted resource id, from existing drafts (read only), whose
+    downloaded bundle is still in CapCut's cache."""
+    found = {}
+    for f in sorted(root.glob("*/draft_info.json")):
+        try:
+            mats = json.loads(f.read_text()).get("materials", {}).get("material_animations", [])
+        except (OSError, ValueError):
+            continue
+        for m in mats:
+            for a in m.get("animations", []):
+                if a.get("resource_id") in wanted and a["resource_id"] not in found and Path(a.get("path", "")).exists():
+                    found[a["resource_id"]] = a
+    missing = set(wanted) - set(found)
+    if missing:
+        raise SystemExit(f"no existing draft uses these animations, so there is no template: {sorted(missing)}")
+    return found
+
+
 def build(name, spec, template: Path, root: Path):
     src = json.loads((template / "draft_info.json").read_text())
     kinds = {k for tr in spec["tracks"] for c in tr if isinstance(c, Img) for k, _ in c.adjust}
     adjusts = adjust_templates(template.parent, kinds) if kinds else {}
+    wanted = {ANIMS[c.anim] for tr in spec["tracks"] for c in tr if isinstance(c, Txt) and c.anim}
+    anims = anim_templates(template.parent, wanted) if wanted else {}
     index = material_index(src["materials"])
     photo_track = next(t for t in src["tracks"] if t["type"] == "video" and t["segments"] and index[t["segments"][0]["material_id"]][1].get("type") == "photo")
     text_track = next(t for t in src["tracks"] if t["type"] == "text")
@@ -175,15 +224,24 @@ def build(name, spec, template: Path, root: Path):
             for c in clips:
                 seg, text = clone_segment(text_track["segments"][0], index, d["materials"], None)
                 content = json.loads(text["content"])
+                if c.text:
+                    content["text"] = c.text
+                    for style in content["styles"]:
+                        style["range"] = [0, len(c.text)]
                 for style in content["styles"]:
                     style["size"] = c.size
                     if c.stroke:
                         style["strokes"] = [{"content": {"render_type": "solid", "solid": {"color": [0, 0, 0]}}, "width": c.stroke, "mode": 0}]
-                text.update(content=json.dumps(content, separators=(",", ":")), font_size=c.size, text_size=round(c.size * 2))
+                text.update(content=json.dumps(content, separators=(",", ":")), font_size=c.size, text_size=round(c.size * 2), fixed_width=c.fixed_width)
                 if c.background:
                     text.update(background_color="#000000", background_alpha=1.0, background_style=2, background_round_radius=0.4,
                                 background_width=c.background, background_height=c.background, background_vertical_offset=0.0, background_horizontal_offset=0.0)
                 seg.update(target_timerange={"start": us(c.start), "duration": us(c.dur)}, track_render_index=ti)
+                seg["clip"]["scale"] = {"x": c.scale, "y": c.scale}
+                if c.anim:
+                    entry = copy.deepcopy(anims[ANIMS[c.anim]]) | {"start": 0, "duration": us(c.anim_dur)}
+                    holder = next(m for m in d["materials"]["material_animations"] if m["id"] in seg["extra_material_refs"])
+                    holder["animations"] = [entry]
                 track["segments"].append(seg)
         tracks.append(track)
     d["tracks"] = tracks

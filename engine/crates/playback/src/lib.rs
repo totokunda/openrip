@@ -14,6 +14,7 @@
 //!   drag ends.
 
 #[cfg(target_os = "macos")]
+pub mod animation;
 pub mod pipeline;
 mod player;
 pub mod preview;
