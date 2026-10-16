@@ -475,9 +475,10 @@ impl Processor for Chorus {
     }
 }
 
-/// Amplitude modulation at a steady `Rate Hz` from `Phase`, dipping by `Depth` (at most all
-/// the way): Demonized's export wobbles at 14 Hz as strongly as this does at depth 1.
-/// (`Mod_Rate` isn't known; a sweep of the rate by it doesn't match.)
+/// Amplitude modulation at a steady `Rate Hz` from `Phase`, swinging the level by ±`Depth`/2
+/// around unity. On Demonized's export this matches CapCut's 14 Hz wobble (2.47× vs 2.41× its
+/// surroundings) and loudness (+0.6 dB); dipping by `Depth` below unity instead comes out
+/// 2.2 dB quiet. (`Mod_Rate` isn't known; a sweep of the rate by it doesn't match.)
 struct Tremolo {
     phase: f32,
     rate: f32,
@@ -489,7 +490,7 @@ impl Tremolo {
         Tremolo {
             phase: get(p, "Phase", 0.0) as f32,
             rate: 2.0 * PI * get(p, "Rate Hz", 5.0) as f32 / fs,
-            depth: (get(p, "Depth", 0.5) as f32).clamp(0.0, 1.0),
+            depth: get(p, "Depth", 0.5) as f32,
         }
     }
 }
@@ -497,7 +498,7 @@ impl Tremolo {
 impl Processor for Tremolo {
     fn process(&mut self, buf: &mut [f32]) {
         for frame in buf.chunks_exact_mut(CHANNELS) {
-            let g = 1.0 - self.depth * 0.5 * (1.0 + self.phase.sin());
+            let g = 1.0 + self.depth * 0.5 * self.phase.sin();
             frame.iter_mut().for_each(|x| *x *= g);
             self.phase = (self.phase + self.rate) % (2.0 * PI);
         }
@@ -506,12 +507,13 @@ impl Processor for Tremolo {
 
 const PV_SIZE: usize = 2048;
 const PV_HOP: usize = PV_SIZE / 4;
-/// Cepstral coefficients kept for the spectral envelope (below a 300 Hz voice's period).
-const PV_LIFTER: usize = 60;
+/// Cepstral coefficients kept for the spectral envelope: well below a 500 Hz voice's period
+/// (30–60 match CapCut's Deep equally; docs/parity/voice-effects.md).
+const PV_LIFTER: usize = 40;
 
-/// Pitch and formants shifted independently: a phase vocoder moves the harmonics by the
-/// pitch ratio, and each frame's spectral envelope (cepstrally smoothed) is moved by the
-/// formant ratio instead.
+/// Pitch and formants shifted independently: a phase vocoder moves each partial to its
+/// frequency times the pitch ratio (peak shifting, which keeps partials' levels), on each
+/// frame's spectral envelope (cepstrally smoothed) moved by the formant ratio instead.
 struct PitchShift {
     pitch: f32,
     formant: f32,
@@ -583,21 +585,38 @@ impl PitchShift {
             let f = x - i as f32;
             v[i] * (1.0 - f) + v[i + 1] * f
         };
-        let mut out = self.fft.make_output_vec();
-        for (j, o) in out.iter_mut().enumerate() {
-            let src = j as f32 / self.pitch;
-            if src >= (bins - 1) as f32 {
-                continue;
+        // Peak shifting (Laroche & Dolson): each partial's whole lobe (the bins nearest its
+        // peak) moves rigidly by a whole number of bins to the partial's new frequency, its
+        // bins keeping their analysis phases plus a rotation that runs at the difference
+        // between the new and old frequency. The lobe keeps its shape, so the partial keeps
+        // its level. Its amplitude follows the envelope moved by the formant ratio.
+        let phase_in: Vec<f32> = spec.iter().map(|z| z.arg()).collect();
+        let peaks: Vec<usize> = (2..bins - 2).filter(|&k| mag[k] > mag[k - 1] && mag[k] >= mag[k + 1] && mag[k] > mag[k - 2] && mag[k] >= mag[k + 2]).collect();
+        let mut out = vec![Complex32::new(0.0, 0.0); bins];
+        let mut rotation = vec![0f32; bins];
+        if !peaks.is_empty() {
+            // Region boundaries: halfway between neighbouring peaks.
+            for (n, &r) in peaks.iter().enumerate() {
+                let lo = if n == 0 { 0 } else { (peaks[n - 1] + r) / 2 + 1 };
+                let hi = if n + 1 == peaks.len() { bins - 1 } else { (r + peaks[n + 1]) / 2 };
+                let shifted = freq[r] * self.pitch;
+                // By the partial's true frequency, so the lobe lands within half a bin of it.
+                let delta = (shifted - freq[r]).round() as isize;
+                let theta = (self.ch[c].sum_phase[r] + expected * (shifted - freq[r])) % (2.0 * PI);
+                let env_r = env[r].max(1e-9);
+                for k in lo..=hi {
+                    rotation[k] = theta;
+                    let j = k as isize + delta;
+                    if j <= 0 || j as usize >= bins - 1 {
+                        continue;
+                    }
+                    let j = j as usize;
+                    let gain = at(&env, j as f32 / self.formant) / env[k].max(env_r * 1e-3);
+                    out[j] += Complex32::from_polar(mag[k] * gain, phase_in[k] + theta);
+                }
             }
-            // The harmonic structure moved by the pitch ratio, on the envelope moved by the
-            // formant ratio.
-            let exc = at(&mag, src) / at(&env, src).max(1e-9);
-            let m = exc * at(&env, j as f32 / self.formant);
-            let f = freq[src.round() as usize] * self.pitch;
-            let ph = &mut self.ch[c].sum_phase[j];
-            *ph = (*ph + f * expected) % (2.0 * PI);
-            *o = Complex32::from_polar(m, *ph);
         }
+        self.ch[c].sum_phase = rotation;
         out[0].im = 0.0;
         out[bins - 1].im = 0.0;
         let mut time = vec![0f32; PV_SIZE];
@@ -675,6 +694,22 @@ mod tests {
         }
         let got = peak_hz(&x, fs);
         assert!((got - 220.0 * 2f32.powf(-4.8 / 12.0)).abs() < 4.0, "{got} Hz");
+    }
+
+    #[test]
+    fn pitch_shift_keeps_a_tones_level() {
+        let fs = 48_000.0;
+        for p in [0.758f32, 0.9, 1.25] {
+            let mut x = sine(220.0, 96_000, fs);
+            let mut s = PitchShift::new(p, p);
+            for block in x.chunks_mut(1000) {
+                s.process(block);
+            }
+            let tail = &x[x.len() / 2..];
+            let rms = (tail.iter().map(|v| v * v).sum::<f32>() / tail.len() as f32).sqrt();
+            let db = 20.0 * (rms / 0.353_55).log10();
+            assert!(db.abs() < 1.0, "pitch {p}: {db:.2} dB");
+        }
     }
 
     #[test]

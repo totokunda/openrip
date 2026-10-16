@@ -6,7 +6,8 @@
 //! default; FFmpeg's atempo) unless the clip asks for the pitch to follow the speed
 //! (`change_pitch`), which resamples. Reversed clips play their audio backwards. A clip's
 //! voice filter (CapCut's audio effect, see [`fx`]) works on its sound after the speed
-//! change and before its volume.
+//! change and before its volume. The mix is limited at full scale, as CapCut's exports are
+//! (docs/parity/voice-effects.md).
 
 mod decode;
 pub mod fx;
@@ -92,6 +93,8 @@ pub struct Mixer {
     decoders: HashMap<String, Option<AudioDecoder>>,
     /// Voice filters by clip; `None` when a clip's filter couldn't be loaded.
     voices: HashMap<String, Option<Voice>>,
+    /// The output limiter's gain, and the sample it continues at (a jump resets it).
+    limiter: (f32, i64),
     scratch: Vec<f32>,
     resampled: Vec<f32>,
 }
@@ -103,7 +106,7 @@ impl Mixer {
     }
 
     pub fn with_rate(project: Project, rate: u32) -> Self {
-        Mixer { project, rate, stretches: HashMap::new(), reversed: HashMap::new(), decoders: HashMap::new(), voices: HashMap::new(), scratch: Vec::new(), resampled: Vec::new() }
+        Mixer { project, rate, stretches: HashMap::new(), reversed: HashMap::new(), decoders: HashMap::new(), voices: HashMap::new(), limiter: (1.0, -1), scratch: Vec::new(), resampled: Vec::new() }
     }
 
     pub fn rate(&self) -> u32 {
@@ -194,7 +197,29 @@ impl Mixer {
             }
             report.clips += 1;
         }
+        self.limit(start, out);
         Ok(report)
+    }
+
+    /// Hold the mix within full scale: instant attack, a 350 ms release. CapCut's exports
+    /// never go over (where a 458% clip on a voice would take OpenRip's mix to twice full
+    /// scale, CapCut's export peaks at 1.00 and a 300–500 ms release matches its level).
+    fn limit(&mut self, start: i64, out: &mut [f32]) {
+        const RELEASE_S: f32 = 0.35;
+        let (mut gain, next) = self.limiter;
+        if next != start {
+            gain = 1.0;
+        }
+        let release = 1.0 - (-1.0 / (RELEASE_S * self.rate as f32)).exp();
+        for frame in out.chunks_exact_mut(CHANNELS) {
+            let peak = frame.iter().fold(0f32, |m, x| m.max(x.abs()));
+            let want = if peak > 1.0 { 1.0 / peak } else { 1.0 };
+            gain = if want < gain { want } else { gain + (want - gain) * release };
+            if gain < 1.0 {
+                frame.iter_mut().for_each(|x| *x *= gain);
+            }
+        }
+        self.limiter = (gain, start + (out.len() / CHANNELS) as i64);
     }
     /// A clip's sound for `n` samples from clip-local sample `local`, speed and direction
     /// applied (interleaved stereo).
