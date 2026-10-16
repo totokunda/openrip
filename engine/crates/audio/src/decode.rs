@@ -133,8 +133,8 @@ impl AudioDecoder {
                     }
                     let room = ff::swr_get_out_samples(self.swr, (*f).nb_samples).max(0) as usize;
                     let mut out = vec![0f32; room * CHANNELS];
-                    let mut ptr = out.as_mut_ptr() as *mut u8;
-                    let n = ff::swr_convert(self.swr, &mut ptr, room as i32, (*f).extended_data as *const *const u8, (*f).nb_samples);
+                    let ptr = out.as_mut_ptr() as *mut u8;
+                    let n = ff::swr_convert(self.swr, &ptr, room as i32, (*f).extended_data as *const *const u8, (*f).nb_samples);
                     ff::av_frame_unref(f);
                     let n = check("swr_convert", n)? as usize;
                     self.buffer.extend(&out[..n * CHANNELS]);
@@ -171,10 +171,9 @@ impl AudioDecoder {
         let frames = (out.len() / CHANNELS) as i64;
         let buffered_end = self.start + (self.buffer.len() / CHANNELS) as i64;
         // Jump if the request is behind the buffer or more than a second past it.
-        if !self.anchored || at < self.start || at > buffered_end + self.rate as i64 {
-            if self.anchored || at > 0 {
-                self.seek(at.max(0))?;
-            }
+        let outside = !self.anchored || at < self.start || at > buffered_end + self.rate as i64;
+        if outside && (self.anchored || at > 0) {
+            self.seek(at.max(0))?;
         }
         loop {
             if self.anchored {
