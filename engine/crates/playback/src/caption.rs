@@ -33,12 +33,15 @@ pub enum CaptionStyle {
     /// The word being spoken keeps its colour (yellow where it's white); the page's other
     /// words are white.
     WordColor,
+    /// Words keep their colours.
+    Plain,
 }
 
 impl CaptionStyle {
     fn of(builtin: &str) -> Option<(CaptionStyle, usize)> {
         match builtin {
             "caption_word_color" => Some((CaptionStyle::WordColor, 3)),
+            "caption_one_word" => Some((CaptionStyle::Plain, 1)),
             _ => None,
         }
     }
@@ -51,6 +54,7 @@ impl CaptionStyle {
                 if white { [255, 255, 0, 255] } else { own }
             }
             CaptionStyle::WordColor => [255, 255, 255, own[3]],
+            CaptionStyle::Plain => own,
         }
     }
 }

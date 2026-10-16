@@ -17,7 +17,7 @@ The style is a Lua script (`TextAnim.lua` on top of a shared `CaptionModule.lua`
 | Resource | Uses | Pages | Spoken word | OpenRip |
 |---|---|---|---|---|
 | 7289356246623195649 (逐词高亮 / 逐词显色 templates) | 35 | up to 3 words | keeps its colour, yellow where it's white; other words white | ✅ `caption_word_color` |
-| 7135040682032370178 (弹出 "pop") | 3 | 1 word | nothing changes | ❌ |
+| 7135040682032370178 (弹出 "pop") | 3 | 1 word | nothing changes; no motion either (the export switches words from one frame to the next) | ✅ `caption_one_word` |
 | 7407345401457545745 (负片多行 "negative, multi-line") | 5 | lines | (not yet read) | ❌ |
 
 ## Timing
@@ -49,8 +49,12 @@ The exports settled how CapCut's font size works for every text, not just captio
 | 1.040 | 20 | 1.0 | 0.1111 | 0.1113 |
 | 1.200 | 18 | 1.0 | 0.0947 | 0.0868 (the multi-line style; not drawn yet) |
 
+## Shadows
+
+A text's shadow is in its rich text's `styles[].shadows` in newer drafts, where `has_shadow` can be false (17 local texts), or in the `shadow_*` fields. Either way it's a copy of the text and its outline, moved by `distance` hundredths of the font size (a template's rich text stores a distance of 6 as an offset of 0.06), blurred by `smoothing` (`feather`) font sizes, in the shadow colour at its alpha, under the outline. On the "pop" export, a black outline of 0.078 reaches 10 px and a shadow of distance 6 at −47° moves 5 px right and 6 down (size 20, 1080 wide); OpenRip's fit gives 10 px and 5, 5. OpenRip didn't draw plain-text shadows before.
+
 ## Still open
 
-- **The other two styles.** "Pop" probably scales each word in; the multi-line one draws lines and is 9% off the rule above, perhaps from its own line fitting (`CPage:_setMaxLineFitable`).
+- **The multi-line style.** It draws lines and is 9% off the size rule above, perhaps from its own line fitting (`CPage:_setMaxLineFitable`).
 - **A split caption's punctuation.** In the first half of a split caption, the full stop after the last word stays white while the word is yellow, as if it were a word of its own; OpenRip picks it out with the word.
 - **Vertical position.** Caption pages sit about 0.04 em higher than CapCut's.

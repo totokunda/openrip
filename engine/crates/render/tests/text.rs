@@ -11,7 +11,7 @@ fn font() -> Option<Font> {
 }
 
 fn style(font: &Font, max_width: Option<f32>) -> TextStyle<'_> {
-    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, stroke: None, background: None, max_width, bold: 0.0, italic: 0.0, effect: None, char_colors: None }
+    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, stroke: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, char_colors: None }
 }
 
 #[test]

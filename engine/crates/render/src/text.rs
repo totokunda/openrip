@@ -69,6 +69,9 @@ pub struct TextStyle<'a> {
     /// Box behind the text: colour, padding around the block of line boxes (px, x and y),
     /// corner radius (px).
     pub background: Option<([u8; 4], [f32; 2], f32)>,
+    /// Drop shadow of the text and its outline, over the background: colour, offset (px, +y
+    /// down) and blur radius (px).
+    pub shadow: Option<([u8; 4], [f32; 2], f32)>,
     /// Wrap lines wider than this (px) between words, or between any two characters of
     /// CJK text; a word wider than the whole line breaks between characters.
     pub max_width: Option<f32>,
@@ -354,7 +357,8 @@ impl TextLayout {
         }
         let stroke = style.stroke.map_or(0.0, |s| s.1);
         let bg_pad = style.background.map_or([0.0, 0.0], |b| b.1);
-        let pad = ((self.size * 0.5).max(stroke).max(bg_pad[0]).max(bg_pad[1]).ceil() as i32) + 2;
+        let shadow_reach = style.shadow.map_or(0.0, |(_, o, blur)| stroke + o[0].abs().max(o[1].abs()) + 2.0 * blur);
+        let pad = ((self.size * 0.5).max(stroke).max(bg_pad[0]).max(bg_pad[1]).max(shadow_reach).ceil() as i32) + 2;
         let (w, h) = ((self.width.ceil() as i32 + 2 * pad + 1) as u32, (self.height.ceil() as i32 + 2 * pad + 1) as u32);
         let (left, top) = (pad as f32 + origin[0], pad as f32 + origin[1]);
         let mut fill = vec![0f32; (w * h) as usize];
@@ -416,11 +420,36 @@ impl TextLayout {
             }
         }
         let background = self.background(style, left, top, w, h);
-        // Composite background, then stroke, then fill (premultiplied), back to straight alpha.
+        // The shadow: the text and its outline, moved and blurred.
+        let shadow = style.shadow.map(|(color, [ox, oy], blur)| {
+            let solid = |i: usize| {
+                let f = tinted.as_ref().map_or(fill[i], |t| t[i][3]);
+                outline.as_ref().map_or(f, |o| f.max(o[i]))
+            };
+            let mut sh: Vec<[f32; 4]> = (0..(w * h) as usize)
+                .map(|i| {
+                    // Bilinear sample at the pixel minus the offset.
+                    let (x, y) = ((i as u32 % w) as f32 - ox, (i as u32 / w) as f32 - oy);
+                    let (x0, y0) = (x.floor(), y.floor());
+                    let (fx, fy) = (x - x0, y - y0);
+                    let at = |xx: f32, yy: f32| if xx < 0.0 || yy < 0.0 || xx >= w as f32 || yy >= h as f32 { 0.0 } else { solid((yy as u32 * w + xx as u32) as usize) };
+                    let c = at(x0, y0) * (1.0 - fx) * (1.0 - fy) + at(x0 + 1.0, y0) * fx * (1.0 - fy) + at(x0, y0 + 1.0) * (1.0 - fx) * fy + at(x0 + 1.0, y0 + 1.0) * fx * fy;
+                    premul(color, c)
+                })
+                .collect();
+            if blur >= 0.5 {
+                box_blur(&mut sh, w as usize, h as usize, blur);
+            }
+            sh
+        });
+        // Composite background, shadow, stroke, then fill (premultiplied), back to straight alpha.
         let mut px = vec![[0f32; 4]; (w * h) as usize];
         for (i, px) in px.iter_mut().enumerate() {
             if let Some((c, cov)) = &background {
                 *px = premul(*c, cov[i]);
+            }
+            if let Some(sh) = &shadow {
+                *px = over(sh[i], *px);
             }
             if let (Some((c, _)), Some(cov)) = (style.stroke, &outline) {
                 *px = over(premul(c, cov[i]), *px);

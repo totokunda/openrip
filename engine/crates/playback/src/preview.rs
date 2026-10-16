@@ -519,6 +519,12 @@ impl PreviewEngine {
                     let radius = if b.style == 2 { b.corner_radius * 0.55 * em * scale.x.abs() as f32 } else { 0.0 };
                     ([to_u8(b.color.r), to_u8(b.color.g), to_u8(b.color.b), to_u8(b.color.a)], pad, radius)
                 }),
+                // Distance and blur are fractions of the font size (for CapCut, its line box).
+                shadow: text.layout.shadow.filter(|sh| sh.color.a > 0.0).map(|sh| {
+                    let size = if run.size_unit == SizeUnit::CapCut { em * self.fonts[&path].line_box_em() } else { em };
+                    let a = sh.angle_deg.to_radians();
+                    (rgba(sh.color), [sh.distance * size * a.cos(), -sh.distance * size * a.sin()], sh.smoothing * size)
+                }),
                 // A fraction of the canvas width at the clip's scale 1; it scales with the clip.
                 // A text box wraps at its own width.
                 max_width: text.layout.max_width.or(text.layout.frame.map(|fr| fr.width)).map(|f| f * w as f32 * scale.x.abs() as f32),
@@ -560,7 +566,10 @@ impl PreviewEngine {
                 em.to_bits(),
                 style.color,
                 style.stroke.map(|(c, r)| (c, r.to_bits())),
-                style.background.map(|(c, p, r)| (c, p[0].to_bits(), p[1].to_bits(), r.to_bits())),
+                (
+                    style.background.map(|(c, p, r)| (c, p[0].to_bits(), p[1].to_bits(), r.to_bits())),
+                    style.shadow.map(|(c, o, b)| (c, o[0].to_bits(), o[1].to_bits(), b.to_bits())),
+                ),
                 text.layout.alignment,
                 text.layout.letter_spacing.to_bits(),
                 text.layout.line_spacing.to_bits(),

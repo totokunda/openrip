@@ -382,6 +382,8 @@ const BUILTIN_ANIMATIONS: &[(&str, &str)] = &[
     // The caption style of CapCut's word-by-word subtitle templates (逐词高亮 and 逐词显色):
     // pages of up to three words, the word being spoken in its colour (yellow if white).
     ("7289356246623195649", "caption_word_color"),
+    // The 弹出 ("pop") templates' caption style: one word at a time, nothing else changes.
+    ("7135040682032370178", "caption_one_word"),
 ];
 
 /// Where CapCut wraps a fixed-size text box: this fraction of the canvas width per unit of
@@ -783,16 +785,28 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             style: i(m, "background_style").clamp(0, 255) as u8,
         }
     });
-    let shadow = b(m, "has_shadow", false).then(|| {
-        let mut color = Rgba::from_hex(&s(m, "shadow_color")).unwrap_or(Rgba::BLACK);
-        color.a = f(m, "shadow_alpha", 1.0) as f32;
-        TextShadow {
-            color,
-            distance: f(m, "shadow_distance", 0.0) as f32,
-            angle_deg: f(m, "shadow_angle", 0.0) as f32,
-            smoothing: f(m, "shadow_smoothing", 0.0) as f32,
-        }
-    });
+    // The shadow is in the rich text's styles (newer drafts: `has_shadow` can be false then)
+    // or in the `shadow_*` fields. Its distance is in hundredths of the font size (a template
+    // stores 6 as an offset of 0.06), its smoothing in font sizes; on a caption export a
+    // distance of 6 at size 20 moves it 7.8 px at 1080 wide (0.0624 of the size).
+    let shadow = match arr(&content, "styles").first().and_then(|st| arr(st, "shadows").first()) {
+        Some(sh) => Some(TextShadow {
+            color: Rgba { a: f(sh, "alpha", 1.0) as f32, ..solid(sh).unwrap_or(Rgba::BLACK) },
+            distance: f(sh, "distance", 0.0) as f32 / 100.0,
+            angle_deg: f(sh, "angle", 0.0) as f32,
+            smoothing: f(sh, "feather", 0.0) as f32,
+        }),
+        None => b(m, "has_shadow", false).then(|| {
+            let mut color = Rgba::from_hex(&s(m, "shadow_color")).unwrap_or(Rgba::BLACK);
+            color.a = f(m, "shadow_alpha", 1.0) as f32;
+            TextShadow {
+                color,
+                distance: f(m, "shadow_distance", 0.0) as f32 / 100.0,
+                angle_deg: f(m, "shadow_angle", 0.0) as f32,
+                smoothing: f(m, "shadow_smoothing", 0.0) as f32,
+            }
+        }),
+    };
     let words = spoken_words(&text, m.get("words").unwrap_or(&Value::Null));
     Text {
         id,
