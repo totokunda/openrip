@@ -41,11 +41,13 @@ Note: CapCut set the canvas to **"original" 1:1, 1920×1920 at 24 fps** because 
 | Bit | Meaning | Evidence |
 |---|---|---|
 | 2 | hidden | certain (the middle track) |
-| 1 | muted | inferred: bit 1 appears alone 8 times across 57 real projects; to confirm which overlay was muted |
-| 4 | locked | the remaining bit |
+| 1 | muted | confirmed: the top overlay (crossed-out speaker in CapCut's timeline) has attribute 1 |
+| 4 | locked | confirmed: the overlay just above the main track (lock icon) has attribute 4 |
 
 **Hidden means fully disabled.** In the 4–6 s section the three overlay tracks carry identical, in-phase audio, yet the export's audio level is exactly **1.00× one copy**. Only the locked track is audible: the hidden track is silenced as well as invisible. The model now documents `Track::hidden` this way.
 
 **Stacking.** The draft has `render_index_track_mode_on = true` and `free_render_index_mode_on = false`. In this default mode, **layer order follows track order** (`track_render_index`), not each segment's `render_index`; the overlay segments' own values (3, 2, 1) ran opposite to their track order (1, 2, 3). The importer now uses track order unless free-layer mode is on.
 
-**Still open:** confirm mute = bit 1; check text-size scaling on a 16:9 canvas.
+**Side-by-side check.** `bench/calibration/compare.py` draws the imported OpenRip project with a reference renderer (Pillow, not the engine) and diffs it against CapCut's export: the marker differs in 0.39% of pixels (PSNR 33.4 dB) and the text in 0.34% (PSNR 27.4 dB), only along anti-aliased edges. The sheet is written to `bench/calibration/compare/comparison.png`.
+
+**Still open:** check text-size scaling on a 16:9 canvas.

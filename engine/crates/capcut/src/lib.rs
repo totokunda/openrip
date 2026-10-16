@@ -15,7 +15,7 @@ use serde_json::Value;
 const APP: &str = "capcut";
 
 // Track `attribute` bits, from the calibration session (docs/parity/calibration.md).
-// Hidden = 2 is certain; mute/lock are 1/4 with mute = 1 inferred (pending confirmation).
+// Confirmed: 1 = muted, 2 = hidden, 4 = locked.
 const ATTR_MUTED: i64 = 1;
 const ATTR_HIDDEN: i64 = 2;
 const ATTR_LOCKED: i64 = 4;
