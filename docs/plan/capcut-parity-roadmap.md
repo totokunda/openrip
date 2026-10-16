@@ -10,8 +10,8 @@ Agreed 2026-10-16. What the engine draws next is chosen from two sources: what r
 | Caption text clips (`subtitle`) | 1,840 clips, 27 drafts | ✅ stroke (1,755), background, wrap, bold/italic |
 | Word-by-word captions (`caption` animations) and subtitle templates (`text_templates`) | 43 + 43, 6 drafts | ✅ the word-colour and "pop" styles (38 of 43, [captions.md](../parity/captions.md)); ❌ multi-line (5) |
 | Library text styles (`text_effect`) | 185, 16 drafts | ✅ both kinds ([capcut-bundles.md](../parity/capcut-bundles.md)) |
-| Text shapes (`text_shape`) | 122, 5 drafts | ❌ |
-| Text intros | 47, 22 drafts | ✅ Type 1, Type 2, Typewriter (40); ❌ 7 others |
+| Text shapes (`text_shape`) | 122, 5 drafts | Nothing to draw: they name a "Bubble" with no bundle, and CapCut's covers and export show plain text |
+| Text intros | 47, 22 drafts | ✅ Type 1, Type 2, Typewriter (40); ❌ 7 others (single uses under 2.6 s; Preview Type's 2 run under 0.4 s) |
 | Adjust sliders | 5 drafts | ✅ 9 within ±2 code values; ❌ fade, clarity, vignette; temperature/tint on fine detail |
 | Audio clips, fades, loudness | 7–35 drafts | ✅ |
 | Speed changes, keyframes (opacity, position) | 14 and 12 uses | ✅ |
