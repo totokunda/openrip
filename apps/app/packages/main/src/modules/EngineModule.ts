@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { app, ipcMain, sharedTexture } from "electron";
 import { AppModule } from "../AppModule.js";
 import { ModuleContext } from "../ModuleContext.js";
@@ -69,9 +69,20 @@ export function getEngine(): EngineAddon | null {
 function addonPath(): string {
   if (process.env.OPENRIP_ENGINE_PATH) return process.env.OPENRIP_ENGINE_PATH;
   const file = "openrip_node.node";
-  return app.isPackaged
-    ? join(process.resourcesPath, "engine", file)
-    : join(app.getAppPath(), "native", `${process.platform}-${process.arch}`, file);
+  if (app.isPackaged) return join(process.resourcesPath, "engine", file);
+  // In development the app folder (apps/app) holds native/<platform>-<arch>/. The app path
+  // is that folder when Electron is started on it, but `npm start` starts Electron on
+  // packages/entry-point.mjs, which makes it apps/app/packages: look upwards from there.
+  const rel = join("native", `${process.platform}-${process.arch}`, file);
+  let dir = app.getAppPath();
+  for (let i = 0; i < 4; i++) {
+    const candidate = join(dir, rel);
+    if (existsSync(candidate)) return candidate;
+    const up = dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return join(app.getAppPath(), rel);
 }
 
 function load(): EngineInfo {
