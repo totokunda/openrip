@@ -65,5 +65,8 @@ for i, (name, rgb) in enumerate(patches.items()):
     layout[f"patch_{name}"] = [x, y2, 140, 140]
 
 Image.fromarray(img).save(out / "pattern.png")
+# Flat backgrounds for border and blending tests
+Image.new("RGB", (W, H), (128, 128, 128)).save(out / "grey.png")
+Image.new("RGB", (64, 64), (0, 0, 0)).save(out / "black.png")
 (out / "pattern.json").write_text(json.dumps(layout, indent=1))
-print(f"wrote {out / 'pattern.png'} and pattern.json ({len(layout)} regions)")
+print(f"wrote {out / 'pattern.png'} and pattern.json ({len(layout)} regions), grey.png, black.png")

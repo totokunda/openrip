@@ -163,18 +163,17 @@ pub struct TextRun {
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SizeUnit {
-    /// CapCut's own font-size unit. Calibrated on a square canvas: one unit is
-    /// [`CAPCUT_SIZE_UNIT_EM`] of the canvas side as an em size (whether it follows width,
-    /// height or the shorter side on non-square canvases is still to be checked).
+    /// CapCut's own font-size unit: one unit is [`CAPCUT_SIZE_UNIT_EM`] of the canvas
+    /// width as an em size, linear in the size value.
     #[default]
     CapCut,
     /// Fraction of the canvas height.
     CanvasHeight,
 }
 
-/// Em size of one CapCut font-size unit, as a fraction of the canvas side
-/// (docs/parity/calibration.md: size 15 → 93.78 px em on a 1080 px canvas, fitted from
-/// the positions of all glyphs in a rendered line).
+/// Em size of one CapCut font-size unit, as a fraction of the canvas width
+/// (docs/parity/calibration.md: 0.005789 on a square canvas, 0.005786–0.005789 at sizes
+/// 10, 15 and 30 on 16:9 at 1080p and 4K; a portrait check of width vs longer side is pending).
 pub const CAPCUT_SIZE_UNIT_EM: f32 = 0.005_789;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

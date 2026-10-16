@@ -1,4 +1,7 @@
-compare/
+__pycache__/
+black.png
+compare*/
+grey.png
 marker.png
 out/
 pattern.json

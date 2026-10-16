@@ -59,29 +59,78 @@ What is left is edges only. CapCut's image edges are **2.7 px wide** (10–90%) 
 
 ## Session 2: rendering kernel, colour path and text scaling
 
-Session 1 settled the draft format. Session 2 measures how CapCut draws pixels, so OpenRip's compositor can match it:
+Session 1 settled the draft format. Session 2 measures how CapCut draws pixels, so OpenRip's compositor can match it: the resampling kernel at 100%, 50% and rotated; the internal render resolution; the colour path; and how text size scales on a 16:9 canvas.
 
-- **Resampling kernel and internal resolution.** How CapCut filters an image at 100%, at 50% and rotated, and whether a 4K export of a 1080p canvas is rendered at 4K or upscaled.
-- **Edge anti-aliasing.** The 2.7 px edge width from session 1, measured on a 5° slanted edge (ISO 12233 method).
-- **Colour path.** A 256-step grey ramp and primary/secondary patches show the tone curve, matrix and range from image to export.
-- **Text scaling.** Default text at sizes 10, 15 and 30 on a 16:9 canvas shows whether size follows the width, the height or the shorter side, and whether it is linear.
+### How it is built
 
-It takes about 10 minutes.
+The project is generated, not assembled by hand: `bench/calibration/make_draft.py` clones session 1's draft as a template and writes a new draft with the clips below. The chart `pattern.png` (1920×1080: 1-px checkerboard and line grids, a 5° slanted edge, a 256-step grey ramp, colour patches; layout in `pattern.json`) comes from `make-assets.sh`.
+
+| Time | Clip |
+|---|---|
+| 0–1 s | `pattern.png` at 100% |
+| 1–2 s | `pattern.png` at 50% |
+| 2–3 s | `pattern.png` at 50%, rotated 45° |
+| 3–4 / 4–5 / 5–6 s | default text at size 15 / 30 / 10 |
+
+Exported from CapCut at 1080p and 4K (30 fps, H.264, bitrate Higher) as `out/openrip-calibration-2.mp4` and `out/openrip-calibration-2-4k.mp4`.
+
+### Results — 2026-10-16 (CapCut 9.5.0)
+
+**1. CapCut renders at the export resolution.** The 4K export of the 1080p canvas is drawn natively at 4K: the 50% clip comes out texel-for-texel (50 dB against the chart drawn 1:1), not as an upscaled 1080p frame.
+
+**2. Resampling is two passes.** Each image is first resampled to its displayed size, then that texture is rotated and positioned:
+
+| Stage | What CapCut does | Evidence |
+|---|---|---|
+| 1:1 | Passes through unchanged | 100% clip: mean error 0.14/255, zero shift, 1-px checkerboard intact |
+| Downscale | Area average (2×2 box at 50%), then a 3×3 Laplacian **sharpen of strength 0.15**, clamped to 8 bits | 1-px lines every 4 px come out at 167 where a plain average gives 127.5, and the chart's mean brightness rises (the clamped negative lobes). Box alone: 31.0 dB on the 50% clip; box + sharpen: **41.4 dB** |
+| Upscale | Bilinear | 4K, 100% clip: the 1-px checkerboard becomes 95/160 2×2 blocks, exactly bilinear's 0.75/0.25 weights |
+| Rotate / place | Bicubic (Catmull-Rom) on the stage-1 texture | 45° clip: one-pass area filter 25.5 dB; stage 1 then Catmull-Rom **36.1 dB** (rotating CapCut's own 50% frame the same way gives 37.1 dB, the ceiling set by its encoding) |
+
+The geometry agrees to 0.09 px at 45°.
+
+**3. Colour path is neutral.** The grey ramp and every patch survive within ±1 code value: no tone curve, BT.709 matrix, TV range.
+
+**4. Text size follows the canvas width, linearly.** Ink widths at sizes 10, 15 and 30 give 0.005786–0.005789 × canvas width per size unit at 1080p and 4K, the same constant session 1 found on a square canvas. Whether it is the width or the longer side is checked on a portrait canvas in session 3. Our text lands within about 1 px of CapCut's; CapCut's glyphs carry about 1.7% more ink (slightly bolder strokes or different edge smoothing), and per-glyph spacing differs by about 1 px because the reference uses Pillow's basic layout instead of HarfBuzz.
+
+**Side-by-side, with the measured pipeline** (`bench/calibration/capcut_model.py`, full frames through the export simulation):
+
+| Frame | 1080p | 4K |
+|---|---|---|
+| Pattern 100% | 54.6 dB | 48.7 dB |
+| Pattern 50% | 59.7 dB | 59.7 dB |
+| Pattern 50%, 45° | 42.4 dB | 43.0 dB |
+| Text 15 / 30 / 10 | 34.3 / 28.0 / 36.4 dB | 34.1 / 30.4 / 33.3 dB |
+| Session 1 marker (re-run) | 36.8 dB (was 35.7) | |
+
+**Still open: image borders.** Content edges inside an image now match, but CapCut softens the outer border of an image to about 3 px (10–90%) where our model gives 1.4 px, and its border sits about 1.6 px inside the nominal size (session 1 measured "536 of 540 px"). Session 2's chart has a black background, so its borders were invisible; session 3 tests them over grey.
+
+## Session 3: image borders, other scale factors, opacity, portrait text
+
+Session 3 is generated too (`make_draft.py`), as two drafts:
+
+**`openrip-calibration-3`** (16:9, 1920×1080), `grey.png` (128 grey) on the main track for the whole 11 s, and on an overlay track:
+
+| Time | Clip | Tests |
+|---|---|---|
+| 0–1 / 1–2 / 2–3 s | `pattern.png` at 25% / 37.5% / 75% | downscale filter at factors other than 2 |
+| 3–4 s | `pattern.png` at 150% | upscale |
+| 4–5 s | `marker.png` at 1:1 (scale 400/1080) | image border with no resampling |
+| 5–6 s | `marker.png` at 1:1, rotated 30° | border under rotation only |
+| 6–7 / 7–8 s | `marker.png` at 50% (1.35× upscale), 0° / 30° | border when magnified (session 1's case at native resolution) |
+| 8–9 s | `marker.png` at 25% | border when minified |
+| 9–10 s | `marker.png` at 1:1, offset +0.37 px right, 0.25 px down | sub-pixel placement |
+| 10–11 s | `pattern.png` at 100%, opacity 50% | blending (sRGB or linear) |
+
+**`openrip-calibration-3-portrait`** (9:16, 1080×1920): `pattern.png` contain-fit (a 0.5625 downscale) 0–1 s, `marker.png` 1:1 at 1–2 s, then default text size 15 over black at 2–3 s (width or longer side).
 
 ### Steps
 
-0. Generate the chart: `bench/calibration/make-assets.sh` → `bench/calibration/pattern.png` (1920×1080: 1-px checkerboard and line grids, a slanted edge, a grey ramp, colour patches). Its layout is written to `pattern.json`.
-1. In CapCut, create a new project named **`openrip-calibration-2`**. Set the ratio to **16:9**. Import `pattern.png` first so the canvas is 1920×1080.
-2. Main track, each clip exactly **1 second** long and back to back:
-   - **0–1 s:** `pattern.png`, all defaults.
-   - **1–2 s:** `pattern.png`, **Scale 50%**.
-   - **2–3 s:** `pattern.png`, **Scale 50%, Rotate 45°**.
-3. Text, on a text track, each **1 second** long and back to back, all other style settings at default:
-   - **3–4 s:** default text, size **15** (the default).
-   - **4–5 s:** default text, size **30**.
-   - **5–6 s:** default text, size **10**.
-4. Export twice into `bench/calibration/out/`, both **30 fps, H.264, bitrate Higher** (or the highest option offered):
-   - **1080p**, named `openrip-calibration-2`.
-   - **4K**, named `openrip-calibration-2-4k`.
-
-Then tell Claude it's done.
+1. Install both drafts (quits CapCut, waits, writes them into CapCut's projects folder, reopens CapCut):
+   ```
+   osascript -e 'quit app "CapCut"'; while pgrep -x CapCut >/dev/null; do sleep 1; done; python3 /Users/tosinkuye/openrip/bench/calibration/make_draft.py --template "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/1015" --register openrip-calibration-3 openrip-calibration-3-portrait && open -a CapCut
+   ```
+2. In CapCut, export into `bench/calibration/out/`, all at **30 fps, H.264, bitrate Higher**:
+   - `openrip-calibration-3` at **1080p**, named `openrip-calibration-3`.
+   - `openrip-calibration-3` at **720p**, named `openrip-calibration-3-720p` (does CapCut render at the export size when it is smaller than the canvas?).
+   - `openrip-calibration-3-portrait` at **1080p**, named `openrip-calibration-3-portrait`.
