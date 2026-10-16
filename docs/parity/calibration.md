@@ -181,7 +181,7 @@ Two things real drafts use that session 2's short default text never showed: lib
 | 3–6 s | same, Type 2 over 2 s | each character's fade start and length |
 | 6–9 s | same, Typewriter over 2 s | the character rhythm and the caret (size, position, blink) |
 | 9–11 s | "in the park", size 15, Typewriter over 1/3 s | the fast rhythm table, as in a real draft |
-| 11 / 12 / 13 / 14 s | 13 number words, size 15: box width 600; 600 at scale 0.6; 900; 600 at size 10 | the unit of `fixed_width`, and whether wrapping scales with the clip and font size |
+| 11 / 12 / 13 / 14 s | 13 number words, size 15: box width 600; 600 at scale 0.6; 900; 600 at size 10 | that a fixed box wraps at 0.82 of the canvas width whatever its width, scale and size (the rule measured on covers and exports) |
 | 15 s | same words, auto-sized box | whether an auto box wraps (session 2 says not, in landscape) |
 | 16 s | a line break, then the words, box 600 | wrapping after an explicit line break |
 | 17 s | two copies of the line with a background box, box 600 | the background around wrapped lines |

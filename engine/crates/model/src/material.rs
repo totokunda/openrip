@@ -216,7 +216,7 @@ pub struct TextLayout {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TextShadow>,
     /// Lines longer than this break between words (anywhere in CJK text): a fraction of the
-    /// canvas width, scaled with the clip. `None` never wraps.
+    /// canvas width on screen (the clip's scale doesn't change it). `None` never wraps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_width: Option<f32>,
 }

@@ -43,6 +43,10 @@
 //!       render of it: PSNR and the share of pixels far off, per draft (numbered, no names)
 //!       and overall. Drafts with media missing at the first frame are left out. --save
 //!       writes ours | CapCut's | difference x4 for each.
+//!   openrip-dev wrap-probe <draft-dir> <capcut-export.mp4>
+//!       For each text clip, sweep the line-wrap width (fraction of the canvas width, on
+//!       screen) and find which widths reproduce CapCut's exported frame: one line per clip
+//!       with the clip's CapCut fields, for fitting CapCut's wrapping rule.
 //!   openrip-dev thumbs-bench <media-file> [--count N] [--height H]
 //!       Timeline thumbnails across the whole file (default 40 at 64 px): the quick pass
 //!       (one keyframe per GOP), the exact pass, and the exact pass again from the disk cache.
@@ -71,6 +75,7 @@ fn main() -> ExitCode {
         Some("playthrough") if args.len() >= 2 => playthrough(&args).map_err(|e| e.to_string()),
         Some("pipeline-bench") if args.len() >= 2 => pipeline_bench(&args).map_err(|e| e.to_string()),
         Some("cover-parity") if args.len() >= 2 => cover_parity(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
+        Some("wrap-probe") if args.len() >= 3 => wrap_probe(Path::new(&args[1]), Path::new(&args[2])).map_err(|e| e.to_string()),
         Some("thumbs-bench") if args.len() >= 2 => thumbs_bench(&args).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
@@ -874,6 +879,62 @@ fn cover_parity(root: &Path, save: Option<PathBuf>) -> Result<(), Box<dyn std::e
     psnrs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     if !psnrs.is_empty() {
         println!("{} drafts compared ({skipped} left out: media missing at the first frame); PSNR p50 {:.1} dB, worst {:.1} dB", psnrs.len(), percentile(&psnrs, 0.5), psnrs[0]);
+    }
+    Ok(())
+}
+
+fn wrap_probe(draft: &Path, export: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_model::{Micros, TrackKind};
+    let raw: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(draft.join("draft_info.json"))?)?;
+    let project = import_draft_dir(draft)?.project;
+    let (cw, ch) = (project.canvas.width, project.canvas.height);
+    let (w, h) = (cw / 2, ch / 2);
+    let mut dec = openrip_media::VideoDecoder::open(export, &Default::default())?;
+    let mut engine = openrip_playback::PreviewEngine::new(project.clone())?;
+    let raw_text = |id: &str| raw["materials"]["texts"].as_array().and_then(|a| a.iter().find(|m| m["id"] == id)).cloned().unwrap_or_default();
+    for (ti, track) in project.tracks.iter().enumerate().filter(|(_, t)| t.kind == TrackKind::Text && !t.hidden) {
+        for (si, seg) in track.segments.iter().enumerate() {
+            let Some(text) = project.materials.texts.iter().find(|m| m.id == seg.material) else { continue };
+            if text.text.chars().count() < 12 || seg.target.duration.0 < 300_000 {
+                continue;
+            }
+            // Late in the clip, so intros have finished.
+            let t = Micros(seg.target.start.0 + seg.target.duration.0 * 4 / 5);
+            let Some(frame) = dec.frame_at(t)? else { continue };
+            let rgb = frame.to_rgb()?;
+            // CapCut's frame at our preview size (box filter; exports are 2x here).
+            let k = (rgb.width / w).max(1);
+            let theirs: Vec<f32> = (0..(w * h) as usize).flat_map(|i| {
+                let (x, y) = ((i as u32 % w) * k, (i as u32 / w) * k);
+                (0..3).map(move |c| (x, y, c))
+            }).map(|(x, y, c)| {
+                let mut sum = 0u32;
+                for dy in 0..k { for dx in 0..k { sum += rgb.data[(((y + dy) * rgb.width + x + dx) * 3) as usize + c] as u32; } }
+                sum as f32 / (k * k) as f32
+            }).collect();
+            let scale = seg.transform.scale.sample(seg.local_time(t)).x.abs().max(1e-6);
+            let mut scores = Vec::new();
+            for step in 0..=60 {
+                let f = 0.30 + step as f64 * 0.015; // screen fraction of the canvas width
+                let mut p = project.clone();
+                let tm = p.materials.texts.iter_mut().find(|m| m.id == seg.material).unwrap();
+                tm.layout.max_width = Some((f / scale) as f32);
+                engine.set_project(p);
+                let (ours, _) = engine.render_image(t, w, h)?;
+                let se: f64 = (0..(w * h) as usize).flat_map(|i| (0..3).map(move |c| (i, c))).map(|(i, c)| (ours.data[i * 4 + c] as f64 - theirs[i * 3 + c] as f64).powi(2)).sum();
+                scores.push((f, 10.0 * (255.0f64.powi(2) / (se / (w * h * 3) as f64)).log10()));
+            }
+            let best = scores.iter().map(|s| s.1).fold(f64::MIN, f64::max);
+            let worst = scores.iter().map(|s| s.1).fold(f64::MAX, f64::min);
+            // The widths within 0.05 dB of the best: CapCut's wrap width lies in there.
+            let good: Vec<f64> = scores.iter().filter(|s| s.1 >= best - 0.05).map(|s| s.0).collect();
+            let rt = raw_text(&text.id.0);
+            let size = text.runs.first().map_or(0.0, |r| r.size);
+            println!(
+                "{{\"track\": {ti}, \"seg\": {si}, \"chars\": {}, \"size\": {size}, \"scale\": {scale:.4}, \"fixed_width\": {}, \"line_max_width\": {}, \"canvas_w\": {cw}, \"lo\": {:.3}, \"hi\": {:.3}, \"spread_db\": {:.2}, \"best_db\": {best:.2}}}",
+                text.text.chars().count(), rt["fixed_width"], rt["line_max_width"], good.first().unwrap(), good.last().unwrap(), best - worst
+            );
+        }
     }
     Ok(())
 }

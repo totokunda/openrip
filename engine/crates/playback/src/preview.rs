@@ -356,8 +356,8 @@ impl PreviewEngine {
                     let radius = if b.style == 2 { b.corner_radius * (em / 2.0 + pad[1]) } else { 0.0 };
                     ([to_u8(b.color.r), to_u8(b.color.g), to_u8(b.color.b), to_u8(b.color.a)], pad, radius)
                 }),
-                // A fraction of the canvas width, scaled with the clip like the text.
-                max_width: text.layout.max_width.map(|f| f * w as f32 * scale.x.abs() as f32),
+                // A fraction of the canvas width on screen; the clip's scale doesn't change it.
+                max_width: text.layout.max_width.map(|f| f * w as f32),
                 // CapCut's synthetic styles: bold widens the glyphs by `bold_width` (0.008 in
                 // every local draft) in the stroke's unit, italic shears them by
                 // `italic_degree` (always 10). Both provisional until calibration session 5.

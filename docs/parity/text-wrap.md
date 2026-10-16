@@ -1,43 +1,44 @@
 # Text wrapping
 
-CapCut breaks long text lines inside the text box. OpenRip didn't wrap at all until 2026-10-16, so long captions ran off both sides of a portrait canvas.
+CapCut breaks long text lines; OpenRip didn't wrap at all until 2026-10-16, so long captions ran off both sides of portrait canvases.
 
-## What CapCut does (measured)
+## The rule (measured)
 
-Each draft folder holds `draft_cover.jpg`, CapCut's own render of the first frame. Seven local drafts open on a long caption with no keyframes. For each one, the table compares the caption's first line as CapCut broke it with the same line plus the next word. Widths are on screen, from the font's advances: size × 0.005789 × canvas width × clip scale per em. Line widths predicted this way match the covers within about 1%.
+**A text box with a fixed width (`fixed_width` > 0) wraps at 0.82 of the canvas width on screen.** The following don't change it:
+- the `fixed_width` value itself;
+- the text's own `line_max_width` (0.78 and 0.84 occur);
+- the font size;
+- the clip's scale.
 
-| Draft | Size | Clip scale | `fixed_width` | `line_max_width` | First line (px) | Plus next word (px) |
-|---|---|---|---|---|---|---|
-| A | 15 | 0.672 | 1013.6 | 0.82 | 786 | 1017 |
-| B | 16.5 | 0.705 | 816.7 | 0.82 | 624 | 929 |
-| C | 10 | 1.097 | 605.6 | 0.78 | 858 | 1035 |
-| D | 15 | 0.731 | 814.4 | 0.82 | 855 | 1104 |
-| E | 15 | 0.762 | 657.7 | 0.82 | 722 | 1078 |
-| F | 15 | 0.862 | 667.8 | 0.82 | 789 | 1128 |
-| G | 10 | 0.921 | 629.7 | 0.84 | 787 | 933 |
+**An auto-sized box (`fixed_width` −1) doesn't wrap.** 0.82 is CapCut's default `line_max_width`.
 
-Calibration session 2 adds a counter-case. "Default text" at size 30 on a 1920-wide canvas is 1,904 px wide in an auto-sized box (`fixed_width` −1), and CapCut kept it on one line.
+Lines break greedily between words, and between any two CJK characters. A word longer than a whole line breaks between characters. Spaces at a break are dropped.
 
-What the data rules out:
-- **A fixed em width.** No single width in em fits all seven.
-- **`line_max_width` × canvas width.** C's own 0.78 would break its first line.
-- **`fixed_width` in canvas pixels.** It would wrap every caption much earlier.
+## Evidence
 
-What fits all seven:
-- **The rule implemented.** The wrap width is `fixed_width` × k × clip scale with k between 1.441 and 1.493 on a 1080-wide canvas. That reads as `fixed_width` in units of about 1/736 of the canvas width. 1/720 would be the natural guess, but A's cover rules it out by 0.4%, which is about the error of these width estimates.
-- **The alternative.** A constant 0.82 of the canvas width fits too, but only by ignoring each text's own `line_max_width`.
+Every interval below is the range of screen wrap widths, as a fraction of the canvas width, that reproduces CapCut's line breaks.
 
-An auto-sized box doesn't wrap.
+**Draft covers.** `draft_cover.jpg` is CapCut's render of a draft's first frame. Seven drafts open on a long caption with no keyframes. Widths come from the font's advances: size × 0.005789 × canvas width × clip scale per em. Line widths predicted this way match the covers within about 1%.
 
-## What OpenRip does
+| Draft | Size | Clip scale | `fixed_width` | `line_max_width` | Interval |
+|---|---|---|---|---|---|
+| A | 15 | 0.672 | 1013.6 | 0.82 | 0.728–0.942 |
+| B | 16.5 | 0.705 | 816.7 | 0.82 | 0.578–0.860 |
+| C | 10 | 1.097 | 605.6 | 0.78 | 0.794–0.958 |
+| D | 15 | 0.731 | 814.4 | 0.82 | 0.792–1.022 |
+| E | 15 | 0.762 | 657.7 | 0.82 | 0.669–0.998 |
+| F | 15 | 0.862 | 667.8 | 0.82 | 0.731–1.044 |
+| G | 10 | 0.921 | 629.7 | 0.84 | 0.729–0.864 |
 
-- **Import.** The CapCut importer sets `TextLayout::max_width` to `fixed_width / 736` of the canvas width, or to no limit for an auto-sized box. The preview scales it with the clip.
-- **Breaking.** Lines break greedily between words, and between any two CJK characters. A word longer than a whole line breaks between characters. Spaces at a break are dropped.
+**CapCut exports.** `openrip-dev wrap-probe <draft> <export.mp4>` sweeps the wrap width for each caption and renders it. It keeps the widths whose render matches CapCut's exported frame best. Ten local drafts have CapCut exports whose length matches the draft, for 108 captions in all. Most are single lines and only bound the width from below; none needs more than 0.855. Two wrapped captions without a text effect give 0.735–0.855 and 0.735–0.930. Captions with library text effects (a paper cut-out style) wrap differently and are left out until those effects are drawn.
+
+**An auto-sized box.** Calibration session 2's "Default text" at size 30 is 0.99 of a 1920-wide canvas and stays on one line.
+
+Together these give 0.794–0.855, and 0.82 fits every case. These rules don't:
+- **A width proportional to `fixed_width`.** It needs incompatible factors across drafts.
+- **Each text's own `line_max_width`.** C's 0.78 breaks its first line one word early; rendering C's cover at 0.78 against 0.80–0.84 confirms it.
+- **A width in em.**
 
 ## Still to measure
 
-Calibration session 5 settles the remaining questions:
-- the unit of `fixed_width`;
-- whether wrapping scales with the clip and font size;
-- whether `fixed_width` is relative to the canvas width (the landscape draft);
-- whether an auto box ever wraps.
+Calibration session 5's wrap clips (box widths 600 and 900, a scaled clip, size 10, landscape) should all wrap at 0.82 of the canvas width. It also shows whether a long auto box wraps on a portrait canvas.

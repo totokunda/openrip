@@ -356,9 +356,9 @@ const ADJUST_TYPES: &[(&str, &str)] = &[
 /// from the scripts CapCut downloads with them (docs/parity/text-animations.md).
 const BUILTIN_ANIMATIONS: &[(&str, &str)] = &[("6724920249654710791", "type_1"), ("6724920636403094028", "type_2"), ("7210980292243231233", "typewriter")];
 
-/// A text box's `fixed_width` is in this fraction of the canvas width (measured; see
-/// `import_text`).
-const FIXED_WIDTH_UNITS: f64 = 736.0;
+/// Where CapCut wraps a fixed-size text box: this fraction of the canvas width, on screen
+/// (measured; see `import_text`). It is CapCut's default `line_max_width`.
+const CAPCUT_WRAP: f32 = 0.82;
 
 fn library_ref(m: &Value) -> LibraryRef {
     let resource = [s(m, "resource_id"), s(m, "effect_id"), s(m, "third_resource_id")]
@@ -643,12 +643,11 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             line_spacing: f(m, "line_spacing", 0.0) as f32,
             background,
             shadow,
-            // Measured on CapCut's own renders (seven draft covers, calibration session 2): a
-            // box with a fixed width wraps at `fixed_width` in units of 1/736 of the canvas
-            // width (1/720 is the natural guess but one cover rules it out by 0.4%), scaled
-            // with the clip; an auto-sized box (`fixed_width` -1) doesn't wrap. Calibration
-            // session 5 checks this (docs/parity/text-wrap.md).
-            max_width: Some(f(m, "fixed_width", -1.0)).filter(|w| *w > 0.0).map(|w| (w / FIXED_WIDTH_UNITS) as f32),
+            // Measured on CapCut's own renders (draft covers, exports, calibration session 2):
+            // a box with a fixed width wraps at 0.82 of the canvas width on screen, whatever
+            // its `fixed_width`, its own `line_max_width`, the font size or the clip's scale;
+            // an auto-sized box (`fixed_width` -1) doesn't wrap. See docs/parity/text-wrap.md.
+            max_width: (f(m, "fixed_width", -1.0) > 0.0).then_some(CAPCUT_WRAP),
         },
     }
 }
@@ -770,12 +769,12 @@ mod tests {
     #[test]
     fn imports_text_intros_and_wrap_width() {
         let mut d = sample_draft();
-        d["materials"]["texts"][0]["fixed_width"] = json!(736.0);
+        d["materials"]["texts"][0]["fixed_width"] = json!(600.0);
         d["materials"]["material_animations"] = json!([{"id": "A1", "type": "sticker_animation", "animations": [
             {"type": "in", "name": "Type 2", "resource_id": "6724920636403094028", "start": 0, "duration": 1_333_333, "path": "/cache/x"},
             {"type": "out", "name": "Other", "resource_id": "1", "start": 2_000_000, "duration": 500_000, "path": ""}]}]);
         let Imported { project, .. } = import_draft_json(&d, "hint").unwrap();
-        assert_eq!(project.materials.texts[0].layout.max_width, Some(1.0));
+        assert_eq!(project.materials.texts[0].layout.max_width, Some(0.82));
         let a = &project.materials.animations[0].items;
         assert_eq!((a[0].kind.clone(), a[0].builtin.as_deref(), a[0].duration, a[0].resource.as_deref()), (AnimationKind::In, Some("type_2"), Micros(1_333_333), Some("/cache/x")));
         assert_eq!((a[1].kind.clone(), a[1].builtin.as_deref(), a[1].resource.as_deref()), (AnimationKind::Out, None, None));
