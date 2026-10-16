@@ -23,9 +23,11 @@
 //!       Import every CapCut draft and render five frames of each with the preview engine:
 //!       aggregate counts of layers drawn, media skipped and errors, and frame times (no
 //!       names). --save writes the frames as PNGs for a visual check.
-//!   openrip-dev export <project.json | draft-dir> <out.mp4> [--size WxH] [--fps N] [--hevc] [--mbps N]
-//!       Render and encode a project (video only for now; default: canvas size, project fps,
-//!       H.264). CapCut drafts are imported on the fly.
+//!   openrip-dev export <project.json | draft-dir> <out.mp4> [--size WxH] [--fps N] [--hevc] [--mbps N] [--no-audio]
+//!       Render and encode a project (default: canvas size, project fps, H.264, AAC 44.1 kHz).
+//!       CapCut drafts are imported on the fly.
+//!   openrip-dev mix <project.json | draft-dir> <out.wav> [<start-seconds> <seconds>]
+//!       Mix a project's audio (48 kHz stereo float WAV), as export and playback will.
 //!   openrip-dev scrub-bench <media-file>
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
@@ -51,6 +53,7 @@ fn main() -> ExitCode {
         Some("play-bench") if args.len() >= 2 => play_bench(&args[1..]).map_err(|e| e.to_string()),
         Some("preview-scan") if args.len() >= 2 => preview_scan(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
         Some("export") if args.len() >= 3 => export_cmd(&args).map_err(|e| e.to_string()),
+        Some("mix") if args.len() >= 3 => mix_cmd(&args).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
@@ -604,7 +607,8 @@ fn export_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let codec = if args.iter().any(|a| a == "--hevc") { openrip_export::Codec::Hevc } else { openrip_export::Codec::H264 };
     let mbps: f64 = opt("--mbps").map(|m| m.parse()).transpose()?.unwrap_or(10.0);
     let duration = project.duration().as_secs_f64();
-    let o = openrip_export::ExportOptions { width: w, height: h, fps, codec, bitrate: (mbps * 1e6) as u64 };
+    let audio = !args.iter().any(|a| a == "--no-audio");
+    let o = openrip_export::ExportOptions { width: w, height: h, fps, codec, bitrate: (mbps * 1e6) as u64, audio };
     println!("exporting {:.1} s at {w}x{h} {:.3} fps, {codec:?} {mbps} Mbps", duration, fps.as_f64());
     let stats = openrip_export::export(project, Path::new(&args[2]), &o, |n, total| {
         if n % 60 == 0 || n == total {
@@ -621,5 +625,46 @@ fn export_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         stats.encode_seconds,
         stats.skipped_layers
     );
+    Ok(())
+}
+
+fn mix_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_audio::{sample_of, Mixer, CHANNELS, RATE};
+    let project = load_project(Path::new(&args[1]))?;
+    let start: f64 = args.get(3).map(|s| s.parse()).transpose()?.unwrap_or(0.0);
+    let secs: f64 = args.get(4).map(|s| s.parse()).transpose()?.unwrap_or(project.duration().as_secs_f64() - start);
+    let mut mixer = Mixer::new(project);
+    let first = sample_of(openrip_model::Micros::from_secs_f64(start));
+    let total = (secs * RATE as f64).round() as usize;
+    let t0 = Instant::now();
+    let mut pcm = Vec::with_capacity(total * CHANNELS);
+    let mut block = vec![0f32; 4096 * CHANNELS];
+    let mut done = 0;
+    let mut missing = std::collections::BTreeSet::new();
+    while done < total {
+        let n = (total - done).min(4096);
+        let report = mixer.mix(first + done as i64, &mut block[..n * CHANNELS])?;
+        missing.extend(report.missing);
+        pcm.extend_from_slice(&block[..n * CHANNELS]);
+        done += n;
+    }
+    // 32-bit float WAV.
+    let data: Vec<u8> = pcm.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let mut wav = Vec::with_capacity(44 + data.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
+    wav.extend_from_slice(&(CHANNELS as u16).to_le_bytes());
+    wav.extend_from_slice(&RATE.to_le_bytes());
+    wav.extend_from_slice(&(RATE * CHANNELS as u32 * 4).to_le_bytes());
+    wav.extend_from_slice(&(CHANNELS as u16 * 4).to_le_bytes());
+    wav.extend_from_slice(&32u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(&data);
+    std::fs::write(&args[2], wav)?;
+    println!("mixed {secs:.2} s in {:.1} ms ({} missing files)", t0.elapsed().as_secs_f64() * 1000.0, missing.len());
     Ok(())
 }

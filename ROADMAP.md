@@ -109,8 +109,9 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
    - Next: move the app to Electron 44 and replace its preview with the engine (needs the user present). Then crop, colour adjustments, text animations, and the image-border AA from session 3.
 3. **M3 Overlays.** Text, shapes, drawing, lasso/shape masks with keyframes.
 4. **M4 Audio.** Mixing, volume, fades, speed, detaching audio.
+   - Started: `openrip-audio`, a decoder plus a mixer with CapCut's mute/hide rules, volume keyframes and fades. On session 1 its mix matches CapCut's exported audio sample for sample (correlation 1.0000, level ratio 1.002). Next: pitch-preserving time-stretch for speed changes, and audio output for playback (cpal).
 5. **M5 Export.** Golden-corpus exports match within tolerance.
-   - Started: `openrip-export` (video only). Session 2's draft exported by OpenRip matches CapCut's own export at 57–64 dB on stills and 42 dB rotated. 6–8× real time. See [results](docs/parity/results/2026-10-16-export.md).
+   - Started: `openrip-export` (video and AAC audio). Session 2's draft exported by OpenRip matches CapCut's own export at 57–64 dB on stills and 42 dB rotated. 6–8× real time. See [results](docs/parity/results/2026-10-16-export.md).
 6. **M6 Editor UI parity.** Timeline editing (trim, split, group, snap, copy/paste), properties panels, media library and proxies, autosave.
 7. **M7 Ship.** CI on macOS, Windows and Linux; signed installers; auto-update from `totokunda/openrip` releases.
 

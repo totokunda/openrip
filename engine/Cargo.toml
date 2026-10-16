@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/model", "crates/capcut", "crates/v1", "crates/media", "crates/playback", "crates/render", "crates/node", "crates/export", "crates/dev"]
+members = ["crates/model", "crates/capcut", "crates/v1", "crates/media", "crates/audio", "crates/playback", "crates/render", "crates/node", "crates/export", "crates/dev"]
 
 [workspace.package]
 edition = "2021"
@@ -13,6 +13,7 @@ openrip-model = { path = "crates/model" }
 openrip-capcut = { path = "crates/capcut" }
 openrip-v1 = { path = "crates/v1" }
 openrip-media = { path = "crates/media" }
+openrip-audio = { path = "crates/audio" }
 openrip-playback = { path = "crates/playback" }
 openrip-render = { path = "crates/render" }
 openrip-export = { path = "crates/export" }

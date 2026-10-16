@@ -33,7 +33,7 @@ fn exports_a_still_as_h264_bt709() {
     }))
     .expect("project json");
     let out = dir.join("export-still.mp4");
-    let stats = export(project, &out, &ExportOptions { width: 320, height: 180, fps: FrameRate::new(30, 1), codec: Codec::H264, bitrate: 2_000_000 }, |_, _| {}).unwrap();
+    let stats = export(project, &out, &ExportOptions { width: 320, height: 180, fps: FrameRate::new(30, 1), codec: Codec::H264, bitrate: 2_000_000, audio: false }, |_, _| {}).unwrap();
     assert_eq!(stats.frames, 30);
     let probe = Command::new("ffprobe")
         .args(["-v", "error", "-show_entries", "stream=codec_name,width,height,nb_frames,color_range,color_space", "-of", "csv=p=0"])
