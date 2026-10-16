@@ -160,11 +160,6 @@ pub struct PreviewEngine {
     tick: u64,
 }
 
-/// Where a fixed-width text box with a library text style wraps, as a fraction of the
-/// canvas width on screen. Provisional: one CapCut export bounds it to 0.871–1.046, wider
-/// than plain text's 0.82.
-const STYLED_WRAP: f32 = 0.95;
-
 impl PreviewEngine {
     pub fn new(project: Project) -> Result<Self, PreviewError> {
         openrip_media::warm_up();
@@ -478,21 +473,21 @@ impl PreviewEngine {
                 },
                 letter_spacing: text.layout.letter_spacing,
                 line_spacing: text.layout.line_spacing,
-                // Provisional scales until calibration session 3 measures CapCut's: the stroke
-                // reaches `width` em outside the glyphs; the background pads by half its
-                // width/height in em, with the radius a fraction of half the box height.
+                // Measured (docs/parity/calibration.md, sessions 3 and 5): the stroke reaches
+                // `width` em outside the glyphs; the background pads each line by its
+                // width/height in em, with corners of 0.55 em × the clip's scale per unit of
+                // radius.
                 stroke: run.stroke.filter(|s| s.width > 0.0).map(|s| ([to_u8(s.color.r), to_u8(s.color.g), to_u8(s.color.b), to_u8(s.color.a)], s.width * em)),
                 background: text.layout.background.map(|b| {
-                    let pad = [b.width * em * 0.5, b.height * em * 0.5];
-                    let radius = if b.style == 2 { b.corner_radius * (em / 2.0 + pad[1]) } else { 0.0 };
+                    let pad = [b.width * em, b.height * em];
+                    let radius = if b.style == 2 { b.corner_radius * 0.55 * em * scale.x.abs() as f32 } else { 0.0 };
                     ([to_u8(b.color.r), to_u8(b.color.g), to_u8(b.color.b), to_u8(b.color.a)], pad, radius)
                 }),
-                // A fraction of the canvas width on screen; the clip's scale doesn't change it.
-                // Text with a library style wraps wider (docs/parity/text-wrap.md).
-                max_width: text.layout.max_width.map(|f| if styled.is_some() { STYLED_WRAP } else { f } * w as f32),
+                // A fraction of the canvas width at the clip's scale 1; it scales with the clip.
+                max_width: text.layout.max_width.map(|f| f * w as f32 * scale.x.abs() as f32),
                 // CapCut's synthetic styles: bold widens the glyphs by `bold_width` (0.008 in
                 // every local draft) in the stroke's unit, italic shears them by
-                // `italic_degree` (always 10). Both provisional until calibration session 5.
+                // `italic_degree` (always 10); both match CapCut (session 5).
                 bold: if run.bold { 0.008 * em } else { 0.0 },
                 italic: if run.italic { 10.0 } else { 0.0 },
                 effect: effect.as_ref(),

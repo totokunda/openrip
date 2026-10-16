@@ -34,6 +34,17 @@ fn lines_wrap_between_words_and_long_words_break() {
 }
 
 #[test]
+fn a_continuation_line_counts_the_space_it_broke_at() {
+    let Some(f) = font() else { return };
+    // Room for two words. The second line, measured with the space it broke at in front,
+    // then has no room for two (CapCut's breaking, calibration session 5).
+    let max = layout("xxx xxx", &style(&f, None)).width + 1.0;
+    let one = layout("xxx", &style(&f, None)).height;
+    let lines = layout("xxx xxx xxx xxx", &style(&f, Some(max))).height / one;
+    assert!((lines - 3.0).abs() < 0.5, "{lines} lines");
+}
+
+#[test]
 fn hidden_characters_leave_no_ink() {
     let Some(f) = font() else { return };
     let s = style(&f, None);

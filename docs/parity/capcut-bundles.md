@@ -76,7 +76,7 @@ Two things the shader alone doesn't fix were fitted against a CapCut export (a 1
 - **`scale` magnifies the texture** (0.44 makes its pieces 1/0.44 times larger). The shader divides by its scale uniform, so CapCut evidently passes 1/`scale`.
 - **The character's box is a square of 0.6 em centred on the glyph.** Neither the glyph's own box (narrow letters then get slivers of paper, where CapCut gives them full pieces) nor the glyph plus its stroke (pieces too large) matches.
 
-Result on that export, at the frames with the styled captions: PSNR +1.9 to +3.1 dB (16.1–18.4 dB before, 19.0–20.3 dB after), and no frame worse. Text with a library style also wraps wider than plain text ([text-wrap.md](text-wrap.md)).
+Result on that export, at the frames with the styled captions: PSNR +1.9 to +3.1 dB (16.1–18.4 dB before, 19.0–20.3 dB after), and no frame worse. Text with a library style wraps by the same rule as plain text ([text-wrap.md](text-wrap.md)); it only looked wider because that caption's box is wide.
 
 Still approximate:
 - gradients are drawn with their first colour;

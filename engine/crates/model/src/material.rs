@@ -216,7 +216,8 @@ pub struct TextLayout {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TextShadow>,
     /// Lines longer than this break between words (anywhere in CJK text): a fraction of the
-    /// canvas width on screen (the clip's scale doesn't change it). `None` never wraps.
+    /// canvas width at the clip's scale 1 (it scales with the clip, not with the font size).
+    /// `None` never wraps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_width: Option<f32>,
 }
@@ -224,11 +225,11 @@ pub struct TextLayout {
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextBackground {
     pub color: Rgba,
-    /// Corner radius. CapCut imports keep CapCut's value until calibration session 3 pins
-    /// its scale; v1 imports store a fraction of the font size.
+    /// Corner radius. CapCut imports keep CapCut's value (0.4 draws 0.22 em × the clip's
+    /// scale, measured on exports); v1 imports store a fraction of the font size.
     pub corner_radius: f32,
-    /// CapCut's background width/height values, the box's padding around the text (scale
-    /// still to be calibrated; CapCut's default is 0.14).
+    /// CapCut's background width/height values: the box's padding around each line, in em
+    /// (measured; CapCut's default is 0.14).
     #[serde(default)]
     pub width: f32,
     #[serde(default)]
