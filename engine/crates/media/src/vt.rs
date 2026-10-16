@@ -109,6 +109,13 @@ impl VtDecoder {
     pub(crate) fn new(codec: Codec, par: *const ff::AVCodecParameters, tb: ff::AVRational, bit_depth: u8) -> Option<VtDecoder> {
         unsafe {
             let extra = std::slice::from_raw_parts((*par).extradata, (*par).extradata_size as usize);
+            Self::with_config(codec, extra, (*par).width, (*par).height, tb, bit_depth)
+        }
+    }
+
+    /// A session from an avcC/hvcC configuration record.
+    pub(crate) fn with_config(codec: Codec, extra: &[u8], width: i32, height: i32, tb: ff::AVRational, bit_depth: u8) -> Option<VtDecoder> {
+        unsafe {
             let (codec_type, atom) = match codec {
                 Codec::H264 => (u32::from_be_bytes(*b"avc1"), "avcC"),
                 Codec::Hevc => (u32::from_be_bytes(*b"hvc1"), "hvcC"),
@@ -116,7 +123,7 @@ impl VtDecoder {
             let atoms = CFDictionary::<CFString, CFData>::from_slices(&[&CFString::from_str(atom)], &[&CFData::from_bytes(extra)]);
             let ext = CFDictionary::<CFString, CFType>::from_slices(&[kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms], &[atoms.as_ref()]);
             let mut format: *const CMFormatDescription = std::ptr::null();
-            if CMVideoFormatDescriptionCreate(None, codec_type, (*par).width, (*par).height, Some(ext.as_opaque()), NonNull::from(&mut format)) != 0 || format.is_null() {
+            if CMVideoFormatDescriptionCreate(None, codec_type, width, height, Some(ext.as_opaque()), NonNull::from(&mut format)) != 0 || format.is_null() {
                 return None;
             }
             let format = CFRetained::from_raw(NonNull::new_unchecked(format as *mut CMFormatDescription));
@@ -231,6 +238,17 @@ impl VtDecoder {
     pub(crate) fn errors(&self) -> u64 {
         self.shared.state.lock().unwrap().errors
     }
+}
+
+/// avcC record of a 64×64 H.264 Baseline stream: enough to start a session.
+const WARM_UP_AVCC: [u8; 39] = [
+    0x01, 0x42, 0xc0, 0x0a, 0xff, 0xe1, 0x00, 0x17, 0x67, 0x42, 0xc0, 0x0a, 0xd9, 0x04, 0x26, 0xc0, 0x44, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x48,
+    0x99, 0x20, 0x01, 0x00, 0x05, 0x68, 0xcb, 0x83, 0xcb, 0x20,
+];
+
+/// The first VideoToolbox session in a process costs ~80 ms (later ones ~2 ms); pay it now.
+pub(crate) fn warm_up() {
+    let _ = VtDecoder::with_config(Codec::H264, &WARM_UP_AVCC, 64, 64, ff::AVRational { num: 1, den: 30 }, 8);
 }
 
 impl Drop for VtDecoder {

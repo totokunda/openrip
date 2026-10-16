@@ -279,6 +279,9 @@ fn decode_bench(file: &Path, software: bool, ffmpeg_hw: bool) -> Result<(), open
     let opts = DecoderOptions { hardware: if software { HardwareMode::Off } else { HardwareMode::Auto }, native_videotoolbox: !ffmpeg_hw, ..Default::default() };
     println!("{}", openrip_media::ffmpeg_versions());
     let t0 = Instant::now();
+    openrip_media::warm_up().join().ok();
+    println!("hardware warm-up (once per process): {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
+    let t0 = Instant::now();
     let mut d = VideoDecoder::open(file, &opts)?;
     let open_ms = t0.elapsed().as_secs_f64() * 1000.0;
     let info = d.info().clone();

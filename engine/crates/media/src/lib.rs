@@ -25,6 +25,16 @@ pub use frame::{PixelFormat, RgbImage, VideoFrame};
 pub use info::{probe, AudioInfo, ColorInfo, MediaInfo, VideoInfo};
 pub use openrip_model::{FrameRate, Micros};
 
+/// Start the platform's hardware decoder on a background thread. The first VideoToolbox
+/// session in a process costs ~80 ms (later ones ~2 ms), so call this at engine start to keep
+/// it off the first clip the user opens.
+pub fn warm_up() -> std::thread::JoinHandle<()> {
+    std::thread::spawn(|| {
+        #[cfg(target_os = "macos")]
+        vt::warm_up();
+    })
+}
+
 /// FFmpeg library versions in use, e.g. for diagnostics.
 pub fn ffmpeg_versions() -> String {
     let v = |n: u32| format!("{}.{}.{}", n >> 16, (n >> 8) & 0xff, n & 0xff);
