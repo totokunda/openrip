@@ -150,6 +150,15 @@ impl PreviewEngine {
                 },
                 letter_spacing: text.layout.letter_spacing,
                 line_spacing: text.layout.line_spacing,
+                // Provisional scales until calibration session 3 measures CapCut's: the stroke
+                // reaches `width` em outside the glyphs; the background pads by half its
+                // width/height in em, with the radius a fraction of half the box height.
+                stroke: run.stroke.filter(|s| s.width > 0.0).map(|s| ([to_u8(s.color.r), to_u8(s.color.g), to_u8(s.color.b), to_u8(s.color.a)], s.width * em)),
+                background: text.layout.background.map(|b| {
+                    let pad = [b.width * em * 0.5, b.height * em * 0.5];
+                    let radius = if b.style == 2 { b.corner_radius * (em / 2.0 + pad[1]) } else { 0.0 };
+                    ([to_u8(b.color.r), to_u8(b.color.g), to_u8(b.color.b), to_u8(b.color.a)], pad, radius)
+                }),
             };
             let lay = text::layout(&text.text, &style);
             // Block centre on the canvas; rasterise so the image sits on the pixel grid.

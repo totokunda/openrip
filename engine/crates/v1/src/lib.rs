@@ -547,7 +547,8 @@ fn convert_text(id: &MaterialId, clip: &Value) -> Text {
     let background = b(clip, "backgroundEnabled").then(|| {
         let mut color = hex(clip, "backgroundColor", Rgba::BLACK);
         color.a = (f(clip, "backgroundOpacity", 100.0) / 100.0) as f32;
-        TextBackground { color, corner_radius: rel(f(clip, "backgroundCornerRadius", 0.0)) }
+        let corner_radius = rel(f(clip, "backgroundCornerRadius", 0.0));
+        TextBackground { color, corner_radius, width: 0.0, height: 0.0, style: if corner_radius > 0.0 { 2 } else { 1 } }
     });
     let shadow = b(clip, "shadowEnabled").then(|| {
         let mut color = hex(clip, "shadowColor", Rgba::BLACK);

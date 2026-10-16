@@ -210,8 +210,18 @@ pub struct TextLayout {
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextBackground {
     pub color: Rgba,
-    /// Fraction of the font size.
+    /// Corner radius. CapCut imports keep CapCut's value until calibration session 3 pins
+    /// its scale; v1 imports store a fraction of the font size.
     pub corner_radius: f32,
+    /// CapCut's background width/height values, the box's padding around the text (scale
+    /// still to be calibrated; CapCut's default is 0.14).
+    #[serde(default)]
+    pub width: f32,
+    #[serde(default)]
+    pub height: f32,
+    /// CapCut's background style (1 = rectangle, 2 = rounded); 0 never reaches the model.
+    #[serde(default)]
+    pub style: u8,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]

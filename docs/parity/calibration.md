@@ -125,7 +125,7 @@ Horizontal placement is within 0.3 px everywhere; the shaping and kerning fixed 
 
 Session 3 is generated too (`make_draft.py`), as two drafts:
 
-**`openrip-calibration-3`** (16:9, 1920×1080), `grey.png` (128 grey) on the main track for the whole 11 s, and on an overlay track:
+**`openrip-calibration-3`** (16:9, 1920×1080), `grey.png` (128 grey) on the main track for the whole 14 s, and on an overlay track:
 
 | Time | Clip | Tests |
 |---|---|---|
@@ -137,6 +137,8 @@ Session 3 is generated too (`make_draft.py`), as two drafts:
 | 8–9 s | `marker.png` at 25% | border when minified |
 | 9–10 s | `marker.png` at 1:1, offset +0.37 px right, 0.25 px down | sub-pixel placement |
 | 10–11 s | `pattern.png` at 100%, opacity 50% | blending (sRGB or linear) |
+| 11–12 / 12–13 s | default text, size 15, black stroke 0.06 / 0.15 (text track) | what CapCut's stroke width means; 0.06 is on 90% of real text |
+| 13–14 s | default text, size 15, black background box (style 2, width/height 0.28, radius 0.4; text track) | background padding and corner radius scales (the common real setting) |
 
 **`openrip-calibration-3-portrait`** (9:16, 1080×1920): `pattern.png` contain-fit (a 0.5625 downscale) 0–1 s, `marker.png` 1:1 at 1–2 s, then default text size 15 over black at 2–3 s (width or longer side).
 

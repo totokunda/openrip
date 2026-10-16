@@ -570,10 +570,17 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             }
         })
         .collect();
-    let background = (i(m, "background_style") != 0 || f(m, "background_alpha", 0.0) > 0.0).then(|| {
+    // Style 0 is "no background": CapCut keeps a colour and alpha (black, 1.0) even then.
+    let background = (i(m, "background_style") != 0).then(|| {
         let mut color = Rgba::from_hex(&s(m, "background_color")).unwrap_or(Rgba::BLACK);
         color.a = f(m, "background_alpha", 1.0) as f32;
-        TextBackground { color, corner_radius: f(m, "background_round_radius", 0.0) as f32 }
+        TextBackground {
+            color,
+            corner_radius: f(m, "background_round_radius", 0.0) as f32,
+            width: f(m, "background_width", 0.14) as f32,
+            height: f(m, "background_height", 0.14) as f32,
+            style: i(m, "background_style").clamp(0, 255) as u8,
+        }
     });
     let shadow = b(m, "has_shadow", false).then(|| {
         let mut color = Rgba::from_hex(&s(m, "shadow_color")).unwrap_or(Rgba::BLACK);

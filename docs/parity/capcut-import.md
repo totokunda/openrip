@@ -40,6 +40,8 @@ The importer only reads CapCut's files; it never writes to CapCut's data folder.
 
 **Library items** (CapCut-only assets we can't ship; need built-in equivalents or placeholders): text effects 185, text shapes 122, animations 2,731, text templates 43, transitions 8, stickers 4, filters 3, a few video effects.
 
+**Text backgrounds:** CapCut keeps a colour and alpha (black, 1.0) on every text, even with the background off. Only `background_style` 1 or 2 means a visible box: style 2 (rounded, width/height 0.28, radius 0.4) is the common real setting. The importer used to treat alpha > 0 as on, which gave about 1,900 of 1,987 local texts a box they don't have; fixed.
+
 **Calibrated against CapCut** (see [calibration.md](calibration.md)): transform units match the model (half-canvas, +y up, clockwise, contain-fit scale); track flags are 1 = muted, 2 = hidden, 4 = locked; hidden tracks are silent too; stacking follows track order in CapCut's default track mode; one text size unit = 0.005789 of the canvas width as an em size. Session 2 measured CapCut's rendering pipeline (native export resolution, two-pass resampling with a sharpened downscale, neutral colour path, text size proportional to canvas width); image borders, other scale factors, opacity and portrait text are in session 3.
 
 **Still to verify against CapCut exports:**

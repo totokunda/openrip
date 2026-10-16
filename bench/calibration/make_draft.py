@@ -42,6 +42,8 @@ class Txt:
     start: float
     dur: float
     size: float
+    stroke: float = 0.0  # CapCut stroke width (black), 0 = none
+    background: float = 0.0  # CapCut background width/height (black, opaque, style 2, radius 0.4: the common real-world case), 0 = none
 
 
 SESSIONS = {
@@ -49,13 +51,15 @@ SESSIONS = {
         [Img("pattern.png", 0, 1), Img("pattern.png", 1, 1, 0.5), Img("pattern.png", 2, 1, 0.5, 45)],
         [Txt(3, 1, 15), Txt(4, 1, 30), Txt(5, 1, 10)],
     ]),
-    # Resampling at other factors, image borders over a grey background, sub-pixel offset, opacity.
+    # Resampling at other factors, image borders over a grey background, sub-pixel offset,
+    # opacity; then text stroke and background widths over grey.
     "openrip-calibration-3": dict(canvas=(1920, 1080, "16:9"), tracks=[
-        [Img("grey.png", 0, 11)],
+        [Img("grey.png", 0, 14)],
         [Img("pattern.png", 0, 1, 0.25), Img("pattern.png", 1, 1, 0.375), Img("pattern.png", 2, 1, 0.75),
          Img("pattern.png", 3, 1, 1.5), Img("marker.png", 4, 1, MARKER_1TO1), Img("marker.png", 5, 1, MARKER_1TO1, 30),
          Img("marker.png", 6, 1, 0.5), Img("marker.png", 7, 1, 0.5, 30), Img("marker.png", 8, 1, 0.25),
          Img("marker.png", 9, 1, MARKER_1TO1, 0, 0.37, -0.25), Img("pattern.png", 10, 1, alpha=0.5)],
+        [Txt(11, 1, 15, stroke=0.06), Txt(12, 1, 15, stroke=0.15), Txt(13, 1, 15, background=0.28)],
     ]),
     # Portrait canvas: text size vs width or longer side; pattern contain-fit at 1080/1920 = 0.5625.
     "openrip-calibration-3-portrait": dict(canvas=(1080, 1920, "9:16"), tracks=[
@@ -137,7 +141,12 @@ def build(name, spec, template: Path, root: Path):
                 content = json.loads(text["content"])
                 for style in content["styles"]:
                     style["size"] = c.size
+                    if c.stroke:
+                        style["strokes"] = [{"content": {"render_type": "solid", "solid": {"color": [0, 0, 0]}}, "width": c.stroke, "mode": 0}]
                 text.update(content=json.dumps(content, separators=(",", ":")), font_size=c.size, text_size=round(c.size * 2))
+                if c.background:
+                    text.update(background_color="#000000", background_alpha=1.0, background_style=2, background_round_radius=0.4,
+                                background_width=c.background, background_height=c.background, background_vertical_offset=0.0, background_horizontal_offset=0.0)
                 seg.update(target_timerange={"start": us(c.start), "duration": us(c.dur)}, track_render_index=ti)
                 track["segments"].append(seg)
         tracks.append(track)
