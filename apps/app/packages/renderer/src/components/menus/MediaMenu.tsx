@@ -34,8 +34,10 @@ import {
   pickMediaPaths,
   getPathForFile,
   createProxy,
+  makePlayable,
   removeProxy,
 } from "@app/preload";
+import type { ConvertedMediaItem } from "@app/preload";
 import { useProjectsStore } from "@/lib/projects";
 import { getMediaInfo } from "@/lib/media/utils";
 import { VIDEO_EXTS, IMAGE_EXTS, AUDIO_EXTS } from "@/lib/settings";
@@ -81,6 +83,43 @@ async function pickFilesViaInput(
 interface MediaSidebarProps {}
 
 // (unused with Electron file picker)
+
+// Videos already given a playable copy (or tried) this session, so a file that can't be
+// converted isn't retried on every refresh.
+const playableAttempts = new Set<string>();
+
+/**
+ * Media info for each listed item. A video whose picture this app can't decode (e.g.
+ * ProRes from an iPhone) first gets a playable H.264 copy, made once, which the list then
+ * points to.
+ */
+const fetchMediaInfos = async (list: ConvertedMediaItem[], folderUuid?: string) => {
+  const infos = await Promise.allSettled(list.map((it) => getMediaInfo(it.assetUrl)));
+  const key = (it: ConvertedMediaItem) => `${folderUuid ?? ""}/${it.name}`;
+  const undecodable = list.filter((it, i) => {
+    const r = infos[i];
+    return it.type === "video" && !it.hasProxy && r.status === "fulfilled" && !r.value.video && !playableAttempts.has(key(it));
+  });
+  if (undecodable.length === 0) return { list, infos };
+  for (const it of undecodable) {
+    playableAttempts.add(key(it));
+    const id = toast.loading(`Converting ${it.name} so it can play…`, { position: "bottom-right" });
+    try {
+      await makePlayable(it.name, folderUuid);
+    } catch (e) {
+      // A file with no video stream has nothing to convert.
+      if (!String(e).includes("matches no streams")) {
+        console.warn(`Could not convert ${it.name} for playback:`, e);
+        toast.error(`${it.name} couldn't be converted for playback`, { position: "bottom-right", duration: 5000 });
+      }
+    } finally {
+      toast.dismiss(id);
+    }
+  }
+  const names = new Set(list.map((it) => it.name));
+  const fresh = (await listConvertedMedia(folderUuid)).filter((it) => names.has(it.name));
+  return { list: fresh, infos: await Promise.allSettled(fresh.map((it) => getMediaInfo(it.assetUrl))) };
+};
 
 // ===== Filtering & Sorting helpers (outside component) =====
 type MediaType = "video" | "image" | "audio";
@@ -189,11 +228,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   } = useQuery({
     queryKey: mediaQueryKey,
     queryFn: async () => {
-      const list = await listConvertedMedia(folderUuid);
-
-      const infoResults = await Promise.allSettled(
-        list.map((it) => getMediaInfo(it.assetUrl))
-      );
+      const { list, infos: infoResults } = await fetchMediaInfos(await listConvertedMedia(folderUuid), folderUuid);
       
       const results: MediaItem[] = [];
       for (let idx = 0; idx < list.length; idx++) {
@@ -271,19 +306,21 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   }, []);
 
   const handleUpload = async (directory: boolean = false) => {
+    // Dismissed when everything is done: dismissing a toast right after showing it (the
+    // import itself takes milliseconds) sometimes leaves it on screen.
+    let loadingId: string | number | undefined;
     try {
       setIsUploading(true);
       const paths = await pickFilesViaInput(directory);
 
       if (!paths || paths.length === 0) return;
       const existingNames = new Set(items.map((it) => it.name));
-      const loadingId = toast.loading(`Importing ${paths.length} item(s)…`, {
+      loadingId = toast.loading(`Importing ${paths.length} item(s)…`, {
         position: "bottom-right",
       });
       const folderUuid = activeProject?.folderUuid;
 
       await importMediaPaths(paths, undefined, folderUuid);
-      toast.dismiss(loadingId);
       const list = await listConvertedMedia(folderUuid);
 
       // Get the base names of files that were just uploaded
@@ -292,11 +329,9 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
       );
       
       // Only process files that: 1) aren't already in UI, AND 2) were just uploaded
-      const newItemsToFetch = list.filter(
-        (it) => !existingNames.has(it.name) && uploadedFileNames.has(it.name.toLowerCase())
-      );
-      const infoResults = await Promise.allSettled(
-        newItemsToFetch.map((it) => getMediaInfo(it.assetUrl)),
+      const { list: newItemsToFetch, infos: infoResults } = await fetchMediaInfos(
+        list.filter((it) => !existingNames.has(it.name) && uploadedFileNames.has(it.name.toLowerCase())),
+        folderUuid,
       );
       
       const newItems: MediaItem[] = [];
@@ -346,11 +381,13 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         },
       });
     } finally {
+      if (loadingId !== undefined) toast.dismiss(loadingId);
       setIsUploading(false);
     }
   };
 
   const handleDraggedFiles = async (files: File[]) => {
+    let loadingId: string | number | undefined;
     try {
       setIsUploading(true);
       const paths: string[] = [];
@@ -373,12 +410,11 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         return;
       }
       const existingNames = new Set(items.map((it) => it.name));
-      const loadingId = toast.loading(`Importing ${paths.length} item(s)…`, {
+      loadingId = toast.loading(`Importing ${paths.length} item(s)…`, {
         position: "bottom-right",
       });
       const folderUuid = activeProject?.folderUuid;
       await importMediaPaths(paths, undefined, folderUuid);
-      toast.dismiss(loadingId);
       const list = await listConvertedMedia(folderUuid);
       
       // Get the base names of files that were just uploaded
@@ -387,11 +423,9 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
       );
       
       // Only process files that: 1) aren't already in UI, AND 2) were just uploaded
-      const newItemsToFetch = list.filter(
-        (it) => !existingNames.has(it.name) && uploadedFileNames.has(it.name.toLowerCase())
-      );
-      const infoResults = await Promise.allSettled(
-        newItemsToFetch.map((it) => getMediaInfo(it.assetUrl)),
+      const { list: newItemsToFetch, infos: infoResults } = await fetchMediaInfos(
+        list.filter((it) => !existingNames.has(it.name) && uploadedFileNames.has(it.name.toLowerCase())),
+        folderUuid,
       );
       
       const newItems: MediaItem[] = [];
@@ -439,6 +473,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         style: { width: "fit-content" },
       });
     } finally {
+      if (loadingId !== undefined) toast.dismiss(loadingId);
       setIsUploading(false);
     }
   };

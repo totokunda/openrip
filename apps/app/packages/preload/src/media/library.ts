@@ -437,6 +437,73 @@ async function createProxy(
   });
 }
 
+// Suffix of a stand-in made because the original's video can't be decoded here (e.g.
+// ProRes, which Chromium's WebCodecs doesn't support). Unlike a proxy it is also used for
+// export, since the original can't be.
+const PLAYABLE_SUFFIX = "_playable.mp4";
+
+/**
+ * Make a full-resolution H.264 copy of a video this app can't decode, and use it in place
+ * of the original (as a proxy is). The rotation is applied to the pixels.
+ */
+async function makePlayable(fileName: string, folderUuid?: string): Promise<void> {
+  const userDataPath = (await getUserDataPath())?.data?.user_data ?? "";
+  const baseRoot = join(userDataPath, "media");
+  let symlinksAbs: string;
+  let proxyAbs: string;
+  if (typeof folderUuid === "string" && folderUuid.length > 0) {
+    const projectRoot = join(baseRoot, folderUuid);
+    symlinksAbs = symlinksDir(projectRoot);
+    proxyAbs = proxyDir(projectRoot);
+    if (!fs.existsSync(proxyAbs)) fs.mkdirSync(proxyAbs, { recursive: true });
+  } else {
+    const dirs = await ensureMediaDirs();
+    symlinksAbs = dirs.symlinksAbs;
+    proxyAbs = dirs.proxyAbs;
+  }
+  const symlinkPath = join(symlinksAbs, fileName);
+  if (!fs.existsSync(symlinkPath)) throw new Error("Source file not found");
+  const realPath = await fsp.realpath(symlinkPath);
+  const outName = `${basename(fileName, extname(fileName))}${PLAYABLE_SUFFIX}`;
+  const outPath = join(proxyAbs, outName);
+  const partPath = `${outPath}.part.mp4`;
+
+  await new Promise<void>((resolve, reject) => {
+    const args = [
+      "-i", realPath,
+      "-map", "0:v:0", "-map", "0:a?",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p",
+      // Short GOPs keep seeking and scrubbing quick.
+      "-g", "15",
+      "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+      "-movflags", "+faststart",
+      "-y", partPath,
+    ];
+    const ffmpeg = spawn(resolveFfmpegCommand("ffmpeg"), args);
+    let stderr = "";
+    ffmpeg.stderr.on("data", (d) => {
+      stderr = (stderr + d.toString()).slice(-4000);
+    });
+    ffmpeg.on("error", reject);
+    ffmpeg.on("close", async (code) => {
+      if (code !== 0) {
+        await fsp.rm(partPath, { force: true }).catch(() => {});
+        reject(new Error(`FFmpeg failed with code ${code}: ${stderr}`));
+        return;
+      }
+      try {
+        await fsp.rename(partPath, outPath);
+        const proxyIndex = await loadProxyIndex();
+        proxyIndex[fileName] = outName;
+        await saveProxyIndex(proxyIndex);
+        resolve();
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
 async function removeProxy(
   fileName: string,
   folderUuid?: string,
@@ -476,6 +543,8 @@ async function resolveOriginalPath(path: string): Promise<string> {
   try {
     // Check if it's likely a proxy path
     if (!path.includes("proxy")) return path;
+    // A playable stand-in replaces an original that can't be decoded: keep it.
+    if (path.endsWith(PLAYABLE_SUFFIX)) return path;
 
     const proxyIndex = await loadProxyIndex();
     const fileName = basename(path);
@@ -516,6 +585,7 @@ export {
   revealMediaItemInFolder,
   revealPathInFolder,
   createProxy,
+  makePlayable,
   removeProxy,
   ensureMediaDirs,
   resolveOriginalPath,
