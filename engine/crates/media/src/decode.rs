@@ -415,6 +415,27 @@ impl VideoDecoder {
         }
     }
 
+    /// Start of the keyframe at or before `t`, from the container's index; `None` when the
+    /// container has no index (MPEG-TS) or nothing precedes `t`. Frames at times that share
+    /// a keyframe share a GOP, so one decoded keyframe can stand in for all of them.
+    pub fn keyframe_time(&self, t: Micros) -> Option<Micros> {
+        if self.origin == ff::AV_NOPTS_VALUE {
+            return None;
+        }
+        unsafe {
+            let st = self.input.stream(self.stream);
+            if ff::avformat_index_get_entries_count(st) == 0 {
+                return None;
+            }
+            let ts = self.origin + ff::av_rescale_q(t.0.max(0), MICROS, self.tb);
+            let e = ff::avformat_index_get_entry_from_timestamp(st, ts, ff::AVSEEK_FLAG_BACKWARD);
+            if e.is_null() {
+                return None;
+            }
+            Some(Micros(ff::av_rescale_q((*e).timestamp - self.origin, self.tb, MICROS)))
+        }
+    }
+
     /// Whether the frame at `t` can be reached without a seek: it's in the cache, or decoding
     /// on from the current position is cheaper than seeking.
     pub fn reachable_without_seek(&self, t: Micros) -> bool {

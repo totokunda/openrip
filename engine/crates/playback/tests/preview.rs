@@ -63,3 +63,30 @@ fn edits_keep_decoders_warm_and_take_effect() {
     assert_eq!(e.open_decoders(), 0);
     assert_eq!(number_at(&mut e, 20), 20);
 }
+
+#[test]
+fn a_missing_file_does_not_stall_the_cut_to_it() {
+    let Some(a) = clip("preview-edit-a.mp4") else { return };
+    // Clip one (present) until 1 s, then clip two (missing file).
+    let mut p = project(&a, 0);
+    let mut missing = p.tracks[0].segments[0].clone();
+    p.tracks[0].segments[0].target.duration = Micros(1_000_000);
+    missing.id = "gone".into();
+    missing.material = "gone".into();
+    missing.target.start = Micros(1_000_000);
+    p.tracks[0].segments.push(missing);
+    let mut gone = p.materials.media[0].clone();
+    gone.id = "gone".into();
+    gone.path = "/nonexistent/clip.mp4".into();
+    p.materials.media.push(gone);
+    let mut e = PreviewEngine::new(p).unwrap();
+    let mut worst = 0f64;
+    for n in 0..45 {
+        let t0 = std::time::Instant::now();
+        let (_, report) = e.render_image(FrameRate::new(30, 1).frame_start(n), 640, 128).unwrap();
+        worst = worst.max(t0.elapsed().as_secs_f64() * 1e3);
+        assert_eq!(report.missing.is_empty(), n < 30, "frame {n}");
+    }
+    // The prefetcher's failed open used to leave the render thread waiting 500 ms.
+    assert!(worst < 300.0, "worst frame {worst:.0} ms");
+}

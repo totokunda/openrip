@@ -36,6 +36,9 @@ enum Prefetched {
     /// Segment, media path, decoder.
     Decoder(String, String, Box<VideoDecoder>),
     Still(String, RgbaImage),
+    /// The job's key (segment or still path): it failed, and the render thread will find out
+    /// why itself.
+    Failed(String),
 }
 
 /// Opens decoders for clips about to start, so a cut doesn't stall the frame.
@@ -55,18 +58,19 @@ impl Prefetcher {
             .name("decoder-prefetch".into())
             .spawn(move || {
                 for job in job_rx {
+                    // Report failures too: the render thread may be waiting for this job.
                     let done = if job.still {
                         match load_still(Path::new(&job.path)) {
                             Ok(img) => Prefetched::Still(job.path, img),
-                            Err(_) => continue,
+                            Err(_) => Prefetched::Failed(job.path),
                         }
                     } else {
-                        let Ok(mut d) = VideoDecoder::open(Path::new(&job.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() }) else { continue };
+                        let opened = VideoDecoder::open(Path::new(&job.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() });
                         // Decode the first frame now (it stays in the decoder's cache).
-                        if d.frame_at(job.at).is_err() {
-                            continue;
+                        match opened.map(|mut d| d.frame_at(job.at).is_ok().then_some(d)) {
+                            Ok(Some(d)) => Prefetched::Decoder(job.segment, job.path, Box::new(d)),
+                            _ => Prefetched::Failed(job.segment),
                         }
-                        Prefetched::Decoder(job.segment, job.path, Box::new(d))
                     };
                     if ready_tx.send(done).is_err() {
                         return;
@@ -239,6 +243,9 @@ impl PreviewEngine {
             Prefetched::Still(path, img) => {
                 self.prefetch.pending.remove(&path);
                 self.images.entry(path).or_insert_with(|| std::sync::Arc::new(img));
+            }
+            Prefetched::Failed(key) => {
+                self.prefetch.pending.remove(&key);
             }
         }
     }
@@ -464,7 +471,7 @@ impl PreviewEngine {
 }
 
 /// Decode a still image: PNG directly (keeps alpha), anything else through FFmpeg.
-fn load_still(path: &Path) -> Result<RgbaImage, String> {
+pub(crate) fn load_still(path: &Path) -> Result<RgbaImage, String> {
     if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) {
         return load_png(path).map_err(|e| e.to_string());
     }

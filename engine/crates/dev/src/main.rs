@@ -38,6 +38,9 @@
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
 //!       and how long the exact frame takes to settle after release.
+//!   openrip-dev thumbs-bench <media-file> [--count N] [--height H]
+//!       Timeline thumbnails across the whole file (default 40 at 64 px): the quick pass
+//!       (one keyframe per GOP), the exact pass, and the exact pass again from the disk cache.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -62,6 +65,7 @@ fn main() -> ExitCode {
         Some("mix") if args.len() >= 3 => mix_cmd(&args).map_err(|e| e.to_string()),
         Some("playthrough") if args.len() >= 2 => playthrough(&args).map_err(|e| e.to_string()),
         Some("pipeline-bench") if args.len() >= 2 => pipeline_bench(&args).map_err(|e| e.to_string()),
+        Some("thumbs-bench") if args.len() >= 2 => thumbs_bench(&args).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
@@ -297,6 +301,10 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 }
 
 fn summary(label: &str, mut ms: Vec<f64>) {
+    if ms.is_empty() {
+        println!("{label:<34} none");
+        return;
+    }
     ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
     println!(
         "{label:<34} p50 {:6.1} ms   p95 {:6.1} ms   max {:6.1} ms   (n={})",
@@ -773,4 +781,37 @@ fn pipeline_bench(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(target_os = "macos"))]
 fn pipeline_bench(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Err("pipeline-bench needs macOS".into())
+}
+
+fn thumbs_bench(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_playback::{Pass, Thumbnailer};
+    let path = Path::new(&args[1]);
+    let count: usize = flag(args, "--count").map(|s| s.to_string_lossy().parse()).transpose()?.unwrap_or(40);
+    let height: u32 = flag(args, "--height").map(|s| s.to_string_lossy().parse()).transpose()?.unwrap_or(64);
+    let duration = openrip_media::probe(path)?.duration;
+    let times: Vec<_> = (0..count).map(|i| openrip_model::Micros(duration.0 * i as i64 / count as i64)).collect();
+    let cache = std::env::temp_dir().join(format!("openrip-thumbs-bench-{}", std::process::id()));
+    let pass = |t: &mut Thumbnailer, p: Pass| -> Result<(f64, f64, usize, usize), Box<dyn std::error::Error>> {
+        let t0 = Instant::now();
+        let (mut first, mut n, mut exact) = (None, 0, 0);
+        t.thumbnails(path, &times, height, p, |th| {
+            first.get_or_insert(t0.elapsed().as_secs_f64() * 1e3);
+            n += 1;
+            exact += th.exact as usize;
+            true
+        })?;
+        Ok((first.unwrap_or(0.0), t0.elapsed().as_secs_f64() * 1e3, n, exact))
+    };
+    let t0 = Instant::now();
+    let mut t = Thumbnailer::new(Some(cache.clone()))?;
+    println!("thumbnailer ready in {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
+    for (name, p, fresh) in [("quick", Pass::Quick, false), ("exact", Pass::Exact, false), ("exact (disk cache, new thumbnailer)", Pass::Exact, true)] {
+        if fresh {
+            t = Thumbnailer::new(Some(cache.clone()))?;
+        }
+        let (first, total, n, exact) = pass(&mut t, p)?;
+        println!("{name:<38} first {first:>6.1} ms  all {n:>3} in {total:>7.1} ms  ({:.1} ms each, {exact} exact)", total / n.max(1) as f64);
+    }
+    let _ = std::fs::remove_dir_all(&cache);
+    Ok(())
 }
