@@ -5,6 +5,9 @@
 //!   openrip-dev capcut-scan <projects-root>
 //!       Import every draft under a CapCut projects folder and print aggregate
 //!       statistics only (no project names, paths or text content).
+//!   openrip-dev v1-import <project-N.json> [--out project.json]
+//!   openrip-dev v1-scan <projects-json-dir>
+//!       Same, for projects saved by the TypeScript app (format v1).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -17,10 +20,12 @@ use openrip_model::Project;
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
-        Some("capcut-import") if args.len() >= 2 => capcut_import(Path::new(&args[1]), flag(&args, "--out")),
-        Some("capcut-scan") if args.len() >= 2 => capcut_scan(Path::new(&args[1])),
+        Some("capcut-import") if args.len() >= 2 => capcut_import(Path::new(&args[1]), flag(&args, "--out")).map_err(|e| e.to_string()),
+        Some("capcut-scan") if args.len() >= 2 => capcut_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("v1-import") if args.len() >= 2 => v1_import(Path::new(&args[1]), flag(&args, "--out")).map_err(|e| e.to_string()),
+        Some("v1-scan") if args.len() >= 2 => v1_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         _ => {
-            eprintln!("usage:\n  openrip-dev capcut-import <draft-dir> [--out project.json]\n  openrip-dev capcut-scan <projects-root>");
+            eprintln!("usage:\n  openrip-dev capcut-import <draft-dir> [--out project.json]\n  openrip-dev capcut-scan <projects-root>\n  openrip-dev v1-import <project-N.json> [--out project.json]\n  openrip-dev v1-scan <projects-json-dir>");
             return ExitCode::from(2);
         }
     };
@@ -180,5 +185,63 @@ fn capcut_scan(root: &Path) -> Result<(), ImportError> {
     println!("curve types:         {:?}", t.curve_types);
     println!("track attributes:    {:?}", t.track_attributes);
     println!("warnings:            {:?}", t.warnings);
+    Ok(())
+}
+
+fn v1_import(file: &Path, out: Option<PathBuf>) -> Result<(), openrip_v1::ImportError> {
+    let t0 = Instant::now();
+    let openrip_v1::Imported { project, report } = openrip_v1::import_v1_file(file)?;
+    let elapsed = t0.elapsed();
+    print_summary(&project);
+    println!("imported in {:.1} ms", elapsed.as_secs_f64() * 1000.0);
+    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    if let Some(out) = out {
+        std::fs::write(&out, serde_json::to_string_pretty(&project).unwrap())
+            .map_err(|source| openrip_v1::ImportError::Io { path: out.display().to_string(), source })?;
+        println!("wrote {}", out.display());
+    }
+    Ok(())
+}
+
+fn v1_scan(dir: &Path) -> Result<(), openrip_v1::ImportError> {
+    let entries = std::fs::read_dir(dir).map_err(|source| openrip_v1::ImportError::Io { path: dir.display().to_string(), source })?;
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("project-") && n.ends_with(".json")))
+        .collect();
+    files.sort();
+    let (mut ok, mut failed, mut segments, mut tracks, mut moved, mut problems, mut missing) = (0, 0, 0, 0, 0, 0, 0);
+    let (mut dropped, mut foreign, mut warnings) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
+    for file in &files {
+        match openrip_v1::import_v1_file(file) {
+            Ok(openrip_v1::Imported { project, report }) => {
+                ok += 1;
+                segments += report.segments;
+                tracks += report.tracks;
+                moved += report.moved_to_new_track;
+                problems += report.problems.len();
+                missing += report.missing_media.len();
+                merge(&mut dropped, &report.dropped);
+                merge(&mut foreign, &report.kept_foreign);
+                for w in &report.warnings {
+                    *warnings.entry(kind_of(w)).or_insert(0) += 1;
+                }
+                let json = serde_json::to_string(&project).unwrap();
+                if serde_json::from_str::<Project>(&json).ok().as_ref() != Some(&project) {
+                    println!("round-trip mismatch in one project");
+                }
+            }
+            Err(_) => failed += 1,
+        }
+    }
+    println!("projects:           {} ({} imported, {} failed)", files.len(), ok, failed);
+    println!("tracks / segments:  {} / {}", tracks, segments);
+    println!("overlaps moved:     {}", moved);
+    println!("problems:           {}", problems);
+    println!("missing media:      {}", missing);
+    println!("dropped:            {:?}", dropped);
+    println!("kept as foreign:    {:?}", foreign);
+    println!("warnings:           {:?}", warnings);
     Ok(())
 }

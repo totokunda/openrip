@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/model", "crates/capcut", "crates/dev"]
+members = ["crates/model", "crates/capcut", "crates/v1", "crates/dev"]
 
 [workspace.package]
 edition = "2021"
@@ -11,6 +11,7 @@ publish = false
 [workspace.dependencies]
 openrip-model = { path = "crates/model" }
 openrip-capcut = { path = "crates/capcut" }
+openrip-v1 = { path = "crates/v1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

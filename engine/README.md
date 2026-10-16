@@ -4,12 +4,14 @@ Cargo workspace for the engine that replaces the TypeScript media pipeline. See 
 
 | Crate | Status | What it is |
 |---|---|---|
-| `openrip-model` | started | Project format: microsecond time with exact frame-rate maths, `Animated<T>` keyframes, tracks → segments → materials mirroring CapCut's drafts |
+| `openrip-model` | started | Project format: microsecond time with exact frame-rate maths, `Animated<T>` keyframes, tracks → segments → materials mirroring CapCut's drafts. Edits as serializable commands (`Edit`) with exact undo/redo (`Document`) |
 | `openrip-capcut` | started | CapCut draft importer (read-only) with an import report — coverage in [docs/parity/capcut-import.md](../docs/parity/capcut-import.md) |
-| `openrip-dev` | started | Developer CLI (`capcut-import`, `capcut-scan`) |
+| `openrip-v1` | started | Importer for projects saved by the TypeScript app (format v1) |
+| `openrip-dev` | started | Developer CLI (`capcut-import`, `capcut-scan`, `v1-import`, `v1-scan`) |
 
 ```bash
 cd engine
 cargo test
+OPENRIP_FUZZ_SEEDS=2000 cargo test --release -p openrip-model random_edit   # long randomized undo/redo run
 cargo run --release -p openrip-dev -- capcut-scan "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft"
 ```

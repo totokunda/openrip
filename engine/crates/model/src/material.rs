@@ -130,6 +130,9 @@ pub struct TextRun {
     pub range: (u32, u32),
     pub font: FontRef,
     pub size: f32,
+    /// What `size` is measured in. Stroke, shadow and background sizes are fractions of it.
+    #[serde(default)]
+    pub size_unit: SizeUnit,
     pub fill: Rgba,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stroke: Option<Stroke>,
@@ -139,6 +142,17 @@ pub struct TextRun {
     pub italic: bool,
     #[serde(default)]
     pub underline: bool,
+}
+
+/// Unit of a text run's font size.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SizeUnit {
+    /// CapCut's own font-size unit (mapping to pixels still to be calibrated).
+    #[default]
+    CapCut,
+    /// Fraction of the canvas height.
+    CanvasHeight,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -154,6 +168,7 @@ pub struct FontRef {
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
     pub color: Rgba,
+    /// Fraction of the font size.
     pub width: f32,
 }
 
@@ -174,14 +189,18 @@ pub struct TextLayout {
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextBackground {
     pub color: Rgba,
+    /// Fraction of the font size.
     pub corner_radius: f32,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextShadow {
     pub color: Rgba,
+    /// Offset length as a fraction of the font size.
     pub distance: f32,
+    /// Direction of the offset in degrees, counter-clockwise from +x (+y up).
     pub angle_deg: f32,
+    /// Blur radius as a fraction of the font size.
     pub smoothing: f32,
 }
 
@@ -263,6 +282,9 @@ pub struct Effect {
     pub params: BTreeMap<String, f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub builtin: Option<String>,
+    /// A file the effect reads, e.g. a LUT.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library: Option<LibraryRef>,
 }
@@ -276,4 +298,73 @@ pub struct Foreign {
     /// Source table name, e.g. "stickers".
     pub kind: String,
     pub raw: serde_json::Value,
+}
+
+/// An owned material of any kind, for edits that add or remove materials.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AnyMaterial {
+    Media(Media),
+    Text(Text),
+    Speed(Speed),
+    CanvasFill(CanvasFill),
+    AudioFade(AudioFade),
+    Transition(Transition),
+    Effect(Effect),
+    Foreign(Foreign),
+}
+
+impl AnyMaterial {
+    pub fn id(&self) -> &MaterialId {
+        match self {
+            AnyMaterial::Media(m) => &m.id,
+            AnyMaterial::Text(m) => &m.id,
+            AnyMaterial::Speed(m) => &m.id,
+            AnyMaterial::CanvasFill(m) => &m.id,
+            AnyMaterial::AudioFade(m) => &m.id,
+            AnyMaterial::Transition(m) => &m.id,
+            AnyMaterial::Effect(m) => &m.id,
+            AnyMaterial::Foreign(m) => &m.id,
+        }
+    }
+}
+
+impl Materials {
+    /// Insert a material at `index` within its table (clamped), or at the end.
+    pub fn insert_at(&mut self, material: AnyMaterial, index: Option<usize>) {
+        fn put<T>(v: &mut Vec<T>, item: T, index: Option<usize>) {
+            let i = index.unwrap_or(v.len()).min(v.len());
+            v.insert(i, item);
+        }
+        match material {
+            AnyMaterial::Media(m) => put(&mut self.media, m, index),
+            AnyMaterial::Text(m) => put(&mut self.texts, m, index),
+            AnyMaterial::Speed(m) => put(&mut self.speeds, m, index),
+            AnyMaterial::CanvasFill(m) => put(&mut self.canvas_fills, m, index),
+            AnyMaterial::AudioFade(m) => put(&mut self.audio_fades, m, index),
+            AnyMaterial::Transition(m) => put(&mut self.transitions, m, index),
+            AnyMaterial::Effect(m) => put(&mut self.effects, m, index),
+            AnyMaterial::Foreign(m) => put(&mut self.foreign, m, index),
+        }
+    }
+
+    /// Remove a material by id, returning it and its index within its table.
+    pub fn remove(&mut self, id: &MaterialId) -> Option<(AnyMaterial, usize)> {
+        macro_rules! take {
+            ($field:ident, $variant:ident) => {
+                if let Some(i) = self.$field.iter().position(|m| &m.id == id) {
+                    return Some((AnyMaterial::$variant(self.$field.remove(i)), i));
+                }
+            };
+        }
+        take!(media, Media);
+        take!(texts, Text);
+        take!(speeds, Speed);
+        take!(canvas_fills, CanvasFill);
+        take!(audio_fades, AudioFade);
+        take!(transitions, Transition);
+        take!(effects, Effect);
+        take!(foreign, Foreign);
+        None
+    }
 }

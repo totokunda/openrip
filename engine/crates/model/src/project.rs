@@ -48,6 +48,8 @@ pub enum TrackKind {
     Effect,
     Filter,
     Adjustment,
+    /// OpenRip shapes and freehand drawings.
+    Graphic,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -83,6 +85,9 @@ pub struct Segment {
     /// Explicit stacking order; higher draws on top.
     pub render_index: i32,
     pub transform: Transform,
+    /// Visible part of the source, if cropped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<CropRect>,
     pub opacity: Animated<f32>,
     /// Linear gain; 1.0 = unity.
     pub volume: Animated<f32>,
@@ -99,9 +104,12 @@ impl Segment {
     }
 }
 
-/// 2D placement on the canvas, in CapCut's convention: `position` is the clip
-/// centre in half-canvas units with (0, 0) at the canvas centre; `scale` 1.0 is
-/// the clip's fitted size; `rotation` is in degrees.
+/// 2D placement on the canvas. These are OpenRip's conventions; importers convert
+/// into them:
+/// - `position`: centre of the clip's box, with the canvas spanning −1…+1 on each axis,
+///   (0, 0) at the canvas centre, +x right and **+y up**.
+/// - `scale`: 1.0 means the (cropped) source contain-fits the canvas.
+/// - `rotation`: degrees, clockwise on screen, about the box centre.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Transform {
     pub position: Animated<Vec2>,
@@ -111,6 +119,19 @@ pub struct Transform {
     pub flip_h: bool,
     #[serde(default)]
     pub flip_v: bool,
+}
+
+/// A normalised rectangle of the source frame (0…1 on each axis, origin top-left).
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CropRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl CropRect {
+    pub const FULL: CropRect = CropRect { x: 0.0, y: 0.0, width: 1.0, height: 1.0 };
 }
 
 impl Default for Transform {

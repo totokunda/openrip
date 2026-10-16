@@ -213,6 +213,8 @@ fn import_segment(seg: &Value, report: &mut ImportReport) -> Option<Segment> {
         visible: b(seg, "visible", true),
         render_index: i(seg, "render_index") as i32,
         transform,
+        // TODO: map CapCut's per-material crop (corner points on materials.videos[].crop).
+        crop: None,
         opacity,
         volume,
         attachments: arr(seg, "extra_material_refs")
@@ -446,6 +448,7 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         name: s(m, "name"),
                         params,
                         builtin: adjust.map(str::to_string),
+                        resource: None,
                         library,
                     });
                     true
@@ -492,6 +495,7 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
                     path: st.pointer("/font/path").and_then(Value::as_str).unwrap_or_default().to_string(),
                 },
                 size: f(st, "size", f(m, "font_size", 15.0)) as f32,
+                size_unit: SizeUnit::CapCut,
                 fill: st.get("fill").and_then(solid).unwrap_or(Rgba::WHITE),
                 stroke,
                 bold: b(st, "bold", false),

@@ -1,0 +1,699 @@
+//! Import projects saved by the TypeScript app (`project-<N>.json`, format "1.0.0").
+//!
+//! The v1 format is documented in `docs/inventory/current-app.md` §11. Conversions:
+//! - **Time.** v1 stores integer frames as "ticks" (µs) computed with truncating
+//!   maths at the *rounded* fps, so some frames come back one short. The frame is
+//!   recovered by rounding, then placed with exact rational frame timing.
+//! - **Geometry.** v1 positions clips in "world units" on a canvas 600 units tall,
+//!   by the top-left of the unrotated box, rotating media/text/rect/line about that
+//!   corner and ellipse/polygon/star about the centre. This is converted to the
+//!   model's centred, normalised, +y-up transform.
+//! - **Audio.** v1 volume is dB; the model stores linear gain. Fades become materials.
+//! - **Tracks.** v1 lists tracks top row first; the model lists them bottom first.
+//!
+//! AI clips (`model`) are dropped; shapes, drawings and masks are kept verbatim as
+//! `Foreign` materials or reported until the model supports them.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use openrip_model::*;
+use serde::Serialize;
+use serde_json::Value;
+
+const APP: &str = "openrip-v1";
+/// v1 canvas height in world units (`BASE_LONG_SIDE`).
+const WORLD_H: f64 = 600.0;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ImportError {
+    #[error("can't read {path}: {source}")]
+    Io { path: String, source: std::io::Error },
+    #[error("{path} is not valid JSON: {source}")]
+    Json { path: String, source: serde_json::Error },
+    #[error("not a v1 project: {0}")]
+    NotAProject(String),
+}
+
+pub struct Imported {
+    pub project: Project,
+    pub report: ImportReport,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct ImportReport {
+    pub tracks: usize,
+    pub segments: usize,
+    /// Clips that were not imported, by reason.
+    pub dropped: BTreeMap<String, usize>,
+    /// Clip features kept verbatim (as `Foreign` materials) but not interpreted yet.
+    pub kept_foreign: BTreeMap<String, usize>,
+    /// Overlapping clips moved onto a new track (v1 allowed some overlaps).
+    pub moved_to_new_track: usize,
+    pub missing_media: Vec<String>,
+    pub warnings: Vec<String>,
+    pub problems: Vec<String>,
+}
+
+fn bump(map: &mut BTreeMap<String, usize>, key: &str) {
+    *map.entry(key.to_string()).or_insert(0) += 1;
+}
+
+// ---- tolerant accessors ------------------------------------------------------
+
+fn s(v: &Value, key: &str) -> String {
+    v.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+}
+fn f(v: &Value, key: &str, default: f64) -> f64 {
+    v.get(key).and_then(Value::as_f64).filter(|x| x.is_finite()).unwrap_or(default)
+}
+fn b(v: &Value, key: &str) -> bool {
+    v.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+fn hex(v: &Value, key: &str, default: Rgba) -> Rgba {
+    v.get(key).and_then(Value::as_str).and_then(Rgba::from_hex).unwrap_or(default)
+}
+
+/// Decode a `file://` URL (as v1 stores asset paths) to a filesystem path.
+fn file_url_to_path(url: &str) -> String {
+    let Some(rest) = url.strip_prefix("file://") else { return url.to_string() };
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(v) = u8::from_str_radix(&rest[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+// ---- time --------------------------------------------------------------------
+
+struct Clock {
+    fps: FrameRate,
+    /// v1 computed ticks with `round(fps)`.
+    tick_fps: i128,
+}
+
+impl Clock {
+    /// Recover the integer frame from a v1 tick string (truncated on save).
+    fn tick_to_frame(&self, tick: &str) -> Option<i64> {
+        let t: i128 = tick.trim().parse().ok()?;
+        if t == 1 || t == 2 {
+            return Some(0); // ±∞ sentinels; clip fields never really use them
+        }
+        let num = t * self.tick_fps;
+        Some(((num + 500_000).div_euclid(1_000_000)) as i64)
+    }
+
+    fn frame(&self, clip: &Value, tick_key: &str, frame_key: &str) -> i64 {
+        clip.get(tick_key)
+            .and_then(Value::as_str)
+            .and_then(|t| self.tick_to_frame(t))
+            .or_else(|| clip.get(frame_key).and_then(Value::as_f64).filter(|x| x.is_finite()).map(|x| x.round() as i64))
+            .unwrap_or(0)
+    }
+
+    fn at(&self, frame: i64) -> Micros {
+        self.fps.frame_start(frame)
+    }
+}
+
+// ---- geometry ----------------------------------------------------------------
+
+struct World {
+    w: f64,
+    h: f64,
+}
+
+/// v1 `ClipTransform` → model `Transform` + crop + opacity.
+fn convert_transform(
+    world: &World,
+    t: &Value,
+    center_pivot: bool,
+    fit: Option<(f64, f64)>,
+) -> (Transform, Option<CropRect>, f32) {
+    let (x, y) = (f(t, "x", 0.0), f(t, "y", 0.0));
+    let (w, h) = (f(t, "width", 0.0) * f(t, "scaleX", 1.0), f(t, "height", 0.0) * f(t, "scaleY", 1.0));
+    let theta = f(t, "rotation", 0.0).to_radians();
+    // Centre of the box in world units (y down). Konva rotates clockwise about the node origin.
+    let (cx, cy) = if center_pivot {
+        (x + w / 2.0, y + h / 2.0)
+    } else {
+        let (c, sn) = (theta.cos(), theta.sin());
+        (x + c * w / 2.0 - sn * h / 2.0, y + sn * w / 2.0 + c * h / 2.0)
+    };
+    let mut transform = Transform {
+        position: Animated::constant(Vec2::new(cx / world.w * 2.0 - 1.0, 1.0 - cy / world.h * 2.0)),
+        rotation: Animated::constant(f(t, "rotation", 0.0)),
+        ..Transform::default()
+    };
+    let crop = t.get("crop").filter(|c| c.is_object()).map(|c| CropRect {
+        x: f(c, "x", 0.0),
+        y: f(c, "y", 0.0),
+        width: f(c, "width", 1.0),
+        height: f(c, "height", 1.0),
+    });
+    if let Some((fit_w, fit_h)) = fit {
+        if fit_w > 0.0 && fit_h > 0.0 && w > 0.0 && h > 0.0 {
+            transform.scale = Animated::constant(Vec2::new(w / fit_w, h / fit_h));
+        }
+    }
+    let crop = crop.filter(|c| *c != CropRect::FULL);
+    (transform, crop, (f(t, "opacity", 100.0) / 100.0) as f32)
+}
+
+/// Size of a source of `media_w`×`media_h` (after `crop`) contain-fitted into the world rect.
+fn contain_fit(world: &World, media_w: f64, media_h: f64, crop: Option<CropRect>) -> Option<(f64, f64)> {
+    let c = crop.unwrap_or(CropRect::FULL);
+    let (sw, sh) = (media_w * c.width, media_h * c.height);
+    if sw <= 0.0 || sh <= 0.0 {
+        return None;
+    }
+    let src_aspect = sw / sh;
+    Some(if src_aspect > world.w / world.h {
+        (world.w, world.w / src_aspect)
+    } else {
+        (world.h * src_aspect, world.h)
+    })
+}
+
+/// Output canvas for an aspect ratio: long side 1920, even dimensions.
+fn canvas_for_aspect(aw: f64, ah: f64) -> Canvas {
+    let even = |v: f64| ((v / 2.0).round() as u32).max(1) * 2;
+    if aw >= ah {
+        Canvas { width: 1920, height: even(1920.0 * ah / aw) }
+    } else {
+        Canvas { width: even(1920.0 * aw / ah), height: 1920 }
+    }
+}
+
+// ---- entry points --------------------------------------------------------------
+
+pub fn import_v1_file(path: &Path) -> Result<Imported, ImportError> {
+    let raw = std::fs::read(path).map_err(|source| ImportError::Io { path: path.display().to_string(), source })?;
+    let doc: Value =
+        serde_json::from_slice(&raw).map_err(|source| ImportError::Json { path: path.display().to_string(), source })?;
+    import_v1_json(&doc)
+}
+
+pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
+    let timeline = doc.get("timeline").filter(|t| t.is_object()).ok_or_else(|| ImportError::NotAProject("no timeline".into()))?;
+    let mut report = ImportReport::default();
+    let settings = doc.get("settings").cloned().unwrap_or(Value::Null);
+    let meta = doc.get("meta").cloned().unwrap_or(Value::Null);
+
+    let fps_raw = f(&settings, "fps", 24.0).max(1.0);
+    let clock = Clock { fps: FrameRate::from_f64(fps_raw), tick_fps: fps_raw.round().max(1.0) as i128 };
+    let ar = settings.get("aspectRatio").cloned().unwrap_or(Value::Null);
+    let (aw, ah) = (f(&ar, "width", 16.0).max(1e-6), f(&ar, "height", 9.0).max(1e-6));
+    let world = World { w: WORLD_H * aw / ah, h: WORLD_H };
+
+    let mut project = Project::new(
+        { let id = s(&meta, "id"); if id.is_empty() { format!("v1-{}", meta.get("projectId").and_then(Value::as_i64).unwrap_or(0)) } else { id } },
+        { let n = s(&meta, "name"); if n.is_empty() { "Untitled Project".to_string() } else { n } },
+        canvas_for_aspect(aw, ah),
+        clock.fps,
+    );
+    project.imported_from = Some(ImportSource { app: APP.into(), version: s(doc, "version") });
+
+    // Assets → media materials.
+    let assets = doc.get("assets").and_then(Value::as_object).cloned().unwrap_or_default();
+    for (id, a) in &assets {
+        let kind = match s(a, "type").as_str() {
+            "audio" => MediaKind::Audio,
+            "image" => MediaKind::Photo,
+            _ => MediaKind::Video,
+        };
+        project.materials.media.push(Media {
+            id: MaterialId(id.clone()),
+            kind,
+            path: file_url_to_path(&s(a, "path")),
+            width: f(a, "width", 0.0) as u32,
+            height: f(a, "height", 0.0) as u32,
+            duration: Micros::from_secs_f64(f(a, "duration", 0.0)),
+            has_audio: kind != MediaKind::Photo,
+        });
+    }
+
+    // Tracks: v1 top row first → model bottom first.
+    let mut tracks: Vec<Track> = Vec::new();
+    for t in timeline.get("tracks").and_then(Value::as_array).into_iter().flatten().rev() {
+        let kind = match s(t, "type").as_str() {
+            "media" => TrackKind::Video,
+            "audio" => TrackKind::Audio,
+            "text" => TrackKind::Text,
+            "filter" => TrackKind::Filter,
+            "shape" | "draw" => TrackKind::Graphic,
+            other => {
+                report.warnings.push(format!("skipped track of unknown type {other:?}"));
+                continue;
+            }
+        };
+        tracks.push(Track {
+            id: s(t, "timelineId"),
+            kind,
+            name: String::new(),
+            segments: Vec::new(),
+            muted: b(t, "muted"),
+            hidden: b(t, "hidden"),
+            locked: false,
+        });
+    }
+
+    for clip in timeline.get("clips").and_then(Value::as_array).into_iter().flatten() {
+        let ty = s(clip, "type");
+        match ty.as_str() {
+            "model" => {
+                bump(&mut report.dropped, "model (AI generation clip)");
+                continue;
+            }
+            "group" => {
+                // Group containers have no content; their children are ordinary clips.
+                bump(&mut report.dropped, "group container (children kept)");
+                continue;
+            }
+            "video" | "image" | "audio" | "text" | "filter" | "shape" | "draw" => {}
+            other => {
+                bump(&mut report.dropped, &format!("unknown clip type {other}"));
+                continue;
+            }
+        }
+        if let Some(seg) = convert_clip(clip, &ty, &clock, &world, &mut project.materials, &mut report) {
+            let track_id = s(clip, "timelineId");
+            let wanted = match ty.as_str() {
+                "video" | "image" => TrackKind::Video,
+                "audio" => TrackKind::Audio,
+                "text" => TrackKind::Text,
+                "filter" => TrackKind::Filter,
+                _ => TrackKind::Graphic,
+            };
+            let ti = match tracks.iter().position(|t| t.id == track_id && t.kind == wanted) {
+                Some(i) => i,
+                None => {
+                    report.warnings.push(format!("{ty} clip without a matching track; created one"));
+                    tracks.push(Track {
+                        id: format!("{track_id}-{ty}"),
+                        kind: wanted,
+                        name: String::new(),
+                        segments: Vec::new(),
+                        muted: false,
+                        hidden: false,
+                        locked: false,
+                    });
+                    tracks.len() - 1
+                }
+            };
+            tracks[ti].segments.push(seg);
+        }
+    }
+
+    // Resolve overlaps by moving clips onto a new track just above.
+    let mut i = 0;
+    while i < tracks.len() {
+        tracks[i].segments.sort_by_key(|s| s.target.start);
+        let mut keep: Vec<Segment> = Vec::new();
+        let mut spill: Vec<Segment> = Vec::new();
+        for seg in tracks[i].segments.drain(..) {
+            if keep.last().is_some_and(|prev: &Segment| prev.target.overlaps(&seg.target)) {
+                spill.push(seg);
+            } else {
+                keep.push(seg);
+            }
+        }
+        tracks[i].segments = keep;
+        if !spill.is_empty() {
+            report.moved_to_new_track += spill.len();
+            let t = &tracks[i];
+            let extra = Track {
+                id: format!("{}-overlap", t.id),
+                kind: t.kind,
+                name: String::new(),
+                segments: spill,
+                muted: t.muted,
+                hidden: t.hidden,
+                locked: false,
+            };
+            tracks.insert(i + 1, extra);
+        }
+        i += 1;
+    }
+
+    // Stacking: later (higher) tracks draw on top.
+    for (index, t) in tracks.iter_mut().enumerate() {
+        for seg in &mut t.segments {
+            seg.render_index = index as i32;
+        }
+    }
+    report.tracks = tracks.len();
+    report.segments = tracks.iter().map(|t| t.segments.len()).sum();
+    project.tracks = tracks;
+
+    for m in &project.materials.media {
+        if !m.path.is_empty() && !Path::new(&m.path).exists() {
+            report.missing_media.push(m.path.clone());
+        }
+    }
+    report.problems = project.validate();
+    Ok(Imported { project, report })
+}
+
+fn convert_clip(
+    clip: &Value,
+    ty: &str,
+    clock: &Clock,
+    world: &World,
+    materials: &mut Materials,
+    report: &mut ImportReport,
+) -> Option<Segment> {
+    let id = s(clip, "clipId");
+    let start = clock.frame(clip, "startTick", "startFrame");
+    let end = clock.frame(clip, "endTick", "endFrame");
+    let target = TimeRange::new(clock.at(start), clock.at(end) - clock.at(start));
+    if target.duration.0 <= 0 {
+        report.warnings.push(format!("{ty} clip with no duration skipped"));
+        return None;
+    }
+    let is_av = matches!(ty, "video" | "audio");
+    let speed = if is_av { f(clip, "speed", 1.0).clamp(0.1, 100.0) } else { 1.0 };
+    let mut attachments = Vec::new();
+
+    // Source range. v1 trims are in timeline frames before speed (preview semantics).
+    let source = match ty {
+        "video" | "audio" => {
+            let trim_start = clock.frame(clip, "trimStartTick", "trimStart").max(0);
+            let src_start = Micros((clock.at(trim_start).0 as f64 * speed).round() as i64);
+            Some(TimeRange::new(src_start, Micros((target.duration.0 as f64 * speed).round() as i64)))
+        }
+        "image" => Some(TimeRange::new(Micros::ZERO, target.duration)),
+        _ => None,
+    };
+
+    let material = match ty {
+        "video" | "image" | "audio" => {
+            let asset = s(clip, "assetId");
+            if !materials.contains(&MaterialId(asset.clone())) {
+                bump(&mut report.dropped, &format!("{ty} clip whose asset is missing"));
+                return None;
+            }
+            MaterialId(asset)
+        }
+        "text" => {
+            let mid = MaterialId(format!("{id}-text"));
+            materials.texts.push(convert_text(&mid, clip));
+            mid
+        }
+        "filter" => {
+            let mid = MaterialId(format!("{id}-filter"));
+            let resource = [s(clip, "fullPath"), s(clip, "smallPath")].into_iter().find(|p| !p.is_empty());
+            let mut params = BTreeMap::new();
+            params.insert("intensity".to_string(), f(clip, "intensity", 100.0).clamp(0.0, 100.0) / 100.0);
+            materials.effects.push(Effect {
+                id: mid.clone(),
+                category: EffectCategory::Filter,
+                name: s(clip, "name"),
+                params,
+                builtin: Some("lut".into()),
+                resource,
+                library: None,
+            });
+            mid
+        }
+        _ => {
+            // shape / draw: not in the model yet; keep the whole clip verbatim.
+            bump(&mut report.kept_foreign, ty);
+            let mid = MaterialId(format!("{id}-{ty}"));
+            materials.foreign.push(Foreign { id: mid.clone(), app: APP.into(), kind: ty.into(), raw: clip.clone() });
+            mid
+        }
+    };
+
+    // Audio: dB → linear, fades → material.
+    let mut volume = Animated::constant(1.0f32);
+    if is_av {
+        volume = Animated::constant(10f64.powf(f(clip, "volume", 0.0) / 20.0) as f32);
+        let (fade_in, fade_out) = (f(clip, "fadeIn", 0.0), f(clip, "fadeOut", 0.0));
+        if fade_in > 0.0 || fade_out > 0.0 {
+            let mid = MaterialId(format!("{id}-fade"));
+            materials.audio_fades.push(AudioFade {
+                id: mid.clone(),
+                fade_in: Micros::from_secs_f64(fade_in),
+                fade_out: Micros::from_secs_f64(fade_out),
+            });
+            attachments.push(mid);
+        }
+    }
+
+    // Adjustments (video/image): keep v1's own scale under a "v1:" name until the
+    // colour milestone defines a shared adjustment scale.
+    if matches!(ty, "video" | "image") {
+        for name in ["brightness", "contrast", "hue", "saturation", "sharpness", "noise", "blur", "vignette"] {
+            let v = f(clip, name, 0.0);
+            if v != 0.0 {
+                let mid = MaterialId(format!("{id}-adj-{name}"));
+                let mut params = BTreeMap::new();
+                params.insert("value".to_string(), v);
+                materials.effects.push(Effect {
+                    id: mid.clone(),
+                    category: EffectCategory::Adjust,
+                    name: name.into(),
+                    params,
+                    builtin: Some(format!("v1:{name}")),
+                    resource: None,
+                    library: None,
+                });
+                attachments.push(mid);
+            }
+        }
+        if clip.get("masks").and_then(Value::as_array).is_some_and(|m| !m.is_empty()) {
+            bump(&mut report.kept_foreign, "masks (not converted yet)");
+        }
+    }
+
+    // Geometry.
+    let (transform, crop, opacity) = match (ty, clip.get("transform").filter(|t| t.is_object())) {
+        ("audio" | "filter", _) | (_, None) => (Transform::default(), None, 1.0),
+        (_, Some(t)) => {
+            let shape_type = s(clip, "shapeType");
+            let center_pivot = ty == "shape" && matches!(shape_type.as_str(), "ellipse" | "polygon" | "star");
+            let fit = if matches!(ty, "video" | "image") {
+                let (mw, mh) = (f(clip, "mediaWidth", 0.0), f(clip, "mediaHeight", 0.0));
+                let crop = t.get("crop").map(|c| CropRect {
+                    x: f(c, "x", 0.0),
+                    y: f(c, "y", 0.0),
+                    width: f(c, "width", 1.0),
+                    height: f(c, "height", 1.0),
+                });
+                let fit = contain_fit(world, mw, mh, crop);
+                if fit.is_none() {
+                    report.warnings.push(format!("{ty} clip without media size; scale left at 1"));
+                }
+                fit
+            } else {
+                None
+            };
+            convert_transform(world, t, center_pivot, fit)
+        }
+    };
+
+    Some(Segment {
+        id,
+        material,
+        source,
+        target,
+        speed,
+        reverse: false,
+        visible: true,
+        render_index: 0,
+        transform,
+        crop,
+        opacity: Animated::constant(opacity),
+        volume,
+        attachments,
+    })
+}
+
+fn convert_text(id: &MaterialId, clip: &Value) -> Text {
+    let raw = s(clip, "text");
+    let text = match s(clip, "textTransform").as_str() {
+        "uppercase" => raw.to_uppercase(),
+        "lowercase" => raw.to_lowercase(),
+        "capitalize" => raw
+            .split(' ')
+            .map(|w| {
+                let mut c = w.chars();
+                match c.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => raw,
+    };
+    let font_size = f(clip, "fontSize", 48.0).max(1.0);
+    let rel = |px: f64| (px / font_size) as f32;
+    let stroke = b(clip, "strokeEnabled").then(|| Stroke {
+        color: hex(clip, "stroke", Rgba::BLACK),
+        width: rel(f(clip, "strokeWidth", 2.0)),
+    });
+    let background = b(clip, "backgroundEnabled").then(|| {
+        let mut color = hex(clip, "backgroundColor", Rgba::BLACK);
+        color.a = (f(clip, "backgroundOpacity", 100.0) / 100.0) as f32;
+        TextBackground { color, corner_radius: rel(f(clip, "backgroundCornerRadius", 0.0)) }
+    });
+    let shadow = b(clip, "shadowEnabled").then(|| {
+        let mut color = hex(clip, "shadowColor", Rgba::BLACK);
+        color.a = (f(clip, "shadowOpacity", 75.0) / 100.0) as f32;
+        let (dx, dy) = (f(clip, "shadowOffsetX", 2.0), f(clip, "shadowOffsetY", 2.0));
+        TextShadow {
+            color,
+            distance: rel(dx.hypot(dy)),
+            // v1 offsets are y-down; the model measures angles with +y up.
+            angle_deg: (-dy).atan2(dx).to_degrees() as f32,
+            smoothing: rel(f(clip, "shadowBlur", 4.0)),
+        }
+    });
+    let chars = text.chars().count() as u32;
+    Text {
+        id: id.clone(),
+        runs: vec![TextRun {
+            range: (0, chars),
+            font: FontRef { name: { let n = s(clip, "fontFamily"); if n.is_empty() { "Arial".into() } else { n } }, path: String::new() },
+            size: (font_size / WORLD_H) as f32,
+            size_unit: SizeUnit::CanvasHeight,
+            // v1's colorOpacity has no effect in its renderer, so it isn't applied here.
+            fill: hex(clip, "color", Rgba::BLACK),
+            stroke,
+            bold: f(clip, "fontWeight", 400.0) >= 700.0,
+            italic: s(clip, "fontStyle") == "italic",
+            underline: s(clip, "textDecoration") == "underline",
+        }],
+        text,
+        layout: TextLayout {
+            alignment: match s(clip, "textAlign").as_str() {
+                "center" => 1,
+                "right" => 2,
+                _ => 0,
+            },
+            letter_spacing: 0.0,
+            line_spacing: 0.0,
+            background,
+            shadow,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 24 fps, 16:9 (world 1066.67×600). Track order in v1 is top first.
+    fn doc() -> Value {
+        // frame→tick exactly as v1 writes it: floor(frame * 1e6 / round(fps))
+        let tick = |frame: i64| ((frame * 1_000_000) / 24).to_string();
+        json!({
+            "version": "1.0.0",
+            "meta": {"id": "UUID-1", "name": "My edit", "projectId": 3},
+            "settings": {"fps": 24, "aspectRatio": {"width": 16, "height": 9, "id": "16:9"}, "defaultClipLength": 5},
+            "assets": {
+                "A1": {"id": "A1", "type": "video", "path": "file:///Users/me/My%20Clip.mp4", "width": 1920, "height": 1080, "duration": 10.0},
+                "A2": {"id": "A2", "type": "audio", "path": "file:///Users/me/song.mp3", "duration": 30.0}
+            },
+            "timeline": {
+                "tracks": [
+                    {"type": "text", "timelineId": "T-text", "muted": false, "hidden": false},
+                    {"type": "media", "timelineId": "T-media", "muted": false, "hidden": false},
+                    {"type": "audio", "timelineId": "T-audio", "muted": true, "hidden": false}
+                ],
+                "clips": [
+                    {"clipId": "v1", "type": "video", "timelineId": "T-media", "assetId": "A1",
+                     "startTick": tick(1), "endTick": tick(49), "trimStartTick": tick(24), "trimEndTick": tick(0),
+                     "speed": 2.0, "volume": -6.0, "fadeIn": 0.5, "brightness": 20, "mediaWidth": 1920, "mediaHeight": 1080,
+                     "transform": {"x": 0, "y": 0, "width": 1066.6666666666667, "height": 600, "scaleX": 1, "scaleY": 1, "rotation": 0, "opacity": 50}},
+                    {"clipId": "v2", "type": "video", "timelineId": "T-media", "assetId": "A1",
+                     "startTick": tick(40), "endTick": tick(60), "trimStartTick": tick(0), "trimEndTick": tick(0)},
+                    {"clipId": "a1", "type": "audio", "timelineId": "T-audio", "assetId": "A2",
+                     "startTick": tick(0), "endTick": tick(240), "trimStartTick": tick(0), "trimEndTick": tick(0), "volume": 0},
+                    {"clipId": "t1", "type": "text", "timelineId": "T-text", "text": "hello world", "textTransform": "capitalize",
+                     "fontSize": 60, "fontWeight": 700, "color": "#ff0000", "textAlign": "center",
+                     "strokeEnabled": true, "stroke": "#000000", "strokeWidth": 3,
+                     "shadowEnabled": true, "shadowOffsetX": 3, "shadowOffsetY": 4, "shadowBlur": 6,
+                     "startTick": tick(0), "endTick": tick(72), "trimStartTick": "0", "trimEndTick": "0",
+                     "transform": {"x": 433.3333333333333, "y": 250, "width": 200, "height": 100, "scaleX": 1, "scaleY": 1, "rotation": 90, "opacity": 100}},
+                    {"clipId": "m1", "type": "model", "timelineId": "T-media", "startTick": tick(0), "endTick": tick(10)}
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn imports_time_exactly_despite_truncated_ticks() {
+        let Imported { project, report } = import_v1_json(&doc()).unwrap();
+        assert_eq!(project.fps, FrameRate::new(24, 1));
+        let (_, v1) = edit::find_segment(&project, "v1").unwrap();
+        // frame 1 was written as tick 41666 (truncated); it must come back as frame 1 exactly.
+        assert_eq!(v1.target.start, FrameRate::new(24, 1).frame_start(1));
+        assert_eq!(v1.target.end(), FrameRate::new(24, 1).frame_start(49));
+        // trimStart 24 frames at 2× speed starts 2 s into the source.
+        assert_eq!(v1.source.unwrap().start, Micros(2_000_000));
+        assert_eq!(v1.source.unwrap().duration, Micros(v1.target.duration.0 * 2));
+        assert!((v1.volume.value - 10f32.powf(-6.0 / 20.0)).abs() < 1e-6);
+        assert_eq!(v1.opacity.value, 0.5);
+        assert_eq!(report.dropped.get("model (AI generation clip)"), Some(&1));
+        assert!(report.problems.is_empty(), "{:?}", report.problems);
+    }
+
+    #[test]
+    fn geometry_converts_to_centred_normalised_coordinates() {
+        let Imported { project, .. } = import_v1_json(&doc()).unwrap();
+        // A full-frame 16:9 video on a 16:9 canvas: centred, scale 1.
+        let (_, v1) = edit::find_segment(&project, "v1").unwrap();
+        let p = v1.transform.position.value;
+        let sc = v1.transform.scale.value;
+        assert!(p.x.abs() < 1e-9 && p.y.abs() < 1e-9, "{p:?}");
+        assert!((sc.x - 1.0).abs() < 1e-9 && (sc.y - 1.0).abs() < 1e-9, "{sc:?}");
+        // Text box 200×100 at (433.33, 250), rotated 90° about its top-left: the centre
+        // moves to (433.33 - 50, 250 + 100) = (383.33, 350) in y-down world units.
+        let (_, t1) = edit::find_segment(&project, "t1").unwrap();
+        let p = t1.transform.position.value;
+        assert!((p.x - (383.3333333333333 / (1066.6666666666667) * 2.0 - 1.0)).abs() < 1e-9, "{p:?}");
+        assert!((p.y - (1.0 - 350.0 / 600.0 * 2.0)).abs() < 1e-9, "{p:?}");
+        assert_eq!(t1.transform.rotation.value, 90.0);
+    }
+
+    #[test]
+    fn text_audio_tracks_and_overlaps() {
+        let Imported { project, report } = import_v1_json(&doc()).unwrap();
+        let text = &project.materials.texts[0];
+        assert_eq!(text.text, "Hello World");
+        let run = &text.runs[0];
+        assert_eq!((run.size, run.size_unit), (0.1, SizeUnit::CanvasHeight));
+        assert!(run.bold && run.stroke.unwrap().width == 0.05);
+        let shadow = text.layout.shadow.unwrap();
+        assert!((shadow.distance - 5.0 / 60.0).abs() < 1e-6);
+        assert_eq!(text.layout.alignment, 1);
+
+        // v1 lists tracks top first; the model lists them bottom first.
+        let kinds: Vec<TrackKind> = project.tracks.iter().map(|t| t.kind).collect();
+        assert_eq!(kinds[0], TrackKind::Audio);
+        assert!(project.tracks[0].muted);
+        // v2 (frames 40-60) overlapped v1 (frames 1-49): it moves to a new video track.
+        assert_eq!(report.moved_to_new_track, 1);
+        assert!(project.tracks.iter().any(|t| t.id == "T-media-overlap" && t.segments[0].id == "v2"));
+        // Fades and adjustments became attached materials.
+        let (_, v1) = edit::find_segment(&project, "v1").unwrap();
+        assert!(v1.attachments.iter().any(|m| m.0 == "v1-fade"));
+        assert!(v1.attachments.iter().any(|m| m.0 == "v1-adj-brightness"));
+        assert_eq!(project.materials.media[0].path, "/Users/me/My Clip.mp4");
+        assert!(project.validate().is_empty());
+    }
+}
