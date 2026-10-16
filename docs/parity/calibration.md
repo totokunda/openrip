@@ -144,10 +144,11 @@ Session 3 is generated too (`make_draft.py`), as two drafts:
 
 ### Steps (sessions 3, 4 and 5 together)
 
-1. Install the drafts. This quits CapCut, waits for it to close, writes the drafts into CapCut's projects folder, and reopens CapCut:
+1. Install the drafts. This quits CapCut, waits for it to close, writes the drafts into CapCut's projects folder, and reopens CapCut. `--replace` rebuilds drafts installed earlier:
    ```
-   osascript -e 'quit app "CapCut"'; while pgrep -x CapCut >/dev/null; do sleep 1; done; python3 /Users/tosinkuye/openrip/bench/calibration/make_draft.py --template "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/1015" --register openrip-calibration-3 openrip-calibration-3-portrait openrip-calibration-4 openrip-calibration-5 openrip-calibration-5-landscape && open -a CapCut
+   osascript -e 'quit app "CapCut"'; while pgrep -x CapCut >/dev/null; do sleep 1; done; python3 /Users/tosinkuye/openrip/bench/calibration/make_draft.py --template "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/1015" --register --replace openrip-calibration-3 openrip-calibration-3-portrait openrip-calibration-4 openrip-calibration-5 openrip-calibration-5-landscape && open -a CapCut
    ```
+   The images are copied to `~/Movies/openrip-calibration-media/` and the drafts point there. CapCut is sandboxed: it can read `~/Movies`, but a file anywhere else only after you pick it in CapCut, so drafts pointing into the repo show their media as missing.
 2. In CapCut, export into `bench/calibration/out/`, all at **30 fps, H.264, bitrate Higher**:
    - `openrip-calibration-3` at **1080p**, named `openrip-calibration-3`.
    - `openrip-calibration-3` at **720p**, named `openrip-calibration-3-720p`. This shows whether CapCut renders at the export size when it is smaller than the canvas.

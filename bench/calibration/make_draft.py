@@ -3,11 +3,16 @@
 Session 1's draft (made by hand in CapCut 9.5) is the template: its photo and text
 segments are cloned with fresh ids and re-timed, so every field CapCut expects is present.
 
-    python3 make_draft.py --template <session-1 draft dir> [--root <drafts folder>] [--register] <session>...
+    python3 make_draft.py --template <session-1 draft dir> [--root <drafts folder>] [--register] [--replace] <session>...
 
 Writes <drafts folder>/<session> for each session (default folder: next to the template).
 --register also adds them to CapCut's root_meta_info.json (backed up first) so they show on
 the home screen; CapCut must be closed then, because it rewrites that file on exit.
+--replace rebuilds sessions that already exist instead of skipping them.
+
+The drafts' images are copied to ~/Movies/openrip-calibration-media (--media-dir) and
+referenced there. CapCut is sandboxed: it may read ~/Movies, but a file elsewhere only
+after the user picks it in CapCut, so images referenced from this folder show as missing.
 """
 import argparse
 import copy
@@ -23,6 +28,7 @@ from PIL import Image
 HERE = Path(__file__).resolve().parent
 SEC = 1_000_000
 MARKER_1TO1 = 400 / 1080  # marker.png drawn texel-for-texel on a 1080-high canvas
+MEDIA_DIR = Path.home() / "Movies" / "openrip-calibration-media"
 
 
 @dataclass
@@ -181,7 +187,16 @@ def anim_templates(root: Path, wanted):
     return found
 
 
-def build(name, spec, template: Path, root: Path):
+def stage(fname, media_dir: Path):
+    """Copy a calibration image where sandboxed CapCut can read it; returns the copy's path."""
+    src, dst = HERE / fname, media_dir / fname
+    if not dst.exists() or dst.read_bytes() != src.read_bytes():
+        media_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+    return dst
+
+
+def build(name, spec, template: Path, root: Path, media_dir: Path, replace=False):
     src = json.loads((template / "draft_info.json").read_text())
     kinds = {k for tr in spec["tracks"] for c in tr if isinstance(c, Img) for k, _ in c.adjust}
     adjusts = adjust_templates(template.parent, kinds) if kinds else {}
@@ -205,10 +220,10 @@ def build(name, spec, template: Path, root: Path):
         if isinstance(clips[0], Img):
             track = {k: v for k, v in photo_track.items() if k != "segments"} | {"id": new_id(), "attribute": 0, "flag": 0 if video_tracks == 0 else 2, "segments": []}
             for c in clips:
-                path = (HERE / c.media).resolve()
                 if c.media not in media:
+                    path = stage(c.media, media_dir)
                     media[c.media] = (path, *Image.open(path).size)
-                _, w, h = media[c.media]
+                path, w, h = media[c.media]
                 photo = copy.deepcopy(photo_tpl) | {"path": str(path), "width": w, "height": h, "material_name": c.media}
                 seg, _ = clone_segment(photo_track["segments"][0], index, d["materials"], photo)
                 seg.update(target_timerange={"start": us(c.start), "duration": us(c.dur)}, source_timerange={"start": 0, "duration": us(c.dur)},
@@ -256,8 +271,10 @@ def build(name, spec, template: Path, root: Path):
 
     out = root / name
     if out.exists():
-        print(f"skip {out}: already exists (delete it in CapCut to rebuild)")
-        return None
+        if not replace:
+            print(f"skip {out}: already exists (--replace rebuilds it)")
+            return None
+        shutil.rmtree(out)
     (out / "Timelines" / timeline_id).mkdir(parents=True)
     body = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
     (out / "draft_info.json").write_text(body)
@@ -301,12 +318,14 @@ def register(root: Path, template: Path, built):
     rootmeta = json.loads(meta_path.read_text())
     like = next(e for e in rootmeta["all_draft_store"] if e["draft_fold_path"] == str(template))
     for b in built:
+        stale = [e for e in rootmeta["all_draft_store"] if e["draft_fold_path"] == str(b["out"])]
+        rootmeta["all_draft_store"] = [e for e in rootmeta["all_draft_store"] if e not in stale]
         e = copy.deepcopy(like)
         e.update(draft_cover=str(b["out"] / "draft_cover.jpg"), draft_fold_path=str(b["out"]), draft_id=b["draft_id"],
                  draft_json_file=str(b["out"] / "draft_info.json"), draft_name=b["name"], tm_draft_create=b["now_us"],
                  tm_draft_modified=b["now_us"], tm_duration=b["duration"], draft_timeline_materials_size=b["size"])
         rootmeta["all_draft_store"].insert(0, e)
-        rootmeta["draft_ids"] += 1
+        rootmeta["draft_ids"] += 0 if stale else 1
     meta_path.write_text(json.dumps(rootmeta, ensure_ascii=False, separators=(",", ":")))
     print(f"registered {len(built)} draft(s) in {meta_path} (backup: {backup})")
 
@@ -316,10 +335,12 @@ if __name__ == "__main__":
     ap.add_argument("--template", type=Path, required=True, help="session 1 draft folder")
     ap.add_argument("--root", type=Path, help="drafts folder to write into (default: the template's)")
     ap.add_argument("--register", action="store_true")
+    ap.add_argument("--replace", action="store_true", help="rebuild sessions that already exist")
+    ap.add_argument("--media-dir", type=Path, default=MEDIA_DIR, help="where the images are copied for CapCut to read")
     ap.add_argument("sessions", nargs="+", choices=sorted(SESSIONS))
     a = ap.parse_args()
     template = a.template.resolve()
     root = (a.root or template.parent).resolve()
-    built = [b for s in a.sessions if (b := build(s, SESSIONS[s], template, root))]
+    built = [b for s in a.sessions if (b := build(s, SESSIONS[s], template, root, a.media_dir.expanduser().resolve(), a.replace))]
     if a.register and built:
         register(root, template, built)
