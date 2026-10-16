@@ -344,6 +344,11 @@ impl PreviewEngine {
             *slot = v;
             bundle = bundle.or(e.resource.as_deref());
         }
+        // Primary colour wheels (log wheels aren't drawn yet).
+        if let Some(w) = seg.attachments.iter().find_map(|id| self.project.materials.color_wheels.iter().find(|w| &w.id == id && !w.log)) {
+            let wheel = |v: &openrip_model::WheelValue| openrip_render::Wheel { red: v.red as f32, green: v.green as f32, blue: v.blue as f32, luma: v.luma as f32, saturation: v.saturation as f32 };
+            a.wheels = openrip_render::Wheels { lift: wheel(&w.lift), gamma: wheel(&w.gamma), gain: wheel(&w.gain), offset: wheel(&w.offset), intensity: w.intensity as f32 };
+        }
         if a.is_identity() {
             return None;
         }

@@ -24,6 +24,14 @@ Each step works on the encoded values and clamps to 0–1, in this order:
 | Temperature / tint | Bradford adaptation from 6500 K to 6500 − 1970t + 876t² − 2630t³ K, tint 100 × slider along the isotemperature line, in BT.709 primaries. |
 | Exposure | Mix towards CapCut's brighter or darker table by \|slider\|. |
 
+The primary colour wheels run before these, in the same pass:
+1. **Per channel and on luma.** Each wheel maps x to ((x − lift′) / (1/gain′ − lift′))^gamma′ around the offset. The primed values come from CapCut's mappings:
+   - lift halved when positive;
+   - gamma 1/(1 + 4v) or 1 − 4v;
+   - gain 1 + 4v² or 1 + 0.999v.
+2. **Luma mix.** Luma is restored to the luma wheel's result.
+3. **Saturation wheel.** It scales HSL saturation.
+
 ## Effect on parity (CapCut's exports and covers)
 
 | Draft | Before | After |
@@ -32,13 +40,16 @@ Each step works on the encoded values and clamps to 0–1, in this order:
 | Export, draft with Adjust, HSL and curves | 16.8 dB | 20.8 dB |
 | Cover, Adjust | 19.0 dB | 21.3 dB |
 | Cover, Adjust, HSL and curves | 14.6 dB (95% of pixels off by > 32) | 17.3 dB (2.3%) |
+| Export, draft with primary colour wheels, PSNR p50 | 22.6 dB | **31.7 dB** |
 
 ## Not yet
 
 Not drawn yet:
 - sharpen and clarity, which are spatial filters in their own passes;
 - vignette;
-- HSL, curves and colour wheels;
+- HSL and curves. In the local drafts, every curve is empty and only 3 HSL materials change anything;
+- log wheels;
+- filter tracks: library LUT filters on a track of their own, applied to everything below. Two of them cover the draft still at 20.8 dB;
 - fade, which no local draft uses and whose table is in a bundle-specific format.
 
 All of them are in the same bundle.

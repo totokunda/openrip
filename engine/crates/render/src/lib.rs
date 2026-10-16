@@ -17,7 +17,7 @@
 pub mod adjust;
 pub mod text;
 
-pub use adjust::{Adjust, ExposureLuts};
+pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
 
 use openrip_media::{Matrix, PixelFormat, VideoFrame};
 use wgpu::util::DeviceExt;
@@ -758,6 +758,7 @@ impl Compositor {
 }
 
 /// Average each `k`x`k` block (edges included as partial blocks).
+#[allow(clippy::needless_range_loop)]
 fn box_shrink(img: &RgbaImage, k: u32) -> RgbaImage {
     let (w, h) = (img.width.div_ceil(k), img.height.div_ceil(k));
     let mut data = vec![0u8; (w * h * 4) as usize];

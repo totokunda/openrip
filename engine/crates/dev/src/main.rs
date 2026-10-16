@@ -945,6 +945,7 @@ fn wrap_probe(draft: &Path, export: &Path) -> Result<(), Box<dyn std::error::Err
 }
 
 /// A decoded RGB frame resampled to `w`x`h` by area averaging (any size, up or down).
+#[allow(clippy::needless_range_loop)]
 fn shrink_rgb(rgb: &openrip_media::RgbImage, w: u32, h: u32) -> Vec<u8> {
     let (sx, sy) = (rgb.width as f64 / w as f64, rgb.height as f64 / h as f64);
     let mut out = vec![0u8; (w * h * 3) as usize];

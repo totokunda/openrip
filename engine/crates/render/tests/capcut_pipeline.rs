@@ -175,3 +175,21 @@ fn adjust_sliders_follow_capcuts_formulas() {
         assert!((*v as i32 - want).abs() <= 1, "{v} vs {want}");
     }
 }
+
+/// CapCut's primary wheels: gain g and offset o on every channel and luma make
+/// y = x * (1 + 4 g^2) + o (lift 0, gamma 1, saturation untouched).
+#[test]
+fn colour_wheel_gain_and_offset() {
+    let Ok(c) = Compositor::new() else { return };
+    let img = RgbaImage { width: 4, height: 4, data: [120u8, 60, 30, 255].repeat(16) };
+    let all = |v: f32| openrip_render::Wheel { red: v, green: v, blue: v, luma: v, saturation: 0.0 };
+    let wheels = openrip_render::Wheels { gain: all(0.156), offset: all(0.0196), intensity: 1.0, ..Default::default() };
+    let mut l = Layer::from_model(Source::Image(&img), [4, 4], [0.0, 0.0], [1.0, 1.0], 0.0);
+    l.adjust = Some((openrip_render::Adjust { wheels, ..Default::default() }, None));
+    let out = c.render(4, 4, [0, 0, 0], &[l]);
+    let k = 1.0 + 4.0 * 0.156f64 * 0.156;
+    for (v, x) in out.data[..3].iter().zip([120.0, 60.0, 30.0f64]) {
+        let want = ((x / 255.0 * k + 0.0196) * 255.0).round() as i32;
+        assert!((*v as i32 - want).abs() <= 1, "{v} vs {want}");
+    }
+}

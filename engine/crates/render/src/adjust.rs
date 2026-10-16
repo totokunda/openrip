@@ -10,9 +10,38 @@ use std::sync::Arc;
 
 use crate::RgbaImage;
 
-/// One clip's Adjust sliders, each -1..1 (0 = off).
+/// One wheel's values, each -1..1: per channel, luma, and saturation.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct Wheel {
+    pub red: f32,
+    pub green: f32,
+    pub blue: f32,
+    pub luma: f32,
+    pub saturation: f32,
+}
+
+/// CapCut's primary colour wheels (lift / gamma / gain / offset), applied before the
+/// Adjust sliders. `intensity` 0 turns them off.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct Wheels {
+    pub lift: Wheel,
+    pub gamma: Wheel,
+    pub gain: Wheel,
+    pub offset: Wheel,
+    pub intensity: f32,
+}
+
+impl Wheels {
+    fn is_identity(&self) -> bool {
+        self.intensity.abs() <= 1e-5 || *self == Wheels { intensity: self.intensity, ..Default::default() }
+    }
+}
+
+/// One clip's colour grade: the primary wheels, then the Adjust sliders, each -1..1
+/// (0 = off).
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct Adjust {
+    pub wheels: Wheels,
     pub brightness: f32,
     pub contrast: f32,
     pub saturation: f32,
@@ -37,7 +66,7 @@ pub struct ExposureLuts {
 impl Adjust {
     pub fn is_identity(&self) -> bool {
         let e = 1e-5;
-        [self.brightness, self.contrast, self.saturation, self.highlights, self.shadows, self.whites, self.blacks, self.temperature, self.tint, self.exposure].iter().all(|v| v.abs() <= e)
+        self.wheels.is_identity() && [self.brightness, self.contrast, self.saturation, self.highlights, self.shadows, self.whites, self.blacks, self.temperature, self.tint, self.exposure].iter().all(|v| v.abs() <= e)
     }
 
     /// The shader's parameters (see `fs_adjust` in shaders.wgsl).
@@ -65,6 +94,21 @@ impl Adjust {
         p.c = [right_slope as f32, pivot_slope as f32, poly(c(self.highlights), 1.0) as f32, poly(c(self.shadows), -1.0) as f32];
         p.d = [bw_slope as f32, bw_bias as f32, c(self.exposure) as f32, 0.0];
         p.on1 = [tt, on(self.saturation), on(self.brightness), on(self.contrast)];
+        if !self.wheels.is_identity() {
+            // CapCut's slider-to-shader mapping for the primary wheels.
+            let w = &self.wheels;
+            let c = |v: f32| v.clamp(-1.0, 1.0);
+            let lift = |v: f32| if c(v) > 0.0 { c(v) * 0.5 } else { c(v) };
+            let gamma = |v: f32| if c(v) < 0.0 { 1.0 - c(v) * 4.0 } else { 1.0 / (1.0 + c(v) * 4.0) };
+            let gamma_s = |v: f32| if c(v) < 0.0 { 1.0 - c(v) * 4.0 } else { 1.0 / (1.0 + c(v) * c(v) * 4.0) };
+            let gain = |v: f32, k: f32| if c(v) < 0.0 { 1.0 + c(v) * 0.999 } else { 1.0 + c(v) * c(v) * k };
+            p.w_lift = [lift(w.lift.red), lift(w.lift.green), lift(w.lift.blue), lift(w.lift.luma)];
+            p.w_gamma = [gamma(w.gamma.red), gamma(w.gamma.green), gamma(w.gamma.blue), gamma(w.gamma.luma)];
+            p.w_gain = [gain(w.gain.red, 4.0), gain(w.gain.green, 4.0), gain(w.gain.blue, 4.0), gain(w.gain.luma, 4.0)];
+            p.w_offset = [c(w.offset.red), c(w.offset.green), c(w.offset.blue), c(w.offset.saturation)];
+            p.w_sat = [c(w.lift.saturation) * 0.5, gamma_s(w.gamma.saturation), gain(w.gain.saturation, 2.0), 1.0];
+            p.w_on = [c(w.intensity), 1.0, 0.0, 0.0];
+        }
         p.on2 = [on(self.highlights), on(self.shadows), on(self.blacks).max(on(self.whites)), on(self.exposure) * has_lut as u8 as f32];
         p
     }
@@ -90,6 +134,14 @@ pub(crate) struct AdjustParams {
     on1: [f32; 4],
     /// enables: highlights, shadows, black/white, exposure
     on2: [f32; 4],
+    /// Primary wheels: lift, gamma and gain for (R, G, B, luma); offset (R, G, B,
+    /// saturation); saturation wheel (lift, gamma, gain) and luma mix; intensity, enable.
+    w_lift: [f32; 4],
+    w_gamma: [f32; 4],
+    w_gain: [f32; 4],
+    w_offset: [f32; 4],
+    w_sat: [f32; 4],
+    w_on: [f32; 4],
 }
 
 /// Contrast: below 0 a straight line through the pivot; above, a sigmoid through the pivot
@@ -185,6 +237,7 @@ fn white_point(kelvin: f64, tint: f64) -> [f64; 3] {
 
 type M3 = [[f64; 3]; 3];
 
+#[allow(clippy::needless_range_loop)]
 fn mul(a: &M3, b: &M3) -> M3 {
     let mut m = [[0.0; 3]; 3];
     for i in 0..3 {
@@ -219,6 +272,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn neutral_temperature_is_identity_and_warm_raises_red() {
         let m = temperature_tint_matrix(0.0, 0.0);
         for i in 0..3 {

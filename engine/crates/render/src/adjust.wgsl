@@ -11,6 +11,12 @@ struct AdjustParams {
     d: vec4<f32>,   // black/white slope, bias; exposure
     on1: vec4<f32>, // temperature/tint, saturation, brightness, contrast
     on2: vec4<f32>, // highlights, shadows, black/white, exposure
+    w_lift: vec4<f32>,   // primary wheels: R, G, B, luma
+    w_gamma: vec4<f32>,
+    w_gain: vec4<f32>,
+    w_offset: vec4<f32>, // R, G, B, saturation
+    w_sat: vec4<f32>,    // saturation wheel: lift, gamma, gain; luma mix
+    w_on: vec4<f32>,     // intensity, enabled
 }
 
 @group(0) @binding(0) var src: texture_2d<f32>;
@@ -57,6 +63,104 @@ fn lut3d(c: vec3<f32>) -> vec3<f32> {
     return mix(lut_grid(floor(blue), c.rg), lut_grid(ceil(blue), c.rg), fract(blue));
 }
 
+fn gray709(c: vec3<f32>) -> f32 {
+    return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+// One channel through a lift / gamma / gain wheel around `offset`.
+fn wheel(x: f32, lift_in: f32, gamma: f32, gain_in: f32, offset: f32) -> f32 {
+    let lift = min(lift_in, 0.4995);
+    let gain_x = 1.0 / max(gain_in, 0.001);
+    let lift_x = min(lift / (lift - 0.5), gain_x - 0.0005);
+    let y = (x - offset - lift_x) / (gain_x - lift_x) + offset;
+    return sign(y) * pow(abs(y), gamma);
+}
+
+fn rgb_to_hsl(c: vec3<f32>) -> vec3<f32> {
+    let hi = max(c.r, max(c.g, c.b));
+    let lo = min(c.r, min(c.g, c.b));
+    let d = hi - lo;
+    let l = (hi + lo) / 2.0;
+    if (d < 0.00001) {
+        return vec3<f32>(0.0, 0.0, l);
+    }
+    var s = d / (hi + lo);
+    if (l > 0.5) {
+        s = d / (2.0 - hi - lo);
+    }
+    var h: f32;
+    if (hi - c.r < 0.00001) {
+        h = 60.0 * (c.g - c.b) / d;
+        if (c.g < c.b) {
+            h += 360.0;
+        }
+    } else if (hi - c.g < 0.00001) {
+        h = 60.0 * (c.b - c.r) / d + 120.0;
+    } else {
+        h = 60.0 * (c.r - c.g) / d + 240.0;
+    }
+    return vec3<f32>(h, s, l);
+}
+
+fn hue_channel(p: f32, q: f32, t_in: f32) -> f32 {
+    var t = t_in;
+    if (t < 0.0) {
+        t += 1.0;
+    }
+    if (t > 1.0) {
+        t -= 1.0;
+    }
+    if (t < 1.0 / 6.0) {
+        return p + (q - p) * 6.0 * t;
+    }
+    if (t < 0.5) {
+        return q;
+    }
+    if (t < 2.0 / 3.0) {
+        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+    }
+    return p;
+}
+
+fn hsl_to_rgb(hsl: vec3<f32>) -> vec3<f32> {
+    if (hsl.y == 0.0) {
+        return vec3<f32>(hsl.z);
+    }
+    let h = hsl.x / 360.0;
+    var q = hsl.z + hsl.y - hsl.z * hsl.y;
+    if (hsl.z < 0.5) {
+        q = hsl.z * (1.0 + hsl.y);
+    }
+    let p = 2.0 * hsl.z - q;
+    return vec3<f32>(hue_channel(p, q, h + 1.0 / 3.0), hue_channel(p, q, h), hue_channel(p, q, h - 1.0 / 3.0));
+}
+
+// CapCut's primary colour wheels: per-channel wheels around the offset, the luma wheel
+// restored by the luma mix, then the saturation wheel in HSL.
+fn primary_wheels(orig: vec3<f32>) -> vec3<f32> {
+    let off = A.w_offset.xyz;
+    var c = orig + off;
+    let base_y = wheel(gray709(c), A.w_lift.w, A.w_gamma.w, A.w_gain.w, gray709(off));
+    c = vec3<f32>(
+        wheel(c.r, A.w_lift.x, A.w_gamma.x, A.w_gain.x, off.x),
+        wheel(c.g, A.w_lift.y, A.w_gamma.y, A.w_gain.y, off.y),
+        wheel(c.b, A.w_lift.z, A.w_gamma.z, A.w_gain.z, off.z),
+    );
+    c = clamp(c + (base_y - gray709(c)) * A.w_sat.w, vec3<f32>(0.0), vec3<f32>(1.0));
+    let y = gray709(c);
+    var ds = A.w_offset.w;
+    ds += wheel(y, A.w_sat.x, 1.0, 1.0, 0.0) - y;
+    ds += wheel(y, 0.0, A.w_sat.y, 1.0, 0.0) - y;
+    ds += wheel(y, 0.0, 1.0, A.w_sat.z, 0.0) - y;
+    ds = clamp(ds, -1.0, 2.0);
+    if (abs(ds) > 0.00001) {
+        var hsl = rgb_to_hsl(c);
+        hsl.y = clamp(hsl.y * (1.0 + ds), 0.0, 1.0);
+        c = hsl_to_rgb(hsl);
+    }
+    return clamp(mix(orig, c, A.w_on.x), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 @fragment
 fn fs_adjust(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let px = textureLoad(src, vec2<i32>(floor(pos.xy)), 0);
@@ -66,6 +170,9 @@ fn fs_adjust(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     var c = px.rgb / px.a;
     let zero = vec3<f32>(0.0);
     let one = vec3<f32>(1.0);
+    if (A.w_on.y > 0.5) {
+        c = primary_wheels(c);
+    }
     if (A.on1.z > 0.5) {
         // Brightness: y = 1 - (1 - x)^p, with a small offset when darkening.
         let b = A.a.y;
