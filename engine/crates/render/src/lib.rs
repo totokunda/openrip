@@ -358,7 +358,6 @@ impl Compositor {
     fn encode_frame(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, background: [u8; 3], layers: &[Layer]) -> Vec<wgpu::Texture> {
         let (width, height) = (canvas.width(), canvas.height());
         let place_pipeline = if canvas.format() == wgpu::TextureFormat::Bgra8Unorm { &self.place_bgra } else { &self.place };
-        let enc = enc;
         let bg = wgpu::Color { r: background[0] as f64 / 255.0, g: background[1] as f64 / 255.0, b: background[2] as f64 / 255.0, a: 1.0 };
         // Clear the canvas with an empty placement pass.
         let blank = self.texture(1, 1, CANVAS, wgpu::TextureUsages::empty());
