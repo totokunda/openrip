@@ -425,6 +425,7 @@ impl PreviewEngine {
                     })
                 })
                 .collect(),
+            edge_fade: if fx.sharp_edges { 0.0 } else { text::MESH_EDGE_FADE },
         }
     }
 

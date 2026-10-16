@@ -64,7 +64,7 @@ The importer reads `effectStyle.json` into the project (`Effect::text_style`). T
 
 Each layer is drawn glyph by glyph in text order. A stroke covers everything within its width of the glyph, measured by a distance transform: stroking the outline instead leaves holes in the middle of round letters at wide widths. Its unit is the plain strokes' unit, reach = width × em (calibration session 3). Calibration also checked a style-only factor: 1.5, 2 and 3 times that unit all score worse.
 
-Every layer fades out over 2.5 px beyond its shape. CapCut's text-style vertex shader pushes each mesh's outer fringe vertices 2.5 px out at zero alpha, which makes its styled letters look about a pixel bolder than plain ones. This added 0.3 dB on every styled frame of the export below.
+Every layer of a declarative style fades out over 2.5 px beyond its shape. CapCut's text-style vertex shader pushes each mesh's outer fringe vertices 2.5 px out at zero alpha, which makes its styled letters look about a pixel bolder than plain ones. This added 0.3 dB on every styled frame of the export below. SDF effects are drawn by another shader and keep sharp edges (`TextEffect::sharp_edges`).
 
 **Texture mapping.** This follows CapCut's text-style shader, whose GLSL source ships inside its engine library:
 - `range` splits the texture into that many vertical strips; character i (counting every character) takes the square around the middle of strip i mod `range`;
@@ -87,13 +87,13 @@ Styled text is slow to draw, so the preview keeps it as per-character pieces and
 ### How OpenRip draws SDF-effect styles
 
 The importer decodes `effect.prefab` with a Rust port of the format reader (`openrip_capcut::amg`) and finds the `SDFText` component's `effectLayers`. The first layer is drawn in front: in the measured style, layer 1's grey gradient sits entirely under layer 0's plain fill, and CapCut's export shows only the plain fill. So layer 0 becomes the fill and the rest, back to front, become shadows. Each layer is:
-- the glyphs grown by its outline `scale`, at **1.3 em per unit**;
+- the glyphs grown by its outline `scale`, at **1.5 em per unit**, with sharp edges;
 - painted in the text's own colour, shifted by the layer's `hsbOffset`, with the stop colour's alpha. The default colour in the file is not used: a caption coloured white or yellow keeps that colour.
 
-The units were fitted on a 1080×1920 CapCut export with 50 captions in the "grey-white gradient + black outline" style. At size 11 (em 68.8 px), the outline crosses mid-grey 5.4 px from the fill in CapCut and in OpenRip (left/right 5.43/5.38 against 5.39/5.39; up 5.74 against 5.70).
+The units were fitted on a 1080×1920 CapCut export with 50 captions in the "grey-white gradient + black outline" style. At size 11 (em 68.8 px), the outline crosses mid-grey about 5.4 px from the fill in both CapCut and OpenRip. Left/right are 5.43/5.38 px in CapCut and 5.36/5.45 px in OpenRip; up is 5.74 px in both.
 
 The same export shows that the other parameters move nothing visibly:
 - **Offsets.** The layers' offsets (0.02 and 0.04 down-right) make no extrusion: left and right reach match within 0.1 px.
 - **The soft shadow.** Compared with a frame from just before the caption, nothing changes past about 4 px from the letters, so there is no halo.
 
-OpenRip therefore leaves offsets out, and keeps smoothing at 0.1 em per unit so soft layers stay under the outlines. Gradients beyond the first stop, texture overlays and inner shadows are left out; in the measured style they all sit under the fill.
+OpenRip therefore leaves offsets and smoothing out. A slight softness had shown as a dark fringe that CapCut doesn't have. Gradients beyond the first stop, texture overlays and inner shadows are left out; in the measured style they all sit under the fill.

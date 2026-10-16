@@ -433,6 +433,7 @@ fn text_style(bundle: &Path) -> Option<TextEffect> {
                 })
             })
             .collect(),
+        sharp_edges: false,
     })
 }
 
@@ -445,18 +446,15 @@ const SDF_NAMES: &[&str] = &[
 
 /// An SDF text effect's outline `scale`, in em per unit (fitted against a CapCut export;
 /// see docs/parity/capcut-bundles.md).
-const SDF_OUTLINE_EM: f32 = 1.3;
-/// Its edge `smoothing`, in em per unit: small enough that a soft layer stays under the
-/// outlines, as in CapCut's export (no halo past them).
-const SDF_SMOOTHING_EM: f32 = 0.1;
+const SDF_OUTLINE_EM: f32 = 1.5;
 
 /// A library text style of the SDF-effect kind, from the `SDFText` component in its
 /// bundle's `effect.prefab`: a stack of layers, the first drawn in front. Each is the
-/// glyphs grown by an outline `scale` and softened by `smoothing`, in the text's colour
-/// shifted in HSB. The first layer becomes the fill, the rest (back to front) shadows.
-/// Layer `offset`s are left out: in CapCut's export they move nothing visibly (no
-/// extrusion, no offset shadow). Gradients use their first stop; texture overlays and
-/// inner shadows are left out (in the measured style they sit under the fill).
+/// glyphs grown by an outline `scale`, in the text's colour shifted in HSB. The first layer
+/// becomes the fill, the rest (back to front) shadows. Layer `offset`s and `smoothing` are
+/// left out: in CapCut's export they show nothing (no extrusion, no soft shadow or halo
+/// past the outlines). Gradients use their first stop; texture overlays and inner shadows
+/// are left out (in the measured style they sit under the fill).
 fn sdf_text_style(bundle: &Path) -> Option<TextEffect> {
     let roots = amg::decode(&std::fs::read(bundle.join("effect.prefab")).ok()?, SDF_NAMES)?;
     fn find<'a>(v: &'a Value, class: &str) -> Option<&'a Value> {
@@ -475,7 +473,7 @@ fn sdf_text_style(bundle: &Path) -> Option<TextEffect> {
         let alpha = stop["color"].get(3).and_then(Value::as_f64).unwrap_or(1.0) as f32 + f(stop, "alphaOffset", 0.0) as f32;
         Paint { alpha: alpha.clamp(0.0, 1.0), kind: PaintKind::TextColor { hue: num(hsb, 0), saturation: num(hsb, 1), brightness: num(hsb, 2) } }
     };
-    let mut effect = TextEffect { fill: layers.first().map(paint), ..Default::default() };
+    let mut effect = TextEffect { fill: layers.first().map(paint), sharp_edges: true, ..Default::default() };
     for layer in layers.iter().skip(1).rev() {
         let grow = f(&layer["grad"], "scale", 0.0) as f32;
         let paint = paint(layer);
@@ -483,7 +481,7 @@ fn sdf_text_style(bundle: &Path) -> Option<TextEffect> {
         effect.shadows.push(EffectShadow {
             distance: 0.0,
             angle_deg: 0.0,
-            blur: f(layer, "smoothing", 0.0) as f32 * SDF_SMOOTHING_EM,
+            blur: 0.0,
             strokes: if grow > 0.0 { vec![EffectStroke { width: grow * SDF_OUTLINE_EM, paint: paint.clone() }] } else { vec![] },
             paint: if grow > 0.0 { hidden } else { paint },
         });

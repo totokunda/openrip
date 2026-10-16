@@ -59,7 +59,7 @@ fn pixel(img: &RgbaImage, x: usize, y: usize) -> [u8; 4] {
 #[test]
 fn styled_text_draws_its_stroke_under_its_fill() {
     let Some(f) = font() else { return };
-    let effect = Effect { fill: Some(Paint::Solid([1.0, 0.0, 0.0, 1.0])), strokes: vec![(6.0, Paint::Solid([0.0, 0.0, 1.0, 1.0]))], shadows: vec![] };
+    let effect = Effect { fill: Some(Paint::Solid([1.0, 0.0, 0.0, 1.0])), strokes: vec![(6.0, Paint::Solid([0.0, 0.0, 1.0, 1.0]))], shadows: vec![], edge_fade: 0.0 };
     let s = TextStyle { effect: Some(&effect), ..style(&f, None) };
     let r = layout("I", &s).rasterize(&s, [0.0, 0.0]);
     // Along the row through the middle of the "I": blue, then red inside, then blue again.
@@ -79,7 +79,7 @@ fn texture_strips_go_to_characters_in_turn() {
     let data = (0..w * h).flat_map(|i| if i % w < w / 2 { [255, 0, 0, 255] } else { [0, 255, 0, 255] }).collect();
     let image = Arc::new(RgbaImage { width: w, height: h, data });
     let paint = Paint::Texture(TexturePaint { image, columns: 2, radians: 0.0, scale: 0.25, stretch: 0, alpha: 1.0 });
-    let effect = Effect { fill: Some(paint), strokes: vec![], shadows: vec![] };
+    let effect = Effect { fill: Some(paint), strokes: vec![], shadows: vec![], edge_fade: 0.0 };
     let s = TextStyle { effect: Some(&effect), size: 80.0, ..style(&f, None) };
     let r = layout("II", &s).rasterize(&s, [0.0, 0.0]);
     let y = r.center[1] as usize;

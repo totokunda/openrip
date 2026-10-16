@@ -411,6 +411,10 @@ pub struct TextEffect {
     /// Drawn in order, back to front, behind the strokes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shadows: Vec<EffectShadow>,
+    /// Edges anti-aliased over a pixel, as CapCut draws its SDF text effects, instead of
+    /// fading out a little beyond each shape, as it draws its text-style meshes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sharp_edges: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

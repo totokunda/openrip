@@ -82,6 +82,9 @@ pub struct Effect {
     /// Width (how far it reaches outside the glyphs) and paint.
     pub strokes: Vec<(f32, Paint)>,
     pub shadows: Vec<Shadow>,
+    /// How far beyond its shape each layer fades out (px); 0 anti-aliases over one pixel.
+    /// CapCut's text-style meshes fade over [`MESH_EDGE_FADE`]; its SDF effects are sharp.
+    pub edge_fade: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -446,11 +449,11 @@ impl TextLayout {
                 let side = PAINT_BOX * self.size;
                 let (cx, cy) = (fx as f32 + fp.width as f32 / 2.0, fy as f32 + fp.height as f32 / 2.0);
                 let rect = [cx - side / 2.0, cy - side / 2.0, side, side];
-                // The shape: everything within `grow` of the glyph, fading out over
-                // EDGE_FADE beyond that as CapCut's text-style meshes do (their outer fringe
-                // vertices sit 2.5 px out with zero alpha). Measured by distance rather than
-                // by stroking the outline, which leaves holes in round letters' middles.
-                let margin = (grow + EDGE_FADE).ceil() as i32 + 1 + if blur > 0.0 { (2.0 * blur).ceil() as i32 + 1 } else { 0 };
+                // The shape: everything within `grow` of the glyph, then the edge fade.
+                // Measured by distance rather than by stroking the outline, which leaves
+                // holes in round letters' middles.
+                let fade = effect.edge_fade;
+                let margin = (grow + fade).ceil() as i32 + 2 + if blur > 0.0 { (2.0 * blur).ceil() as i32 + 1 } else { 0 };
                 let (fw, fh) = (fp.width as i32, fp.height as i32);
                 let (pw, ph) = (fw + 2 * margin, fh + 2 * margin);
                 let at_fill = |c: i32, r: i32| if c >= 0 && r >= 0 && c < fw && r < fh { fill.data[(r * fw + c) as usize] as f32 / 255.0 } else { 0.0 };
@@ -462,7 +465,8 @@ impl TextLayout {
                     // Distance from the pixel centre to the glyph's edge (half a pixel short
                     // of the nearest inked pixel's centre).
                     let beyond = (dist[i] - 0.5).max(0.0) - grow;
-                    let cov = if inside[i] { 1.0 } else { (1.0 - beyond / EDGE_FADE).clamp(0.0, 1.0).max(at_fill(col - margin, row - margin)) };
+                    let edge = if fade > 0.0 { 1.0 - beyond / fade } else { 0.5 - beyond };
+                    let cov = if inside[i] { 1.0 } else { edge.clamp(0.0, 1.0).max(at_fill(col - margin, row - margin)) };
                     if cov > 0.0 {
                         let c = paint.at((fx - margin + col) as f32 + 0.5, (fy - margin + row) as f32 + 0.5, rect, g.char_index);
                         *p = c.map(|v| v * cov);
@@ -560,9 +564,9 @@ fn finish(px: Vec<[f32; 4]>, w: u32, h: u32, center: [f64; 2]) -> RenderedText {
     RenderedText { image: RgbaImage { width: w, height: h, data }, center }
 }
 
-/// How far beyond its shape a text-style layer fades out, in pixels (CapCut's text-style
-/// vertex shader pushes the outer fringe vertices 2.5 px out at zero alpha).
-const EDGE_FADE: f32 = 2.5;
+/// How far beyond its shape a layer of a CapCut text-style mesh fades out, in pixels: its
+/// vertex shader pushes the outer fringe vertices 2.5 px out at zero alpha.
+pub const MESH_EDGE_FADE: f32 = 2.5;
 
 /// Euclidean distance from each pixel to the nearest `inside` one (0 for those), by the
 /// Felzenszwalb–Huttenlocher squared distance transform, columns then rows.
