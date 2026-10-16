@@ -116,6 +116,12 @@ enum Pixels {
     Text(std::sync::Arc<RgbaImage>, u64, [f64; 2]),
     /// A filter track's lookup table and strength, applied to everything below it.
     Filter(std::sync::Arc<Lut3d>, f32),
+    /// A transition's colour over the whole canvas (a 1×1 image), its key and opacity.
+    Wash(std::sync::Arc<RgbaImage>, u64, f32),
+    /// A transition's image, cover-fitted to the canvas, and its key.
+    Cover(std::sync::Arc<RgbaImage>, u64),
+    /// A transition's blur of everything below it, taps this many output pixels apart.
+    Blur(f32),
 }
 
 /// The media file a segment plays.
@@ -321,11 +327,19 @@ impl PreviewEngine {
                 eprintln!("[preview] t={:.3}s segment {} took {:.1} ms", t.as_secs_f64(), seg.id, t0.elapsed().as_secs_f64() * 1e3);
             }
             match got {
-                Ok(Some(p)) => out.push((seg, p)),
+                Ok(Some(p)) => out.push((seg.clone(), p)),
                 Ok(None) => {}
                 Err((path, why)) => {
                     self.failed.insert(path.clone(), why.clone());
                     report.missing.push((path, why));
+                }
+            }
+            // A transition at the cut before or after this clip works on the canvas over it.
+            if let Some((tr, p)) = crate::transition::transition_at(&self.project, &seg, t).map(|(tr, p)| (tr.clone(), p)) {
+                for step in crate::transition::steps(&tr, p) {
+                    if let Some(px) = self.step_pixels(step, w) {
+                        out.push((seg.clone(), px));
+                    }
                 }
             }
         }
@@ -335,6 +349,31 @@ impl PreviewEngine {
         self.texts.retain(|_, (_, _, last)| tick - *last < 3);
         self.prepared.retain(|_, (_, last)| tick - *last < 3);
         (out, report)
+    }
+
+    fn step_pixels(&mut self, step: crate::transition::Step, w: u32) -> Option<Pixels> {
+        use crate::transition::Step;
+        Some(match step {
+            Step::Wash(c, amount) => Pixels::Wash(std::sync::Arc::new(RgbaImage { width: 4, height: 4, data: c.repeat(16) }), key_of(("wash", c)), amount),
+            Step::Blur(px) => Pixels::Blur(px * w as f32 / self.project.canvas.width.max(1) as f32),
+            Step::Frame(path) => {
+                if self.failed.contains_key(&path) {
+                    return None;
+                }
+                if !self.images.contains_key(&path) {
+                    match load_png(Path::new(&path)) {
+                        Ok(img) => {
+                            self.images.insert(path.clone(), std::sync::Arc::new(img));
+                        }
+                        Err(e) => {
+                            self.failed.insert(path, e.to_string());
+                            return None;
+                        }
+                    }
+                }
+                Pixels::Cover(self.images[&path].clone(), key_of(&path))
+            }
+        })
     }
 
     /// The clip's Adjust sliders (CapCut's colour adjustments), if any.
@@ -696,6 +735,31 @@ impl PreviewEngine {
                         opacity: 1.0,
                         adjust: None,
                     },
+                    // Twice the canvas, so the image's soft edge is off it.
+                    Pixels::Wash(img, key, amount) => Layer {
+                        source: Source::Cached(*key, img),
+                        center: [w as f64 / 2.0, h as f64 / 2.0],
+                        size: [2.0 * w as f64, 2.0 * h as f64],
+                        rotation: 0.0,
+                        flip_h: false,
+                        flip_v: false,
+                        opacity: *amount,
+                        adjust: None,
+                    },
+                    Pixels::Cover(img, key) => {
+                        let fit = (w as f64 / img.width as f64).max(h as f64 / img.height as f64);
+                        Layer {
+                            source: Source::Cached(*key, img),
+                            center: [w as f64 / 2.0, h as f64 / 2.0],
+                            size: [img.width as f64 * fit, img.height as f64 * fit],
+                            rotation: 0.0,
+                            flip_h: false,
+                            flip_v: false,
+                            opacity: 1.0,
+                            adjust: None,
+                        }
+                    }
+                    Pixels::Blur(px) => Layer { source: Source::Blur(*px), center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None },
                     Pixels::Text(img, key, at) => Layer {
                         source: Source::Cached(*key, img),
                         center: *at,
@@ -707,7 +771,9 @@ impl PreviewEngine {
                         adjust: None,
                     },
                 };
-                layer.opacity *= seg.opacity.sample(local);
+                if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_)) {
+                    layer.opacity *= seg.opacity.sample(local);
+                }
                 if matches!(p, Pixels::Image(..) | Pixels::Video(..)) {
                     layer.adjust = self.adjust_of(seg);
                 }

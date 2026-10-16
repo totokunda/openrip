@@ -16,7 +16,7 @@ Agreed 2026-10-16. What the engine draws next is chosen from two sources: what r
 | Audio clips, fades, loudness | 7–35 drafts | ✅ |
 | Speed changes, keyframes (opacity, position) | 14 and 12 uses | ✅ |
 | Stabilisation | 12, 2 drafts | ❌ |
-| Transitions | 8, 2 drafts | ❌ (imported, not drawn) |
+| Transitions | 8, 2 drafts | ✅ Blink, White Flash, White Fade ([transitions.md](../parity/transitions.md)) |
 | Voice effects, stickers, masks, video effects | 1–5 each | ❌ |
 | AI features (matting, smart crop, AI denoise) | 1–29 | Out of scope (OpenRip is AI-free) |
 

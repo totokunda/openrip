@@ -43,3 +43,32 @@ fn fs_lut3d(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let out = clamp(mix(c, looked, F.strength), vec3<f32>(0.0), vec3<f32>(1.0));
     return vec4<f32>(out * px.a, px.a);
 }
+
+// One direction of CapCut's transition blur (its Blink transition's blurry_horizontal /
+// blurry_vertical shaders): 17 taps `F.n, F.strength` pixels apart along that direction,
+// bilinear, clamped at the edges, with the shader's own weights.
+fn load_clamped(p: vec2<i32>) -> vec4<f32> {
+    let d = vec2<i32>(textureDimensions(src));
+    return textureLoad(src, clamp(p, vec2<i32>(0), d - vec2<i32>(1)), 0);
+}
+
+fn bilinear(x: vec2<f32>) -> vec4<f32> {
+    let p = x - vec2<f32>(0.5);
+    let i = floor(p);
+    let f = p - i;
+    let a = vec2<i32>(i);
+    let top = mix(load_clamped(a), load_clamped(a + vec2<i32>(1, 0)), f.x);
+    let bottom = mix(load_clamped(a + vec2<i32>(0, 1)), load_clamped(a + vec2<i32>(1, 1)), f.x);
+    return mix(top, bottom, f.y);
+}
+
+@fragment
+fn fs_blur(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    var w = array<f32, 9>(0.20, 0.19, 0.17, 0.15, 0.13, 0.11, 0.08, 0.05, 0.02);
+    let step = vec2<f32>(F.n, F.strength);
+    var sum = textureLoad(src, vec2<i32>(floor(pos.xy)), 0) * w[0];
+    for (var i = 1; i <= 8; i++) {
+        sum += (bilinear(pos.xy + step * f32(i)) + bilinear(pos.xy - step * f32(i))) * w[i];
+    }
+    return sum / 2.0;
+}

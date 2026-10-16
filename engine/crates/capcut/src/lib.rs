@@ -386,6 +386,9 @@ const BUILTIN_ANIMATIONS: &[(&str, &str)] = &[
     ("7135040682032370178", "caption_one_word"),
 ];
 
+/// CapCut library transitions OpenRip draws itself, by resource id (docs/parity/transitions.md).
+const BUILTIN_TRANSITIONS: &[(&str, &str)] = &[("6724845376098013708", "white_flash"), ("6864867302936941064", "blink"), ("7637430135737650452", "white_fade")];
+
 /// Where CapCut wraps a fixed-size text box: this fraction of the canvas width per unit of
 /// its `fixed_width`, at the clip's scale 1 (calibration session 5 bounds it to
 /// 0.001330–0.001366, draft covers to ≥ 0.001335 and a styled export to < 0.001344).
@@ -629,7 +632,8 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         name: s(m, "name"),
                         duration: Micros(i(m, "duration")),
                         overlap: b(m, "is_overlap", true),
-                        builtin: None,
+                        builtin: BUILTIN_TRANSITIONS.iter().find(|(id, _)| *id == lib.resource_id).map(|(_, ours)| ours.to_string()),
+                        resource: Some(s(m, "path")).filter(|p| !p.is_empty()),
                         library: Some(lib),
                     });
                     true

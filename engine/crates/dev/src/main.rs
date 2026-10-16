@@ -997,7 +997,8 @@ fn export_parity(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             // with the same filter.
             let rgb = frame.to_rgb()?;
             let theirs = shrink_rgb(&rgb, w, h);
-            let (full, report) = engine.render_image(at, rgb.width, rgb.height)?;
+            // At the export frame's own time, which can be up to a frame before `at`.
+            let (full, report) = engine.render_image(frame.time, rgb.width, rgb.height)?;
             let full_rgb = openrip_media::RgbImage { width: full.width, height: full.height, data: full.data.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect() };
             let small = shrink_rgb(&full_rgb, w, h);
             let ours = openrip_render::RgbaImage { width: w, height: h, data: small.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect() };

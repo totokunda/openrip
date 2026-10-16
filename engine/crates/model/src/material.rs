@@ -338,6 +338,10 @@ pub struct Transition {
     pub builtin: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library: Option<LibraryRef>,
+    /// The source app's downloaded copy of the transition, for transitions that draw images
+    /// from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
 }
 
 /// Loudness normalisation of a clip's sound (CapCut's "Normalize loudness"): the clip is

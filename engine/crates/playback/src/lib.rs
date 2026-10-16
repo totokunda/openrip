@@ -17,6 +17,8 @@
 pub mod animation;
 #[cfg(target_os = "macos")]
 pub mod caption;
+#[cfg(target_os = "macos")]
+pub mod transition;
 pub mod pipeline;
 mod player;
 pub mod preview;

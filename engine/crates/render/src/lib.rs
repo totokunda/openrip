@@ -76,6 +76,9 @@ pub enum Source<'a> {
     /// Not an image: a colour lookup table applied to everything drawn below it, mixed in
     /// by the given strength (a filter track).
     Filter(&'a Lut3d, f32),
+    /// Not an image: everything drawn below it blurred, horizontally then vertically, by
+    /// CapCut's transition blur with its taps this many output pixels apart.
+    Blur(f32),
 }
 
 impl Source<'_> {
@@ -83,7 +86,7 @@ impl Source<'_> {
         match self {
             Source::Image(i) | Source::Cached(_, i) => (i.width, i.height),
             Source::Video(f) => (f.width(), f.height()),
-            Source::Filter(..) => (1, 1),
+            Source::Filter(..) | Source::Blur(_) => (1, 1),
         }
     }
 }
@@ -179,6 +182,7 @@ pub struct Compositor {
     sharpen_luma: wgpu::RenderPipeline,
     /// Filter tracks: a 3D lookup table over the canvas (filter.wgsl).
     lut3d: wgpu::RenderPipeline,
+    blur: wgpu::RenderPipeline,
     /// Exposure lookup tables on the GPU, by key, and a stand-in for clips without one.
     luts: std::sync::Mutex<std::collections::HashMap<u64, wgpu::Texture>>,
     no_lut: wgpu::Texture,
@@ -318,6 +322,25 @@ impl Compositor {
                     fragment: Some(wgpu::FragmentState {
                         module: &module,
                         entry_point: Some("fs_lut3d"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState { format: CANVAS, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                    }),
+                    primitive: Default::default(),
+                    depth_stencil: None,
+                    multisample: Default::default(),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            },
+            blur: {
+                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("blur"), source: wgpu::ShaderSource::Wgsl(include_str!("filter.wgsl").into()) });
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("fs_blur"),
+                    layout: Some(&yuv_pipeline_layout),
+                    vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some("fs_blur"),
                         compilation_options: Default::default(),
                         targets: &[Some(wgpu::ColorTargetState { format: CANVAS, blend: None, write_mask: wgpu::ColorWrites::ALL })],
                     }),
@@ -537,6 +560,51 @@ impl Compositor {
 
     /// Apply a filter track to the canvas so far: look up into a temporary, then draw it
     /// back over the canvas.
+    /// Blur everything drawn so far: CapCut's transition blur, horizontally then vertically.
+    fn blur_canvas(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, place_pipeline: &wgpu::RenderPipeline, step: f32, scratch: &mut Vec<wgpu::Texture>) {
+        let (w, h) = (canvas.width(), canvas.height());
+        let no_lut = self.no_lut.create_view(&Default::default());
+        let mut src = canvas.clone();
+        for dir in [[step, 0.0f32], [0.0, step]] {
+            let dst = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+            let params: [f32; 4] = [dir[0], dir[1], 0.0, 0.0];
+            let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&params), usage: wgpu::BufferUsages::UNIFORM });
+            let (src_view, dst_view) = (src.create_view(&Default::default()), dst.create_view(&Default::default()));
+            let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.yuv_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&src_view) },
+                    wgpu::BindGroupEntry { binding: 1, resource: buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&no_lut) },
+                ],
+            });
+            {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &dst_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.blur);
+                pass.set_bind_group(0, &bind, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            scratch.push(dst.clone());
+            src = dst;
+        }
+        // Back onto the canvas, pixel for pixel (opaque, so "over" replaces).
+        let back = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0: [1.0, 0.0, 0.0, 0.0], inv1: [0.0, 1.0, 0.0, 0.0], misc: [1.0, 0.0, 0.0, 0.0] };
+        self.pass(enc, place_pipeline, &src, canvas, back, None);
+    }
+
     fn filter_canvas(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, place_pipeline: &wgpu::RenderPipeline, lut: &Lut3d, strength: f32, scratch: &mut Vec<wgpu::Texture>) {
         let n = lut.size;
         let table = {
@@ -710,6 +778,12 @@ impl Compositor {
                 self.filter_canvas(enc, canvas, place_pipeline, lut, strength, &mut scratch);
                 continue;
             }
+            if let Source::Blur(step) = layer.source {
+                if step > 0.0 {
+                    self.blur_canvas(enc, canvas, place_pipeline, step, &mut scratch);
+                }
+                continue;
+            }
             let (dw, dh) = (layer.size[0], layer.size[1]);
             // A layer zoomed past the GPU's texture limit is staged at the limit; the
             // placement pass scales the rest.
@@ -727,7 +801,7 @@ impl Compositor {
                 None => {
                     let src = match layer.source {
                         Source::Image(img) | Source::Cached(_, img) => self.upload(img),
-                        Source::Filter(..) => unreachable!("filters are drawn above"),
+                        Source::Filter(..) | Source::Blur(_) => unreachable!("canvas passes are drawn above"),
                         Source::Video(frame) => match self.import_video(enc, frame) {
                             Some((rgba, planes)) => {
                                 keep.extend(planes);
