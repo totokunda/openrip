@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Frame transport spike</title>
+<style>
+  html, body { margin: 0; height: 100%; font: 12px -apple-system, sans-serif; color: #ddd; }
+  body { background: #111; display: grid; grid-template: 44px 1fr 260px / 280px 1fr 300px; }
+  body.transparent, body.transparent #center { background: transparent; }
+  header { grid-column: 1 / 4; background: #1b1b1b; display: flex; align-items: center; padding: 0 12px; gap: 8px; }
+  aside, #inspector { background: #181818; padding: 10px; overflow: hidden; }
+  #center { background: #0c0c0c; display: flex; align-items: center; justify-content: center; position: relative; }
+  #preview { width: 960px; height: 540px; background: transparent; outline: 1px solid #333; }
+  footer { grid-column: 1 / 4; background: #161616; position: relative; overflow: hidden; }
+  .track { height: 40px; margin: 6px 10px; background: linear-gradient(90deg, #2a4 0 30%, #24a 30% 70%, #a42 70%); opacity: .6; }
+  #playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; left: 10px; }
+  #menu { position: absolute; top: 20px; left: 20px; width: 220px; padding: 8px; background: #2b2b2bee; border: 1px solid #555; border-radius: 6px; z-index: 5; }
+  #hud { position: absolute; right: 8px; top: 8px; font: 11px ui-monospace, monospace; background: #000a; padding: 6px; white-space: pre; z-index: 6; }
+</style>
+</head>
+<body>
+<header>OpenRip — frame transport spike <span id="modeLabel"></span></header>
+<aside>Media panel<br/><br/>(mock)</aside>
+<div id="center">
+  <canvas id="preview"></canvas>
+  <div id="menu">HTML popover overlapping the preview<br/>(tests layering)</div>
+  <div id="hud"></div>
+</div>
+<div id="inspector">Inspector<br/><br/>(mock)</div>
+<footer><div class="track"></div><div class="track"></div><div class="track"></div><div id="playhead"></div></footer>
+<script src="renderer.js"></script>
+</body>
+</html>

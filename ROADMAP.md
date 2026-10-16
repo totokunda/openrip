@@ -6,6 +6,8 @@
 
 - **Speed is the feature.** Every phase has measurable performance targets, and regressions block merges.
 - **Parity before redesign.** First rewrite the current editor in Rust with the same features, then make it fast, then make it look and work like CapCut.
+- **CapCut is the reference.** Every benchmark and every visual test is run against CapCut on the same machine, media and edit, following [docs/parity](docs/parity/README.md). A number without a CapCut column is incomplete.
+- **CapCut projects open in OpenRip.** The engine's data model mirrors CapCut's draft model (tracks → segments → materials, microsecond time, per-property keyframes), so users can bring their projects with them.
 - **No AI, no cloud.** Everything runs locally with classic media processing. No model downloads, no inference, no accounts.
 - **Small steps.** Each milestone ends with something that runs and can be measured.
 
@@ -30,12 +32,15 @@ The app now boots straight into the editor. ffmpeg/ffprobe ship inside packaged 
 
 ### 2.0 Lock down the reference
 
-The current TypeScript app is the spec. Before writing Rust:
+Two references: the current TypeScript app (for porting) and CapCut (for parity).
 
-- **Feature inventory.** List every clip type, property, tool, shortcut and menu action, with links to the TS source. This becomes the parity checklist.
+- **Feature inventories ✅**
+  - [docs/inventory/current-app.md](docs/inventory/current-app.md): every clip type, property, effect, edit and export option in today's app, with source links. Its last section lists about 90 bugs and dead-code items.
+  - [docs/inventory/capcut.md](docs/inventory/capcut.md): CapCut 9.5.0's feature set, tagged by evidence, with a P0/P1/P2 parity matrix mapped to engine crates.
+- **Parity protocol ✅** in [docs/parity](docs/parity/README.md): how OpenRip is measured against CapCut (performance, pixels, container, features, project import).
 - **Project format spec.** Document the v1 JSON format as it exists today: ticks, masks, `.bin` sidecars, assets. The Rust app must import v1 projects.
-- **Golden corpus.** Build sample projects that cover every feature, plus reference frames and exports rendered by the TS app. Rust output is compared against these, with an image-diff tolerance.
-- **Baseline numbers** to beat:
+- **Golden corpus.** Scenario files that generate both an OpenRip project and a CapCut draft, plus reference exports from CapCut. Rust output is compared against CapCut first, and against the TS app only where CapCut has no equivalent.
+- **Baseline numbers** to beat, each with a CapCut column:
   - cold start
   - import of a 4K file
   - scrub latency
@@ -43,22 +48,36 @@ The current TypeScript app is the spec. Before writing Rust:
   - export speed
   - peak memory
 
-### 2.1 Choose the architecture (decision gate)
+Lessons from the current-app inventory that shape the engine:
+- **Preview and export disagree today.** They differ on trim/speed mapping, blur/sharpen/noise resolution and what counts as "below" for filters. Muted tracks are still exported, and video-clip volume and fades are dropped. The engine must have **one render graph** that serves both preview and export.
+- **Frames and ticks lose precision.** Integer frames are converted to ticks and back by truncation, so some frames shift by one after save and load. Store time as integer microseconds (as CapCut does) and convert only at the edges.
+- **There is no undo/redo.** Every edit should be a command on the document from day one.
 
-The only big open choice is the UI stack. The engine is Rust either way.
+### 2.1 Architecture ✅ (decided)
 
-| Option | Pros | Cons |
-|---|---|---|
-| **A. Tauri 2 + existing React UI**, Rust engine behind commands | Fastest route to parity; reuses UI code | The preview and timeline would live in a webview. Getting GPU frames from Rust into it means copies, or a native-overlay workaround. That caps the speed ceiling. |
-| **B. Native Rust UI on wgpu** (gpui, iced or Slint) | No webview. Preview, timeline and UI share one GPU context, with zero-copy frames. Highest ceiling. | The whole UI has to be rebuilt, and the UI toolkits are less mature. |
+- **UI:** React/TypeScript in **Electron** (Chromium). This is the same idea as CapCut's embedded Chromium, without having to write a browser host.
+- **Engine:** **Rust**, owning decode, compositing, effects, audio and export. It mirrors CapCut's native engine, which runs in its own helper process (`VEHelper`).
+- **Frame transport:** Electron's **`sharedTexture`** (experimental, Electron 44). The engine hands IOSurface / DXGI / dmabuf GPU textures to the renderer, which draws them with WebGPU. There is no copy, and the HTML UI (handles, menus, overlays) composites normally on top.
 
-**Recommendation:** run a 2–3 day bake-off. Build the same prototype in each candidate: a timeline with 3 tracks of 4K video, a playhead, and scrubbing. Measure frame time, scrub-to-frame latency and memory. Pick on numbers. B is likely to win on speed; A is the fallback if a toolkit blocks us.
+Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
+
+| Path | 4K60 | 8K30 | Main-thread cost per frame (p95) |
+|---|---|---|---|
+| **`sharedTexture` → WebGPU** (chosen) | 60 fps, 0 drops | 30 fps, 0 drops | 0.6–0.8 ms |
+| Native CALayer inside the window (fallback) | 60 fps, 0 drops | 30 fps, 0 drops | 0.13–0.17 ms |
+
+- **Whole app measured externally, CapCut-style:** 4K60 playback (decode plus display only) costs about 37% of one core across all processes, hardware decode included, and 511 MB of memory. The CapCut column is pending ([results](docs/parity/results/)).
+- **Keep frames in YUV (NV12/P010) end to end.** Asking the decoder for BGRA dropped frames at 4K60.
+- **The native layer is cheaper but can't sit under HTML.** Above the web UI it hides popovers; below it needs a transparent window. It stays as a fallback in case `sharedTexture` regresses.
+- **Fallback order:** if both paths fail on a platform, the last resort is a Rust host with CEF in offscreen mode.
+- **Still to validate:** Windows (DXGI) and Linux (dmabuf) transport, transport with `contextIsolation` enabled, and the CapCut head-to-head.
 
 ### 2.2 Engine crates (Cargo workspace)
 
 | Crate | Responsibility |
 |---|---|
-| `openrip-model` | Project and timeline data model, serde, undo/redo (command pattern), v1 JSON importer, v2 format |
+| `openrip-model` | Project and timeline data model mirroring CapCut's concepts (tracks → segments → materials, microsecond time, `Animated<T>` keyframes with bezier easing, render order); undo/redo as commands; v1 JSON importer; v2 format |
+| `openrip-capcut` | CapCut draft import (and later export), with versioned schema adapters. Unmappable proprietary library items (effects, stickers, templates, fonts) become placeholders in an import report. |
 | `openrip-media` | Demux/decode through FFmpeg (`ffmpeg-next`/`rsmpeg`) with hardware decode: VideoToolbox, D3D11VA/NVDEC, VAAPI. Also frame cache, thumbnails, waveform peaks and proxies. |
 | `openrip-render` | wgpu compositor; WGSL shaders for adjustments, 3D-texture LUTs, blur/sharpen/noise/vignette, and lasso/shape masks with feathering; text (cosmic-text/glyphon); shapes (lyon). Zero-copy upload from hardware frames where the platform allows it (IOSurface→Metal, DXGI, dmabuf). |
 | `openrip-audio` | cpal output, mixer, fades, resampling (rubato), time-stretch for speed changes |
@@ -117,10 +136,11 @@ Match CapCut's layout and workflows. Don't copy its assets.
 
 ## Open decisions
 
-1. UI stack (2.1): settle it with the bake-off.
+1. ~~UI stack (2.1)~~: decided. React/TS in Electron, Rust engine, `sharedTexture` transport.
 2. FFmpeg bindings and licensing: an LGPL dynamic build or a GPL static build. This affects which encoders can ship (for example x264).
 3. Whether to keep the v1 JSON format as the native format or move to a v2 format with an importer.
 4. Minimum OS and GPU support (Metal / DX12 / Vulkan baseline).
+5. How the engine runs: as an N-API addon in a utility process, or as a separate executable with its own IPC. `sharedTexture` import is main-process only, which affects the frame path.
 
 ## Housekeeping
 
