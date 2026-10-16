@@ -76,6 +76,29 @@ export function onEngineEnded(cb: (atUs: number, token: number) => void): () => 
   return () => ipcRenderer.off("engine:ended", listener);
 }
 
+export type EngineExportOptions = { width: number; height: number; fps: number; codec: string; bitrate: number; audio: boolean };
+
+export type EngineExportResult =
+  | { ok: true; frames: number; seconds: number; skippedLayers: number }
+  | { ok: false; cancelled?: boolean; error?: string };
+
+/** Export a project snapshot to `path` with the engine (H.264/HEVC, AAC). */
+export function engineExport(projectId: number, snapshot: unknown, path: string, options: EngineExportOptions): Promise<EngineExportResult> {
+  return ipcRenderer.invoke("engine:export", projectId, snapshot, path, options);
+}
+
+/** Stop the running engine export (its promise resolves with `cancelled`). */
+export function engineExportCancel(): Promise<void> {
+  return ipcRenderer.invoke("engine:export-cancel");
+}
+
+/** Called with frames done and total while an engine export runs. Returns an unsubscribe. */
+export function onEngineExportProgress(cb: (done: number, total: number) => void): () => void {
+  const listener = (_e: unknown, done: number, total: number) => cb(done, total);
+  ipcRenderer.on("engine:export-progress", listener);
+  return () => ipcRenderer.off("engine:export-progress", listener);
+}
+
 export function engineClose(): Promise<void> {
   return ipcRenderer.invoke("engine:close");
 }

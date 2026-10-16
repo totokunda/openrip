@@ -113,3 +113,29 @@ export interface Waveform {
 
 /** Peaks of a file's audio (perSecond must divide 48000; 100 = one per 10 ms); null if it has no audio. */
 export function waveform(path: string, perSecond: number): Promise<Waveform | null>
+
+export interface ExportOptions {
+  width: number
+  height: number
+  fps: number
+  /** "h264" or "hevc". */
+  codec: string
+  /** Bits per second. */
+  bitrate: number
+  audio: boolean
+}
+
+export interface ExportResult {
+  frames: number
+  seconds: number
+  /** Layers skipped because their media or font was missing, summed over frames. */
+  skippedLayers: number
+}
+
+/** Export a project (same JSON formats as openProjectJson) on a worker thread, independent of the preview. Rejects with "cancelled" after cancelExport(). */
+export function exportProject(json: string, path: string, options: ExportOptions): Promise<ExportResult>
+/** The running (or last) export's frames done and total. */
+export function exportProgress(): { done: number; total: number }
+/** Stop the running export; the unfinished file is removed. */
+export function cancelExport(): void
+

@@ -45,6 +45,7 @@ import { useControlsStore } from "@/lib/control";
 import type { AnyClipProps, GroupClipProps } from "@/lib/types";
 import { prepareExportClipsForValue } from "@/lib/prepareExportClips";
 import { sortClipsForStacking } from "@/lib/clipOrdering";
+import { cancelEngineExport, engineExportProject, engineExports, parseBitrate } from "@/lib/engine-preview";
 import { toast } from "sonner";
 import { revealPathInFolder, writeFileBuffer } from "@app/preload";
 import { DEFAULT_FPS } from "@/lib/settings";
@@ -241,16 +242,44 @@ const TopBar: React.FC<TopBarProps> = () => {
     const rawRatio = aspectRatio.width / aspectRatio.height;
     const ratio = Number.isFinite(rawRatio) && rawRatio > 0 ? rawRatio : 1;
 
-    // Mirror the editor rect: fix the "height" (short side in editor units) to `base`
-    // and scale the width by the same ratio derived from rectWidth:rectHeight.
-    const heightPx = base;
-    const widthPx = Math.round(base * ratio);
+    // The resolution sets the short side, as in CapCut (1080P portrait is 1080×1920); the
+    // long side follows the project's ratio. Encoders want even sizes.
+    const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
+    const heightPx = ratio >= 1 ? even(base) : even(base / ratio);
+    const widthPx = ratio >= 1 ? even(base * ratio) : even(base);
 
     const preserveAlpha = !!settings.preserveAlpha;
 
     setIsExporting(true);
     setExportProgress(0);
-    
+
+    // H.264/HEVC video goes through the Rust engine when its preview is on: CapCut's
+    // compositing, VideoToolbox encoding and the engine's mix.
+    if (engineExports(settings) && settings.kind === "video") {
+      setCancelExportFn(() => () => void cancelEngineExport());
+      try {
+        const r = await engineExportProject(
+          { path: outpath, width: widthPx, height: heightPx, fps, codec: settings.codec, bitrate: parseBitrate(settings.bitrate), audio: settings.includeAudio },
+          (ratio) => setExportProgress(ratio),
+        );
+        if (r.ok) {
+          toast("Export completed", { description: outpath });
+          try {
+            await revealPathInFolder(outpath);
+          } catch (e) {
+            console.error("Failed to reveal export path", e);
+          }
+        } else if (!r.cancelled) {
+          toast("Export failed", { description: r.error });
+          console.error("[engine] export failed:", r.error);
+        }
+      } finally {
+        setIsExporting(false);
+        setExportProgress(null);
+        setCancelExportFn(null);
+      }
+      return;
+    }
 
     try {
       // Prepare export-ready clips (attach filters, normalize paths, etc.).

@@ -15,12 +15,15 @@ export {
   enginePause,
   onEngineClock,
   onEngineEnded,
+  engineExport,
+  engineExportCancel,
+  onEngineExportProgress,
   getEnginePreviewEnabled,
   setEnginePreviewEnabled,
   ENGINE_FRAME_CANVAS_ID,
   ENGINE_FRAME_EVENT,
 } from "./engine.js";
-export type { EngineInfo, EngineProjectInfo, EngineRenderResult } from "./engine.js";
+export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult } from "./engine.js";
 
 // App updates (Electron auto-updater)
 export * from "./appUpdates.js";

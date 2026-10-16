@@ -11,10 +11,14 @@ import {
   engineSourcePaths,
   onEngineClock,
   onEngineEnded,
+  engineExport,
+  engineExportCancel,
+  onEngineExportProgress,
   getEnginePreviewEnabled,
   setEnginePreviewEnabled,
   type EngineInfo,
   type EngineProjectInfo,
+  type EngineExportResult,
 } from "@app/preload";
 import { useClipStore } from "./clip";
 import { useControlsStore, setPlaybackDriver } from "./control";
@@ -187,3 +191,60 @@ export function initEnginePreview() {
     useControlsStore.getState().pause();
   });
 }
+
+/** What an engine export takes from the export dialog. */
+export type EngineExportRequest = {
+  path: string;
+  width: number;
+  height: number;
+  fps: number;
+  codec: string;
+  /** Bits per second. */
+  bitrate: number;
+  audio: boolean;
+};
+
+/**
+ * Whether a video export with these settings goes through the engine: with the engine
+ * preview on, for H.264/HEVC in MP4, MOV or MKV without alpha. Anything else uses the
+ * app's own exporter.
+ */
+export function engineExports(settings: { kind: string; format?: string; codec?: string; preserveAlpha?: boolean }): boolean {
+  const s = useEnginePreviewStore.getState();
+  return (
+    s.enabled &&
+    !!s.info?.available &&
+    settings.kind === "video" &&
+    ["mp4", "mov", "mkv"].includes(settings.format ?? "") &&
+    ["h264", "hevc"].includes(settings.codec ?? "") &&
+    !settings.preserveAlpha
+  );
+}
+
+/** "10M" / "5000k" / a number of bits per second. */
+export function parseBitrate(value: string | number): number {
+  if (typeof value === "number") return value;
+  const m = /^\s*([\d.]+)\s*([kKmM]?)/.exec(value);
+  if (!m) return 10_000_000;
+  const n = parseFloat(m[1]);
+  return Math.round(n * (m[2].toLowerCase() === "m" ? 1e6 : m[2].toLowerCase() === "k" ? 1e3 : 1));
+}
+
+/** Export the open project with the engine (the snapshot the preview gets, with originals). */
+export async function engineExportProject(request: EngineExportRequest, onProgress: (ratio: number) => void): Promise<EngineExportResult> {
+  const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any);
+  if (!snap) return { ok: false, error: "no project open" };
+  const snapshot = await withOriginalMedia(snap.snapshot);
+  const off = onEngineExportProgress((done, total) => onProgress(total > 0 ? done / total : 0));
+  try {
+    const { path, ...options } = request;
+    return await engineExport(snap.projectId, snapshot, path, options);
+  } finally {
+    off();
+  }
+}
+
+export function cancelEngineExport(): Promise<void> {
+  return engineExportCancel();
+}
+

@@ -24,6 +24,8 @@ pub enum ExportError {
     Render(#[from] PreviewError),
     #[error("{0}")]
     Other(String),
+    #[error("cancelled")]
+    Cancelled,
 }
 
 fn check(op: &'static str, code: i32) -> Result<i32, ExportError> {
@@ -293,8 +295,10 @@ impl Pool {
     }
 }
 
-/// Render `project` to `path`. `progress` gets (frame, total) after each frame.
-pub fn export(project: Project, path: &Path, o: &ExportOptions, mut progress: impl FnMut(u64, u64)) -> Result<ExportStats, ExportError> {
+/// Render `project` to `path`. `progress` gets (frame, total) after each frame and returns
+/// whether to go on; stopping removes the unfinished file and returns
+/// [`ExportError::Cancelled`].
+pub fn export(project: Project, path: &Path, o: &ExportOptions, mut progress: impl FnMut(u64, u64) -> bool) -> Result<ExportStats, ExportError> {
     let t0 = Instant::now();
     let duration = project.duration();
     let total = o.fps.frame_of(Micros(duration.0 - 1)).max(0) as u64 + 1;
@@ -326,7 +330,11 @@ pub fn export(project: Project, path: &Path, o: &ExportOptions, mut progress: im
         }
         stats.encode_seconds += e0.elapsed().as_secs_f64();
         stats.frames += 1;
-        progress(n + 1, total);
+        if !progress(n + 1, total) {
+            drop(out);
+            let _ = std::fs::remove_file(path);
+            return Err(ExportError::Cancelled);
+        }
     }
     let e0 = Instant::now();
     if mixer.is_some() {

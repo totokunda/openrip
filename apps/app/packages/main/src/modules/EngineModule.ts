@@ -50,7 +50,16 @@ export type EngineAddon = {
   frameForDisplay(): DisplayFrame | null;
   positionUs(): number;
   setVolume(volume: number): void;
+  exportProject(json: string, path: string, options: EngineExportOptions): Promise<{ frames: number; seconds: number; skippedLayers: number }>;
+  exportProgress(): { done: number; total: number };
+  cancelExport(): void;
 };
+
+export type EngineExportOptions = { width: number; height: number; fps: number; codec: string; bitrate: number; audio: boolean };
+
+export type ExportResult =
+  | { ok: true; frames: number; seconds: number; skippedLayers: number }
+  | { ok: false; cancelled?: boolean; error?: string };
 
 export type EngineInfo = {
   available: boolean;
@@ -261,7 +270,7 @@ export class EngineModule implements AppModule {
     } else {
       console.warn(`[engine] not available (${info.error}); using the app's own preview`);
     }
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause"]) {
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -302,6 +311,32 @@ export class EngineModule implements AppModule {
     });
 
     ipcMain.handle("engine:pause", () => this.#playback.stop());
+
+    // Export the project (the same snapshot the preview gets) to a file, independent of the
+    // preview; progress goes to the asking window as `engine:export-progress` (frames done, total).
+    ipcMain.handle("engine:export", async (event, projectId: number, payload: unknown, path: string, options: EngineExportOptions): Promise<ExportResult> => {
+      const engine = addon;
+      if (!engine) return { ok: false, error: "engine not available" };
+      const json = JSON.stringify(ensureProjectJson({ ...(payload as object) }, Number(projectId), app.getVersion()));
+      const sender = event.sender;
+      const timer = setInterval(() => {
+        if (!sender.isDestroyed()) {
+          const p = engine.exportProgress();
+          sender.send("engine:export-progress", p.done, p.total);
+        }
+      }, 200);
+      try {
+        const r = await engine.exportProject(json, path, options);
+        return { ok: true, ...r };
+      } catch (e) {
+        const why = message(e);
+        return why === "cancelled" ? { ok: false, cancelled: true } : { ok: false, error: why };
+      } finally {
+        clearInterval(timer);
+      }
+    });
+
+    ipcMain.handle("engine:export-cancel", () => addon?.cancelExport());
 
     ipcMain.handle("engine:close", () => {
       this.#playback.stop();

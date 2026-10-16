@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
@@ -541,4 +542,93 @@ impl Task for WaveformTask {
 #[napi]
 pub fn waveform(path: String, per_second: u32) -> AsyncTask<WaveformTask> {
     AsyncTask::new(WaveformTask { path, per_second })
+}
+
+// ---- export -------------------------------------------------------------------
+
+/// The running export's frames done and total, and a request to stop it.
+static EXPORT_DONE: AtomicU64 = AtomicU64::new(0);
+static EXPORT_TOTAL: AtomicU64 = AtomicU64::new(0);
+static EXPORT_CANCEL: AtomicBool = AtomicBool::new(false);
+
+#[napi(object)]
+pub struct ExportOptions {
+    pub width: u32,
+    pub height: u32,
+    pub fps: f64,
+    /// "h264" or "hevc".
+    pub codec: String,
+    /// Bits per second.
+    pub bitrate: f64,
+    pub audio: bool,
+}
+
+#[napi(object)]
+pub struct ExportResult {
+    pub frames: f64,
+    pub seconds: f64,
+    /// Layers skipped because their media or font was missing, summed over frames.
+    pub skipped_layers: f64,
+}
+
+#[napi(object)]
+pub struct ExportProgress {
+    pub done: f64,
+    pub total: f64,
+}
+
+pub struct ExportTask {
+    json: String,
+    path: String,
+    options: ExportOptions,
+}
+
+impl Task for ExportTask {
+    type Output = openrip_export::ExportStats;
+    type JsValue = ExportResult;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let (project, _) = parse_json(&self.json)?;
+        let o = &self.options;
+        let options = openrip_export::ExportOptions {
+            width: o.width & !1,
+            height: o.height & !1,
+            fps: openrip_model::FrameRate::from_f64(o.fps),
+            codec: if o.codec.eq_ignore_ascii_case("hevc") || o.codec.eq_ignore_ascii_case("h265") { openrip_export::Codec::Hevc } else { openrip_export::Codec::H264 },
+            bitrate: o.bitrate.max(100_000.0) as u64,
+            audio: o.audio,
+        };
+        EXPORT_DONE.store(0, Ordering::Relaxed);
+        EXPORT_TOTAL.store(0, Ordering::Relaxed);
+        EXPORT_CANCEL.store(false, Ordering::Relaxed);
+        openrip_export::export(project, Path::new(&self.path), &options, |done, total| {
+            EXPORT_DONE.store(done, Ordering::Relaxed);
+            EXPORT_TOTAL.store(total, Ordering::Relaxed);
+            !EXPORT_CANCEL.load(Ordering::Relaxed)
+        })
+        .map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, s: Self::Output) -> Result<ExportResult> {
+        Ok(ExportResult { frames: s.frames as f64, seconds: s.seconds, skipped_layers: s.skipped_layers as f64 })
+    }
+}
+
+/// Export a project (same JSON formats as `openProjectJson`) to an MP4/MOV file on a worker
+/// thread, independent of the open preview. Rejects with "cancelled" after `cancelExport()`.
+#[napi]
+pub fn export_project(json: String, path: String, options: ExportOptions) -> AsyncTask<ExportTask> {
+    AsyncTask::new(ExportTask { json, path, options })
+}
+
+/// The running (or last) export's progress, in frames.
+#[napi]
+pub fn export_progress() -> ExportProgress {
+    ExportProgress { done: EXPORT_DONE.load(Ordering::Relaxed) as f64, total: EXPORT_TOTAL.load(Ordering::Relaxed) as f64 }
+}
+
+/// Stop the running export; its promise rejects and the unfinished file is removed.
+#[napi]
+pub fn cancel_export() {
+    EXPORT_CANCEL.store(true, Ordering::Relaxed);
 }

@@ -646,6 +646,7 @@ fn export_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if n % 60 == 0 || n == total {
             eprint!("\r  frame {n}/{total}");
         }
+        true
     })?;
     eprintln!();
     println!(

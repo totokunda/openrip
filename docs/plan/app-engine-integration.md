@@ -48,7 +48,11 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
    - On each display tick it takes the frame for the `Player` clock and sends it.
    - It pushes the clock to the renderer, which sets `focusFrame` from it in place of `__playbackTick`.
    - Seeks and scrubs go to `pipeline.seek` (newest wins). The per-clip `AudioContext`s go.
-6. **Export.** Switch `export-renderer` to `openrip-export` (GPU → VideoToolbox; it matches CapCut's own export at 57–64 dB on stills).
+6. **Export.** Done (2026-10-16) in engine mode.
+   - With the engine preview on, H.264/HEVC video in MP4, MOV or MKV without alpha goes through `openrip-export` (GPU compositing → VideoToolbox, the engine's mix as AAC 44.1 kHz): `exportProject` on a worker thread, `exportProgress` polled by main every 200 ms (`engine:export-progress`), `cancelExport` from the dialog's cancel. It exports the same snapshot the preview gets, with original media.
+   - WebM, VP9/AV1/ProRes, alpha and stills stay on the app's exporter.
+   - Checked in the app: a 10 s 1080P export of the standard clip in 2.3 s, H.264 + AAC, 10.04 s long.
+   - The resolution now sets the short side for both exporters (1080P portrait is 1080×1920, as in CapCut); it had set the height, so portrait came out 608×1080.
 7. **Remove the old path** once the engine path covers what the old one did: shapes, drawings, masks, filters, effects (some still need calibration sessions).
 
 ## Addon API
