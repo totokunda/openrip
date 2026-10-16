@@ -1,0 +1,849 @@
+{
+ "summary": {
+  "label": "native CALayer, static UI",
+  "seconds": 15,
+  "samples": 24,
+  "processes": 9,
+  "cpuPercentTotal": {
+   "mean": 11.5,
+   "p95": 14.4,
+   "max": 17.7
+  },
+  "rssMBTotal": {
+   "mean": 461.9,
+   "p95": 488.6,
+   "max": 490
+  },
+  "gpuMsPerSecTotal": {
+   "mean": 2,
+   "p95": 3.9,
+   "max": 4.3
+  },
+  "windowServerGpuMsPerSec": {
+   "mean": 78.7,
+   "p95": 87.1,
+   "max": 89.6
+  },
+  "gpuDeviceUtilPercent": {
+   "mean": 13.2,
+   "p95": 16,
+   "max": 21
+  },
+  "byProcess": {
+   "VTDecoderXPCService (hw decode)": {
+    "cpu": {
+     "mean": 3.3,
+     "p95": 4.8,
+     "max": 4.8
+    },
+    "gpuMsPerSec": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "rssMB": {
+     "mean": 74.2,
+     "p95": 75.4,
+     "max": 77.3
+    }
+   },
+   "Electron.app": {
+    "cpu": {
+     "mean": 5,
+     "p95": 6.5,
+     "max": 8
+    },
+    "gpuMsPerSec": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "rssMB": {
+     "mean": 167.1,
+     "p95": 178.3,
+     "max": 178.6
+    }
+   },
+   "Electron Helper.app": {
+    "cpu": {
+     "mean": 1.4,
+     "p95": 1.6,
+     "max": 3.2
+    },
+    "gpuMsPerSec": {
+     "mean": 2,
+     "p95": 3.9,
+     "max": 4.3
+    },
+    "rssMB": {
+     "mean": 119.9,
+     "p95": 127.8,
+     "max": 128
+    }
+   },
+   "Electron Helper (Renderer).app": {
+    "cpu": {
+     "mean": 1.9,
+     "p95": 3.2,
+     "max": 3.3
+    },
+    "gpuMsPerSec": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "rssMB": {
+     "mean": 100.7,
+     "p95": 107,
+     "max": 107.2
+    }
+   }
+  }
+ },
+ "samples": [
+  {
+   "t": 1792114096137,
+   "gpu": 13,
+   "cpuTotal": 13.029315960912063,
+   "rssTotalMB": 486.984375,
+   "gpuMsTotal": 2.879412052117264,
+   "windowServerGpuMs": 87.07145765472313,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.257328990228016,
+     "rssMB": 75.265625,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 6.514657980456032,
+     "rssMB": 177.421875,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.628664495114008,
+     "rssMB": 127.953125,
+     "gpuMs": 2.879412052117264
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.628664495114008,
+     "rssMB": 106.34375,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114096754,
+   "gpu": 15,
+   "cpuTotal": 12.965964343598023,
+   "rssTotalMB": 486.984375,
+   "gpuMsTotal": 3.930982171799027,
+   "windowServerGpuMs": 75.09231442463533,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.241491085899508,
+     "rssMB": 75.28125,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.862236628849257,
+     "rssMB": 177.421875,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.6207455429497493,
+     "rssMB": 127.84375,
+     "gpuMs": 3.930982171799027
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 3.241491085899508,
+     "rssMB": 106.4375,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114097372,
+   "gpu": 11,
+   "cpuTotal": 11.326860841423958,
+   "rssTotalMB": 489.390625,
+   "gpuMsTotal": 2.564254045307443,
+   "windowServerGpuMs": 75.50316990291262,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 1.6181229773462797,
+     "rssMB": 77.25,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 6.472491909385119,
+     "rssMB": 177.796875,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.6181229773462797,
+     "rssMB": 127.828125,
+     "gpuMs": 2.564254045307443
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6181229773462797,
+     "rssMB": 106.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114097996,
+   "gpu": 11,
+   "cpuTotal": 14.423076923076936,
+   "rssTotalMB": 489.984375,
+   "gpuMsTotal": 4.346754807692308,
+   "windowServerGpuMs": 82.62620192307693,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.807692307692312,
+     "rssMB": 77.25,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 6.410256410256416,
+     "rssMB": 178.25,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.602564102564104,
+     "rssMB": 127.84375,
+     "gpuMs": 4.346754807692308
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.602564102564104,
+     "rssMB": 106.640625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114098717,
+   "gpu": 19,
+   "cpuTotal": 11.095700416088768,
+   "rssTotalMB": 486.15625,
+   "gpuMsTotal": 3.4837600554785024,
+   "windowServerGpuMs": 83.32928710124827,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 2.773925104022186,
+     "rssMB": 75.328125,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.160887656033291,
+     "rssMB": 176.3125,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.386962552011097,
+     "rssMB": 127.828125,
+     "gpuMs": 3.4837600554785024
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 2.773925104022194,
+     "rssMB": 106.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114099339,
+   "gpu": 21,
+   "cpuTotal": 17.68488745980706,
+   "rssTotalMB": 488.328125,
+   "gpuMsTotal": 2.5020771704180063,
+   "windowServerGpuMs": 87.98030546623795,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.215434083601289,
+     "rssMB": 75.34375,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 8.038585209003204,
+     "rssMB": 178.328125,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 3.215434083601289,
+     "rssMB": 127.828125,
+     "gpuMs": 2.5020771704180063
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 3.2154340836012802,
+     "rssMB": 106.828125,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114099952,
+   "gpu": 13,
+   "cpuTotal": 11.419249592169658,
+   "rssTotalMB": 488.609375,
+   "gpuMsTotal": 4.0859168026101145,
+   "windowServerGpuMs": 74.89885807504078,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.262642740619905,
+     "rssMB": 75.34375,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.893964110929858,
+     "rssMB": 178.5625,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.6313213703099434,
+     "rssMB": 127.828125,
+     "gpuMs": 4.0859168026101145
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6313213703099525,
+     "rssMB": 106.875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114100584,
+   "gpu": 14,
+   "cpuTotal": 9.493670886075948,
+   "rssTotalMB": 486.875,
+   "gpuMsTotal": 1.7979287974683542,
+   "windowServerGpuMs": 80.93242405063292,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.1645569620253107,
+     "rssMB": 75.34375,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 3.164556962025319,
+     "rssMB": 176.71875,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.5822784810126596,
+     "rssMB": 127.828125,
+     "gpuMs": 1.7979287974683542
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.5822784810126596,
+     "rssMB": 106.984375,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114101196,
+   "gpu": 12,
+   "cpuTotal": 9.803921568627441,
+   "rssTotalMB": 486.96875,
+   "gpuMsTotal": 3.0023839869281046,
+   "windowServerGpuMs": 80.2638202614379,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.2679738562091534,
+     "rssMB": 75.34375,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.901960784313712,
+     "rssMB": 176.75,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 0,
+     "rssMB": 127.828125,
+     "gpuMs": 3.0023839869281046
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6339869281045767,
+     "rssMB": 107.046875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114101817,
+   "gpu": 13,
+   "cpuTotal": 12.882447665056372,
+   "rssTotalMB": 487.09375,
+   "gpuMsTotal": 2.601716586151369,
+   "windowServerGpuMs": 82.08782930756844,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.220611916264093,
+     "rssMB": 75.34375,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.83091787439614,
+     "rssMB": 176.78125,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 3.220611916264093,
+     "rssMB": 127.84375,
+     "gpuMs": 2.601716586151369
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6103059581320465,
+     "rssMB": 107.125,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114102448,
+   "gpu": 16,
+   "cpuTotal": 9.508716323296346,
+   "rssTotalMB": 487.265625,
+   "gpuMsTotal": 2.781366085578447,
+   "windowServerGpuMs": 85.9751061806656,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.1695721077654455,
+     "rssMB": 75.359375,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.754358161648182,
+     "rssMB": 176.890625,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 0,
+     "rssMB": 127.84375,
+     "gpuMs": 2.781366085578447
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.5847860538827185,
+     "rssMB": 107.171875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114103070,
+   "gpu": 12,
+   "cpuTotal": 11.254019292604513,
+   "rssTotalMB": 440.890625,
+   "gpuMsTotal": 1.533427652733119,
+   "windowServerGpuMs": 75.66914469453377,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.215434083601289,
+     "rssMB": 73.21875,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.8231511254019335,
+     "rssMB": 159.140625,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.6077170418006446,
+     "rssMB": 113.265625,
+     "gpuMs": 1.533427652733119
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6077170418006446,
+     "rssMB": 95.265625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114103691,
+   "gpu": 12,
+   "cpuTotal": 11.272141706924327,
+   "rssTotalMB": 441.140625,
+   "gpuMsTotal": 1.6456650563607085,
+   "windowServerGpuMs": 81.93189694041868,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.220611916264093,
+     "rssMB": 73.421875,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.83091787439614,
+     "rssMB": 159.140625,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.6103059581320465,
+     "rssMB": 113.265625,
+     "gpuMs": 1.6456650563607085
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6103059581320465,
+     "rssMB": 95.3125,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114104312,
+   "gpu": 12,
+   "cpuTotal": 8.051529790660233,
+   "rssTotalMB": 438.90625,
+   "gpuMsTotal": 1.2197391304347827,
+   "windowServerGpuMs": 74.43706441223833,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 1.6103059581320465,
+     "rssMB": 73.140625,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.83091787439614,
+     "rssMB": 157.125,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 0,
+     "rssMB": 113.265625,
+     "gpuMs": 1.2197391304347827
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6103059581320465,
+     "rssMB": 95.375,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114104937,
+   "gpu": 12,
+   "cpuTotal": 12.800000000000002,
+   "rssTotalMB": 437.078125,
+   "gpuMsTotal": 1.2018672000000001,
+   "windowServerGpuMs": 75.8692672,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.800000000000004,
+     "rssMB": 71.21875,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.800000000000004,
+     "rssMB": 157.171875,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.5999999999999925,
+     "rssMB": 113.265625,
+     "gpuMs": 1.2018672000000001
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6000000000000014,
+     "rssMB": 95.421875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114105566,
+   "gpu": 12,
+   "cpuTotal": 11.128775834658144,
+   "rssTotalMB": 439.09375,
+   "gpuMsTotal": 1.3449920508744038,
+   "windowServerGpuMs": 77.29537519872814,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.179650238473753,
+     "rssMB": 73.171875,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.769475357710621,
+     "rssMB": 157.171875,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.5898251192368853,
+     "rssMB": 113.265625,
+     "gpuMs": 1.3449920508744038
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.5898251192368853,
+     "rssMB": 95.484375,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114106181,
+   "gpu": 13,
+   "cpuTotal": 13.008130081300816,
+   "rssTotalMB": 439.328125,
+   "gpuMsTotal": 1.6121268292682926,
+   "windowServerGpuMs": 79.60426829268293,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.2520325203252063,
+     "rssMB": 73.171875,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.878048780487809,
+     "rssMB": 157.34375,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.6260162601626031,
+     "rssMB": 113.265625,
+     "gpuMs": 1.6121268292682926
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 3.252032520325197,
+     "rssMB": 95.546875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114106802,
+   "gpu": 12,
+   "cpuTotal": 12.882447665056372,
+   "rssTotalMB": 441.328125,
+   "gpuMsTotal": 1.3357487922705313,
+   "windowServerGpuMs": 72.30998389694042,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.83091787439614,
+     "rssMB": 73.1875,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.83091787439614,
+     "rssMB": 159.28125,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.6103059581320465,
+     "rssMB": 113.265625,
+     "gpuMs": 1.3357487922705313
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6103059581320465,
+     "rssMB": 95.59375,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114107424,
+   "gpu": 11,
+   "cpuTotal": 8.038585209003223,
+   "rssTotalMB": 437.390625,
+   "gpuMsTotal": 1.167604501607717,
+   "windowServerGpuMs": 70.9600080385852,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.215434083601289,
+     "rssMB": 71.203125,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 3.215434083601289,
+     "rssMB": 157.3125,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 0,
+     "rssMB": 113.25,
+     "gpuMs": 1.167604501607717
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6077170418006446,
+     "rssMB": 95.625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114108037,
+   "gpu": 12,
+   "cpuTotal": 11.419249592169667,
+   "rssTotalMB": 439.390625,
+   "gpuMsTotal": 0,
+   "windowServerGpuMs": 69.69535073409462,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.262642740619905,
+     "rssMB": 73.140625,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.893964110929858,
+     "rssMB": 157.3125,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.6313213703099525,
+     "rssMB": 113.25,
+     "gpuMs": 0
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6313213703099525,
+     "rssMB": 95.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114108669,
+   "gpu": 12,
+   "cpuTotal": 7.911392405063298,
+   "rssTotalMB": 441.421875,
+   "gpuMsTotal": 0.4107990506329114,
+   "windowServerGpuMs": 72.96044303797468,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 1.5822784810126596,
+     "rssMB": 73.140625,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 3.164556962025319,
+     "rssMB": 159.3125,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.5822784810126596,
+     "rssMB": 113.25,
+     "gpuMs": 0.4107990506329114
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.5822784810126596,
+     "rssMB": 95.71875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114109296,
+   "gpu": 11,
+   "cpuTotal": 9.569377990430613,
+   "rssTotalMB": 441.515625,
+   "gpuMsTotal": 0,
+   "windowServerGpuMs": 68.86483253588517,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.189792663476859,
+     "rssMB": 73.140625,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.7846889952153155,
+     "rssMB": 159.359375,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 0,
+     "rssMB": 113.25,
+     "gpuMs": 0
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.5948963317384384,
+     "rssMB": 95.765625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114109922,
+   "gpu": 14,
+   "cpuTotal": 14.376996805111824,
+   "rssTotalMB": 441.78125,
+   "gpuMsTotal": 1.1793130990415335,
+   "windowServerGpuMs": 89.61681309904154,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.792332268370611,
+     "rssMB": 73.21875,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 6.389776357827482,
+     "rssMB": 159.453125,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.5974440894568616,
+     "rssMB": 113.25,
+     "gpuMs": 1.1793130990415335
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.5974440894568704,
+     "rssMB": 95.859375,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  },
+  {
+   "t": 1792114110541,
+   "gpu": 13,
+   "cpuTotal": 11.308562197092058,
+   "rssTotalMB": 442.828125,
+   "gpuMsTotal": 0.8582390953150243,
+   "windowServerGpuMs": 83.32027463651049,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 3.231017770597741,
+     "rssMB": 74.171875,
+     "gpuMs": 0
+    },
+    "Electron.app": {
+     "cpu": 4.846526655896576,
+     "rssMB": 159.46875,
+     "gpuMs": 0
+    },
+    "Electron Helper.app": {
+     "cpu": 1.6155088852988706,
+     "rssMB": 113.265625,
+     "gpuMs": 0.8582390953150243
+    },
+    "Electron Helper (Renderer).app": {
+     "cpu": 1.6155088852988706,
+     "rssMB": 95.921875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 9
+  }
+ ]
+}

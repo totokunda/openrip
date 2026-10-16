@@ -1,0 +1,1123 @@
+{
+ "summary": {
+  "label": "capcut-9.5.0 4K60 HEVC (gpu)",
+  "seconds": 15,
+  "samples": 24,
+  "processes": 12,
+  "cpuPercentTotal": {
+   "mean": 48.1,
+   "p95": 52.1,
+   "max": 53.1
+  },
+  "rssMBTotal": {
+   "mean": 1313.9,
+   "p95": 1315,
+   "max": 1315.3
+  },
+  "gpuMsPerSecTotal": {
+   "mean": 64,
+   "p95": 68.1,
+   "max": 69.9
+  },
+  "windowServerGpuMsPerSec": {
+   "mean": 41.5,
+   "p95": 44.1,
+   "max": 47.7
+  },
+  "gpuDeviceUtilPercent": {
+   "mean": 1,
+   "p95": 7,
+   "max": 8
+  },
+  "byProcess": {
+   "VTDecoderXPCService (hw decode)": {
+    "cpu": {
+     "mean": 5.8,
+     "p95": 6.5,
+     "max": 7.8
+    },
+    "gpuMsPerSec": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "rssMB": {
+     "mean": 83.9,
+     "p95": 84.7,
+     "max": 86
+    }
+   },
+   "CapCut.app": {
+    "cpu": {
+     "mean": 42.3,
+     "p95": 45.8,
+     "max": 46.6
+    },
+    "gpuMsPerSec": {
+     "mean": 64,
+     "p95": 68.1,
+     "max": 69.9
+    },
+    "rssMB": {
+     "mean": 638.8,
+     "p95": 639.3,
+     "max": 639.6
+    }
+   },
+   "CapCut Helper (GPU).app": {
+    "cpu": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "gpuMsPerSec": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "rssMB": {
+     "mean": 98.1,
+     "p95": 98.1,
+     "max": 98.1
+    }
+   },
+   "CapCut Helper.app": {
+    "cpu": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "gpuMsPerSec": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "rssMB": {
+     "mean": 166.3,
+     "p95": 166.3,
+     "max": 166.3
+    }
+   },
+   "VECrashHandler.app": {
+    "cpu": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "gpuMsPerSec": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "rssMB": {
+     "mean": 5.6,
+     "p95": 5.6,
+     "max": 5.6
+    }
+   },
+   "CapCut Helper (Renderer).app": {
+    "cpu": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "gpuMsPerSec": {
+     "mean": 0,
+     "p95": 0,
+     "max": 0
+    },
+    "rssMB": {
+     "mean": 321.1,
+     "p95": 321.7,
+     "max": 321.8
+    }
+   }
+  }
+ },
+ "samples": [
+  {
+   "t": 1792114192822,
+   "gpu": 0,
+   "cpuTotal": 52.13270142180082,
+   "rssTotalMB": 1314.140625,
+   "gpuMsTotal": 68.08352922590838,
+   "windowServerGpuMs": 42.31503475513428,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.319115323854666,
+     "rssMB": 84.59375,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 45.81358609794615,
+     "rssMB": 638.28125,
+     "gpuMs": 68.08352922590838
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.25,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114193457,
+   "gpu": 0,
+   "cpuTotal": 44.09448818897635,
+   "rssTotalMB": 1314.5,
+   "gpuMsTotal": 60.627755905511805,
+   "windowServerGpuMs": 42.80209921259842,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.724409448818867,
+     "rssMB": 84.71875,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 39.37007874015748,
+     "rssMB": 638.515625,
+     "gpuMs": 60.627755905511805
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.25,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114194097,
+   "gpu": 0,
+   "cpuTotal": 46.874999999999694,
+   "rssTotalMB": 1315.28125,
+   "gpuMsTotal": 67.830534375,
+   "windowServerGpuMs": 39.937240624999994,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.250000000000005,
+     "rssMB": 84.671875,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 40.62499999999969,
+     "rssMB": 639.34375,
+     "gpuMs": 67.830534375
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.25,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114194719,
+   "gpu": 0,
+   "cpuTotal": 53.05466237942109,
+   "rssTotalMB": 1315.21875,
+   "gpuMsTotal": 63.98908038585209,
+   "windowServerGpuMs": 43.28081350482315,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.430868167202578,
+     "rssMB": 84.546875,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 46.62379421221851,
+     "rssMB": 639.40625,
+     "gpuMs": 63.98908038585209
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.25,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114195346,
+   "gpu": 8,
+   "cpuTotal": 46.25199362041467,
+   "rssTotalMB": 1313.53125,
+   "gpuMsTotal": 69.90158213716109,
+   "windowServerGpuMs": 40.695708133971294,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.3795853269537535,
+     "rssMB": 83.390625,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 39.87240829346092,
+     "rssMB": 639.609375,
+     "gpuMs": 69.90158213716109
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 320.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114195959,
+   "gpu": 0,
+   "cpuTotal": 45.676998368678596,
+   "rssTotalMB": 1314.96875,
+   "gpuMsTotal": 61.22682218597063,
+   "windowServerGpuMs": 42.76821533442089,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.893964110929821,
+     "rssMB": 85.953125,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 40.783034257748774,
+     "rssMB": 638.484375,
+     "gpuMs": 61.22682218597063
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 320.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114196591,
+   "gpu": 0,
+   "cpuTotal": 45.88607594936681,
+   "rssTotalMB": 1313.875,
+   "gpuMsTotal": 64.53078639240506,
+   "windowServerGpuMs": 38.377768987341774,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.746835443038014,
+     "rssMB": 84.71875,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 41.1392405063288,
+     "rssMB": 638.625,
+     "gpuMs": 64.53078639240506
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 320.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114197208,
+   "gpu": 0,
+   "cpuTotal": 50.243111831442974,
+   "rssTotalMB": 1313.703125,
+   "gpuMsTotal": 59.923758508914105,
+   "windowServerGpuMs": 37.91166936790924,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.4829821717990335,
+     "rssMB": 84.609375,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 43.760129659643944,
+     "rssMB": 638.5625,
+     "gpuMs": 59.923758508914105
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 320.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114197832,
+   "gpu": 0,
+   "cpuTotal": 46.47435897435862,
+   "rssTotalMB": 1312.734375,
+   "gpuMsTotal": 60.03599198717949,
+   "windowServerGpuMs": 39.28872916666666,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.807692307692276,
+     "rssMB": 83.34375,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 41.666666666666345,
+     "rssMB": 638.859375,
+     "gpuMs": 60.03599198717949
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 320.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114198444,
+   "gpu": 0,
+   "cpuTotal": 49.0196078431381,
+   "rssTotalMB": 1311.890625,
+   "gpuMsTotal": 67.43191666666667,
+   "windowServerGpuMs": 38.14821568627451,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.535947712418307,
+     "rssMB": 83.375,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 42.48366013071979,
+     "rssMB": 637.984375,
+     "gpuMs": 67.43191666666667
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 320.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114199078,
+   "gpu": 0,
+   "cpuTotal": 50.47318611987288,
+   "rssTotalMB": 1312.078125,
+   "gpuMsTotal": 65.76570820189275,
+   "windowServerGpuMs": 45.017022082018926,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.309148264984232,
+     "rssMB": 83.34375,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 44.16403785488865,
+     "rssMB": 638.203125,
+     "gpuMs": 65.76570820189275
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 320.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114199715,
+   "gpu": 0,
+   "cpuTotal": 50.235478806907565,
+   "rssTotalMB": 1312.109375,
+   "gpuMsTotal": 65.45264207221351,
+   "windowServerGpuMs": 43.31043956043956,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.279434850863428,
+     "rssMB": 83.296875,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 43.956043956044134,
+     "rssMB": 638.28125,
+     "gpuMs": 65.45264207221351
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 320.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114200348,
+   "gpu": 7,
+   "cpuTotal": 50.55292259083747,
+   "rssTotalMB": 1312.40625,
+   "gpuMsTotal": 66.92996208530806,
+   "windowServerGpuMs": 47.69714375987361,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.319115323854666,
+     "rssMB": 83.359375,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 44.2338072669828,
+     "rssMB": 638.515625,
+     "gpuMs": 66.92996208530806
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 320.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114200948,
+   "gpu": 0,
+   "cpuTotal": 45.0000000000003,
+   "rssTotalMB": 1312.515625,
+   "gpuMsTotal": 55.41389,
+   "windowServerGpuMs": 39.8275,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.999999999999968,
+     "rssMB": 83.40625,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 40.000000000000334,
+     "rssMB": 638.578125,
+     "gpuMs": 55.41389
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 320.515625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114201560,
+   "gpu": 0,
+   "cpuTotal": 44.11764705882389,
+   "rssTotalMB": 1314.984375,
+   "gpuMsTotal": 61.31815032679739,
+   "windowServerGpuMs": 40.641748366013076,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.901960784313766,
+     "rssMB": 84.71875,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 39.21568627451013,
+     "rssMB": 638.5625,
+     "gpuMs": 61.31815032679739
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114202192,
+   "gpu": 0,
+   "cpuTotal": 52.21518987341752,
+   "rssTotalMB": 1314.90625,
+   "gpuMsTotal": 67.04140348101267,
+   "windowServerGpuMs": 44.098034810126585,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.329113924050568,
+     "rssMB": 84.65625,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 45.886075949366955,
+     "rssMB": 638.546875,
+     "gpuMs": 67.04140348101267
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114202824,
+   "gpu": 0,
+   "cpuTotal": 49.05063291139178,
+   "rssTotalMB": 1313.734375,
+   "gpuMsTotal": 62.21624525316456,
+   "windowServerGpuMs": 41.41126107594937,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.329113924050638,
+     "rssMB": 83.375,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 42.72151898734114,
+     "rssMB": 638.65625,
+     "gpuMs": 62.21624525316456
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114203470,
+   "gpu": 0,
+   "cpuTotal": 44.89164086687279,
+   "rssTotalMB": 1314.203125,
+   "gpuMsTotal": 60.420987616099076,
+   "windowServerGpuMs": 42.560886996904024,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.643962848297252,
+     "rssMB": 83.40625,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 40.24767801857554,
+     "rssMB": 639.09375,
+     "gpuMs": 60.420987616099076
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114204109,
+   "gpu": 0,
+   "cpuTotal": 50.078247261346036,
+   "rssTotalMB": 1314.265625,
+   "gpuMsTotal": 65.68753208137716,
+   "windowServerGpuMs": 41.23278560250392,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.259780907668237,
+     "rssMB": 83.40625,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 43.8184663536778,
+     "rssMB": 639.15625,
+     "gpuMs": 65.68753208137716
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114204729,
+   "gpu": 0,
+   "cpuTotal": 46.7741935483871,
+   "rssTotalMB": 1314.25,
+   "gpuMsTotal": 63.45604838709678,
+   "windowServerGpuMs": 43.53017419354838,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.451612903225812,
+     "rssMB": 83.40625,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 40.32258064516129,
+     "rssMB": 639.140625,
+     "gpuMs": 63.45604838709678
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114205361,
+   "gpu": 8,
+   "cpuTotal": 47.46835443038021,
+   "rssTotalMB": 1314.359375,
+   "gpuMsTotal": 64.96360759493672,
+   "windowServerGpuMs": 41.80458860759494,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.746835443037944,
+     "rssMB": 83.40625,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 42.721518987342264,
+     "rssMB": 639.25,
+     "gpuMs": 64.96360759493672
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114205999,
+   "gpu": 0,
+   "cpuTotal": 47.02194357366768,
+   "rssTotalMB": 1314.296875,
+   "gpuMsTotal": 60.59208463949843,
+   "windowServerGpuMs": 35.37003761755486,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 7.836990595611257,
+     "rssMB": 83.34375,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 39.18495297805642,
+     "rssMB": 639.25,
+     "gpuMs": 60.59208463949843
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114206626,
+   "gpu": 0,
+   "cpuTotal": 47.84688995215251,
+   "rssTotalMB": 1314.265625,
+   "gpuMsTotal": 63.3729393939394,
+   "windowServerGpuMs": 41.10380063795853,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 4.784688995215351,
+     "rssMB": 83.390625,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 43.06220095693716,
+     "rssMB": 639.171875,
+     "gpuMs": 63.3729393939394
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.6875,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  },
+  {
+   "t": 1792114207262,
+   "gpu": 0,
+   "cpuTotal": 48.74213836478037,
+   "rssTotalMB": 1314.3125,
+   "gpuMsTotal": 68.77633647798743,
+   "windowServerGpuMs": 43.16483176100628,
+   "byName": {
+    "VTDecoderXPCService (hw decode)": {
+     "cpu": 6.289308176100635,
+     "rssMB": 83.375,
+     "gpuMs": 0
+    },
+    "CapCut.app": {
+     "cpu": 42.452830188679734,
+     "rssMB": 639.15625,
+     "gpuMs": 68.77633647798743
+    },
+    "CapCut Helper (GPU).app": {
+     "cpu": 0,
+     "rssMB": 98.0625,
+     "gpuMs": 0
+    },
+    "CapCut Helper.app": {
+     "cpu": 0,
+     "rssMB": 166.328125,
+     "gpuMs": 0
+    },
+    "VECrashHandler.app": {
+     "cpu": 0,
+     "rssMB": 5.625,
+     "gpuMs": 0
+    },
+    "CapCut Helper (Renderer).app": {
+     "cpu": 0,
+     "rssMB": 321.765625,
+     "gpuMs": 0
+    }
+   },
+   "pids": 12
+  }
+ ]
+}

@@ -10,6 +10,11 @@
 // long decaying average and misreports short windows). 100% = one core fully busy.
 // Add --decoder to also count Apple's shared hardware-decode service (VTDecoderXPCService),
 // where VideoToolbox decode work lands for every app.
+// GPU time per process comes from the Apple GPU driver's per-client counters in the I/O
+// registry (`AGXDeviceUserClient` → `AppUsage[].accumulatedGPUTime`, nanoseconds), the
+// same source Activity Monitor uses; no admin rights needed. Reported in ms of GPU time
+// per second (1000 = GPU busy the whole time). WindowServer (the system compositor) is
+// reported separately as context, since every on-screen app adds work there.
 // --delay N waits N seconds before measuring (time to switch apps and press play).
 // Prints a JSON summary; per-sample data goes to --out if given.
 import { execFileSync } from "node:child_process";
@@ -36,6 +41,26 @@ function gpuUtil() {
   } catch {
     return null;
   }
+}
+
+/** pid -> cumulative GPU nanoseconds, summed over that process's GPU clients. */
+function gpuTimesByPid() {
+  const out = new Map();
+  let text = "";
+  try {
+    text = execFileSync("ioreg", ["-r", "-c", "AGXDeviceUserClient", "-l", "-w0"], { encoding: "utf8", maxBuffer: 64 << 20 });
+  } catch {
+    return out;
+  }
+  for (const block of text.split("+-o ").slice(1)) {
+    const creator = block.match(/"IOUserClientCreator" = "pid (\d+), /);
+    if (!creator) continue;
+    const pid = Number(creator[1]);
+    let ns = 0;
+    for (const m of block.matchAll(/"accumulatedGPUTime"=(\d+)/g)) ns += Number(m[1]);
+    out.set(pid, (out.get(pid) || 0) + ns);
+  }
+  return out;
 }
 
 function parseCpuTime(t) {
@@ -74,27 +99,47 @@ if (delay > 0) {
 console.error(`[sample-procs] measuring for ${seconds}s`);
 const samples = [];
 let prev = new Map(procs().map((r) => [r.pid, r.cpuSec]));
+let prevGpu = gpuTimesByPid();
 let prevT = Date.now();
+const windowServerPid = (() => {
+  try {
+    return Number(execFileSync("pgrep", ["-x", "WindowServer"], { encoding: "utf8" }).trim().split("\n")[0]) || null;
+  } catch {
+    return null;
+  }
+})();
 const end = Date.now() + seconds * 1000;
 while (Date.now() < end) {
   await new Promise((r) => setTimeout(r, intervalMs));
   const rows = procs();
+  const gpuNow = gpuTimesByPid();
   const t = Date.now();
   const dt = (t - prevT) / 1000;
+  const gpuMsPerSec = (pid) => {
+    const a = prevGpu.get(pid);
+    const b = gpuNow.get(pid);
+    return a === undefined || b === undefined ? 0 : Math.max(0, b - a) / 1e6 / dt;
+  };
   const byName = {};
   let cpuTotal = 0;
   let rssTotalMB = 0;
+  let gpuMsTotal = 0;
   for (const r of rows) {
     const before = prev.get(r.pid);
     const cpu = before === undefined ? 0 : (100 * Math.max(0, r.cpuSec - before)) / dt;
+    const gpuMs = gpuMsPerSec(r.pid);
     cpuTotal += cpu;
     rssTotalMB += r.rssMB;
-    byName[r.name] = byName[r.name] || { cpu: 0, rssMB: 0 };
+    gpuMsTotal += gpuMs;
+    byName[r.name] = byName[r.name] || { cpu: 0, rssMB: 0, gpuMs: 0 };
     byName[r.name].cpu += cpu;
     byName[r.name].rssMB += r.rssMB;
+    byName[r.name].gpuMs += gpuMs;
   }
-  samples.push({ t, gpu: gpuUtil(), cpuTotal, rssTotalMB, byName, pids: rows.length });
+  const windowServerGpuMs = windowServerPid ? gpuMsPerSec(windowServerPid) : null;
+  samples.push({ t, gpu: gpuUtil(), cpuTotal, rssTotalMB, gpuMsTotal, windowServerGpuMs, byName, pids: rows.length });
   prev = new Map(rows.map((r) => [r.pid, r.cpuSec]));
+  prevGpu = gpuNow;
   prevT = t;
 }
 
@@ -112,9 +157,18 @@ const summary = {
   processes: Math.max(...samples.map((s) => s.pids)),
   cpuPercentTotal: stat(samples.map((s) => s.cpuTotal)),
   rssMBTotal: stat(samples.map((s) => s.rssTotalMB)),
+  gpuMsPerSecTotal: stat(samples.map((s) => s.gpuMsTotal)),
+  windowServerGpuMsPerSec: stat(samples.map((s) => s.windowServerGpuMs)),
   gpuDeviceUtilPercent: stat(samples.map((s) => s.gpu)),
   byProcess: Object.fromEntries(
-    names.map((n) => [n, { cpu: stat(samples.map((s) => s.byName[n]?.cpu ?? 0)), rssMB: stat(samples.map((s) => s.byName[n]?.rssMB ?? 0)) }]),
+    names.map((n) => [
+      n,
+      {
+        cpu: stat(samples.map((s) => s.byName[n]?.cpu ?? 0)),
+        gpuMsPerSec: stat(samples.map((s) => s.byName[n]?.gpuMs ?? 0)),
+        rssMB: stat(samples.map((s) => s.byName[n]?.rssMB ?? 0)),
+      },
+    ]),
   ),
 };
 if (args.out) fs.writeFileSync(args.out, JSON.stringify({ summary, samples }, null, 1));
