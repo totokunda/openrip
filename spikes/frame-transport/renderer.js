@@ -4,6 +4,10 @@ const { ipcRenderer, sharedTexture } = require("electron");
 const q = new URLSearchParams(location.search);
 const mode = q.get("mode") || "shared";
 const drawMode = q.get("draw") || "webgpu";
+const staticUi = q.get("staticUi") === "1";
+const uiHz = Number(q.get("uiHz") || 0);
+let lastUiAt = 0;
+if (q.get("willChange") === "1") document.getElementById("playhead").style.willChange = "transform";
 const now = () => performance.timeOrigin + performance.now();
 document.getElementById("modeLabel").textContent = `· ${mode}${mode === "shared" ? " / " + drawMode : ""}`;
 if (mode === "overlay-below") document.body.classList.add("transparent");
@@ -29,6 +33,7 @@ window.__stats = () => {
     drawCpuMs: { p50: pct(s.drawMs, 50), p95: pct(s.drawMs, 95) },
     rafHz: +(s.rafs / secs).toFixed(1),
     rafsWithNewFramePct: s.rafs ? +((100 * s.rafsWithNewFrame) / s.rafs).toFixed(1) : null,
+    presentedFps: s.presented ? +(s.presented / secs).toFixed(1) : null,
   };
 };
 
@@ -37,7 +42,11 @@ function raf() {
   s.rafs++;
   if (newFrameSinceRaf) s.rafsWithNewFrame++;
   newFrameSinceRaf = false;
-  playhead.style.transform = `translateX(${(performance.now() / 8) % 1400}px)`;
+  // Update the playhead at uiHz (default: every display refresh).
+  if (!staticUi && (!uiHz || performance.now() - lastUiAt >= 1000 / uiHz - 1)) {
+    lastUiAt = performance.now();
+    playhead.style.transform = `translateX(${(performance.now() / 8) % 1400}px)`;
+  }
   if (s.rafs % 30 === 0) hud.textContent = JSON.stringify(window.__stats(), null, 1);
   requestAnimationFrame(raf);
 }
@@ -100,9 +109,33 @@ function setupCanvas2D() {
   return (vf) => ctx.drawImage(vf, 0, 0, canvas.width, canvas.height);
 }
 
+// Feed frames into a <video> element via a MediaStreamTrackGenerator, so Chromium can
+// treat it as video (eligible for promotion to a native overlay layer on macOS).
+function setupVideoElement() {
+  const gen = new MediaStreamTrackGenerator({ kind: "video" });
+  const writer = gen.writable.getWriter();
+  const video = document.createElement("video");
+  video.muted = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.srcObject = new MediaStream([gen]);
+  video.style.cssText = canvas.style.cssText + ";width:960px;height:540px;background:#000;object-fit:contain";
+  canvas.replaceWith(video);
+  video.id = "preview";
+  // Count frames the compositor actually presented (not just frames written).
+  const onPresented = () => {
+    s.presented = (s.presented || 0) + 1;
+    video.requestVideoFrameCallback(onPresented);
+  };
+  video.requestVideoFrameCallback(onPresented);
+  // The writer takes ownership of the frame and closes it.
+  return (vf) => writer.write(vf.clone());
+}
+
 (async () => {
   if (mode === "shared") {
-    const drawFrame = drawMode === "canvas2d" ? setupCanvas2D() : await setupWebGPU();
+    const drawFrame =
+      drawMode === "canvas2d" ? setupCanvas2D() : drawMode === "video" ? setupVideoElement() : await setupWebGPU();
     sharedTexture.setSharedTextureReceiver(async ({ importedSharedTexture }, meta) => {
       const t = now();
       if (!s.firstAt) s.firstAt = t;
@@ -123,6 +156,6 @@ function setupCanvas2D() {
     s.firstAt = now();
     setInterval(() => (s.lastAt = now()), 250);
   }
-  const r = canvas.getBoundingClientRect();
+  const r = document.getElementById("preview").getBoundingClientRect();
   ipcRenderer.send("preview-rect", { x: r.x, y: r.y, width: r.width, height: r.height });
 })();

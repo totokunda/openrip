@@ -66,8 +66,10 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
 | **`sharedTexture` → WebGPU** (chosen) | 60 fps, 0 drops | 30 fps, 0 drops | 0.6–0.8 ms |
 | Native CALayer inside the window (fallback) | 60 fps, 0 drops | 30 fps, 0 drops | 0.13–0.17 ms |
 
-- **Whole app measured externally, CapCut-style:** 4K60 playback (decode plus display only) costs about 37% of one core across all processes, hardware decode included, and 511 MB of memory. The CapCut column is pending ([results](docs/parity/results/)).
+- **Whole app measured externally, CapCut-style:** 4K60 playback (decode plus display only) costs about 37% of one core across all processes, hardware decode included, and 511 MB of memory. See the CapCut head-to-head below.
 - **Keep frames in YUV (NV12/P010) end to end.** Asking the decoder for BGRA dropped frames at 4K60.
+- **First CapCut head-to-head** ([results](docs/parity/results/2026-10-15-playback-4k60.md)): 4K60 playback costs OpenRip 37% of one core and 490 MB, versus CapCut's 70% and 2.8 GB. CapCut is doing more work (audio, full UI), so this is our floor.
+- **Most of our cost is Chromium compositing the 4K preview,** not the frame handoff. Prefer `<video>` presentation (25% vs 31% CPU for WebGPU), keep UI animation during playback to 60 Hz or less on promoted layers, and keep the native-layer path (12% CPU) as the efficiency ceiling to revisit.
 - **The native layer is cheaper but can't sit under HTML.** Above the web UI it hides popovers; below it needs a transparent window. It stays as a fallback in case `sharedTexture` regresses.
 - **Fallback order:** if both paths fail on a platform, the last resort is a Rust host with CEF in offscreen mode.
 - **Still to validate:** Windows (DXGI) and Linux (dmabuf) transport, transport with `contextIsolation` enabled, and the CapCut head-to-head.

@@ -55,9 +55,16 @@ app.whenReady().then(async () => {
     transparent,
     webPreferences: { nodeIntegration: true, contextIsolation: false, sandbox: false, backgroundThrottling: false },
   });
+  win.webContents.on("render-process-gone", (_e, d) => console.error("[renderer gone]", JSON.stringify(d)));
+  win.webContents.on("console-message", (_e, level, message) => {
+    if (level >= 2) console.error("[renderer console]", message);
+  });
   // Listen before loading: some pages report their preview rect during script evaluation.
   const rectPromise = new Promise((resolve) => ipcMain.once("preview-rect", (_e, r) => resolve(r)));
-  await win.loadFile(path.join(__dirname, "renderer.html"), { query: { mode, draw } });
+  // Electron can reject loadFile() with ERR_FAILED on pages that start a media stream even
+  // though the page loaded; the page reporting its preview rect is the real readiness signal.
+  win.loadFile(path.join(__dirname, "renderer.html"), { query: { mode, draw, staticUi: args["static-ui"] ? "1" : "0", uiHz: args["ui-hz"] || "0", willChange: args["will-change"] ? "1" : "0" } })
+    .catch((e) => console.error("[loadFile]", e.message));
   const rect = await rectPromise;
 
   const info = native.open(file, fmt, pool);
