@@ -16,4 +16,5 @@ openrip-model.workspace = true
 openrip-capcut.workspace = true
 openrip-v1.workspace = true
 openrip-media.workspace = true
+openrip-playback.workspace = true
 serde_json.workspace = true

@@ -38,6 +38,18 @@ impl FrameCache {
         e.next.is_some_and(|n| t.0 < n).then(|| e.frame.try_clone())
     }
 
+    /// The cached frame starting closest to `t`, if one starts within `tolerance` of it.
+    pub(crate) fn nearest(&self, t: Micros, tolerance: Micros) -> Option<&VideoFrame> {
+        let lo = self.frames.range(..=t.0).next_back();
+        let hi = self.frames.range(t.0 + 1..).next();
+        [lo, hi]
+            .into_iter()
+            .flatten()
+            .filter(|(k, _)| (**k - t.0).abs() <= tolerance.0)
+            .min_by_key(|(k, _)| (**k - t.0).abs())
+            .map(|(_, e)| &e.frame)
+    }
+
     /// A picture at `time` was decoded but not output.
     pub(crate) fn hide(&mut self, time: Micros) {
         self.hidden.insert(time.0);

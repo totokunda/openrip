@@ -13,6 +13,10 @@
 //!   openrip-dev decode-bench <media-file> [--sw | --ffmpeg-hw]
 //!       Measure sequential decode speed, random-seek latency and scrubbing (default: native
 //!       VideoToolbox where possible; --ffmpeg-hw uses FFmpeg's hwaccel, --sw software).
+//!   openrip-dev scrub-bench <media-file>
+//!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
+//!       accurate-only mode: frames shown per second, how far behind the playhead they are,
+//!       and how long the exact frame takes to settle after release.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -30,6 +34,7 @@ fn main() -> ExitCode {
         Some("v1-import") if args.len() >= 2 => v1_import(Path::new(&args[1]), flag(&args, "--out")).map_err(|e| e.to_string()),
         Some("v1-scan") if args.len() >= 2 => v1_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("probe") if args.len() >= 2 => probe(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
             eprintln!("usage:\n  openrip-dev capcut-import <draft-dir> [--out project.json]\n  openrip-dev capcut-scan <projects-root>\n  openrip-dev v1-import <project-N.json> [--out project.json]\n  openrip-dev v1-scan <projects-json-dir>\n  openrip-dev probe <media-file>\n  openrip-dev decode-bench <media-file> [--sw]");
@@ -353,5 +358,73 @@ fn decode_bench(file: &Path, software: bool, ffmpeg_hw: bool) -> Result<(), open
     }
     summary("step backward 1 frame", back);
     println!("  answered from the frame cache: {} of 90 steps", d.stats().cache_hits - before.cache_hits);
+    Ok(())
+}
+
+fn scrub_bench(file: &Path) -> Result<(), openrip_media::MediaError> {
+    use openrip_media::{DecoderOptions, Micros};
+    use openrip_playback::{FrameServer, Quality, SeekMode};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    openrip_media::warm_up().join().ok();
+    let info = openrip_media::probe(file)?.video.expect("no video");
+    let duration = info.duration.0;
+    let frame = info.frame_rate.map(|r| r.frame_duration().0).unwrap_or(33_333);
+    println!("{} {}x{}, {:.1} s; 2 s drags with 120 Hz input", info.codec, info.width, info.height, info.duration.as_secs_f64());
+    println!("{:<10} {:<9} {:>8} {:>16} {:>10} {:>14}", "speed", "mode", "shown/s", "lag p50/p95 ms*", "exact %", "settle ms");
+    for speed in [1.0, 4.0, 16.0] {
+        for scrub in [true, false] {
+            // (request id, media time) of every request, and what was delivered when.
+            let requests: Arc<Mutex<Vec<(u64, i64)>>> = Arc::default();
+            let shown: Arc<Mutex<Vec<(u64, i64, bool, Duration)>>> = Arc::default();
+            let server = {
+                let shown = shown.clone();
+                FrameServer::open(file, &DecoderOptions::default(), move |d| {
+                    if let Ok((f, q)) = &d.result {
+                        shown.lock().unwrap().push((d.request, f.time.0, *q == Quality::Exact, d.latency));
+                    }
+                })?
+            };
+            let start = (duration / 4) as f64;
+            let t0 = Instant::now();
+            let tick = Duration::from_micros(8_333);
+            let mut i = 0;
+            while t0.elapsed() < Duration::from_secs(2) {
+                let t = (start + speed * t0.elapsed().as_secs_f64() * 1e6) as i64 % duration.max(1);
+                // CapCut-style tolerance: wider when dragging faster (here: 50 ms of drag).
+                let mode = if scrub { SeekMode::Scrub { tolerance: Micros(((speed * 50_000.0) as i64).max(frame)) } } else { SeekMode::Accurate };
+                let id = server.request(Micros(t), mode);
+                requests.lock().unwrap().push((id, t));
+                i += 1;
+                std::thread::sleep((tick * i).saturating_sub(t0.elapsed()));
+            }
+            // Release: one accurate request; measure until it is delivered.
+            let last_t = requests.lock().unwrap().last().unwrap().1;
+            let release = Instant::now();
+            let id = server.request(Micros(last_t), SeekMode::Accurate);
+            server.wait_idle();
+            let settle = release.elapsed().as_secs_f64() * 1000.0;
+            let shown = shown.lock().unwrap();
+            let during: Vec<_> = shown.iter().filter(|s| s.0 < id).collect();
+            // Lag: how far (in wall time) the shown frame trails the playhead when it appears,
+            // approximated by delivery latency.
+            let mut lag: Vec<f64> = during.iter().map(|s| s.3.as_secs_f64() * 1000.0).collect();
+            lag.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let exact = during.iter().filter(|s| s.2).count();
+            println!(
+                "{:<10} {:<9} {:>8.1} {:>7.1} / {:<7.1} {:>9.0}% {:>14.1}",
+                format!("{speed}x"),
+                if scrub { "scrub" } else { "accurate" },
+                during.len() as f64 / 2.0,
+                lag.get(lag.len() / 2).copied().unwrap_or(f64::NAN),
+                lag.get(lag.len() * 95 / 100).copied().unwrap_or(f64::NAN),
+                100.0 * exact as f64 / during.len().max(1) as f64,
+                settle
+            );
+            drop(server);
+        }
+    }
+    println!("* lag = time from the request to its frame being ready");
     Ok(())
 }

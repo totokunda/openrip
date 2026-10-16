@@ -104,6 +104,19 @@ impl Segment {
     pub fn local_time(&self, timeline: Micros) -> Micros {
         timeline - self.target.start
     }
+
+    /// The media time shown at a timeline time, for segments that read media: the local
+    /// time scaled by the speed from the in-point, or counted back from the out-point when
+    /// reversed. Clamped to the source range (the last instant inside it, so a frame lookup
+    /// never lands on the frame after the out-point).
+    pub fn source_time(&self, timeline: Micros) -> Option<Micros> {
+        let source = self.source?;
+        let local = self.local_time(timeline).0.clamp(0, self.target.duration.0.max(0));
+        let offset = (local as f64 * self.speed).round() as i64;
+        let last = (source.end().0 - 1).max(source.start.0);
+        let t = if self.reverse { source.end().0 - 1 - offset } else { source.start.0 + offset };
+        Some(Micros(t.clamp(source.start.0, last)))
+    }
 }
 
 /// 2D placement on the canvas. These are OpenRip's conventions; importers convert
@@ -200,5 +213,48 @@ impl Project {
             }
         }
         problems
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Animated, MaterialId};
+
+    fn clip(source: (i64, i64), target: (i64, i64), speed: f64, reverse: bool) -> Segment {
+        Segment {
+            id: "s".into(),
+            material: MaterialId("m".into()),
+            source: Some(TimeRange::new(Micros(source.0), Micros(source.1))),
+            target: TimeRange::new(Micros(target.0), Micros(target.1)),
+            speed,
+            reverse,
+            visible: true,
+            render_index: 0,
+            transform: Transform::default(),
+            crop: None,
+            opacity: Animated::constant(1.0),
+            volume: Animated::constant(1.0),
+            attachments: vec![],
+        }
+    }
+
+    #[test]
+    fn source_time_follows_in_point_speed_and_reverse() {
+        // In-point 10 s, placed at 2 s on the timeline.
+        let s = clip((10_000_000, 4_000_000), (2_000_000, 4_000_000), 1.0, false);
+        assert_eq!(s.source_time(Micros(2_000_000)), Some(Micros(10_000_000)));
+        assert_eq!(s.source_time(Micros(3_500_000)), Some(Micros(11_500_000)));
+        // Clamped inside the source range at both ends.
+        assert_eq!(s.source_time(Micros(0)), Some(Micros(10_000_000)));
+        assert_eq!(s.source_time(Micros(9_000_000)), Some(Micros(13_999_999)));
+        // 2x: 2 s of timeline read 4 s of media.
+        let s = clip((0, 4_000_000), (0, 2_000_000), 2.0, false);
+        assert_eq!(s.source_time(Micros(1_000_000)), Some(Micros(2_000_000)));
+        // Reversed: the timeline start shows the last instant of the source.
+        let s = clip((10_000_000, 4_000_000), (0, 4_000_000), 1.0, true);
+        assert_eq!(s.source_time(Micros(0)), Some(Micros(13_999_999)));
+        assert_eq!(s.source_time(Micros(1_000_000)), Some(Micros(12_999_999)));
+        assert_eq!(s.source_time(Micros(3_999_999)), Some(Micros(10_000_000)));
     }
 }

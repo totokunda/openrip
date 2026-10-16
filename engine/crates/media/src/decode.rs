@@ -380,6 +380,42 @@ impl VideoDecoder {
         }
     }
 
+    /// The exact frame at `t` if it is already decoded, or else the closest decoded frame
+    /// starting within `tolerance` of `t`. Never decodes. The flag says whether it is exact.
+    pub fn frame_near(&self, t: Micros, tolerance: Micros) -> Option<(VideoFrame, bool)> {
+        if let Some(Ok(f)) = self.cache.get(t) {
+            return Some((f, true));
+        }
+        let cur = self.current.as_ref().filter(|c| c.time <= t && self.pending.as_ref().is_some_and(|p| t < p.time));
+        if let Some(Ok(f)) = cur.map(VideoFrame::try_clone) {
+            return Some((f, true));
+        }
+        let near = self.cache.nearest(t, tolerance).or_else(|| self.current.as_ref().filter(|c| (c.time.0 - t.0).abs() <= tolerance.0))?;
+        near.try_clone().ok().map(|f| (f, false))
+    }
+
+    /// The keyframe at or before `t`: one GOP start decoded, nothing after it. A cheap
+    /// stand-in while scrubbing; a later `frame_at` in the same GOP continues from it.
+    pub fn keyframe_at(&mut self, t: Micros) -> Result<Option<VideoFrame>, MediaError> {
+        let t = Micros(t.0.max(0));
+        self.request = t;
+        self.seek_before(t, 0)?;
+        match self.decode_cached()? {
+            Some(f) => {
+                let out = f.try_clone()?;
+                self.current = Some(f);
+                Ok(Some(out))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Whether the frame at `t` can be reached without a seek: it's in the cache, or decoding
+    /// on from the current position is cheaper than seeking.
+    pub fn reachable_without_seek(&self, t: Micros) -> bool {
+        self.cache.get(t).is_some() || self.can_reach_by_decoding(t)
+    }
+
     /// Whether decoding forward from the current position reaches `t` sooner than a seek.
     fn can_reach_by_decoding(&self, t: Micros) -> bool {
         let Some(cur) = &self.current else { return false };
