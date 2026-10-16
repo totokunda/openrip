@@ -14,11 +14,10 @@ openrip-render.workspace = true
 openrip-audio.workspace = true
 cpal = "0.18"
 png = "0.18"
+serde_json.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVBase"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }
 
-[dev-dependencies]
-serde_json.workspace = true

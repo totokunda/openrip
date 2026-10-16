@@ -110,8 +110,9 @@ pub struct FrameReport {
 enum Pixels {
     /// A still and its cache key.
     Image(std::sync::Arc<RgbaImage>, u64),
-    /// A frame and the clockwise turn that displays it upright (phone video).
-    Video(VideoFrame, i32),
+    /// A frame, the clockwise turn that displays it upright (phone video), and its cut-out
+    /// mask if the clip's background is removed.
+    Video(VideoFrame, i32, Option<std::sync::Arc<RgbaImage>>),
     /// Rasterised text, its cache key, and the canvas point its image centre goes to.
     Text(std::sync::Arc<RgbaImage>, u64, [f64; 2]),
     /// A filter track's lookup table and strength, applied to everything below it.
@@ -154,6 +155,10 @@ pub struct PreviewEngine {
     failed: HashMap<String, String>,
     /// Rasterised text by content/style/size/sub-pixel origin, with the tick last used.
     texts: HashMap<u64, (std::sync::Arc<RgbaImage>, [f64; 2], u64)>,
+    /// Background-removal masks by file, with the tick they were last used.
+    mattes: HashMap<String, (std::sync::Arc<RgbaImage>, u64)>,
+    /// The frame times each background-removal folder has masks for.
+    matte_times: HashMap<String, std::sync::Arc<Vec<i64>>>,
     /// CapCut's exposure tables by colour-bundle path (`None` if they couldn't be read).
     exposure_luts: HashMap<String, Option<ExposureLuts>>,
     /// Filter lookup tables by bundle path.
@@ -179,6 +184,8 @@ impl PreviewEngine {
             fonts: HashMap::new(),
             failed: HashMap::new(),
             texts: HashMap::new(),
+            mattes: HashMap::new(),
+            matte_times: HashMap::new(),
             exposure_luts: HashMap::new(),
             filters: HashMap::new(),
             textures: HashMap::new(),
@@ -348,6 +355,7 @@ impl PreviewEngine {
         let tick = self.tick;
         self.texts.retain(|_, (_, _, last)| tick - *last < 3);
         self.prepared.retain(|_, (_, last)| tick - *last < 3);
+        self.mattes.retain(|_, (_, last)| tick - *last < 3);
         (out, report)
     }
 
@@ -703,7 +711,51 @@ impl PreviewEngine {
                 after.skipped_disposable - before.skipped_disposable
             );
         }
-        Ok(frame.map(|f| Pixels::Video(f, orientation)))
+        let Some(frame) = frame else { return Ok(None) };
+        let matte = media.matte.as_deref().and_then(|dir| self.matte_at(dir, frame.time, orientation));
+        Ok(Some(Pixels::Video(frame, orientation, matte)))
+    }
+
+    /// The saved background-removal mask for the source frame at `at` (the last one at or
+    /// before it), turned into the stored picture's axes.
+    fn matte_at(&mut self, dir: &str, at: Micros, orientation: i32) -> Option<std::sync::Arc<RgbaImage>> {
+        let times = self.matte_times.entry(dir.to_string()).or_insert_with(|| {
+            let mut t: Vec<i64> = std::fs::read_dir(Path::new(dir).join("mask")).into_iter().flatten().filter_map(Result::ok).filter_map(|e| e.file_name().to_str()?.parse().ok()).collect();
+            t.sort_unstable();
+            std::sync::Arc::new(t)
+        });
+        let i = times.partition_point(|&x| x <= at.0 + 1_000);
+        let t = *times.get(i.checked_sub(1)?).or(times.first())?;
+        let key = format!("{dir}/mask/{t}");
+        let tick = self.tick;
+        if let Some((m, last)) = self.mattes.get_mut(&key) {
+            *last = tick;
+            return Some(m.clone());
+        }
+        let info: serde_json::Value = serde_json::from_slice(&std::fs::read(Path::new(dir).join("maskinfo").join(t.to_string())).ok()?).ok()?;
+        let (w, h) = (info.pointer("/boundingBox/width")?.as_u64()? as u32, info.pointer("/boundingBox/height")?.as_u64()? as u32);
+        let raw = std::fs::read(&key).ok()?;
+        if raw.len() < (w * h) as usize {
+            return None;
+        }
+        // Upright → stored: undo the clockwise turn that displays the picture upright.
+        let (sw, sh) = if orientation.rem_euclid(180) == 90 { (h, w) } else { (w, h) };
+        let mut data = vec![0u8; (sw * sh * 4) as usize];
+        for y in 0..sh {
+            for x in 0..sw {
+                let (ux, uy) = match orientation.rem_euclid(360) {
+                    90 => (sh - 1 - y, x),
+                    180 => (sw - 1 - x, sh - 1 - y),
+                    270 => (y, sw - 1 - x),
+                    _ => (x, y),
+                };
+                let v = raw[(uy * w + ux) as usize];
+                data[((y * sw + x) * 4) as usize..][..4].fill(v);
+            }
+        }
+        let m = std::sync::Arc::new(RgbaImage { width: sw, height: sh, data });
+        self.mattes.insert(key, (m.clone(), tick));
+        Some(m)
     }
 
     fn evict_decoders(&mut self) {
@@ -724,7 +776,7 @@ impl PreviewEngine {
                 let scale = [scale.x * if tr.flip_h { -1.0 } else { 1.0 }, scale.y * if tr.flip_v { -1.0 } else { 1.0 }];
                 let mut layer = match p {
                     Pixels::Image(i, key) => Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot),
-                    Pixels::Video(f, orientation) => Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation),
+                    Pixels::Video(f, orientation, matte) => Layer { matte: matte.as_deref(), ..Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation) },
                     Pixels::Filter(lut, strength) => Layer {
                         source: Source::Filter(lut, *strength),
                         center: [0.0, 0.0],
@@ -734,6 +786,7 @@ impl PreviewEngine {
                         flip_v: false,
                         opacity: 1.0,
                         adjust: None,
+                        matte: None,
                     },
                     // Twice the canvas, so the image's soft edge is off it.
                     Pixels::Wash(img, key, amount) => Layer {
@@ -745,6 +798,7 @@ impl PreviewEngine {
                         flip_v: false,
                         opacity: *amount,
                         adjust: None,
+                        matte: None,
                     },
                     Pixels::Cover(img, key) => {
                         let fit = (w as f64 / img.width as f64).max(h as f64 / img.height as f64);
@@ -757,9 +811,10 @@ impl PreviewEngine {
                             flip_v: false,
                             opacity: 1.0,
                             adjust: None,
+                        matte: None,
                         }
                     }
-                    Pixels::Blur(px) => Layer { source: Source::Blur(*px), center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None },
+                    Pixels::Blur(px) => Layer { source: Source::Blur(*px), center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None, matte: None },
                     Pixels::Text(img, key, at) => Layer {
                         source: Source::Cached(*key, img),
                         center: *at,
@@ -769,6 +824,7 @@ impl PreviewEngine {
                         flip_v: tr.flip_v,
                         opacity: 1.0,
                         adjust: None,
+                        matte: None,
                     },
                 };
                 if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_)) {

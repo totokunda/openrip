@@ -109,7 +109,37 @@ pub fn import_draft_dir(dir: &Path) -> Result<Imported, ImportError> {
     let doc: Value =
         serde_json::from_slice(&raw).map_err(|source| ImportError::Json { path: info.display().to_string(), source })?;
     let name_hint = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    import_draft_json(&doc, &name_hint)
+    let mut imported = import_draft_json(&doc, &name_hint)?;
+    // Paths inside the draft folder (stills CapCut made, e.g. freeze frames) start with a
+    // placeholder for it.
+    for m in &mut imported.project.materials.media {
+        if let Some((_, rel)) = m.path.split_once("_##/").filter(|_| m.path.starts_with("##_draftpath_placeholder")) {
+            m.path = dir.join(rel).to_string_lossy().into_owned();
+        }
+    }
+    imported.report.missing_media.retain(|p| !p.starts_with("##_draftpath_placeholder") || !p.split_once("_##/").is_some_and(|(_, rel)| dir.join(rel).exists()));
+    // A background-removal result is a folder holding a numbered folder with the masks.
+    for m in &mut imported.project.materials.media {
+        let Some(matte) = &m.matte else { continue };
+        let rel = matte.split_once("_##/").map_or(matte.as_str(), |(_, rest)| rest);
+        let root = dir.join(rel);
+        let found = std::fs::read_dir(&root)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .find(|p| p.join("mask").is_dir())
+            .or_else(|| root.join("mask").is_dir().then(|| root.clone()));
+        match found {
+            Some(p) => m.matte = Some(p.to_string_lossy().into_owned()),
+            None => {
+                imported.report.warnings.push(format!("background removal of {} not found at {}", m.path, root.display()));
+                m.matte = None;
+            }
+        }
+    }
+    Ok(imported)
 }
 
 /// Import an already-parsed draft document.
@@ -546,6 +576,13 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         height: i(m, "height") as u32,
                         duration: Micros(i(m, "duration")),
                         has_audio: b(m, "has_audio", kind == MediaKind::Video),
+                        // Background removal's saved result, in the draft folder
+                        // (resolved by `import_draft_dir`).
+                        matte: m
+                            .get("matting")
+                            .filter(|mt| i(mt, "flag") != 0)
+                            .map(|mt| s(mt, "path"))
+                            .filter(|p| !p.is_empty()),
                     });
                     true
                 }
@@ -558,6 +595,7 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         height: 0,
                         duration: Micros(i(m, "duration")),
                         has_audio: true,
+                        matte: None,
                     });
                     true
                 }
@@ -1146,6 +1184,16 @@ mod tests {
         assert_eq!((seg.material.0.as_str(), seg.attachments.contains(&MaterialId::from("A1"))), ("T1", true));
         assert_eq!(project.materials.animations[0].items[0].builtin.as_deref(), Some("caption_word_color"));
         assert_eq!(project.materials.texts[0].words.len(), 1);
+    }
+
+    #[test]
+    fn keeps_a_background_removal_only_when_it_is_on() {
+        let mut d = sample_draft();
+        d["materials"]["videos"][0]["matting"] = json!({"flag": 3, "path": "##_draftpath_placeholder_X_##/matting/abc"});
+        let Imported { project, .. } = import_draft_json(&d, "hint").unwrap();
+        assert_eq!(project.materials.media[0].matte.as_deref(), Some("##_draftpath_placeholder_X_##/matting/abc"));
+        d["materials"]["videos"][0]["matting"]["flag"] = json!(0);
+        assert_eq!(import_draft_json(&d, "hint").unwrap().project.materials.media[0].matte, None);
     }
 
     #[test]

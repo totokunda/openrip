@@ -138,6 +138,11 @@ pub struct Media {
     pub duration: Micros,
     #[serde(default)]
     pub has_audio: bool,
+    /// The source app's saved cut-out of the subject (CapCut's background removal): a
+    /// folder of per-frame masks, `mask/<source µs>` (8-bit, the size in
+    /// `maskinfo/<source µs>`), covering the whole picture upright.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matte: Option<String>,
 }
 
 /// Rich text: the full string plus styled runs over character ranges.

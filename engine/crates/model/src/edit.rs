@@ -774,6 +774,7 @@ mod tests {
             height: 1080,
             duration: Micros(secs * SEC),
             has_audio: true,
+            matte: None,
         })
     }
 

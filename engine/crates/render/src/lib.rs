@@ -118,6 +118,9 @@ pub struct Layer<'a> {
     pub opacity: f32,
     /// CapCut's Adjust sliders for this layer, with its exposure tables if known.
     pub adjust: Option<(Adjust, Option<&'a ExposureLuts>)>,
+    /// A cut-out mask over the whole source (in the texture's own axes, stretched to it; any
+    /// channel), multiplied in before placement.
+    pub matte: Option<&'a RgbaImage>,
 }
 
 impl<'a> Layer<'a> {
@@ -148,6 +151,7 @@ impl<'a> Layer<'a> {
             flip_v: if sideways { sx < 0.0 } else { sy < 0.0 },
             opacity: 1.0,
             adjust: None,
+            matte: None,
         }
     }
 }
@@ -183,6 +187,7 @@ pub struct Compositor {
     /// Filter tracks: a 3D lookup table over the canvas (filter.wgsl).
     lut3d: wgpu::RenderPipeline,
     blur: wgpu::RenderPipeline,
+    matte: wgpu::RenderPipeline,
     /// Exposure lookup tables on the GPU, by key, and a stand-in for clips without one.
     luts: std::sync::Mutex<std::collections::HashMap<u64, wgpu::Texture>>,
     no_lut: wgpu::Texture,
@@ -341,6 +346,25 @@ impl Compositor {
                     fragment: Some(wgpu::FragmentState {
                         module: &module,
                         entry_point: Some("fs_blur"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState { format: CANVAS, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                    }),
+                    primitive: Default::default(),
+                    depth_stencil: None,
+                    multisample: Default::default(),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            },
+            matte: {
+                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("matte"), source: wgpu::ShaderSource::Wgsl(include_str!("filter.wgsl").into()) });
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("fs_matte"),
+                    layout: Some(&yuv_pipeline_layout),
+                    vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some("fs_matte"),
                         compilation_options: Default::default(),
                         targets: &[Some(wgpu::ColorTargetState { format: CANVAS, blend: None, write_mask: wgpu::ColorWrites::ALL })],
                     }),
@@ -560,6 +584,38 @@ impl Compositor {
 
     /// Apply a filter track to the canvas so far: look up into a temporary, then draw it
     /// back over the canvas.
+    /// One full-texture pass of a filter.wgsl pipeline: `src` and `aux` (bindings 0 and 2)
+    /// and four parameters in, `dst` out.
+    fn canvas_pass(&self, enc: &mut wgpu::CommandEncoder, pipeline: &wgpu::RenderPipeline, src: &wgpu::Texture, aux: &wgpu::Texture, dst: &wgpu::Texture, params: [f32; 4]) {
+        let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&params), usage: wgpu::BufferUsages::UNIFORM });
+        let (src_view, aux_view, dst_view) = (src.create_view(&Default::default()), aux.create_view(&Default::default()), dst.create_view(&Default::default()));
+        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.yuv_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&src_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&aux_view) },
+            ],
+        });
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &dst_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
     /// Blur everything drawn so far: CapCut's transition blur, horizontally then vertically.
     fn blur_canvas(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, place_pipeline: &wgpu::RenderPipeline, step: f32, scratch: &mut Vec<wgpu::Texture>) {
         let (w, h) = (canvas.width(), canvas.height());
@@ -849,6 +905,22 @@ impl Compositor {
                 None => stage,
             };
             let adjusted = layer.adjust.is_some_and(|(a, _)| !a.is_identity());
+            // A cut-out: the clip's pixels times the mask, before placement.
+            let (stage, adjusted) = match layer.matte {
+                Some(m) => {
+                    let mask = self.upload(m);
+                    let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
+                    self.canvas_pass(enc, &self.matte, &stage, &mask, &out, [0.0; 4]);
+                    if matches!(layer.source, Source::Cached(..)) && !adjusted {
+                        keep.push(stage);
+                    } else {
+                        scratch.push(stage);
+                    }
+                    scratch.push(mask);
+                    (out, true)
+                }
+                None => (stage, adjusted),
+            };
             // Canvas pixel centre -> stage texture coordinates.
             let (sx, sy) = (dw / tw as f64, dh / th as f64);
             let (s, c) = layer.rotation.to_radians().sin_cos();

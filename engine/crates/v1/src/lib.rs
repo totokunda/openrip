@@ -240,6 +240,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
             height: f(a, "height", 0.0) as u32,
             duration: Micros::from_secs_f64(f(a, "duration", 0.0)),
             has_audio: kind != MediaKind::Photo,
+            matte: None,
         });
     }
 
