@@ -35,11 +35,19 @@ pub struct FrameReport {
 }
 
 enum Pixels {
-    Image(std::sync::Arc<RgbaImage>),
+    /// A still and its cache key.
+    Image(std::sync::Arc<RgbaImage>, u64),
     /// A frame and the clockwise turn that displays it upright (phone video).
     Video(VideoFrame, i32),
-    /// Rasterised text and the canvas point its image centre goes to.
-    Text(RgbaImage, [f64; 2]),
+    /// Rasterised text, its cache key, and the canvas point its image centre goes to.
+    Text(std::sync::Arc<RgbaImage>, u64, [f64; 2]),
+}
+
+fn key_of(v: impl std::hash::Hash) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    v.hash(&mut h);
+    h.finish()
 }
 
 struct OpenDecoder {
@@ -57,13 +65,24 @@ pub struct PreviewEngine {
     fonts: HashMap<String, Font>,
     /// Paths that failed to load, so they aren't retried every frame.
     failed: HashMap<String, String>,
+    /// Rasterised text by content/style/size/sub-pixel origin, with the tick last used.
+    texts: HashMap<u64, (std::sync::Arc<RgbaImage>, [f64; 2], u64)>,
     tick: u64,
 }
 
 impl PreviewEngine {
     pub fn new(project: Project) -> Result<Self, PreviewError> {
         openrip_media::warm_up();
-        Ok(PreviewEngine { project, compositor: Compositor::new()?, decoders: HashMap::new(), images: HashMap::new(), fonts: HashMap::new(), failed: HashMap::new(), tick: 0 })
+        Ok(PreviewEngine {
+            project,
+            compositor: Compositor::new()?,
+            decoders: HashMap::new(),
+            images: HashMap::new(),
+            fonts: HashMap::new(),
+            failed: HashMap::new(),
+            texts: HashMap::new(),
+            tick: 0,
+        })
     }
 
     pub fn project(&self) -> &Project {
@@ -118,6 +137,8 @@ impl PreviewEngine {
         }
         report.layers = out.len();
         self.evict_decoders();
+        let tick = self.tick;
+        self.texts.retain(|_, (_, _, last)| tick - *last < 3);
         (out, report)
     }
 
@@ -164,9 +185,35 @@ impl PreviewEngine {
             // Block centre on the canvas; rasterise so the image sits on the pixel grid.
             let (cx, cy) = (w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0);
             let (x0, y0) = (cx - lay.width as f64 / 2.0, cy - lay.height as f64 / 2.0);
-            let r = lay.rasterize(&style, [x0.rem_euclid(1.0) as f32, y0.rem_euclid(1.0) as f32]);
-            let at = [cx - (r.center[0] - r.image.width as f64 / 2.0), cy - (r.center[1] - r.image.height as f64 / 2.0)];
-            return Ok(Some(Pixels::Text(r.image, at)));
+            let origin = [x0.rem_euclid(1.0) as f32, y0.rem_euclid(1.0) as f32];
+            let key = key_of((
+                &path,
+                &text.text,
+                em.to_bits(),
+                style.color,
+                style.stroke.map(|(c, r)| (c, r.to_bits())),
+                style.background.map(|(c, p, r)| (c, p[0].to_bits(), p[1].to_bits(), r.to_bits())),
+                text.layout.alignment,
+                text.layout.letter_spacing.to_bits(),
+                text.layout.line_spacing.to_bits(),
+                origin[0].to_bits(),
+                origin[1].to_bits(),
+            ));
+            let tick = self.tick;
+            let (image, center) = match self.texts.get_mut(&key) {
+                Some((img, center, last)) => {
+                    *last = tick;
+                    (img.clone(), *center)
+                }
+                None => {
+                    let r = lay.rasterize(&style, origin);
+                    let img = std::sync::Arc::new(r.image);
+                    self.texts.insert(key, (img.clone(), r.center, tick));
+                    (img, r.center)
+                }
+            };
+            let at = [cx - (center[0] - image.width as f64 / 2.0), cy - (center[1] - image.height as f64 / 2.0)];
+            return Ok(Some(Pixels::Text(image, key, at)));
         }
         let Some(media) = self.project.materials.media.iter().find(|m| m.id == seg.material).cloned() else { return Ok(None) };
         if media.kind == MediaKind::Audio {
@@ -181,7 +228,7 @@ impl PreviewEngine {
                 let img = load_still(Path::new(&media.path)).map_err(|e| fail(&e))?;
                 self.images.insert(media.path.clone(), std::sync::Arc::new(img));
             }
-            return Ok(Some(Pixels::Image(self.images[&media.path].clone())));
+            return Ok(Some(Pixels::Image(self.images[&media.path].clone(), key_of(&media.path))));
         }
         let key = seg.id.clone();
         if !self.decoders.contains_key(&key) {
@@ -212,10 +259,10 @@ impl PreviewEngine {
                 // Flips are on screen axes: fold them into the scale signs.
                 let scale = [scale.x * if tr.flip_h { -1.0 } else { 1.0 }, scale.y * if tr.flip_v { -1.0 } else { 1.0 }];
                 let mut layer = match p {
-                    Pixels::Image(i) => Layer::from_model(Source::Image(i), [w, h], [pos.x, pos.y], scale, rot),
+                    Pixels::Image(i, key) => Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot),
                     Pixels::Video(f, orientation) => Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation),
-                    Pixels::Text(img, at) => Layer {
-                        source: Source::Image(img),
+                    Pixels::Text(img, key, at) => Layer {
+                        source: Source::Cached(*key, img),
                         center: *at,
                         size: [img.width as f64, img.height as f64],
                         rotation: rot,

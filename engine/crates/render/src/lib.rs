@@ -41,13 +41,16 @@ pub struct RgbaImage {
 #[derive(Copy, Clone, Debug)]
 pub enum Source<'a> {
     Image(&'a RgbaImage),
+    /// An image whose content `key` identifies: the compositor keeps it on the GPU,
+    /// already resampled, for as long as it keeps being drawn (stills, text).
+    Cached(u64, &'a RgbaImage),
     Video(&'a VideoFrame),
 }
 
 impl Source<'_> {
     pub fn size(&self) -> (u32, u32) {
         match self {
-            Source::Image(i) => (i.width, i.height),
+            Source::Image(i) | Source::Cached(_, i) => (i.width, i.height),
             Source::Video(f) => (f.width(), f.height()),
         }
     }
@@ -133,7 +136,14 @@ pub struct Compositor {
     place: wgpu::RenderPipeline,
     /// The placement pass for BGRA targets (IOSurfaces handed to the app).
     place_bgra: wgpu::RenderPipeline,
+    /// Resampled textures of keyed images, by (key, width, height), with the frame they
+    /// were last drawn in.
+    cache: std::sync::Mutex<std::collections::HashMap<(u64, u32, u32), (wgpu::Texture, u64)>>,
+    frame: std::sync::atomic::AtomicU64,
 }
+
+/// Keyed images not drawn for this many frames leave the GPU cache.
+const CACHE_FRAMES: u64 = 3;
 
 const CANVAS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const WIDE: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -217,6 +227,8 @@ impl Compositor {
             queue,
             layout,
             yuv_layout,
+            cache: Default::default(),
+            frame: Default::default(),
         })
     }
 
@@ -377,35 +389,52 @@ impl Compositor {
         let mut keep = Vec::new(); // textures must outlive the submission
         let off = Params { src_size: [1.0, 1.0], dst_size: [1.0, 1.0], inv0: [0.0, 0.0, -100.0, 0.0], inv1: [0.0, 0.0, -100.0, 0.0], misc: [0.0; 4] };
         self.pass(enc, place_pipeline, &blank, canvas, off, Some(bg));
+        let frame = self.frame.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         for layer in layers {
             let (sw, sh) = layer.source.size();
-            let src = match layer.source {
-                Source::Image(img) => self.upload(img),
-                Source::Video(frame) => match self.import_video(enc, frame) {
-                    Some((rgba, planes)) => {
-                        keep.extend(planes);
-                        rgba
-                    }
-                    None => self.upload(&rgb_of(frame)),
-                },
-            };
             let (dw, dh) = (layer.size[0], layer.size[1]);
             let (tw, th) = ((dw.round() as u32).max(1), (dh.round() as u32).max(1));
-            let resize = Params { src_size: [sw as f32, sh as f32], dst_size: [tw as f32, th as f32], inv0: [0.0; 4], inv1: [0.0; 4], misc: [1.0, DOWNSCALE_SHARPEN, 0.0, 0.0] };
-            let stage = if (tw, th) == (sw, sh) {
-                src
-            } else if tw < sw && th < sh {
-                let wide = self.texture(tw, th, WIDE, wgpu::TextureUsages::empty());
-                self.pass(enc, &self.area, &src, &wide, resize, Some(wgpu::Color::TRANSPARENT));
-                let sharp = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
-                self.pass(enc, &self.sharpen, &wide, &sharp, resize, Some(wgpu::Color::TRANSPARENT));
-                keep.extend([src, wide]);
-                sharp
-            } else {
-                let up = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
-                self.pass(enc, &self.bilinear, &src, &up, resize, Some(wgpu::Color::TRANSPARENT));
-                keep.push(src);
-                up
+            let cached = match layer.source {
+                Source::Cached(key, _) => self.cache.lock().unwrap().get_mut(&(key, tw, th)).map(|(tex, last)| {
+                    *last = frame;
+                    tex.clone()
+                }),
+                _ => None,
+            };
+            let stage = match cached {
+                Some(tex) => tex,
+                None => {
+                    let src = match layer.source {
+                        Source::Image(img) | Source::Cached(_, img) => self.upload(img),
+                        Source::Video(frame) => match self.import_video(enc, frame) {
+                            Some((rgba, planes)) => {
+                                keep.extend(planes);
+                                rgba
+                            }
+                            None => self.upload(&rgb_of(frame)),
+                        },
+                    };
+                    let resize = Params { src_size: [sw as f32, sh as f32], dst_size: [tw as f32, th as f32], inv0: [0.0; 4], inv1: [0.0; 4], misc: [1.0, DOWNSCALE_SHARPEN, 0.0, 0.0] };
+                    let stage = if (tw, th) == (sw, sh) {
+                        src
+                    } else if tw < sw && th < sh {
+                        let wide = self.texture(tw, th, WIDE, wgpu::TextureUsages::empty());
+                        self.pass(enc, &self.area, &src, &wide, resize, Some(wgpu::Color::TRANSPARENT));
+                        let sharp = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
+                        self.pass(enc, &self.sharpen, &wide, &sharp, resize, Some(wgpu::Color::TRANSPARENT));
+                        keep.extend([src, wide]);
+                        sharp
+                    } else {
+                        let up = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
+                        self.pass(enc, &self.bilinear, &src, &up, resize, Some(wgpu::Color::TRANSPARENT));
+                        keep.push(src);
+                        up
+                    };
+                    if let Source::Cached(key, _) = layer.source {
+                        self.cache.lock().unwrap().insert((key, tw, th), (stage.clone(), frame));
+                    }
+                    stage
+                }
             };
             // Canvas pixel centre -> stage texture coordinates.
             let (sx, sy) = (dw / tw as f64, dh / th as f64);
@@ -430,6 +459,7 @@ impl Compositor {
             keep.push(stage);
         }
         keep.push(blank);
+        self.cache.lock().unwrap().retain(|_, (_, last)| frame - *last < CACHE_FRAMES);
         keep
     }
 
