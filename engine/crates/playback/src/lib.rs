@@ -19,6 +19,7 @@ mod player;
 pub mod preview;
 mod server;
 pub mod thumbs;
+mod waveform;
 
 #[cfg(target_os = "macos")]
 pub use pipeline::{Clock, PipelineStats, PreviewPipeline, RenderedFrame};
@@ -26,3 +27,4 @@ pub use player::{Player, PlayerError};
 pub use preview::{FrameReport, PreviewEngine, PreviewError};
 pub use server::{Delivered, FrameServer, Quality, SeekMode, ServerStats};
 pub use thumbs::{Pass, Thumb, Thumbnailer};
+pub use waveform::waveform;

@@ -7,6 +7,7 @@
 //! (`change_pitch`), which resamples. Reversed clips play their audio backwards.
 
 mod decode;
+mod peaks;
 mod tempo;
 
 use std::collections::HashMap;
@@ -15,6 +16,7 @@ use std::path::Path;
 use openrip_model::{AudioFade, MediaKind, Micros, Project, Segment, TrackKind};
 
 pub use decode::AudioDecoder;
+pub use peaks::{peaks, Peaks};
 
 /// The mixer's default rate (playback); export uses CapCut's 44.1 kHz.
 pub const RATE: u32 = 48_000;

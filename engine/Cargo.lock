@@ -1226,6 +1226,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-video",
  "objc2-io-surface",
+ "openrip-audio",
  "openrip-capcut",
  "openrip-model",
  "openrip-playback",

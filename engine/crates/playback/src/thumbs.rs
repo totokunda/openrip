@@ -209,7 +209,7 @@ fn is_still(path: &Path) -> bool {
 }
 
 /// A folder name for one version of a file: its path, size and modification time.
-fn media_key(path: &Path) -> Option<String> {
+pub(crate) fn media_key(path: &Path) -> Option<String> {
     let meta = std::fs::metadata(path).ok()?;
     let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
     let mut h = std::collections::hash_map::DefaultHasher::new();

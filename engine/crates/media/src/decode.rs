@@ -181,6 +181,12 @@ impl VideoDecoder {
         let stream = input.best_stream(ff::AVMediaType::AVMEDIA_TYPE_VIDEO).ok_or_else(|| MediaError::NoVideoStream { path: path.into() })?;
         let info = video_info(&input, stream);
         unsafe {
+            // Don't read other streams' packets (a clip's audio, for one) off the disk.
+            for i in 0..(*input.0).nb_streams as i32 {
+                if i != stream {
+                    (*input.stream(i)).discard = ff::AVDiscard::AVDISCARD_ALL;
+                }
+            }
             let st = input.stream(stream);
             let par = (*st).codecpar;
             let codec = ff::avcodec_find_decoder((*par).codec_id);

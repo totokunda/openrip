@@ -67,6 +67,12 @@ impl AudioDecoder {
                 return Ok(None);
             }
             d.stream = stream;
+            // Don't read other streams' packets (a clip's video, for one) off the disk.
+            for i in 0..(*fmt).nb_streams as usize {
+                if i != stream as usize {
+                    (**(*fmt).streams.add(i)).discard = ff::AVDiscard::AVDISCARD_ALL;
+                }
+            }
             let st = *(*fmt).streams.add(stream as usize);
             d.tb = (*st).time_base;
             d.origin = if (*st).start_time != ff::AV_NOPTS_VALUE { (*st).start_time } else { 0 };
@@ -163,6 +169,12 @@ impl AudioDecoder {
                 ff::av_packet_unref(self.pkt);
             }
         }
+    }
+
+    /// One past the last sample, once decoding has reached the end of the stream (0 if it
+    /// had none).
+    pub fn end(&self) -> Option<i64> {
+        self.eof.then(|| if self.anchored { self.start + (self.buffer.len() / CHANNELS) as i64 } else { 0 })
     }
 
     /// Fill `out` (interleaved stereo) with the audio from sample `at` onwards; silence where

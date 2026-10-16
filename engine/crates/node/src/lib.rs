@@ -16,7 +16,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use napi::bindgen_prelude::{AsyncTask, Buffer};
+use napi::bindgen_prelude::{AsyncTask, Buffer, Float32Array};
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
 use openrip_model::{Micros, Project};
@@ -499,4 +499,40 @@ impl Task for ThumbnailTask {
 #[napi]
 pub fn thumbnails(path: String, times_us: Vec<i64>, height: u32, exact: bool) -> AsyncTask<ThumbnailTask> {
     AsyncTask::new(ThumbnailTask { path, times: times_us.into_iter().map(Micros).collect(), height, exact })
+}
+
+#[napi(object)]
+pub struct Waveform {
+    /// Buckets per second.
+    pub per_second: u32,
+    /// Per bucket, of the mono mix: the largest absolute sample, and the RMS (0..1).
+    pub peak: Float32Array,
+    pub rms: Float32Array,
+}
+
+pub struct WaveformTask {
+    path: String,
+    per_second: u32,
+}
+
+impl Task for WaveformTask {
+    type Output = Option<openrip_audio::Peaks>;
+    type JsValue = Option<Waveform>;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let dir = thumbnailers().cache_dir.lock().unwrap().clone();
+        openrip_playback::waveform(Path::new(&self.path), self.per_second, dir.as_deref()).map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<Option<Waveform>> {
+        Ok(out.map(|p| Waveform { per_second: p.per_second, peak: Float32Array::new(p.peak), rms: Float32Array::new(p.rms) }))
+    }
+}
+
+/// The waveform of `path`'s audio at `perSecond` buckets a second (must divide 48,000; 100
+/// is one per 10 ms), on a worker thread; `null` if it has no audio. Kept in the thumbnail
+/// cache folder, so each file is decoded once.
+#[napi]
+pub fn waveform(path: String, per_second: u32) -> AsyncTask<WaveformTask> {
+    AsyncTask::new(WaveformTask { path, per_second })
 }
