@@ -21,7 +21,7 @@ mod vt;
 
 pub use decode::{DecodeStats, DecoderOptions, HardwareMode, VideoDecoder};
 pub use error::MediaError;
-pub use frame::{PixelFormat, RgbImage, VideoFrame};
+pub use frame::{Matrix, PixelFormat, RgbImage, VideoFrame};
 pub use info::{probe, AudioInfo, ColorInfo, MediaInfo, VideoInfo};
 pub use openrip_model::{FrameRate, Micros};
 

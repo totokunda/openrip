@@ -14,8 +14,8 @@
 //!       Measure sequential decode speed, random-seek latency and scrubbing (default: native
 //!       VideoToolbox where possible; --ffmpeg-hw uses FFmpeg's hwaccel, --sw software).
 //!   openrip-dev render-frame <project.json> <seconds> <width> <height> <out.png>
-//!       Render one frame of an imported project with the GPU compositor (images and video;
-//!       text is not rendered yet).
+//!       Render one frame of an imported project with the GPU compositor (images, and video
+//!       frames straight from the hardware decoder; text is not rendered yet).
 //!   openrip-dev scrub-bench <media-file>
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
@@ -473,28 +473,35 @@ fn render_frame(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     active.sort_by_key(|s| s.render_index);
-    let mut images = Vec::new();
+    enum Pixels {
+        Image(openrip_render::RgbaImage),
+        Video(openrip_media::VideoFrame),
+    }
+    let mut sources = Vec::new();
     for seg in &active {
         let media = project.materials.media.iter().find(|m| m.id == seg.material).ok_or("segment media not found")?;
-        let image = match media.kind {
-            MediaKind::Photo if media.path.to_lowercase().ends_with(".png") => load_png(Path::new(&media.path))?,
+        let pixels = match media.kind {
+            MediaKind::Photo if media.path.to_lowercase().ends_with(".png") => Pixels::Image(load_png(Path::new(&media.path))?),
             MediaKind::Video | MediaKind::Photo => {
+                // Hardware frames go to the GPU without a copy.
                 let mut d = openrip_media::VideoDecoder::open(Path::new(&media.path), &Default::default())?;
-                let at = seg.source_time(t).unwrap_or(Micros::ZERO);
-                let rgb = d.frame_at(at)?.ok_or("no frame")?.to_rgb()?;
-                openrip_render::RgbaImage { width: rgb.width, height: rgb.height, data: rgb.data.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect() }
+                Pixels::Video(d.frame_at(seg.source_time(t).unwrap_or(Micros::ZERO))?.ok_or("no frame")?)
             }
             MediaKind::Audio => continue,
         };
-        images.push((seg, image));
+        sources.push((seg, pixels));
     }
-    let layers: Vec<_> = images
+    let layers: Vec<_> = sources
         .iter()
-        .map(|(seg, img)| {
+        .map(|(seg, pixels)| {
+            let source = match pixels {
+                Pixels::Image(i) => openrip_render::Source::Image(i),
+                Pixels::Video(f) => openrip_render::Source::Video(f),
+            };
             let local = seg.local_time(t);
             let tr = &seg.transform;
             let (pos, scale) = (tr.position.sample(local), tr.scale.sample(local));
-            let mut layer = openrip_render::Layer::from_model(img, [w, h], [pos.x, pos.y], [scale.x, scale.y], tr.rotation.sample(local));
+            let mut layer = openrip_render::Layer::from_model(source, [w, h], [pos.x, pos.y], [scale.x, scale.y], tr.rotation.sample(local));
             layer.flip_h ^= tr.flip_h;
             layer.flip_v ^= tr.flip_v;
             layer.opacity = seg.opacity.sample(local);

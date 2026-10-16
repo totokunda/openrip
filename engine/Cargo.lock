@@ -715,6 +715,7 @@ dependencies = [
  "block2",
  "objc2",
  "objc2-foundation",
+ "objc2-io-surface",
 ]
 
 [[package]]
@@ -810,6 +811,12 @@ name = "openrip-render"
 version = "0.0.0"
 dependencies = [
  "bytemuck",
+ "objc2",
+ "objc2-core-video",
+ "objc2-io-surface",
+ "objc2-metal",
+ "openrip-media",
+ "openrip-model",
  "pollster",
  "thiserror",
  "wgpu",

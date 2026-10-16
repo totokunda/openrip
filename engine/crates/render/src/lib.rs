@@ -9,7 +9,12 @@
 //!
 //! Geometry is in output pixels; mapping the project model (half-canvas positions,
 //! contain-fit scale) to layers is the caller's job (see [`Layer::from_model`]).
+//!
+//! Video frames from the hardware decoder are used in place: on macOS their IOSurface
+//! planes (NV12 / P010) become GPU textures without a copy and are converted to RGB on the
+//! GPU with the frame's own matrix and range.
 
+use openrip_media::{Matrix, PixelFormat, VideoFrame};
 use wgpu::util::DeviceExt;
 
 pub const DOWNSCALE_SHARPEN: f32 = 0.15;
@@ -30,10 +35,38 @@ pub struct RgbaImage {
     pub data: Vec<u8>,
 }
 
+/// Pixels for a layer.
+#[derive(Copy, Clone, Debug)]
+pub enum Source<'a> {
+    Image(&'a RgbaImage),
+    Video(&'a VideoFrame),
+}
+
+impl Source<'_> {
+    pub fn size(&self) -> (u32, u32) {
+        match self {
+            Source::Image(i) => (i.width, i.height),
+            Source::Video(f) => (f.width(), f.height()),
+        }
+    }
+}
+
+impl<'a> From<&'a RgbaImage> for Source<'a> {
+    fn from(i: &'a RgbaImage) -> Self {
+        Source::Image(i)
+    }
+}
+
+impl<'a> From<&'a VideoFrame> for Source<'a> {
+    fn from(f: &'a VideoFrame) -> Self {
+        Source::Video(f)
+    }
+}
+
 /// One image placed on the canvas.
 #[derive(Clone, Debug)]
 pub struct Layer<'a> {
-    pub image: &'a RgbaImage,
+    pub source: Source<'a>,
     /// Centre of the image on the canvas, in output pixels (y down).
     pub center: [f64; 2],
     /// Displayed width and height in output pixels, before rotation.
@@ -48,13 +81,15 @@ pub struct Layer<'a> {
 impl<'a> Layer<'a> {
     /// Place an image the way the project model does: `position` in half-canvas units
     /// (+y up), `scale` relative to contain-fit, `rotation` clockwise degrees.
-    pub fn from_model(image: &'a RgbaImage, canvas: [u32; 2], position: [f64; 2], scale: [f64; 2], rotation: f64) -> Self {
+    pub fn from_model(source: impl Into<Source<'a>>, canvas: [u32; 2], position: [f64; 2], scale: [f64; 2], rotation: f64) -> Self {
+        let source = source.into();
+        let (sw, sh) = source.size();
         let (w, h) = (canvas[0] as f64, canvas[1] as f64);
-        let fit = (w / image.width as f64).min(h / image.height as f64);
+        let fit = (w / sw as f64).min(h / sh as f64);
         Layer {
-            image,
+            source,
             center: [w / 2.0 + position[0] * w / 2.0, h / 2.0 - position[1] * h / 2.0],
-            size: [image.width as f64 * fit * scale[0].abs(), image.height as f64 * fit * scale[1].abs()],
+            size: [sw as f64 * fit * scale[0].abs(), sh as f64 * fit * scale[1].abs()],
             rotation,
             flip_h: scale[0] < 0.0,
             flip_v: scale[1] < 0.0,
@@ -77,6 +112,8 @@ pub struct Compositor {
     device: wgpu::Device,
     queue: wgpu::Queue,
     layout: wgpu::BindGroupLayout,
+    yuv_layout: wgpu::BindGroupLayout,
+    yuv: wgpu::RenderPipeline,
     area: wgpu::RenderPipeline,
     sharpen: wgpu::RenderPipeline,
     bilinear: wgpu::RenderPipeline,
@@ -92,7 +129,9 @@ impl Compositor {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() }))
             .map_err(|e| RenderError::Adapter(e.to_string()))?;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("openrip compositor"), ..Default::default() }))
+        // 16-bit normalised textures let P010 planes be sampled directly.
+        let required_features = adapter.features() & wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("openrip compositor"), required_features, ..Default::default() }))
             .map_err(|e| RenderError::Device(e.to_string()))?;
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("compositor"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders.wgsl").into()) });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -112,11 +151,32 @@ impl Compositor {
                 },
             ],
         });
+        let plane = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+            count: None,
+        };
+        let yuv_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                plane(0),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                plane(2),
+            ],
+        });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
+        let yuv_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&yuv_layout)], immediate_size: 0 });
         let pipeline = |entry: &str, format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>| {
+            let layout = if entry == "fs_yuv" { &yuv_pipeline_layout } else { &pipeline_layout };
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(entry),
-                layout: Some(&pipeline_layout),
+                layout: Some(layout),
                 vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
@@ -132,6 +192,7 @@ impl Compositor {
             })
         };
         Ok(Compositor {
+            yuv: pipeline("fs_yuv", CANVAS, None),
             area: pipeline("fs_area", WIDE, None),
             sharpen: pipeline("fs_sharpen", CANVAS, None),
             bilinear: pipeline("fs_bilinear", CANVAS, None),
@@ -139,6 +200,7 @@ impl Compositor {
             device,
             queue,
             layout,
+            yuv_layout,
         })
     }
 
@@ -177,16 +239,31 @@ impl Compositor {
     }
 
     fn pass(&self, enc: &mut wgpu::CommandEncoder, pipeline: &wgpu::RenderPipeline, src: &wgpu::Texture, dst: &wgpu::Texture, params: Params, clear: Option<wgpu::Color>) {
+        self.pass_with(enc, pipeline, src, None, dst, params, clear)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn pass_with(
+        &self,
+        enc: &mut wgpu::CommandEncoder,
+        pipeline: &wgpu::RenderPipeline,
+        src: &wgpu::Texture,
+        chroma: Option<&wgpu::Texture>,
+        dst: &wgpu::Texture,
+        params: Params,
+        clear: Option<wgpu::Color>,
+    ) {
         let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::bytes_of(&params), usage: wgpu::BufferUsages::UNIFORM });
         let src_view = src.create_view(&Default::default());
-        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&src_view) },
-                wgpu::BindGroupEntry { binding: 1, resource: buf.as_entire_binding() },
-            ],
-        });
+        let chroma_view = chroma.map(|c| c.create_view(&Default::default()));
+        let mut entries = vec![
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&src_view) },
+            wgpu::BindGroupEntry { binding: 1, resource: buf.as_entire_binding() },
+        ];
+        if let Some(v) = &chroma_view {
+            entries.push(wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(v) });
+        }
+        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: if chroma.is_some() { &self.yuv_layout } else { &self.layout }, entries: &entries });
         let dst_view = dst.create_view(&Default::default());
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
@@ -206,6 +283,66 @@ impl Compositor {
         pass.draw(0..3, 0..1);
     }
 
+    /// Convert a hardware frame's planes to an RGBA texture on the GPU, without copying them
+    /// out of their IOSurface. `None` if the frame isn't a hardware NV12/P010 frame.
+    #[cfg(target_os = "macos")]
+    fn import_video(&self, enc: &mut wgpu::CommandEncoder, frame: &VideoFrame) -> Option<(wgpu::Texture, [wgpu::Texture; 2])> {
+        let ten_bit = match frame.pixel_format() {
+            PixelFormat::Nv12 => false,
+            PixelFormat::P010 if self.device.features().contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM) => true,
+            _ => return None,
+        };
+        let pb = frame.pixel_buffer()?;
+        let surface = frame.io_surface()?;
+        let plane_size = |i| (objc2_core_video::CVPixelBufferGetWidthOfPlane(pb, i) as u32, objc2_core_video::CVPixelBufferGetHeightOfPlane(pb, i) as u32);
+        let (luma_fmt, chroma_fmt) = if ten_bit { (wgpu::TextureFormat::R16Unorm, wgpu::TextureFormat::Rg16Unorm) } else { (wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Rg8Unorm) };
+        let luma = self.wrap_plane(&surface, 0, plane_size(0), luma_fmt)?;
+        let chroma = self.wrap_plane(&surface, 1, plane_size(1), chroma_fmt)?;
+        let (w, h) = (frame.width(), frame.height());
+        let rgba = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+        let (inv0, inv1, k) = yuv_params(frame.matrix(), frame.full_range(), ten_bit);
+        let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0, inv1, misc: [1.0, 0.0, k, 0.0] };
+        self.pass_with(enc, &self.yuv, &luma, Some(&chroma), &rgba, params, Some(wgpu::Color::BLACK));
+        Some((rgba, [luma, chroma]))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn import_video(&self, _enc: &mut wgpu::CommandEncoder, _frame: &VideoFrame) -> Option<(wgpu::Texture, [wgpu::Texture; 2])> {
+        None
+    }
+
+    /// One IOSurface plane as a wgpu texture (no copy).
+    #[cfg(target_os = "macos")]
+    fn wrap_plane(&self, surface: &objc2_io_surface::IOSurfaceRef, plane: usize, (w, h): (u32, u32), format: wgpu::TextureFormat) -> Option<wgpu::Texture> {
+        use objc2_metal::{MTLDevice, MTLPixelFormat, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage};
+        let mtl_format = match format {
+            wgpu::TextureFormat::R8Unorm => MTLPixelFormat::R8Unorm,
+            wgpu::TextureFormat::Rg8Unorm => MTLPixelFormat::RG8Unorm,
+            wgpu::TextureFormat::R16Unorm => MTLPixelFormat::R16Unorm,
+            wgpu::TextureFormat::Rg16Unorm => MTLPixelFormat::RG16Unorm,
+            _ => return None,
+        };
+        let raw = unsafe {
+            let hal = self.device.as_hal::<wgpu::hal::api::Metal>()?;
+            let desc = MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(mtl_format, w as usize, h as usize, false);
+            desc.setUsage(MTLTextureUsage::ShaderRead);
+            hal.raw_device().newTextureWithDescriptor_iosurface_plane(&desc, surface, plane)?
+        };
+        let size = wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 };
+        let hal_texture = unsafe { wgpu::hal::metal::Device::texture_from_raw(raw, format, MTLTextureType::Type2D, 1, 1, wgpu::hal::CopyExtent { width: w, height: h, depth: 1 }, None) };
+        let desc = wgpu::TextureDescriptor {
+            label: Some("video plane"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        };
+        Some(unsafe { self.device.create_texture_from_hal::<wgpu::hal::api::Metal>(hal_texture, &desc, wgpu::TextureUses::RESOURCE) })
+    }
+
     /// Render `layers` (bottom first) over an opaque `background` at `width`×`height`.
     pub fn render(&self, width: u32, height: u32, background: [u8; 3], layers: &[Layer]) -> RgbaImage {
         let canvas = self.texture(width, height, CANVAS, wgpu::TextureUsages::COPY_SRC);
@@ -217,8 +354,17 @@ impl Compositor {
         self.pass(&mut enc, &self.place, &blank, &canvas, off, Some(bg));
         let mut keep = Vec::new(); // textures must outlive the submission
         for layer in layers {
-            let (sw, sh) = (layer.image.width, layer.image.height);
-            let src = self.upload(layer.image);
+            let (sw, sh) = layer.source.size();
+            let src = match layer.source {
+                Source::Image(img) => self.upload(img),
+                Source::Video(frame) => match self.import_video(&mut enc, frame) {
+                    Some((rgba, planes)) => {
+                        keep.extend(planes);
+                        rgba
+                    }
+                    None => self.upload(&rgb_of(frame)),
+                },
+            };
             let (dw, dh) = (layer.size[0], layer.size[1]);
             let (tw, th) = ((dw.round() as u32).max(1), (dh.round() as u32).max(1));
             let resize = Params { src_size: [sw as f32, sh as f32], dst_size: [tw as f32, th as f32], inv0: [0.0; 4], inv1: [0.0; 4], misc: [1.0, DOWNSCALE_SHARPEN, 0.0, 0.0] };
@@ -279,4 +425,32 @@ impl Compositor {
         drop(keep);
         RgbaImage { width, height, data }
     }
+}
+
+/// CPU fallback for frames the GPU can't take directly (software-decoded, unusual formats).
+fn rgb_of(frame: &VideoFrame) -> RgbaImage {
+    match frame.to_rgb() {
+        Ok(rgb) => RgbaImage { width: rgb.width, height: rgb.height, data: rgb.data.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect() },
+        Err(_) => RgbaImage { width: frame.width(), height: frame.height(), data: vec![0; (frame.width() * frame.height() * 4) as usize] },
+    }
+}
+
+/// Code-value offsets/ranges and RGB coefficients for the YUV import shader.
+fn yuv_params(matrix: Matrix, full: bool, ten_bit: bool) -> ([f32; 4], [f32; 4], f32) {
+    let (kr, kb) = match matrix {
+        Matrix::Bt601 => (0.299, 0.114),
+        Matrix::Bt709 => (0.2126, 0.0722),
+        Matrix::Bt2020 => (0.2627, 0.0593),
+    };
+    let kg = 1.0 - kr - kb;
+    let coeffs = [2.0 * (1.0 - kr), -2.0 * kb * (1.0 - kb) / kg, -2.0 * kr * (1.0 - kr) / kg, 2.0 * (1.0 - kb)];
+    let ranges = match (ten_bit, full) {
+        (false, false) => [16.0, 219.0, 128.0, 224.0],
+        (false, true) => [0.0, 255.0, 128.0, 255.0],
+        (true, false) => [64.0, 876.0, 512.0, 896.0],
+        (true, true) => [0.0, 1023.0, 512.0, 1023.0],
+    };
+    // P010 keeps 10-bit samples in the top bits of 16: unit sample = 65535 / 64 code values.
+    let k = if ten_bit { 65535.0 / 64.0 } else { 255.0 };
+    (ranges, coeffs, k)
 }

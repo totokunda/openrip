@@ -106,3 +106,32 @@ fn fs_place(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     }
     return clamp(acc / wsum, vec4<f32>(0.0), vec4<f32>(1.0)) * P.misc.x;
 }
+
+// Video import: NV12 / P010 planes (straight from the decoder's IOSurface, no copy) to RGBA
+// at the luma resolution. 4:2:0 chroma is sited left horizontally and centred vertically
+// (H.264/HEVC default) and interpolated bilinearly, clamped at the edges.
+//   inv0: (y offset, y range, c offset, c range) in code values
+//   inv1: (R from Cr, G from Cb, G from Cr, B from Cb)
+//   misc.z: code values per unit sample (255 for 8-bit, 65535 / 64 for P010)
+@group(0) @binding(2) var chroma: texture_2d<f32>;
+
+fn chroma_at(p: vec2<i32>) -> vec2<f32> {
+    let s = vec2<i32>(textureDimensions(chroma)) - 1;
+    return textureLoad(chroma, clamp(p, vec2<i32>(0), s), 0).rg;
+}
+
+@fragment
+fn fs_yuv(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let k = P.misc.z;
+    let y = (textureLoad(src, vec2<i32>(floor(pos.xy)), 0).r * k - P.inv0.x) / P.inv0.y;
+    // Chroma sample i sits at luma x = 2i (left) and between luma rows 2j and 2j + 1.
+    let c = vec2<f32>((floor(pos.x)) / 2.0, (pos.y - 1.0) / 2.0);
+    let b = floor(c);
+    let f = c - b;
+    let p = vec2<i32>(b);
+    let top = mix(chroma_at(p), chroma_at(p + vec2<i32>(1, 0)), f.x);
+    let bottom = mix(chroma_at(p + vec2<i32>(0, 1)), chroma_at(p + vec2<i32>(1, 1)), f.x);
+    let cbcr = (mix(top, bottom, f.y) * k - P.inv0.z) / P.inv0.w;
+    let rgb = vec3<f32>(y + P.inv1.x * cbcr.y, y + P.inv1.y * cbcr.x + P.inv1.z * cbcr.y, y + P.inv1.w * cbcr.x);
+    return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+}

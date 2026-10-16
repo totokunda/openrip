@@ -3,6 +3,14 @@ use ffmpeg_sys_next as ff;
 use crate::error::check;
 use crate::{MediaError, Micros};
 
+/// YCbCr→RGB matrix of a frame.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Matrix {
+    Bt601,
+    Bt709,
+    Bt2020,
+}
+
 /// Memory layout of a decoded frame (for hardware frames, of the GPU surface).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PixelFormat {
@@ -128,6 +136,24 @@ impl VideoFrame {
             },
             #[cfg(target_os = "macos")]
             Pixels::Cv { buffer, .. } => cv_format(&buffer.0).0,
+        }
+    }
+
+    /// The frame's YCbCr matrix; unspecified streams follow the usual convention (BT.709
+    /// from 720 lines up, BT.601 below).
+    pub fn matrix(&self) -> Matrix {
+        let cs = match &self.pixels {
+            Pixels::Av(raw) => unsafe { (**raw).colorspace },
+            #[cfg(target_os = "macos")]
+            Pixels::Cv { colorspace, .. } => *colorspace,
+        };
+        use ff::AVColorSpace::*;
+        match cs {
+            AVCOL_SPC_BT709 => Matrix::Bt709,
+            AVCOL_SPC_BT2020_NCL | AVCOL_SPC_BT2020_CL => Matrix::Bt2020,
+            AVCOL_SPC_BT470BG | AVCOL_SPC_SMPTE170M => Matrix::Bt601,
+            _ if self.height() >= 720 => Matrix::Bt709,
+            _ => Matrix::Bt601,
         }
     }
 
