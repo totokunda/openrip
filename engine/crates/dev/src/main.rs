@@ -43,6 +43,10 @@
 //!       render of it: PSNR and the share of pixels far off, per draft (numbered, no names)
 //!       and overall. Drafts with media missing at the first frame are left out. --save
 //!       writes ours | CapCut's | difference x4 for each.
+//!   openrip-dev export-parity <draft-dir> <capcut-export.mp4> [--every S] [--save <dir>]
+//!       Compare our render with CapCut's export of the same draft every S seconds (default
+//!       2) at half size: PSNR per sample, overall, and the worst samples (--save writes
+//!       ours | CapCut's | difference x4 for the five worst).
 //!   openrip-dev wrap-probe <draft-dir> <capcut-export.mp4>
 //!       For each text clip, sweep the line-wrap width (fraction of the canvas width, on
 //!       screen) and find which widths reproduce CapCut's exported frame: one line per clip
@@ -75,6 +79,7 @@ fn main() -> ExitCode {
         Some("playthrough") if args.len() >= 2 => playthrough(&args).map_err(|e| e.to_string()),
         Some("pipeline-bench") if args.len() >= 2 => pipeline_bench(&args).map_err(|e| e.to_string()),
         Some("cover-parity") if args.len() >= 2 => cover_parity(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
+        Some("export-parity") if args.len() >= 3 => export_parity(&args).map_err(|e| e.to_string()),
         Some("wrap-probe") if args.len() >= 3 => wrap_probe(Path::new(&args[1]), Path::new(&args[2])).map_err(|e| e.to_string()),
         Some("thumbs-bench") if args.len() >= 2 => thumbs_bench(&args).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
@@ -934,6 +939,95 @@ fn wrap_probe(draft: &Path, export: &Path) -> Result<(), Box<dyn std::error::Err
                 "{{\"track\": {ti}, \"seg\": {si}, \"chars\": {}, \"size\": {size}, \"scale\": {scale:.4}, \"fixed_width\": {}, \"line_max_width\": {}, \"canvas_w\": {cw}, \"lo\": {:.3}, \"hi\": {:.3}, \"spread_db\": {:.2}, \"best_db\": {best:.2}}}",
                 text.text.chars().count(), rt["fixed_width"], rt["line_max_width"], good.first().unwrap(), good.last().unwrap(), best - worst
             );
+        }
+    }
+    Ok(())
+}
+
+/// A decoded RGB frame resampled to `w`x`h` by area averaging (any size, up or down).
+fn shrink_rgb(rgb: &openrip_media::RgbImage, w: u32, h: u32) -> Vec<u8> {
+    let (sx, sy) = (rgb.width as f64 / w as f64, rgb.height as f64 / h as f64);
+    let mut out = vec![0u8; (w * h * 3) as usize];
+    for y in 0..h {
+        let (y0, y1) = (y as f64 * sy, (y + 1) as f64 * sy);
+        for x in 0..w {
+            let (x0, x1) = (x as f64 * sx, (x + 1) as f64 * sx);
+            let mut acc = [0f64; 3];
+            let mut wsum = 0.0;
+            for yy in y0.floor() as u32..(y1.ceil() as u32).min(rgb.height) {
+                let wy = (y1.min(yy as f64 + 1.0) - y0.max(yy as f64)).max(0.0);
+                for xx in x0.floor() as u32..(x1.ceil() as u32).min(rgb.width) {
+                    let wx = (x1.min(xx as f64 + 1.0) - x0.max(xx as f64)).max(0.0);
+                    let i = ((yy * rgb.width + xx) * 3) as usize;
+                    for c in 0..3 {
+                        acc[c] += rgb.data[i + c] as f64 * wx * wy;
+                    }
+                    wsum += wx * wy;
+                }
+            }
+            for c in 0..3 {
+                out[((y * w + x) * 3) as usize + c] = (acc[c] / wsum.max(1e-9)).round() as u8;
+            }
+        }
+    }
+    out
+}
+
+fn psnr_rgba_rgb(ours: &openrip_render::RgbaImage, theirs: &[u8]) -> f64 {
+    let n = (ours.width * ours.height) as usize;
+    let se: f64 = (0..n).map(|i| (0..3).map(|c| (ours.data[i * 4 + c] as f64 - theirs[i * 3 + c] as f64).powi(2)).sum::<f64>()).sum();
+    10.0 * (255.0f64.powi(2) / (se / (3 * n) as f64).max(1e-9)).log10()
+}
+
+fn export_parity(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let project = load_project(Path::new(&args[1]))?;
+    let every: f64 = flag(args, "--every").map(|s| s.to_string_lossy().parse()).transpose()?.unwrap_or(2.0);
+    let save = flag(args, "--save");
+    let (w, h) = (project.canvas.width / 2, project.canvas.height / 2);
+    let duration = project.duration();
+    let mut dec = openrip_media::VideoDecoder::open(Path::new(&args[2]), &Default::default())?;
+    let mut engine = openrip_playback::PreviewEngine::new(project)?;
+    let mut samples = Vec::new();
+    let mut t = every / 2.0;
+    while t < duration.as_secs_f64() - 0.05 {
+        let at = openrip_model::Micros::from_secs_f64(t);
+        if let Some(frame) = dec.frame_at(at)? {
+            // Render at the export's size, as CapCut did, then bring both to half the canvas
+            // with the same filter.
+            let rgb = frame.to_rgb()?;
+            let theirs = shrink_rgb(&rgb, w, h);
+            let (full, report) = engine.render_image(at, rgb.width, rgb.height)?;
+            let full_rgb = openrip_media::RgbImage { width: full.width, height: full.height, data: full.data.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect() };
+            let small = shrink_rgb(&full_rgb, w, h);
+            let ours = openrip_render::RgbaImage { width: w, height: h, data: small.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect() };
+            samples.push((t, psnr_rgba_rgb(&ours, &theirs), report.missing.len(), ours, theirs));
+        }
+        t += every;
+    }
+    let mut ps: Vec<f64> = samples.iter().map(|s| s.1).collect();
+    ps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let missing = samples.iter().filter(|s| s.2 > 0).count();
+    println!("{} samples every {every} s ({missing} with media missing): PSNR p50 {:.1} dB, p10 {:.1} dB, worst {:.1} dB", samples.len(), percentile(&ps, 0.5), percentile(&ps, 0.1), ps[0]);
+    let mut worst: Vec<_> = samples.iter().collect();
+    worst.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    for s in worst.iter().take(5) {
+        println!("  worst: {:7.2} s  {:5.1} dB{}", s.0, s.1, if s.2 > 0 { "  (media missing)" } else { "" });
+    }
+    if let Some(dir) = save {
+        std::fs::create_dir_all(&dir)?;
+        for s in worst.iter().take(5) {
+            let mut img = openrip_render::RgbaImage { width: w * 3, height: h, data: vec![255; (w * 3 * h * 4) as usize] };
+            for i in 0..(w * h) as usize {
+                let (y, x) = (i / w as usize, i % w as usize);
+                let o = (y * w as usize * 3 + x) * 4;
+                for c in 0..3 {
+                    let (a, b) = (s.3.data[i * 4 + c], s.4[i * 3 + c]);
+                    img.data[o + c] = a;
+                    img.data[o + w as usize * 4 + c] = b;
+                    img.data[o + w as usize * 8 + c] = ((a as i32 - b as i32).unsigned_abs() * 4).min(255) as u8;
+                }
+            }
+            save_png(&dir.join(format!("t{:07.2}.png", s.0)), &img)?;
         }
     }
     Ok(())

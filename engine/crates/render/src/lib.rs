@@ -14,7 +14,10 @@
 //! planes (NV12 / P010) become GPU textures without a copy and are converted to RGB on the
 //! GPU with the frame's own matrix and range.
 
+pub mod adjust;
 pub mod text;
+
+pub use adjust::{Adjust, ExposureLuts};
 
 use openrip_media::{Matrix, PixelFormat, VideoFrame};
 use wgpu::util::DeviceExt;
@@ -81,6 +84,8 @@ pub struct Layer<'a> {
     pub flip_h: bool,
     pub flip_v: bool,
     pub opacity: f32,
+    /// CapCut's Adjust sliders for this layer, with its exposure tables if known.
+    pub adjust: Option<(Adjust, Option<&'a ExposureLuts>)>,
 }
 
 impl<'a> Layer<'a> {
@@ -110,6 +115,7 @@ impl<'a> Layer<'a> {
             flip_h: if sideways { sy < 0.0 } else { sx < 0.0 },
             flip_v: if sideways { sx < 0.0 } else { sy < 0.0 },
             opacity: 1.0,
+            adjust: None,
         }
     }
 }
@@ -139,6 +145,11 @@ pub struct Compositor {
     /// RGBA canvas -> NV12 planes for the encoder.
     luma: wgpu::RenderPipeline,
     chroma: wgpu::RenderPipeline,
+    /// CapCut's Adjust sliders (adjust.wgsl).
+    adjust: wgpu::RenderPipeline,
+    /// Exposure lookup tables on the GPU, by key, and a stand-in for clips without one.
+    luts: std::sync::Mutex<std::collections::HashMap<u64, wgpu::Texture>>,
+    no_lut: wgpu::Texture,
     /// Resampled textures of keyed images, with the frame they were last drawn in.
     cache: std::sync::Mutex<std::collections::HashMap<CacheKey, (wgpu::Texture, u64)>>,
     frame: std::sync::atomic::AtomicU64,
@@ -246,6 +257,36 @@ impl Compositor {
             place_bgra: pipeline("fs_place", wgpu::TextureFormat::Bgra8Unorm, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             luma: pipeline("fs_luma", wgpu::TextureFormat::R8Unorm, None),
             chroma: pipeline("fs_chroma", wgpu::TextureFormat::Rg8Unorm, None),
+            adjust: {
+                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("adjust"), source: wgpu::ShaderSource::Wgsl(include_str!("adjust.wgsl").into()) });
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("fs_adjust"),
+                    layout: Some(&yuv_pipeline_layout),
+                    vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some("fs_adjust"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState { format: CANVAS, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                    }),
+                    primitive: Default::default(),
+                    depth_stencil: None,
+                    multisample: Default::default(),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            },
+            luts: Default::default(),
+            no_lut: device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("no lut"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: CANVAS,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            }),
             device,
             queue,
             layout,
@@ -293,6 +334,12 @@ impl Compositor {
     }
 
     fn upload(&self, img: &RgbaImage) -> wgpu::Texture {
+        let max = self.device.limits().max_texture_dimension_2d;
+        if img.width > max || img.height > max {
+            // Beyond the GPU's texture limit (panoramas): box-filter it down to fit first.
+            let k = img.width.max(img.height).div_ceil(max);
+            return self.upload(&box_shrink(img, k));
+        }
         // Premultiply on the way in; every pass works on premultiplied colour.
         let mut data = img.data.clone();
         for px in data.chunks_exact_mut(4) {
@@ -354,6 +401,70 @@ impl Compositor {
             multiview_mask: None,
         });
         pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// Apply Adjust sliders to `src` into `dst` (same size).
+    fn adjust_pass(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, dst: &wgpu::Texture, adjust: &Adjust, luts: Option<&ExposureLuts>) {
+        // The table for the slider's direction, uploaded once per key.
+        let lut = luts.filter(|_| adjust.exposure.abs() > 1e-5).map(|l| {
+            let key = l.key ^ (adjust.exposure > 0.0) as u64;
+            let mut cache = self.luts.lock().unwrap();
+            cache
+                .entry(key)
+                .or_insert_with(|| {
+                    let img = if adjust.exposure > 0.0 { &l.brighter } else { &l.darker };
+                    let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("exposure lut"),
+                        size: wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: CANVAS,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    });
+                    self.queue.write_texture(
+                        wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                        &img.data,
+                        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(img.width * 4), rows_per_image: Some(img.height) },
+                        wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },
+                    );
+                    tex
+                })
+                .clone()
+        });
+        // Tables of the wrong shape are ignored rather than read out of bounds.
+        let lut = lut.filter(|t| t.width() == 289 && t.height() == 17);
+        let params = adjust.params(lut.is_some());
+        let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::bytes_of(&params), usage: wgpu::BufferUsages::UNIFORM });
+        let src_view = src.create_view(&Default::default());
+        let lut_view = lut.as_ref().unwrap_or(&self.no_lut).create_view(&Default::default());
+        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.yuv_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&src_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&lut_view) },
+            ],
+        });
+        let dst_view = dst.create_view(&Default::default());
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &dst_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.adjust);
         pass.set_bind_group(0, &bind, &[]);
         pass.draw(0..3, 0..1);
     }
@@ -448,10 +559,13 @@ impl Compositor {
         let off = Params { src_size: [1.0, 1.0], dst_size: [1.0, 1.0], inv0: [0.0, 0.0, -100.0, 0.0], inv1: [0.0, 0.0, -100.0, 0.0], misc: [0.0; 4] };
         self.pass(enc, place_pipeline, &blank, canvas, off, Some(bg));
         let frame = self.frame.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let max = self.device.limits().max_texture_dimension_2d;
         for layer in layers {
-            let (sw, sh) = layer.source.size();
             let (dw, dh) = (layer.size[0], layer.size[1]);
-            let (tw, th) = ((dw.round() as u32).max(1), (dh.round() as u32).max(1));
+            // A layer zoomed past the GPU's texture limit is staged at the limit; the
+            // placement pass scales the rest.
+            let fit = (max as f64 / dw.max(dh).max(1.0)).min(1.0);
+            let (tw, th) = (((dw * fit).round() as u32).clamp(1, max), ((dh * fit).round() as u32).clamp(1, max));
             let cached = match layer.source {
                 Source::Cached(key, _) => self.cache.lock().unwrap().get_mut(&(key, tw, th)).map(|(tex, last)| {
                     *last = frame;
@@ -472,6 +586,8 @@ impl Compositor {
                             None => self.upload(&rgb_of(frame)),
                         },
                     };
+                    // The texture's own size (an oversize image is uploaded smaller).
+                    let (sw, sh) = (src.width(), src.height());
                     let resize = Params { src_size: [sw as f32, sh as f32], dst_size: [tw as f32, th as f32], inv0: [0.0; 4], inv1: [0.0; 4], misc: [1.0, DOWNSCALE_SHARPEN, 0.0, 0.0] };
                     let stage = if (tw, th) == (sw, sh) {
                         src
@@ -494,6 +610,21 @@ impl Compositor {
                     stage
                 }
             };
+            // Adjust sliders on the clip's own pixels, before placement.
+            let stage = match layer.adjust.filter(|(a, _)| !a.is_identity()) {
+                Some((a, luts)) => {
+                    let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
+                    self.adjust_pass(enc, &stage, &out, &a, luts);
+                    if matches!(layer.source, Source::Cached(..)) {
+                        keep.push(stage);
+                    } else {
+                        scratch.push(stage);
+                    }
+                    out
+                }
+                None => stage,
+            };
+            let adjusted = layer.adjust.is_some_and(|(a, _)| !a.is_identity());
             // Canvas pixel centre -> stage texture coordinates.
             let (sx, sy) = (dw / tw as f64, dh / th as f64);
             let (s, c) = layer.rotation.to_radians().sin_cos();
@@ -515,7 +646,7 @@ impl Compositor {
             };
             self.pass(enc, place_pipeline, &stage, canvas, place, None);
             // A keyed image's stage lives on in the cache; anything else is scratch.
-            if matches!(layer.source, Source::Cached(..)) {
+            if matches!(layer.source, Source::Cached(..)) && !adjusted {
                 keep.push(stage);
             } else {
                 scratch.push(stage);
@@ -624,6 +755,31 @@ impl Compositor {
         self.recycle(textures.scratch);
         RgbaImage { width, height, data }
     }
+}
+
+/// Average each `k`x`k` block (edges included as partial blocks).
+fn box_shrink(img: &RgbaImage, k: u32) -> RgbaImage {
+    let (w, h) = (img.width.div_ceil(k), img.height.div_ceil(k));
+    let mut data = vec![0u8; (w * h * 4) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = [0u32; 4];
+            let mut n = 0;
+            for yy in y * k..((y + 1) * k).min(img.height) {
+                for xx in x * k..((x + 1) * k).min(img.width) {
+                    let i = ((yy * img.width + xx) * 4) as usize;
+                    for c in 0..4 {
+                        sum[c] += img.data[i + c] as u32;
+                    }
+                    n += 1;
+                }
+            }
+            for c in 0..4 {
+                data[((y * w + x) * 4) as usize + c] = ((sum[c] + n / 2) / n) as u8;
+            }
+        }
+    }
+    RgbaImage { width: w, height: h, data }
 }
 
 /// CPU fallback for frames the GPU can't take directly (software-decoded, unusual formats).

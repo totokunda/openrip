@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use openrip_media::{DecoderOptions, MediaError, VideoDecoder, VideoFrame};
-use openrip_model::{MediaKind, Micros, Project, Segment, SizeUnit, TrackKind, CAPCUT_SIZE_UNIT_EM};
+use openrip_model::{EffectCategory, MediaKind, Micros, Project, Segment, SizeUnit, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_render::text::{self, Align, Font, TextStyle};
-use openrip_render::{Compositor, Layer, RenderError, RgbaImage, Source};
+use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, RenderError, RgbaImage, Source};
 
 /// CapCut's default font, used when a text run names none.
 const DEFAULT_FONT: &str = "/Applications/CapCut.app/Contents/Resources/Font/SystemFont/en.ttf";
@@ -146,6 +146,8 @@ pub struct PreviewEngine {
     failed: HashMap<String, String>,
     /// Rasterised text by content/style/size/sub-pixel origin, with the tick last used.
     texts: HashMap<u64, (std::sync::Arc<RgbaImage>, [f64; 2], u64)>,
+    /// CapCut's exposure tables by colour-bundle path (`None` if they couldn't be read).
+    exposure_luts: HashMap<String, Option<ExposureLuts>>,
     prefetch: Prefetcher,
     tick: u64,
 }
@@ -161,6 +163,7 @@ impl PreviewEngine {
             fonts: HashMap::new(),
             failed: HashMap::new(),
             texts: HashMap::new(),
+            exposure_luts: HashMap::new(),
             prefetch: Prefetcher::new(),
             tick: 0,
         })
@@ -297,6 +300,7 @@ impl PreviewEngine {
         let mut out = Vec::new();
         let trace = std::env::var_os("OPENRIP_TRACE").is_some();
         for seg in self.active(t) {
+            self.load_exposure_luts(&seg);
             let t0 = std::time::Instant::now();
             let got = self.pixels(&seg, t, w, h);
             if trace && t0.elapsed().as_millis() >= 10 {
@@ -316,6 +320,51 @@ impl PreviewEngine {
         let tick = self.tick;
         self.texts.retain(|_, (_, _, last)| tick - *last < 3);
         (out, report)
+    }
+
+    /// The clip's Adjust sliders (CapCut's colour adjustments), if any.
+    fn adjust_of(&self, seg: &Segment) -> Option<(Adjust, Option<&ExposureLuts>)> {
+        let mut a = Adjust::default();
+        let mut bundle = None;
+        for e in seg.attachments.iter().filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Adjust)) {
+            let v = e.params.get("intensity").copied().unwrap_or(0.0) as f32;
+            let slot = match e.builtin.as_deref() {
+                Some("brightness") => &mut a.brightness,
+                Some("contrast") => &mut a.contrast,
+                Some("saturation") => &mut a.saturation,
+                Some("highlights") => &mut a.highlights,
+                Some("shadows") => &mut a.shadows,
+                Some("whites") => &mut a.whites,
+                Some("blacks") => &mut a.blacks,
+                Some("temperature") => &mut a.temperature,
+                Some("tint") => &mut a.tint,
+                Some("exposure") => &mut a.exposure,
+                _ => continue,
+            };
+            *slot = v;
+            bundle = bundle.or(e.resource.as_deref());
+        }
+        if a.is_identity() {
+            return None;
+        }
+        Some((a, bundle.and_then(|b| self.exposure_luts.get(b)).and_then(Option::as_ref)))
+    }
+
+    /// Read the exposure tables from a clip's CapCut colour bundle, once per bundle.
+    fn load_exposure_luts(&mut self, seg: &Segment) {
+        let bundles: Vec<String> = seg
+            .attachments
+            .iter()
+            .filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.builtin.as_deref() == Some("exposure")))
+            .filter_map(|e| e.resource.clone())
+            .filter(|b| !self.exposure_luts.contains_key(b))
+            .collect();
+        for b in bundles {
+            let dir = Path::new(&b).join("AmazingFeature_adjustColor").join("image");
+            let read = |name: &str| load_png(&dir.join(name)).ok().filter(|i| (i.width, i.height) == (289, 17)).map(std::sync::Arc::new);
+            let luts = read("lightSensation_min.png").zip(read("lightSensation_max.png")).map(|(darker, brighter)| ExposureLuts { key: key_of(&b) & !1, darker, brighter });
+            self.exposure_luts.insert(b, luts);
+        }
     }
 
     fn pixels(&mut self, seg: &Segment, t: Micros, w: u32, h: u32) -> Result<Option<Pixels>, (String, String)> {
@@ -451,7 +500,7 @@ impl PreviewEngine {
         }
     }
 
-    fn layers<'a>(&self, pixels: &'a [(Segment, Pixels)], t: Micros, w: u32, h: u32) -> Vec<Layer<'a>> {
+    fn layers<'a>(&'a self, pixels: &'a [(Segment, Pixels)], t: Micros, w: u32, h: u32) -> Vec<Layer<'a>> {
         pixels
             .iter()
             .map(|(seg, p)| {
@@ -471,9 +520,13 @@ impl PreviewEngine {
                         flip_h: tr.flip_h,
                         flip_v: tr.flip_v,
                         opacity: 1.0,
+                        adjust: None,
                     },
                 };
                 layer.opacity *= seg.opacity.sample(local);
+                if !matches!(p, Pixels::Text(..)) {
+                    layer.adjust = self.adjust_of(seg);
+                }
                 layer
             })
             .collect()

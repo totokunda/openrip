@@ -1,7 +1,7 @@
 //! The compositor against values measured from CapCut's own exports
 //! (docs/parity/calibration.md, session 2). Skipped when no GPU adapter is available.
 
-use openrip_render::{Compositor, Layer, RgbaImage};
+use openrip_render::{Compositor, Layer, RgbaImage, Source};
 
 fn gpu() -> Option<Compositor> {
     match Compositor::new() {
@@ -136,5 +136,42 @@ fn sideways_sources_are_shown_upright() {
         for x in 0..64 {
             assert_eq!(px(&out, 31 - y, x), px(&src, x, y), "({x}, {y})");
         }
+    }
+}
+
+/// Layers zoomed past the GPU's texture limit, and images larger than it, still draw
+/// (they used to panic in wgpu).
+#[test]
+fn oversize_layers_and_images_draw() {
+    let Ok(c) = Compositor::new() else { return };
+    let img = RgbaImage { width: 9000, height: 2000, data: vec![200; 9000 * 2000 * 4] };
+    let out = c.render(64, 64, [0, 0, 0], &[Layer::from_model(Source::Image(&img), [64, 64], [0.0, 0.0], [1.0, 1.0], 0.0)]);
+    assert!(out.data.chunks_exact(4).any(|p| p[0] > 100));
+    let small = RgbaImage { width: 16, height: 16, data: vec![255; 16 * 16 * 4] };
+    let out = c.render(64, 64, [0, 0, 0], &[Layer::from_model(Source::Image(&small), [64, 64], [0.0, 0.0], [600.0, 600.0], 0.0)]);
+    assert!(out.data.chunks_exact(4).all(|p| p[0] == 255));
+}
+
+/// CapCut's Adjust sliders: saturation -1 leaves CapCut's luma weights; brightness +0.5
+/// follows y = 1 - (1 - x)^p, p = 1 + 5 * 0.3 * 0.5 (sliders up to 0.7 are scaled by 0.3).
+#[test]
+fn adjust_sliders_follow_capcuts_formulas() {
+    let Ok(c) = Compositor::new() else { return };
+    let img = RgbaImage { width: 4, height: 4, data: [200u8, 100, 50, 255].repeat(16) };
+    let draw = |a: openrip_render::Adjust| {
+        let mut l = Layer::from_model(Source::Image(&img), [4, 4], [0.0, 0.0], [1.0, 1.0], 0.0);
+        l.adjust = Some((a, None));
+        c.render(4, 4, [0, 0, 0], &[l]).data[..3].to_vec()
+    };
+    let grey = draw(openrip_render::Adjust { saturation: -1.0, ..Default::default() });
+    let luma = (0.208540 * 200.0 + 0.702086 * 100.0 + 0.089374 * 50.0f64).round() as i32;
+    for v in grey {
+        assert!((v as i32 - luma).abs() <= 1, "{v} vs {luma}");
+    }
+    let bright = draw(openrip_render::Adjust { brightness: 0.5, ..Default::default() });
+    let p = 1.0 + 5.0 * 0.3 * 0.5;
+    for (v, x) in bright.iter().zip([200.0, 100.0, 50.0f64]) {
+        let want = (255.0 * (1.0 - (1.0 - x / 255.0).powf(p))).round() as i32;
+        assert!((*v as i32 - want).abs() <= 1, "{v} vs {want}");
     }
 }

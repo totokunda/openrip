@@ -504,7 +504,8 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         name: s(m, "name"),
                         params,
                         builtin: adjust.map(str::to_string),
-                        resource: None,
+                        // CapCut's downloaded bundle (for Adjust: its exposure tables).
+                        resource: Some(s(m, "path")).filter(|p| !p.is_empty()),
                         library,
                     });
                     true
