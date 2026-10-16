@@ -257,8 +257,10 @@ def build(name, spec, template: Path, root: Path, media_dir: Path, replace=False
                 text.update(content=json.dumps(content, separators=(",", ":")), font_size=c.size, text_size=round(c.size * 2), fixed_width=c.fixed_width,
                             bold_width=0.008 if c.bold else 0.0, italic_degree=10 if c.italic else 0)
                 if c.background:
+                    # CapCut draws the box only with check_flag bit 0x10 (calibration session 3).
                     text.update(background_color="#000000", background_alpha=1.0, background_style=2, background_round_radius=0.4,
-                                background_width=c.background, background_height=c.background, background_vertical_offset=0.0, background_horizontal_offset=0.0)
+                                background_width=c.background, background_height=c.background, background_vertical_offset=0.0, background_horizontal_offset=0.0,
+                                check_flag=int(text.get("check_flag", 7)) | 0x10)
                 seg.update(target_timerange={"start": us(c.start), "duration": us(c.dur)}, track_render_index=ti)
                 seg["clip"]["scale"] = {"x": c.scale, "y": c.scale}
                 if c.anim:

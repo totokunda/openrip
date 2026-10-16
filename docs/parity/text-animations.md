@@ -26,4 +26,4 @@ Opacity applies per character to the fill and the stroke. The background box sta
 
 **Checks:**
 - **Covers.** CapCut's draft covers render the first frame with the animation applied: the drafts that open on a Type 2 caption have none on their cover, as the timing above predicts.
-- **Calibration session 5.** It measures the exact timing, and the caret, against CapCut's export ([calibration.md](calibration.md#session-5-text-intros-and-line-wrapping)).
+- **Calibration session 5.** CapCut's export confirms all three timings: Type 1 frame for frame, Type 2 to an rms opacity of 0.002, and Typewriter's every reveal frame at 2 s and at 1/3 s. The caret it measures (size, position, when it shows) is in [calibration.md](calibration.md#session-5-text-intros-and-line-wrapping).

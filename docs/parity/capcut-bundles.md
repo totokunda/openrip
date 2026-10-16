@@ -62,7 +62,7 @@ The importer reads `effectStyle.json` into the project (`Effect::text_style`). T
 - the strokes, last first;
 - the fill.
 
-Each layer is drawn glyph by glyph in text order. A stroke covers the glyph grown by its width; its unit is the same provisional unit as plain strokes until calibration session 3.
+Each layer is drawn glyph by glyph in text order. A stroke covers the glyph grown by its width, in the unit of plain strokes: `width` × em, as calibration session 3 measured.
 
 **Texture mapping.** This follows CapCut's text-style shader, whose GLSL source ships inside its engine library:
 - `range` splits the texture into that many vertical strips; character i (counting every character) takes the square around the middle of strip i mod `range`;
@@ -74,12 +74,11 @@ Two things the shader alone doesn't fix were fitted against a CapCut export (a 1
 - **`scale` magnifies the texture** (0.44 makes its pieces 1/0.44 times larger). The shader divides by its scale uniform, so CapCut evidently passes 1/`scale`.
 - **The character's box is a square of 0.6 em centred on the glyph.** Neither the glyph's own box (narrow letters then get slivers of paper, where CapCut gives them full pieces) nor the glyph plus its stroke (pieces too large) matches.
 
-Result on that export, at the frames with the styled captions: PSNR +1.5 to +2.8 dB (16.1–18.4 dB before, 18.9–20.0 dB after), and no frame worse. Text with a library style also wraps wider than plain text ([text-wrap.md](text-wrap.md)).
+Result on that export, at the frames with the styled captions: PSNR +1.5 to +2.8 dB (16.1–18.4 dB before, 18.9–20.0 dB after), and no frame worse. Text with a library style wraps by the same rule as plain text ([text-wrap.md](text-wrap.md)); it only looked wider because that caption's box is wide.
 
 Still approximate:
 - gradients are drawn with their first colour;
 - the shadow `diffuse` is a box blur of the shadow's body;
-- stroke widths use the provisional unit;
 - SDF-effect styles (the other kind) aren't drawn yet.
 
 Styled text is slow to draw, so the preview keeps it as per-character pieces and redraws only their opacity while a typing intro runs. On that draft's intro, playback p95 at 540p is 4.7 ms, against 20 ms when it was redrawn each frame.

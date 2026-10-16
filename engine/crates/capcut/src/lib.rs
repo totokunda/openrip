@@ -356,9 +356,10 @@ const ADJUST_TYPES: &[(&str, &str)] = &[
 /// from the scripts CapCut downloads with them (docs/parity/text-animations.md).
 const BUILTIN_ANIMATIONS: &[(&str, &str)] = &[("6724920249654710791", "type_1"), ("6724920636403094028", "type_2"), ("7210980292243231233", "typewriter")];
 
-/// Where CapCut wraps a fixed-size text box: this fraction of the canvas width, on screen
-/// (measured; see `import_text`). It is CapCut's default `line_max_width`.
-const CAPCUT_WRAP: f32 = 0.82;
+/// Where CapCut wraps a fixed-size text box: this fraction of the canvas width per unit of
+/// its `fixed_width`, at the clip's scale 1 (calibration session 5 bounds it to
+/// 0.001330–0.001366, draft covers to ≥ 0.001335 and a styled export to < 0.001344).
+const CAPCUT_WRAP_PER_UNIT: f32 = 0.00134;
 
 /// A library text style from its bundle's `effectStyle.json` (the declarative kind; see
 /// docs/parity/capcut-bundles.md). `None` when the bundle isn't on this machine or is the
@@ -685,8 +686,10 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             }
         })
         .collect();
-    // Style 0 is "no background": CapCut keeps a colour and alpha (black, 1.0) even then.
-    let background = (i(m, "background_style") != 0).then(|| {
+    // Style 0 is "no background": CapCut keeps a colour and alpha (black, 1.0) even then. It
+    // draws one only when `check_flag` has bit 0x10 too (calibration session 3: a style-2 box
+    // without the bit isn't drawn; every real text with a background has it).
+    let background = (i(m, "background_style") != 0 && i(m, "check_flag") & 0x10 != 0).then(|| {
         let mut color = Rgba::from_hex(&s(m, "background_color")).unwrap_or(Rgba::BLACK);
         color.a = f(m, "background_alpha", 1.0) as f32;
         TextBackground {
@@ -717,11 +720,10 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             line_spacing: f(m, "line_spacing", 0.0) as f32,
             background,
             shadow,
-            // Measured on CapCut's own renders (draft covers, exports, calibration session 2):
-            // a box with a fixed width wraps at 0.82 of the canvas width on screen, whatever
-            // its `fixed_width`, its own `line_max_width`, the font size or the clip's scale;
-            // an auto-sized box (`fixed_width` -1) doesn't wrap. See docs/parity/text-wrap.md.
-            max_width: (f(m, "fixed_width", -1.0) > 0.0).then_some(CAPCUT_WRAP),
+            // A box with a fixed width wraps at a width proportional to `fixed_width`, scaled
+            // with the clip and independent of the font size; an auto-sized box (`fixed_width`
+            // -1) doesn't wrap (calibration session 5; docs/parity/text-wrap.md).
+            max_width: Some(f(m, "fixed_width", -1.0) as f32).filter(|w| *w > 0.0).map(|w| w * CAPCUT_WRAP_PER_UNIT),
         },
     }
 }
@@ -877,13 +879,20 @@ mod tests {
             {"type": "in", "name": "Type 2", "resource_id": "6724920636403094028", "start": 0, "duration": 1_333_333, "path": "/cache/x"},
             {"type": "out", "name": "Other", "resource_id": "1", "start": 2_000_000, "duration": 500_000, "path": ""}]}]);
         let Imported { project, .. } = import_draft_json(&d, "hint").unwrap();
-        assert_eq!(project.materials.texts[0].layout.max_width, Some(0.82));
+        // A 600-wide box wraps at 0.804 of the canvas width (at the clip's scale 1).
+        assert!((project.materials.texts[0].layout.max_width.unwrap() - 0.804).abs() < 1e-6);
         let a = &project.materials.animations[0].items;
         assert_eq!((a[0].kind.clone(), a[0].builtin.as_deref(), a[0].duration, a[0].resource.as_deref()), (AnimationKind::In, Some("type_2"), Micros(1_333_333), Some("/cache/x")));
         assert_eq!((a[1].kind.clone(), a[1].builtin.as_deref(), a[1].resource.as_deref()), (AnimationKind::Out, None, None));
         // An auto-sized box doesn't wrap.
         d["materials"]["texts"][0]["fixed_width"] = json!(-1.0);
         assert_eq!(import_draft_json(&d, "hint").unwrap().project.materials.texts[0].layout.max_width, None);
+        // A background is drawn only with check_flag bit 0x10.
+        d["materials"]["texts"][0]["background_style"] = json!(2);
+        d["materials"]["texts"][0]["check_flag"] = json!(7);
+        assert!(import_draft_json(&d, "hint").unwrap().project.materials.texts[0].layout.background.is_none());
+        d["materials"]["texts"][0]["check_flag"] = json!(23);
+        assert!(import_draft_json(&d, "hint").unwrap().project.materials.texts[0].layout.background.is_some());
     }
 
     #[test]

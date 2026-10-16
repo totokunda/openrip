@@ -91,7 +91,7 @@ The geometry agrees to 0.09 px at 45°.
 
 **3. Colour path is neutral.** The grey ramp and every patch survive within ±1 code value: no tone curve, BT.709 matrix, TV range.
 
-**4. Text size follows the canvas width, linearly.** Ink widths at sizes 10, 15 and 30 give 0.005786–0.005789 × canvas width per size unit at 1080p and 4K, the same constant session 1 found on a square canvas. Whether it is the width or the longer side is checked on a portrait canvas in session 3. Our text lands within about 1 px of CapCut's; CapCut's glyphs carry about 1.7% more ink (slightly bolder strokes or different edge smoothing), and per-glyph spacing differs by about 1 px because the reference uses Pillow's basic layout instead of HarfBuzz.
+**4. Text size follows the canvas width, linearly.** Ink widths at sizes 10, 15 and 30 give 0.005786–0.005789 × canvas width per size unit at 1080p and 4K, the same constant session 1 found on a square canvas. It is the width, not the longer side: session 3's portrait text (1080×1920, size 15) is 524 px wide in CapCut and in OpenRip. Our text lands within about 1 px of CapCut's; CapCut's glyphs carry about 1.7% more ink (slightly bolder strokes or different edge smoothing), and per-glyph spacing differs by about 1 px because the reference uses Pillow's basic layout instead of HarfBuzz.
 
 **Side-by-side, with the measured pipeline** (`bench/calibration/capcut_model.py`, full frames through the export simulation):
 
@@ -116,10 +116,10 @@ The geometry agrees to 0.09 px at 45°.
 
 Horizontal placement is within 0.3 px everywhere; the shaping and kerning fixed Pillow's per-glyph drift. Two gaps remain:
 
-- **Vertical:** our text sits 0.4–1.6 px higher than CapCut's. With that shift removed, the four cases match at 42.4 / 35.0 / 45.6 / 44.4 dB. The offset is 0.0023 em at sizes 15 and 30 on 16:9, but 0.0147 em at size 10 and on the square canvas. The font's hhea, typo and win metrics all give a line box of exactly 1 em, so this looks like CapCut snapping the text box to whole pixels by a rule four samples can't pin down. Session 3's portrait text adds data points.
-- **Weight:** CapCut's glyphs carry about 1.8% more ink, which points to slight emboldening or gamma in its rasteriser.
+- **Vertical:** our text sits 0.4–1.6 px higher than CapCut's. With that shift removed, the four cases match at 42.4 / 35.0 / 45.6 / 44.4 dB. The offset is 0.0023 em at sizes 15 and 30 on 16:9, but 0.0147 em at size 10 and on the square canvas. The font's hhea, typo and win metrics all give a line box of exactly 1 em, so this looks like CapCut snapping the text box to whole pixels by a rule four samples can't pin down. Sessions 3 and 5 add 0.25 px (size 15, 1920 wide), about 1 px (size 15, portrait) and 0.75 px (size 30, portrait), still with no clear rule.
+- **Weight and softness:** CapCut's glyphs carry about 1% more ink (size 30 in session 5: 20,458 against 20,284). Its edges are also slightly softer: blurring ours by a Gaussian of 0.3–0.5 px gains 2.5–3.5 dB on sessions 2, 3 and 5. This is consistent with CapCut's distance-field text rendering.
 
-**Still open: image borders.** Content edges inside an image now match, but CapCut softens the outer border of an image to about 3 px (10–90%) where our model gives 1.4 px, and its border sits about 1.6 px inside the nominal size (session 1 measured "536 of 540 px"). Session 2's chart has a black background, so its borders were invisible; session 3 tests them over grey.
+**Image borders (session 3, over grey):** a 1:1, pixel-aligned image has edges as sharp as ours (65 dB). Once an image is resampled or placed off the pixel grid, CapCut's edge ramps over 2–3 px where ours takes 1, for example 128 → 109 → 89 → 80 → 76 against 128 → 83 → 76 at 50%. Interiors match (43–74 dB). Not modelled yet.
 
 ## Session 3: image borders, other scale factors, opacity, portrait text
 
@@ -141,6 +141,22 @@ Session 3 is generated too (`make_draft.py`), as two drafts:
 | 13–14 s | default text, size 15, black background box (style 2, width/height 0.28, radius 0.4; text track) | background padding and corner radius scales (the common real setting) |
 
 **`openrip-calibration-3-portrait`** (9:16, 1080×1920): `pattern.png` contain-fit (a 0.5625 downscale) 0–1 s, `marker.png` 1:1 at 1–2 s, then default text size 15 over black at 2–3 s (width or longer side).
+
+### Results — 2026-10-16 (CapCut 9.5)
+
+Detailed numbers: [results/2026-10-16-calibration-3-5.md](results/2026-10-16-calibration-3-5.md).
+
+- **Stroke width:** the stroke reaches exactly `width` × em outside the glyph.
+  - At em 166.7 px, darkness crosses 50% at 10.0 px for 0.06 and 25.0 px for 0.15.
+  - Sweeping the reach factor scores the band outside the glyph at 31.8 / 33.0 dB for 1.00, 28.4 / 23.7 for 1.05 and 23.3 / 19.5 for 1.10.
+  - The fill is not emboldened, and small counters (e, a) fill solid at 0.15, as ours do.
+  - The same unit applies to library text styles.
+- **Background box:** CapCut drew none at 13–14 s. It draws a text background only when the text's `check_flag` has bit 0x10. Every real text with a background has that bit, and `make_draft.py` now sets it. The box itself was measured on four exports of real drafts instead:
+  - **Per line.** One rounded box per line, padded by `background_width` / `background_height` em on each side: 0.25–0.28 em left and right, 0.25–0.31 em top and bottom, at 0.28. OpenRip used half that.
+  - **Merging.** Neighbouring lines whose widths differ by 0.27 or 0.44 em a side share the wider box; lines 1.25 em apart keep their own.
+  - **Corners.** Radius 0.4 draws 9.0, 11.0 and 16.0 px at clip scales 0.672, 0.731 and 0.862, which is 0.22 em × scale (±4%).
+- **Images:** see "Image borders" above. Opacity blends as ours does (45.8 dB at 50%). Minifying fine detail by 37.5% or 75% differs: CapCut is closer to sampling a 2×-box mip pyramid than to exact area averaging (1-px checker at 37.5%: 37.6 against 27.8 dB). Smooth content matches either way (49–66 dB).
+- **720p export of a 1080p canvas:** images match whether we render at 720p or at 1080p and shrink. Text matches far better rendered at 1080p and shrunk bilinearly (37.0 against 26.1 dB). CapCut evidently rasterises text at the canvas size and resamples it like a layer. OpenRip still rasterises text at the output size.
 
 ### Steps (sessions 3, 4 and 5 together)
 
@@ -170,6 +186,16 @@ CapCut stores each Adjust slider as an effect material: `type` names the slider,
 
 The adjustments are cloned from ones your own drafts already use, so CapCut finds their effect bundle in its cache. Nothing is copied into the repo.
 
+### Results — 2026-10-16
+
+The sliders reimplemented from CapCut's colour bundle ([adjust.md](adjust.md)) match it within ±2 code values on the grey ramp and every patch, at both ends of the range:
+- brightness, contrast, saturation, highlight, shadow, white, black, exposure: chart PSNR 49.0–61.0 dB;
+- sharpen: 44.7 / 38.8 dB at 0.5 / 1.
+
+Differences:
+- **Temperature and tint:** flat areas match within ±2, but fine detail doesn't take the tint. On the 1-px checker at temperature +1, CapCut's white pixels become neutral grey 210 where ours turn (255, 212, 52); 4-px lines are partly tinted. The tint evidently follows a low-pass copy of the image. Chart PSNR is 25.0–43.1 dB, nearly all of it in the fine-detail regions. Real drafts use temperature at −0.37 and 0.02.
+- **Fade, clarity (`clear`), vignette:** not drawn. Fade is used by no local draft, clarity only at 0.02, and vignette twice at 0.08.
+
 ## Session 5: text intros and line wrapping
 
 Two things real drafts use that session 2's short default text never showed: library intros that reveal text character by character (85 animated clips in the local drafts: "Type 2", "Typewriter", "Type 1"), and line wrapping. What is implemented already, and why, is in [text-animations.md](text-animations.md) and [text-wrap.md](text-wrap.md); this session measures it. The animations are cloned from drafts that already use them, so CapCut finds their bundles in its cache.
@@ -190,3 +216,15 @@ Two things real drafts use that session 2's short default text never showed: lib
 | 20 / 21 / 22 s | "Bold" bold, "Bold" regular, "Italic" italic, size 30 | the synthetic bold's strength (`bold_width` 0.008) and the italic shear (10°; matches a cover already) |
 
 **`openrip-calibration-5-landscape`** (16:9, 1920×1080): the words with box widths 600 and 1200, then an auto box at size 8: whether `fixed_width` is relative to the canvas width.
+
+### Results — 2026-10-16
+
+- **Intros:** each character's opacity was read frame by frame from the export.
+  - **Type 1** matches [text-animations.md](text-animations.md) frame for frame: character i, spaces counted, appears at d·i/(n+1).
+  - **Type 2** matches with an rms opacity error of 0.002 over 1,320 character samples.
+  - **Typewriter** matches every character's reveal frame at 2 s and at 1/3 s (the fast rhythm table).
+- **Typewriter caret (not drawn yet):** a bar 0.065 em wide, from 0.872 em above the baseline to 0.116 em below, at the advance end of the last shown character. It is visible from the start of the intro until its end (gone within 1/30 s of it). During longer pauses it blinks off for two frames.
+- **Wrapping:** the rule is different from the one inferred from covers. A fixed box wraps at 0.00134 × `fixed_width` × canvas width × clip scale, and a continuation line is measured with the space it broke at. See [text-wrap.md](text-wrap.md). Every clip's breaks now match, including the landscape ones; an auto box never wraps.
+- **Bold:** strength matches (`bold_width` 0.008 grows each edge by 1.30 px in CapCut, 1.31 px in ours at size 30). swash's embolden also moved each glyph by its strength right and up; corrected, the bold clip goes from 15.4 to 31.3 dB.
+- **Italic:** 10° matches, but CapCut shears about a line 0.268 em above the baseline, not the baseline. Corrected, the italic clip goes from 9.2 to 24.9 dB, the same as the regular clip with its known vertical offset.
+- **Stroke with Type 1:** black stroke over the black background, so it can't be seen; unmeasured.

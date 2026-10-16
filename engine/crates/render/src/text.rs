@@ -190,6 +190,8 @@ pub struct TextLayout {
     pub width: f32,
     pub height: f32,
     size: f32,
+    /// Each line's left edge and width in the block, and its line box (top, height).
+    lines: Vec<[f32; 4]>,
 }
 
 /// Rasterised text.
@@ -237,6 +239,7 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
     let width = lines.iter().map(|l| l.1).fold(0.0, f32::max);
     let height = line_box + advance_y * (lines.len().saturating_sub(1)) as f32;
     let mut glyphs = Vec::new();
+    let mut boxes = Vec::new();
     for (i, (line, w)) in lines.into_iter().enumerate() {
         let x0 = match style.align {
             Align::Left => 0.0,
@@ -244,9 +247,10 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
             Align::Right => width - w,
         };
         let baseline = m.ascent + i as f32 * advance_y;
+        boxes.push([x0, w, i as f32 * advance_y, line_box]);
         glyphs.extend(line.into_iter().map(|(glyph, x, char_index)| Placed { glyph, x: x0 + x, baseline, char_index }));
     }
-    TextLayout { glyphs, width, height, size: style.size }
+    TextLayout { glyphs, width, height, size: style.size, lines: boxes }
 }
 
 /// A shaped cluster: its glyphs (id, x from the cluster's start) and advance, letter
@@ -263,12 +267,15 @@ fn is_cjk(c: char) -> bool {
 }
 
 /// Greedy line breaking: break before a word (after spaces) or before/after a CJK character
-/// when the line would get wider than `max`. Spaces at a break are dropped. A piece wider
-/// than a whole line breaks between characters.
+/// when the line would get wider than `max`. Spaces at a break are dropped from the drawn
+/// lines, but, as in CapCut, the next line is measured with them in front (calibration
+/// session 5: no single width reproduces its breaks otherwise). A piece wider than a whole
+/// line breaks between characters.
 fn wrap(clusters: &[Cluster], max: Option<f32>) -> Vec<&[Cluster]> {
     let Some(max) = max.filter(|m| *m > 0.0) else { return vec![clusters] };
     let mut rows = Vec::new();
     let mut start = 0; // first cluster of the row
+    let mut carry = 0.0; // width of the spaces the row was broken at, counted against it
     let mut i = 0;
     while i < clusters.len() {
         // The next unbreakable piece: a CJK character, or a run up to the next space or CJK
@@ -284,12 +291,18 @@ fn wrap(clusters: &[Cluster], max: Option<f32>) -> Vec<&[Cluster]> {
         }
         let ink_end = (i..end).rev().find(|&k| clusters[k].ch != ' ').map_or(i, |k| k + 1);
         let width = |from: usize, to: usize| clusters[from..to].iter().map(|c| c.advance).sum::<f32>();
-        if ink_end > i && width(start, ink_end) > max {
+        if ink_end > i && carry + width(start, ink_end) > max {
             if start < i {
                 // Break before this piece (dropping the spaces that ended the row).
                 let row_end = (start..i).rev().find(|&k| clusters[k].ch != ' ').map_or(start, |k| k + 1);
                 rows.push(&clusters[start..row_end]);
+                carry = width(row_end, i);
                 start = i;
+                continue;
+            }
+            if width(start, ink_end) <= max {
+                // Only the carried space makes it too wide: the piece takes the line.
+                i = end;
                 continue;
             }
             // The piece alone is too wide: break it between characters.
@@ -298,6 +311,7 @@ fn wrap(clusters: &[Cluster], max: Option<f32>) -> Vec<&[Cluster]> {
                 k += 1;
             }
             rows.push(&clusters[start..k]);
+            carry = 0.0;
             start = k;
             i = k;
             continue;
@@ -354,7 +368,8 @@ impl TextLayout {
             if alpha == 0.0 {
                 continue;
             }
-            let (x, y) = (left + g.x, top + g.baseline);
+            let [dx, dy] = synthetic_style_offset(style, self.size);
+            let (x, y) = (left + g.x + dx, top + g.baseline + dy);
             let offset = Vector::new(x.fract(), y.fract());
             if let Some(cov) = outline.as_mut() {
                 // Centred on the outline, so twice as wide as its reach outside the glyph.
@@ -386,15 +401,42 @@ impl TextLayout {
     /// Background box coverage, anti-aliased by distance to its rounded edge.
     fn background(&self, style: &TextStyle, left: f32, top: f32, w: u32, h: u32) -> Option<([u8; 4], Vec<f32>)> {
         style.background.map(|(color, [px, py], radius)| {
-            let (x0, y0, x1, y1) = (left - px, top - py, left + self.width + px, top + self.height + py);
-            let r = radius.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
-            let (cx, cy, hx, hy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0, (x1 - x0) / 2.0 - r, (y1 - y0) / 2.0 - r);
+            // One box per line, padded by (px, py), as CapCut draws them (measured on its
+            // exports). Neighbouring lines whose widths differ by up to twice the padding on
+            // each side share the wider one's width (merged at 0.27 and 0.44 em a side,
+            // separate at 1.25 em).
+            let mut spans: Vec<[f32; 2]> = self.lines.iter().map(|l| [l[0], l[0] + l[1]]).collect();
+            for _ in 0..spans.len() {
+                for k in 1..spans.len() {
+                    let (a, b) = (spans[k - 1], spans[k]);
+                    if a != b && ((a[1] - a[0]) - (b[1] - b[0])).abs() / 2.0 <= 2.0 * px {
+                        let wide = if a[1] - a[0] >= b[1] - b[0] { a } else { b };
+                        spans[k - 1] = wide;
+                        spans[k] = wide;
+                    }
+                }
+            }
+            let boxes: Vec<[f32; 5]> = self
+                .lines
+                .iter()
+                .zip(&spans)
+                .map(|(l, s)| {
+                    let (x0, y0, x1, y1) = (left + s[0] - px, top + l[2] - py, left + s[1] + px, top + l[2] + l[3] + py);
+                    let r = radius.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
+                    [(x0 + x1) / 2.0, (y0 + y1) / 2.0, (x1 - x0) / 2.0 - r, (y1 - y0) / 2.0 - r, r]
+                })
+                .collect();
             let cov: Vec<f32> = (0..(w * h) as usize)
                 .map(|i| {
-                    // Signed distance to the rounded rectangle, sampled at the pixel centre.
+                    // Signed distance to the nearest rounded rectangle, sampled at the pixel centre.
                     let (x, y) = ((i as u32 % w) as f32 + 0.5, (i as u32 / w) as f32 + 0.5);
-                    let (dx, dy) = ((x - cx).abs() - hx, (y - cy).abs() - hy);
-                    let d = (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0) - r;
+                    let d = boxes
+                        .iter()
+                        .map(|&[cx, cy, hx, hy, r]| {
+                            let (dx, dy) = ((x - cx).abs() - hx, (y - cy).abs() - hy);
+                            (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0) - r
+                        })
+                        .fold(f32::INFINITY, f32::min);
                     (0.5 - d).clamp(0.0, 1.0)
                 })
                 .collect();
@@ -569,6 +611,17 @@ fn finish(px: Vec<[f32; 4]>, w: u32, h: u32, center: [f64; 2]) -> RenderedText {
 
 /// Side of the square a text style's paint is mapped onto, in em (see `prepare_effect`).
 const PAINT_BOX: f32 = 0.6;
+
+/// Where CapCut's italic shear pivots: this far above the baseline, in em (calibration
+/// session 5: 10° italic at size 30; swash shears about the baseline).
+const ITALIC_PIVOT: f32 = 0.268;
+
+/// How far to move a glyph (px, +y down) so synthetic bold and italic sit where CapCut puts
+/// them. swash's embolden grows every edge by `bold` and also moves the glyph `bold` right and
+/// up; CapCut grows it in place. CapCut's italic shears about [`ITALIC_PIVOT`].
+pub fn synthetic_style_offset(style: &TextStyle, size: f32) -> [f32; 2] {
+    [-style.bold - style.italic.to_radians().tan() * ITALIC_PIVOT * size, style.bold]
+}
 
 fn premul(c: [u8; 4], cov: f32) -> [f32; 4] {
     let a = cov * c[3] as f32 / 255.0;
