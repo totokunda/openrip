@@ -6,13 +6,18 @@ import { create } from "zustand";
 import {
   engineInfo,
   engineSyncProject,
+  enginePlay,
+  enginePause,
+  engineSourcePaths,
+  onEngineClock,
+  onEngineEnded,
   getEnginePreviewEnabled,
   setEnginePreviewEnabled,
   type EngineInfo,
   type EngineProjectInfo,
 } from "@app/preload";
 import { useClipStore } from "./clip";
-import { useControlsStore } from "./control";
+import { useControlsStore, setPlaybackDriver } from "./control";
 import { useViewportStore } from "./viewport";
 import { useProjectsStore } from "./projects";
 import { getActiveProjectJsonSnapshot } from "./middlewares/json-persistence";
@@ -36,6 +41,8 @@ export const useEnginePreviewStore = create<EnginePreviewState>((set) => ({
   version: 0,
   error: null,
   setEnabled: (on) => {
+    // Hand playback back (or over) cleanly: stop whatever is playing first.
+    if (useControlsStore.getState().isPlaying) useControlsStore.getState().pause();
     // Until the first sync, the app's own preview keeps drawing.
     set({ enabled: on, project: null, error: null });
     void setEnginePreviewEnabled(on);
@@ -43,9 +50,16 @@ export const useEnginePreviewStore = create<EnginePreviewState>((set) => ({
   },
 }));
 
+const drawsNow = (s: EnginePreviewState) => s.enabled && !!s.info?.available && s.project != null;
+
 /** Whether the engine draws the preview right now. */
-export const useEngineDraws = () =>
-  useEnginePreviewStore((s) => s.enabled && !!s.info?.available && s.project != null);
+export const useEngineDraws = () => useEnginePreviewStore(drawsNow);
+
+/** The preview's size on screen in pixels, which playback renders at (set by EngineFrame). */
+let previewSize = { width: 1280, height: 720 };
+export const setEnginePreviewSize = (width: number, height: number) => {
+  previewSize = { width, height };
+};
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 let syncing = false;
@@ -65,7 +79,10 @@ async function syncNow() {
   }
   syncing = true;
   try {
-    const r = await engineSyncProject(snap.projectId, snap.snapshot);
+    // The engine reads originals (ProRes included) where the app uses proxies or playable
+    // copies.
+    const snapshot = await withOriginalMedia(snap.snapshot);
+    const r = await engineSyncProject(snap.projectId, snapshot);
     if (r.ok) {
       useEnginePreviewStore.setState((s) => ({ project: r.project, version: s.version + 1, error: null }));
     } else {
@@ -79,6 +96,20 @@ async function syncNow() {
       scheduleSync(0);
     }
   }
+}
+
+/** The snapshot with each asset's path pointing at its original file. */
+async function withOriginalMedia<T>(snapshot: T): Promise<T> {
+  const assets = (snapshot as any)?.assets;
+  if (!assets || typeof assets !== "object") return snapshot;
+  const entries = Object.entries(assets as Record<string, any>).filter(([, a]) => typeof a?.path === "string");
+  if (entries.length === 0) return snapshot;
+  const originals = await engineSourcePaths(entries.map(([, a]) => a.path));
+  const mapped = { ...(assets as Record<string, any>) };
+  entries.forEach(([id, a], i) => {
+    if (originals[i] !== a.path) mapped[id] = { ...a, path: originals[i] };
+  });
+  return { ...(snapshot as any), assets: mapped };
 }
 
 /** Sync soon; edits arriving within `ms` are sent together. */
@@ -112,4 +143,47 @@ export function initEnginePreview() {
   watch(useControlsStore.subscribe as any, (s: any) => [s.fps]);
   watch(useViewportStore.subscribe as any, (s: any) => [s.aspectRatio]);
   watch(useProjectsStore.subscribe as any, (s: any) => [s.activeProjectId, (s as any).projectsLoaded]);
+
+  // Playback by the engine: its sound, and its clock moving the playhead. Each run has a
+  // token, so ticks still in flight from a run that was stopped (a seek while playing
+  // stops and restarts) are ignored.
+  let run = 0;
+  let playing = false;
+  setPlaybackDriver({
+    active: () => drawsNow(useEnginePreviewStore.getState()),
+    play: (fromFrame) => {
+      const { fps } = useControlsStore.getState();
+      const token = ++run;
+      playing = true;
+      void enginePlay((fromFrame / Math.max(1, fps)) * 1e6, previewSize.width, previewSize.height, token).then((r) => {
+        if (!r.ok && token === run) {
+          console.warn("[engine] play failed:", r.error);
+          playing = false;
+          useControlsStore.getState().setIsPlaying(false);
+        }
+      });
+    },
+    pause: () => {
+      const token = run;
+      playing = false;
+      const focusAtPause = useControlsStore.getState().focusFrame;
+      void enginePause().then((atUs) => {
+        // Show where the sound actually stopped, unless the playhead has moved since (a
+        // seek) or a new run started.
+        const c = useControlsStore.getState();
+        if (atUs < 0 || token !== run || c.isPlaying || c.focusFrame !== focusAtPause) return;
+        c.setFocusFrame(Math.round((atUs * c.fps) / 1e6), false);
+      });
+    },
+  });
+  onEngineClock((timeUs, token) => {
+    const c = useControlsStore.getState();
+    if (!playing || token !== run || !c.isPlaying) return;
+    c.setFocusFrame(Math.round((timeUs * c.fps) / 1e6), false);
+  });
+  onEngineEnded((_atUs, token) => {
+    if (token !== run) return;
+    playing = false;
+    useControlsStore.getState().pause();
+  });
 }

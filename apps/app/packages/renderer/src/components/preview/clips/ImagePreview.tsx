@@ -51,7 +51,7 @@ const ImagePreview: React.FC<
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // The Rust engine draws the preview: draw nothing here, keep the handles.
-  const engineDraws = useEngineDraws();
+  const engineDraws = useEngineDraws() && !inputMode;
   const imageRef = useRef<Konva.Image>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const suppressUntilRef = useRef<number>(0);

@@ -116,7 +116,7 @@ const TextPreview: React.FC<
   const [isEditing, setIsEditing] = useState(false);
   // The Rust engine draws the preview: hide this text (keeping its handles), except while
   // it's being typed, so each keystroke shows at once.
-  const engineHides = useEngineDraws() && !isEditing;
+  const engineHides = useEngineDraws() && !isEditing && !inputMode;
   const [caretVisible, setCaretVisible] = useState(true);
   const [caretPosition, setCaretPosition] = useState<number>(0); // Character index for caret position
   const [selectionStart, setSelectionStart] = useState<number | null>(null);

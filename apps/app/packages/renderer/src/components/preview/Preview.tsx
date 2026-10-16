@@ -30,6 +30,7 @@ import ImagePreview from "./clips/ImagePreview";
 import ShapePreview from "./clips/ShapePreview";
 import TextPreview from "./clips/TextPreview";
 import EngineFrame from "./EngineFrame";
+import { useEngineDraws } from "@/lib/engine-preview";
 import DrawingPreview from "./clips/DrawingPreview";
 import MaskPreview from "./clips/MaskPreview";
 import { useControlsStore } from "@/lib/control";
@@ -230,6 +231,8 @@ const Preview: React.FC<PreviewProps> = () => {
   const focusFrame = useControlsStore((s) => s.focusFrame);
   const totalTimelineFrames = useControlsStore((s) => s.totalTimelineFrames);
   const isPlaying = useControlsStore((s) => s.isPlaying);
+  // The Rust engine draws the preview (and plays the sound).
+  const engineDraws = useEngineDraws();
   // Shape creation state
   const [isDrawingShape, setIsDrawingShape] = useState(false);
   const [isDrawingText, setIsDrawingText] = useState(false);
@@ -2840,7 +2843,8 @@ const Preview: React.FC<PreviewProps> = () => {
       )}
       {
         <>
-          {sortClips(filterClips(clips, true)).map((clip: AnyClipProps) => {
+          {/* With the Rust engine drawing, it plays the sound too. */}
+          {!engineDraws && sortClips(filterClips(clips, true)).map((clip: AnyClipProps) => {
 
             const isActive = clipWithinFrame(clip, focusFrame, false, 0);
 

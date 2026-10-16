@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import { basename, extname, join, dirname } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ipcRenderer } from "electron";
 import { spawn } from "node:child_process";
 import { resolveFfmpegCommand } from "./ffmpegBin.js";
@@ -539,6 +539,30 @@ async function removeProxy(
   }
 }
 
+/**
+ * The original files behind proxies and playable copies, for the Rust engine, which
+ * decodes originals (ProRes included) quickly. Paths may be file URLs or plain paths and
+ * come back in the same form; anything that isn't a proxy comes back unchanged.
+ */
+async function engineSourcePaths(paths: string[]): Promise<string[]> {
+  const proxyIndex = await loadProxyIndex();
+  const byProxy = new Map(Object.entries(proxyIndex).map(([original, proxy]) => [proxy, original]));
+  return paths.map((p) => {
+    try {
+      const isUrl = p.startsWith("file://");
+      const fsPath = isUrl ? fileURLToPath(p) : p;
+      const dir = dirname(fsPath);
+      const original = byProxy.get(basename(fsPath));
+      if (!original || basename(dir) !== "proxy") return p;
+      const originalPath = join(symlinksDir(dirname(dir)), original);
+      if (!fs.existsSync(originalPath)) return p;
+      return isUrl ? pathToFileURL(originalPath).href : originalPath;
+    } catch {
+      return p;
+    }
+  });
+}
+
 async function resolveOriginalPath(path: string): Promise<string> {
   try {
     // Check if it's likely a proxy path
@@ -589,6 +613,7 @@ export {
   removeProxy,
   ensureMediaDirs,
   resolveOriginalPath,
+  engineSourcePaths,
 };
 
 

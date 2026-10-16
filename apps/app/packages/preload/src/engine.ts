@@ -46,6 +46,36 @@ export function engineRender(timeUs: number, width: number, height: number): Pro
   return ipcRenderer.invoke("engine:render", timeUs, width, height);
 }
 
+/**
+ * Play from `fromUs` with the engine's sound and clock, frames drawn at `width`×`height`.
+ * The frames arrive like rendered ones; `onEngineClock` reports the time of each.
+ */
+export function enginePlay(fromUs: number, width: number, height: number, token: number): Promise<{ ok: true } | { ok: false; error: string }> {
+  return ipcRenderer.invoke("engine:play", fromUs, width, height, token);
+}
+
+/** Stop playing; resolves to where it stopped (µs), or -1 if it wasn't playing. */
+export function enginePause(): Promise<number> {
+  return ipcRenderer.invoke("engine:pause");
+}
+
+/**
+ * Called with the time (µs) of each frame shown while the engine plays, and the token the
+ * run was started with. Returns an unsubscribe.
+ */
+export function onEngineClock(cb: (timeUs: number, token: number) => void): () => void {
+  const listener = (_e: unknown, timeUs: number, token: number) => cb(timeUs, token);
+  ipcRenderer.on("engine:clock", listener);
+  return () => ipcRenderer.off("engine:clock", listener);
+}
+
+/** Called when playback reaches the end of the timeline, with where it stopped (µs) and the run's token. */
+export function onEngineEnded(cb: (atUs: number, token: number) => void): () => void {
+  const listener = (_e: unknown, atUs: number, token: number) => cb(atUs, token);
+  ipcRenderer.on("engine:ended", listener);
+  return () => ipcRenderer.off("engine:ended", listener);
+}
+
 export function engineClose(): Promise<void> {
   return ipcRenderer.invoke("engine:close");
 }

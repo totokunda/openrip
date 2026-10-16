@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef } from "react";
 import { Image as KonvaImage } from "react-konva";
 import Konva from "konva";
 import { engineRender, ENGINE_FRAME_CANVAS_ID, ENGINE_FRAME_EVENT } from "@app/preload";
-import { useEnginePreviewStore, useEngineDraws } from "@/lib/engine-preview";
+import { setEnginePreviewSize, useEnginePreviewStore, useEngineDraws } from "@/lib/engine-preview";
 import { useControlsStore } from "@/lib/control";
 
 /** Longest side the engine renders the preview at. */
@@ -34,6 +34,7 @@ const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: numb
   const version = useEnginePreviewStore((s) => s.version);
   const focusFrame = useControlsStore((s) => s.focusFrame);
   const fps = useControlsStore((s) => s.fps);
+  const isPlaying = useControlsStore((s) => s.isPlaying);
   const nodeRef = useRef<Konva.Image>(null);
   const canvas = useMemo(frameCanvas, []);
 
@@ -44,18 +45,22 @@ const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: numb
     return () => canvas.removeEventListener(ENGINE_FRAME_EVENT, onFrame);
   }, [canvas]);
 
-  // Ask for the frame at the playhead, at the size it's shown on screen.
-  useEffect(() => {
-    if (!draws || !fps) return;
+  // The size it's shown at on screen: paused frames and playback render at it.
+  const size = useMemo(() => {
     const dpr = window.devicePixelRatio || 1;
-    let [w, h] = [rectWidth * scale * dpr, rectHeight * scale * dpr];
+    const [w, h] = [rectWidth * scale * dpr, rectHeight * scale * dpr];
     const fit = Math.min(1, MAX_SIDE / Math.max(w, h));
-    [w, h] = [Math.round(w * fit), Math.round(h * fit)];
-    if (w < 2 || h < 2) return;
-    void engineRender((focusFrame / fps) * 1e6, w, h).then((r) => {
+    return { width: Math.round(w * fit), height: Math.round(h * fit) };
+  }, [rectWidth, rectHeight, scale]);
+  useEffect(() => setEnginePreviewSize(size.width, size.height), [size]);
+
+  // Paused: ask for the frame at the playhead. Playing, the engine sends frames by itself.
+  useEffect(() => {
+    if (!draws || !fps || isPlaying || size.width < 2 || size.height < 2) return;
+    void engineRender((focusFrame / fps) * 1e6, size.width, size.height).then((r) => {
       if (!r.ok && !r.superseded) console.warn("[engine] render failed:", r.error);
     });
-  }, [draws, version, focusFrame, fps, rectWidth, rectHeight, scale]);
+  }, [draws, version, focusFrame, fps, size, isPlaying]);
 
   if (!draws) return null;
   return <KonvaImage ref={nodeRef} image={canvas} x={0} y={0} width={rectWidth} height={rectHeight} listening={false} />;

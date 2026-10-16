@@ -38,7 +38,12 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
    - Add `EnginePreview.tsx`: one canvas (or a `<video>` fed by `MediaStreamTrackGenerator`, cheaper per the spike) that draws frames received through `sharedTexture.setSharedTextureReceiver`.
    - It replaces the clip-mapping block in `Preview.tsx` and `FullscreenPreview.tsx`. Overlays stay.
    - **Verified:** `spikes/engine-preview` now runs exactly this way: `contextIsolation` on, the preload receives the frames and draws them into the page's canvas (the preload world shares the DOM, so no `VideoFrame` crosses `contextBridge`). A real draft plays at 23.9 of 24 fps.
-5. **Playback and scrubbing.**
+5. **Playback and scrubbing.** Done (2026-10-16) in engine mode.
+   - Play starts the engine's playback (`engine:play`): it plays the mixed sound and renders ahead of its audio clock; each display tick main sends the frame due now and its time (`engine:clock`), which moves the playhead. Pause stops it where the sound stopped; at the end it stops (`engine:ended`). Runs carry a token so ticks from a stopped run are dropped.
+   - The app's frame timer gives way through a `PlaybackDriver` hook in `lib/control.ts`; the per-clip audio players aren't mounted in engine mode.
+   - The engine gets original files: `engineSourcePaths` maps proxies and playable copies back to them before each sync, so iPhone ProRes plays from the original (hardware decode, 414 fps on a 1080p clip).
+   - Checked: the playhead follows at 0.99x real time with 72 frames in 3 s (24 fps), pause holds, playing on after a seek stops at the end, and switching back to the old player works.
+   - Still converted on import: the media panel's thumbnails and media info come from the old decoder, so a ProRes file still gets its playable copy. Using the engine's `thumbnails`/probe there removes that (step 7).
    - Main runs the `PreviewPipeline` (render-ahead).
    - On each display tick it takes the frame for the `Player` clock and sends it.
    - It pushes the clock to the renderer, which sets `focusFrame` from it in place of `__playbackTick`.

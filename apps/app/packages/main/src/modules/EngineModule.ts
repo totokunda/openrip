@@ -35,6 +35,8 @@ type FrameHandle = {
   skipped: number;
 };
 
+type DisplayFrame = { id: number; ioSurface: Buffer; width: number; height: number; timeUs: number; renderMs: number };
+
 export type EngineAddon = {
   version(): string;
   openProjectJson(json: string): ProjectInfo;
@@ -42,6 +44,12 @@ export type EngineAddon = {
   close(): void;
   renderFrame(timeUs: number, width: number, height: number): Promise<FrameHandle>;
   release(id: number): void;
+  setPreviewSize(width: number, height: number): void;
+  startPlayback(fromUs: number): void;
+  stopPlayback(): number;
+  frameForDisplay(): DisplayFrame | null;
+  positionUs(): number;
+  setVolume(volume: number): void;
 };
 
 export type EngineInfo = {
@@ -60,6 +68,7 @@ let addon: EngineAddon | null = null;
 let info: EngineInfo = { available: false, error: "not loaded yet" };
 /** The app project the engine has open, so later syncs update it in place. */
 let openProjectId: number | null = null;
+let openProject: ProjectInfo | null = null;
 
 /** The loaded engine, or null. */
 export function getEngine(): EngineAddon | null {
@@ -101,6 +110,97 @@ function load(): EngineInfo {
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** Hand a rendered surface to a window as a shared texture; the engine gets it back once released. */
+async function sendFrame(engine: EngineAddon, sender: Electron.WebContents, f: { id: number; ioSurface: Buffer; width: number; height: number; timeUs: number }) {
+  try {
+    const imported = sharedTexture.importSharedTexture({
+      textureInfo: {
+        pixelFormat: "bgra",
+        codedSize: { width: f.width, height: f.height },
+        visibleRect: { x: 0, y: 0, width: f.width, height: f.height },
+        colorSpace: { primaries: "bt709", transfer: "srgb", matrix: "rgb", range: "full" },
+        timestamp: f.timeUs,
+        handle: { ioSurface: f.ioSurface },
+      },
+      allReferencesReleased: () => engine.release(f.id),
+    });
+    await sharedTexture.sendSharedTexture({ frame: sender.mainFrame, importedSharedTexture: imported }, { timeUs: f.timeUs, width: f.width, height: f.height });
+    imported.release();
+  } catch (e) {
+    engine.release(f.id);
+    throw e;
+  }
+}
+
+/**
+ * Playback by the engine: it plays the sound and renders frames ahead of its audio clock.
+ * Each display tick sends the window the frame due now and its time (`engine:clock`), which
+ * the timeline's playhead follows; at the end it stops and says so (`engine:ended`).
+ */
+class EnginePlayback {
+  #timer: ReturnType<typeof setInterval> | null = null;
+  #sender: Electron.WebContents | null = null;
+  #sending = false;
+  #endUs = 0;
+  /** The renderer's id for this run, sent back with every clock tick so it can drop stale ones. */
+  #token = 0;
+
+  start(sender: Electron.WebContents, fromUs: number, width: number, height: number, token: number): void {
+    const engine = addon;
+    if (!engine) throw new Error("engine not available");
+    if (openProjectId == null) throw new Error("no project sent to the engine yet");
+    this.stop();
+    engine.setPreviewSize(width, height);
+    engine.startPlayback(Math.max(0, Math.round(fromUs)));
+    this.#sender = sender;
+    this.#token = token;
+    this.#endUs = openProject?.durationUs ?? 0;
+    this.#timer = setInterval(() => void this.#tick(), 1000 / 60);
+  }
+
+  /** Stop; returns where it stopped (µs), or -1 if it wasn't playing. */
+  stop(): number {
+    if (!this.#timer) return -1;
+    clearInterval(this.#timer);
+    this.#timer = null;
+    this.#sender = null;
+    return addon?.stopPlayback() ?? -1;
+  }
+
+  async #tick() {
+    const [engine, sender] = [addon, this.#sender];
+    if (!engine || !sender || this.#sending) return;
+    if (sender.isDestroyed()) {
+      this.stop();
+      return;
+    }
+    const heard = engine.positionUs();
+    if (this.#endUs > 0 && heard >= this.#endUs) {
+      const token = this.#token;
+      const at = this.stop();
+      sender.send("engine:ended", at, token);
+      return;
+    }
+    const f = engine.frameForDisplay();
+    if (!f) return;
+    this.#sending = true;
+    try {
+      await sendFrame(engine, sender, f);
+      sender.send("engine:clock", f.timeUs, this.#token);
+    } catch (e) {
+      console.warn("[engine] frame send failed:", message(e));
+    } finally {
+      this.#sending = false;
+    }
+    // Without an audio device the clock is the frames' own.
+    if (heard < 0 && this.#endUs > 0 && f.timeUs >= this.#endUs - 50_000) {
+      const token = this.#token;
+      const at = this.stop();
+      sender.send("engine:ended", at, token);
+    }
+  }
+}
+
 /**
  * Renders one request at a time; a request arriving while one renders waits as the next,
  * and a newer one replaces it (the older is answered as superseded), so scrubbing never
@@ -141,24 +241,8 @@ class FrameRenderer {
       return { ok: false, error: message(e) };
     }
     try {
-      const imported = sharedTexture.importSharedTexture({
-        textureInfo: {
-          pixelFormat: "bgra",
-          codedSize: { width: frame.width, height: frame.height },
-          visibleRect: { x: 0, y: 0, width: frame.width, height: frame.height },
-          colorSpace: { primaries: "bt709", transfer: "srgb", matrix: "rgb", range: "full" },
-          timestamp: frame.timeUs,
-          handle: { ioSurface: frame.ioSurface },
-        },
-        allReferencesReleased: () => engine.release(frame.id),
-      });
-      await sharedTexture.sendSharedTexture(
-        { frame: sender.mainFrame, importedSharedTexture: imported },
-        { timeUs: frame.timeUs, width: frame.width, height: frame.height },
-      );
-      imported.release();
+      await sendFrame(engine, sender, frame);
     } catch (e) {
-      engine.release(frame.id);
       return { ok: false, error: message(e) };
     }
     const { timeUs: t, width: w, height: h, renderMs, layers, skipped } = frame;
@@ -168,6 +252,7 @@ class FrameRenderer {
 
 export class EngineModule implements AppModule {
   readonly #frames = new FrameRenderer();
+  readonly #playback = new EnginePlayback();
 
   enable(_context: ModuleContext): void {
     info = load();
@@ -176,7 +261,7 @@ export class EngineModule implements AppModule {
     } else {
       console.warn(`[engine] not available (${info.error}); using the app's own preview`);
     }
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close"]) {
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -191,8 +276,12 @@ export class EngineModule implements AppModule {
         const id = Number(projectId);
         const doc = ensureProjectJson({ ...(payload as object) }, id, app.getVersion());
         const json = JSON.stringify(doc);
+        if (openProjectId !== id) this.#playback.stop();
         const project = openProjectId === id ? addon.updateProject(json) : addon.openProjectJson(json);
+        // For automated tests: keep the clock, silence the speakers.
+        if (openProjectId !== id && process.env.OPENRIP_ENGINE_MUTE) addon.setVolume(0);
         openProjectId = id;
+        openProject = project;
         return { ok: true, project };
       } catch (e) {
         return { ok: false, error: message(e) };
@@ -203,9 +292,22 @@ export class EngineModule implements AppModule {
       this.#frames.request(event.sender, timeUs, Math.max(2, Math.round(width)), Math.max(2, Math.round(height))),
     );
 
+    ipcMain.handle("engine:play", (event, fromUs: number, width: number, height: number, token: number) => {
+      try {
+        this.#playback.start(event.sender, fromUs, Math.max(2, Math.round(width)), Math.max(2, Math.round(height)), token);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: message(e) };
+      }
+    });
+
+    ipcMain.handle("engine:pause", () => this.#playback.stop());
+
     ipcMain.handle("engine:close", () => {
+      this.#playback.stop();
       addon?.close();
       openProjectId = null;
+      openProject = null;
     });
   }
 }

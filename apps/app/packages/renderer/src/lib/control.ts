@@ -8,6 +8,24 @@ import {
 import { useClipStore } from "./clip";
 import _ from "lodash";
 
+/**
+ * Something that plays the timeline itself instead of the frame timer below: the Rust
+ * engine when it draws the preview (lib/engine-preview.ts). It moves the playhead with
+ * setFocusFrame(frame, false) as it plays.
+ */
+export type PlaybackDriver = {
+  /** Whether it plays right now (otherwise the frame timer does). */
+  active: () => boolean;
+  play: (fromFrame: number) => void;
+  pause: () => void;
+};
+let __driver: PlaybackDriver | null = null;
+/** Whether the current run is the driver's. */
+let __driverPlaying = false;
+export const setPlaybackDriver = (driver: PlaybackDriver | null) => {
+  __driver = driver;
+};
+
 // Playback internals (module-scoped to avoid causing unnecessary rerenders)
 let __playbackRafId: number | null = null;
 let __lastTickMs = 0;
@@ -311,10 +329,20 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
     __lastTickMs = 0;
     __frameAccumulator = 0;
     if (__playbackRafId != null) cancelAnimationFrame(__playbackRafId);
+    if (__driver?.active()) {
+      __driverPlaying = true;
+      set({ isPlaying: true });
+      __driver.play(get().focusFrame);
+      return;
+    }
     set({ isPlaying: true });
     __playbackRafId = requestAnimationFrame(__playbackTick);
   },
   pause: () => {
+    if (__driverPlaying) {
+      __driverPlaying = false;
+      __driver?.pause();
+    }
     if (__playbackRafId != null) {
       cancelAnimationFrame(__playbackRafId);
       __playbackRafId = null;

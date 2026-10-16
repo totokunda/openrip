@@ -128,7 +128,8 @@ const VideoPreview: React.FC<
 }) => {
 
   // The Rust engine draws the preview: skip decoding and drawing, keep the handles.
-  const engineDraws = useEngineDraws();
+  // (Only on the timeline's preview; dialogs that preview media keep decoding.)
+  const engineDraws = useEngineDraws() && !inputMode;
   const mediaInfo = useRef<MediaInfo | null>(getMediaInfoCached(assetId) || null);
   // `mediaInfo` is stored in a ref for fast access by decoder callbacks, but ref updates
   // don't trigger React renders. We bump this version whenever `mediaInfo.current` changes
