@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/model", "crates/capcut", "crates/dev"]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/totokunda/openrip"
+publish = false
+
+[workspace.dependencies]
+openrip-model = { path = "crates/model" }
+openrip-capcut = { path = "crates/capcut" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[profile.release]
+lto = "thin"

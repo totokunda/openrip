@@ -29,8 +29,6 @@ obj/
 **/.Trashes
 ehthumbs.db/
 **/ehthumbs.db/
-bin/
-**/bin/
 .idea
 **/.idea
 lib64/

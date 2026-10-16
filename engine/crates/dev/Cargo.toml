@@ -1,0 +1,17 @@
+[package]
+name = "openrip-dev"
+version = "0.1.0"
+description = "Developer CLI for inspecting and importing projects"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "openrip-dev"
+path = "src/main.rs"
+
+[dependencies]
+openrip-model.workspace = true
+openrip-capcut.workspace = true
+serde_json.workspace = true

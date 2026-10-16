@@ -87,6 +87,9 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
 
 ### 2.3 Milestones
 
+0. **M0 Project format + CapCut import** (in progress, `engine/`).
+   - Done: `openrip-model` (µs time with exact frame-rate maths, `Animated<T>`, CapCut-shaped tracks/segments/materials) and `openrip-capcut`. All 56 local CapCut drafts import with zero structural problems ([coverage](docs/parity/capcut-import.md)).
+   - Next: undo/redo commands, the v1 (TypeScript app) importer, decoding track attribute bits, and the colour-tool materials.
 1. **M1 Open and play.** Import a v1 project and play one video track with audio, A/V in sync.
 2. **M2 Compose.** Multi-track compositing, transforms, crop, opacity, adjustments, LUT filters.
 3. **M3 Overlays.** Text, shapes, drawing, lasso/shape masks with keyframes.
