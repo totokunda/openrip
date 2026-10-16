@@ -361,6 +361,9 @@ fn decode_bench(file: &Path, software: bool, ffmpeg_hw: bool) -> Result<(), open
     Ok(())
 }
 
+/// A delivered frame in scrub-bench: request id, media time, exact?, request-to-delivery.
+type Shown = (u64, i64, bool, std::time::Duration);
+
 fn scrub_bench(file: &Path) -> Result<(), openrip_media::MediaError> {
     use openrip_media::{DecoderOptions, Micros};
     use openrip_playback::{FrameServer, Quality, SeekMode};
@@ -377,7 +380,7 @@ fn scrub_bench(file: &Path) -> Result<(), openrip_media::MediaError> {
         for scrub in [true, false] {
             // (request id, media time) of every request, and what was delivered when.
             let requests: Arc<Mutex<Vec<(u64, i64)>>> = Arc::default();
-            let shown: Arc<Mutex<Vec<(u64, i64, bool, Duration)>>> = Arc::default();
+            let shown: Arc<Mutex<Vec<Shown>>> = Arc::default();
             let server = {
                 let shown = shown.clone();
                 FrameServer::open(file, &DecoderOptions::default(), move |d| {
