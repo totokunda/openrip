@@ -4,6 +4,7 @@
 
 - **Node.js 24.x** (see `apps/app/package.json` → `engines.node`)
 - **Git**
+- **Rust** (stable, from [rustup.rs](https://rustup.rs)) for the engine. `npm start` and `npm run build` build it (`scripts/build-engine.mjs`) into `apps/app/native/<platform>-<arch>/`; packaged builds carry it under `resources/engine/`. Without Rust, or on a platform the engine isn't built for yet (so far it's built for Apple Silicon only), the app runs on its own preview. `npm run build:engine` builds it on its own.
 
 FFmpeg doesn't need a separate install. Development builds use the `ffmpeg-static` / `ffprobe-static` npm packages, and packaged builds bundle those binaries under `resources/ffmpeg/`. To use your own FFmpeg instead, set `FFMPEG_PATH` / `FFPROBE_PATH`.
 

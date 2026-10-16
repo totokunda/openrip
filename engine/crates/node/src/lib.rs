@@ -81,6 +81,12 @@ fn load(path: &Path) -> Result<(Project, &'static str)> {
 }
 
 /// Open a project for preview (replacing any open one).
+/// The addon's version, so the app can tell which engine it loaded.
+#[napi]
+pub fn version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 #[napi]
 pub fn open_project(path: String) -> Result<ProjectInfo> {
     let (project, source) = load(Path::new(&path))?;

@@ -158,3 +158,6 @@ packages/renderer/public/filters
 /.idea/csv-plugin.xml
 
 .env
+
+# The Rust engine addon, built by apps/app/scripts/build-engine.mjs
+apps/app/native/

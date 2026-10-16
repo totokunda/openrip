@@ -12,6 +12,7 @@ import { settingsModule } from "./modules/SettingsModule.js";
 import { jsonPersistenceModule } from "./modules/JSONPersistenceModule.js";
 import { appDirProtocol } from "./modules/AppDirProtocol.js";
 import { coreIpc } from "./modules/CoreIpc.js";
+import { engineModule } from "./modules/EngineModule.js";
 import { app } from "electron";
 
 export async function initApp(initConfig: AppInitConfig) {
@@ -25,6 +26,8 @@ export async function initApp(initConfig: AppInitConfig) {
     .init(settingsModule())
     // Register 'app://' protocol handlers and core IPC before any renderer windows load
     .init(coreIpc())
+    // The Rust engine, before any window asks for it
+    .init(engineModule())
     .init(jsonPersistenceModule())
     .init(appDirProtocol())
     .init(

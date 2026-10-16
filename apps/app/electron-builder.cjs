@@ -56,6 +56,13 @@ module.exports = {
       to: "ffmpeg",
       filter: ["ffprobe", "ffprobe.exe"],
     },
+    // The Rust engine's addon (scripts/build-engine.mjs), loaded by the main process from
+    // `<resources>/engine/`. A build without it runs on the app's own preview.
+    {
+      from: "native/${platform}-${arch}",
+      to: "engine",
+      filter: ["*.node"],
+    },
   ],
 
   /**

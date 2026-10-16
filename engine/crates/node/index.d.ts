@@ -13,6 +13,9 @@ export interface ProjectInfo {
   source: string
 }
 
+/** The addon's version, so the app can tell which engine it loaded. */
+export function version(): string
+
 /** Open a CapCut draft folder, an OpenRip project JSON or a v1 project file (replaces any open one). */
 export function openProject(path: string): ProjectInfo
 /** Open from JSON text: an OpenRip project, a v1 project or a CapCut draft's draft_info.json. */

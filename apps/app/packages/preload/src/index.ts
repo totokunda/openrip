@@ -5,6 +5,10 @@
 export { sha256sum } from "./nodeCrypto.js";
 export { versions } from "./versions.js";
 
+// The Rust engine in the main process
+export { engineInfo } from "./engine.js";
+export type { EngineInfo } from "./engine.js";
+
 // App updates (Electron auto-updater)
 export * from "./appUpdates.js";
 

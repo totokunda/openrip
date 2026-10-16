@@ -27,6 +27,8 @@
     }
   ],
   "scripts": {
+    "build:engine": "node scripts/build-engine.mjs",
+    "prebuild": "node scripts/build-engine.mjs",
     "build": "npm run build -ws --if-present",
     "compile": "npm run build && electron-builder build --config electron-builder.cjs",
     "compile:mac": "npm run build && electron-builder build --config electron-builder.cjs --mac",
@@ -41,6 +43,7 @@
     "publish": "node scripts/build-app.js --publish",
     "publish:draft": "node scripts/build-app.js --publish --draft",
     "test": "npx playwright test ./tests/e2e.spec.ts",
+    "prestart": "node scripts/build-engine.mjs",
     "start": "node packages/dev-mode.js",
     "postinstall": "electron-builder install-app-deps",
     "typecheck": "npm run typecheck -ws --if-present"

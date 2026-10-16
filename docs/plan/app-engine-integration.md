@@ -1,6 +1,6 @@
 # Plan: the app's preview on the Rust engine
 
-Status 2026-10-16: the engine side is done and measured. `spikes/engine-preview` plays CapCut drafts in Electron 44 through `sharedTexture`, with sound and A/V sync. What remains is wiring it into `apps/app`. That changes the editor you use every day, so it is planned here and done together.
+Status 2026-10-16: the engine side is done and measured; the app runs on Electron 44 (step 1) and ships and loads the engine on Apple Silicon (step 2). `spikes/engine-preview` plays CapCut drafts in Electron 44 through `sharedTexture`, with sound and A/V sync. What remains is wiring it into `apps/app`. That changes the editor you use every day, so it is planned here and done together.
 
 ## Today's preview (survey of `apps/app`)
 
@@ -20,9 +20,11 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
 1. **Electron 38 → 44.**
    - Bump, rebuild, and run the existing smoke tests (Playwright Electron recipe) and a manual pass.
    - No native modules are involved, so the risk is Chromium/API changes in our code.
-2. **Ship the addon.**
-   - Build `openrip-node` for darwin-arm64 and darwin-x64; the electron-builder config packs `openrip_node.node`.
-   - Load it in the main process.
+2. **Ship the addon.** Done for Apple Silicon (2026-10-16).
+   - `scripts/build-engine.mjs` builds `openrip-node` into `native/<platform>-<arch>/` (run by `npm start` and `npm run build`); electron-builder packs it into `resources/engine/`.
+   - The main process loads it (`modules/EngineModule.ts`); the preload's `engineInfo()` tells the UI whether it's there and its version. Without it the app runs on its own preview.
+   - Checked: dev mode and a packaged `OpenRip.app` (arm64, unsigned) both load it; with it missing, the app imports, plays and edits as before.
+   - Still to do: an Intel build (`--arch x64`, needs the `x86_64-apple-darwin` Rust target).
 3. **Project in, kept in sync.**
    - The renderer already autosaves v1 JSON (`withJsonProjectPersistence`), and `openrip-v1` imports it in 1–2 ms.
    - First cut: send the project on load with `openProjectJson(json)` and after each edit (debounced) with `updateProject(json)`, which keeps decoders warm.
