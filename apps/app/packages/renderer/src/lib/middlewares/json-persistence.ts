@@ -1000,6 +1000,18 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
   }
 };
 
+/**
+ * The active project as the JSON autosave writes it, for the Rust engine, or null while a
+ * project is loading.
+ */
+export const getActiveProjectJsonSnapshot = (
+  projectState: JsonProjectSlice,
+): { projectId: number; snapshot: ProjectJsonSnapshot } | null => {
+  if (isHydratingFromJson || (projectState as any).projectsLoaded === false) return null;
+  const r = buildProjectJsonSnapshot(projectState);
+  return r && r.projectId != null ? { projectId: r.projectId, snapshot: r.snapshot } : null;
+};
+
 export const withJsonProjectPersistence =
   <T extends JsonProjectSlice>(
     config: StateCreator<T, [], []>,

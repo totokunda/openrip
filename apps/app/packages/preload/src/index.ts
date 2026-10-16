@@ -6,8 +6,17 @@ export { sha256sum } from "./nodeCrypto.js";
 export { versions } from "./versions.js";
 
 // The Rust engine in the main process
-export { engineInfo } from "./engine.js";
-export type { EngineInfo } from "./engine.js";
+export {
+  engineInfo,
+  engineSyncProject,
+  engineRender,
+  engineClose,
+  getEnginePreviewEnabled,
+  setEnginePreviewEnabled,
+  ENGINE_FRAME_CANVAS_ID,
+  ENGINE_FRAME_EVENT,
+} from "./engine.js";
+export type { EngineInfo, EngineProjectInfo, EngineRenderResult } from "./engine.js";
 
 // App updates (Electron auto-updater)
 export * from "./appUpdates.js";

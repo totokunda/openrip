@@ -25,11 +25,16 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
    - The main process loads it (`modules/EngineModule.ts`); the preload's `engineInfo()` tells the UI whether it's there and its version. Without it the app runs on its own preview.
    - Checked: dev mode and a packaged `OpenRip.app` (arm64, unsigned) both load it; with it missing, the app imports, plays and edits as before.
    - Still to do: an Intel build (`--arch x64`, needs the `x86_64-apple-darwin` Rust target).
-3. **Project in, kept in sync.**
+3. **Project in, kept in sync.** Done (2026-10-16), behind Settings → Engine → "Use the Rust engine for the preview".
+   - `lib/engine-preview.ts` sends the autosave's snapshot (`getActiveProjectJsonSnapshot`) to the main process 60 ms after an edit (`engine:sync-project`): opened once, then `updateProject`. An edit shows in the engine's frame at once.
    - The renderer already autosaves v1 JSON (`withJsonProjectPersistence`), and `openrip-v1` imports it in 1–2 ms.
    - First cut: send the project on load with `openProjectJson(json)` and after each edit (debounced) with `updateProject(json)`, which keeps decoders warm.
    - Later: send `openrip-model` `Edit` commands instead of whole projects.
-4. **Preview surface.**
+4. **Preview surface.** Done (2026-10-16), first cut.
+   - `components/preview/EngineFrame.tsx` asks for the frame at the playhead at its on-screen size (`engine:render`; the newest request wins), and draws the canvas the preload paints the shared texture into, under the clips.
+   - Video, image and text clips stop decoding and drawing in engine mode but keep their handles (text shows again while it's typed). Shapes, drawings and masks are still drawn by Konva, on top.
+   - Checked in the app with a 10 s iPhone ProRes clip: frames arrive, scrubbing and moving a clip update the engine's picture, playback on the old clock gets 23.6 of 24 fps from the engine, and turning it off brings the old preview back.
+   - Gaps against the old preview: filters from the Filters panel (Hald CLUT PNGs) aren't drawn; shapes and drawings sit above everything; text baselines sit ~0.1 em lower than Konva's.
    - Add `EnginePreview.tsx`: one canvas (or a `<video>` fed by `MediaStreamTrackGenerator`, cheaper per the spike) that draws frames received through `sharedTexture.setSharedTextureReceiver`.
    - It replaces the clip-mapping block in `Preview.tsx` and `FullscreenPreview.tsx`. Overlays stay.
    - **Verified:** `spikes/engine-preview` now runs exactly this way: `contextIsolation` on, the preload receives the frames and draws them into the page's canvas (the preload world shares the DOM, so no `VideoFrame` crosses `contextBridge`). A real draft plays at 23.9 of 24 fps.

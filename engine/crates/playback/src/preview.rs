@@ -154,6 +154,8 @@ pub struct PreviewEngine {
     filters: HashMap<String, std::sync::Arc<Lut3d>>,
     /// Styled text in pieces (see `PreparedText`), by everything but per-character opacity.
     prepared: HashMap<u64, (std::sync::Arc<text::PreparedText>, u64)>,
+    /// Font files found for family names (see `font_file_for`).
+    font_files: HashMap<String, String>,
     /// Text-style textures (premultiplied) by path; `None` if unreadable.
     textures: HashMap<String, Option<std::sync::Arc<RgbaImage>>>,
     prefetch: Prefetcher,
@@ -174,6 +176,7 @@ impl PreviewEngine {
             exposure_luts: HashMap::new(),
             filters: HashMap::new(),
             textures: HashMap::new(),
+            font_files: HashMap::new(),
             prepared: HashMap::new(),
             prefetch: Prefetcher::new(),
             tick: 0,
@@ -444,7 +447,12 @@ impl PreviewEngine {
     fn pixels(&mut self, seg: &Segment, t: Micros, w: u32, h: u32) -> Result<Option<Pixels>, (String, String)> {
         if let Some(text) = self.project.materials.texts.iter().find(|m| m.id == seg.material).cloned() {
             let Some(run) = text.runs.first() else { return Ok(None) };
-            let path = if run.font.path.is_empty() || !Path::new(&run.font.path).exists() { DEFAULT_FONT.to_string() } else { run.font.path.clone() };
+            let path = if !run.font.path.is_empty() && Path::new(&run.font.path).exists() {
+                run.font.path.clone()
+            } else {
+                let name = run.font.name.clone();
+                self.font_files.entry(name.clone()).or_insert_with(|| font_file_for(&name)).clone()
+            };
             if let Some(why) = self.failed.get(&path) {
                 return Err((path.clone(), why.clone()));
             }
@@ -484,7 +492,8 @@ impl PreviewEngine {
                     ([to_u8(b.color.r), to_u8(b.color.g), to_u8(b.color.b), to_u8(b.color.a)], pad, radius)
                 }),
                 // A fraction of the canvas width at the clip's scale 1; it scales with the clip.
-                max_width: text.layout.max_width.map(|f| f * w as f32 * scale.x.abs() as f32),
+                // A text box wraps at its own width.
+                max_width: text.layout.max_width.or(text.layout.frame.map(|fr| fr.width)).map(|f| f * w as f32 * scale.x.abs() as f32),
                 // CapCut's synthetic styles: bold widens the glyphs by `bold_width` (0.008 in
                 // every local draft) in the stroke's unit, italic shears them by
                 // `italic_degree` (always 10); both match CapCut (session 5).
@@ -496,8 +505,23 @@ impl PreviewEngine {
             // Library text animations (typing reveals) as per-character opacity.
             let animations = seg.attachments.iter().filter_map(|id| self.project.materials.animations.iter().find(|m| &m.id == id)).flat_map(|m| &m.items);
             let char_alpha = crate::animation::char_alpha(animations, text.text.chars().count(), local);
-            // Block centre on the canvas; rasterise so the image sits on the pixel grid.
-            let (cx, cy) = (w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0);
+            // Block centre on the canvas; rasterise so the image sits on the pixel grid. In a text
+            // box the block sits at the box's side or middle, by its alignments.
+            let (mut cx, mut cy) = (w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0);
+            if let Some(fr) = text.layout.frame {
+                let (bw, bh) = (fr.width as f64 * w as f64 * scale.x.abs(), fr.height as f64 * h as f64 * scale.y.abs());
+                let (slack_x, slack_y) = ((bw - lay.width as f64) / 2.0, (bh - lay.height as f64) / 2.0);
+                cx += match text.layout.alignment {
+                    0 => -slack_x,
+                    2 => slack_x,
+                    _ => 0.0,
+                };
+                cy += match fr.vertical_align {
+                    0 => -slack_y,
+                    2 => slack_y,
+                    _ => 0.0,
+                };
+            }
             let (x0, y0) = (cx - lay.width as f64 / 2.0, cy - lay.height as f64 / 2.0);
             let origin = [x0.rem_euclid(1.0) as f32, y0.rem_euclid(1.0) as f32];
             // Everything but the per-character opacity, which animations change every frame.
@@ -674,6 +698,31 @@ pub(crate) fn load_still(path: &Path) -> Result<RgbaImage, String> {
     let mut d = VideoDecoder::open(path, &DecoderOptions { hardware: openrip_media::HardwareMode::Off, ..Default::default() }).map_err(|e| e.to_string())?;
     let rgb = d.next_frame().map_err(|e| e.to_string())?.ok_or("no picture")?.to_rgb().map_err(|e| e.to_string())?;
     Ok(RgbaImage { width: rgb.width, height: rgb.height, data: rgb.data.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect() })
+}
+
+/// A font file for a family name: an installed font whose file is named after it (e.g.
+/// "Arial" → Arial.ttf) in the system and user font folders; otherwise CapCut's default font
+/// if CapCut is installed, otherwise Helvetica. Bold and italic stay synthetic.
+fn font_file_for(name: &str) -> String {
+    let mut dirs = vec!["/System/Library/Fonts/Supplemental".to_string(), "/System/Library/Fonts".to_string(), "/Library/Fonts".to_string()];
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(Path::new(&home).join("Library/Fonts").to_string_lossy().into_owned());
+    }
+    if !name.trim().is_empty() {
+        for dir in &dirs {
+            for ext in ["ttf", "otf", "ttc"] {
+                let p = Path::new(dir).join(format!("{}.{ext}", name.trim()));
+                if p.exists() {
+                    return p.to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+    if Path::new(DEFAULT_FONT).exists() {
+        DEFAULT_FONT.to_string()
+    } else {
+        "/System/Library/Fonts/Helvetica.ttc".to_string()
+    }
 }
 
 /// An RGB colour (0..1) shifted in HSB: hue by degrees, saturation and brightness by

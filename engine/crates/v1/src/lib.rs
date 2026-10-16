@@ -407,7 +407,7 @@ fn convert_clip(
         }
         "text" => {
             let mid = MaterialId(format!("{id}-text"));
-            materials.texts.push(convert_text(&mid, clip));
+            materials.texts.push(convert_text(&mid, clip, world));
             mid
         }
         "filter" => {
@@ -523,7 +523,7 @@ fn convert_clip(
     })
 }
 
-fn convert_text(id: &MaterialId, clip: &Value) -> Text {
+fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
     let raw = s(clip, "text");
     let text = match s(clip, "textTransform").as_str() {
         "uppercase" => raw.to_uppercase(),
@@ -592,6 +592,17 @@ fn convert_text(id: &MaterialId, clip: &Value) -> Text {
             background,
             shadow,
             max_width: None,
+            // Konva draws v1 text inside its box (wrapping at the box's width), aligned by
+            // textAlign and verticalAlign.
+            frame: clip.get("transform").map(|t| TextFrame {
+                width: (f(t, "width", 0.0) * f(t, "scaleX", 1.0) / world.w) as f32,
+                height: (f(t, "height", 0.0) * f(t, "scaleY", 1.0) / world.h) as f32,
+                vertical_align: match s(clip, "verticalAlign").as_str() {
+                    "middle" => 1,
+                    "bottom" => 2,
+                    _ => 0,
+                },
+            }).filter(|fr| fr.width > 0.0 && fr.height > 0.0),
         },
     }
 }

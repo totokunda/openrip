@@ -220,6 +220,22 @@ pub struct TextLayout {
     /// `None` never wraps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_width: Option<f32>,
+    /// A box the text sits in, centred on the clip's position (OpenRip's own text clips).
+    /// Without one the block of lines is centred on the position, as CapCut does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<TextFrame>,
+}
+
+/// A text box: the block of lines sits inside it by [`TextLayout::alignment`] and
+/// `vertical_align`, and wraps at its width.
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TextFrame {
+    /// Fractions of the canvas width and height.
+    pub width: f32,
+    pub height: f32,
+    /// 0 = top, 1 = middle, 2 = bottom.
+    #[serde(default)]
+    pub vertical_align: u8,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]

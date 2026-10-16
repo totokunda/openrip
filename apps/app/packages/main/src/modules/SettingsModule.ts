@@ -6,6 +6,8 @@ import { EventEmitter } from "node:events";
 
 interface Settings {
   activeProjectId?: string | number | null;
+  /** Draw the preview with the Rust engine instead of the app's own renderer. */
+  useEnginePreview?: boolean;
 }
 
 // Singleton instance
@@ -51,6 +53,14 @@ export class SettingsModule extends EventEmitter implements AppModule {
         this.setActiveProjectId(projectId);
       },
     );
+
+    ipcMain.handle("settings:get-engine-preview", (): boolean => {
+      return this.store.get("useEnginePreview") === true;
+    });
+
+    ipcMain.handle("settings:set-engine-preview", (_event, on: boolean): void => {
+      this.store.set("useEnginePreview", on === true);
+    });
   }
 }
 

@@ -21,6 +21,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useControlsStore } from "@/lib/control";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useEnginePreviewStore } from "@/lib/engine-preview";
 
 import {
     Tabs,
@@ -91,6 +93,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     (s) => s.setDefaultClipLength,
   );
 
+  const engineEnabled = useEnginePreviewStore((s) => s.enabled);
+  const engineInfoState = useEnginePreviewStore((s) => s.info);
+  const engineProject = useEnginePreviewStore((s) => s.project);
+  const engineError = useEnginePreviewStore((s) => s.error);
+  const setEngineEnabled = useEnginePreviewStore((s) => s.setEnabled);
   const [projectFps, setProjectFps] = useState<string>(
     String(controlsFps || 24),
   );
@@ -212,6 +219,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </TabsTrigger>
             <TabsTrigger
               className="data-[state=active]:bg-brand-light/10 data-[state=active]:text-brand-light text-[11px] rounded-[6px] px-2 py-1 w-full!"
+              value="engine"
+            >
+              Engine
+            </TabsTrigger>
+            <TabsTrigger
+              className="data-[state=active]:bg-brand-light/10 data-[state=active]:text-brand-light text-[11px] rounded-[6px] px-2 py-1 w-full!"
               value="updates"
             >
               Updates
@@ -296,6 +309,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+          </TabsContent>
+          <TabsContent value="engine">
+            <div className="flex flex-col gap-4 font-poppins text-brand-light">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={engineEnabled}
+                  disabled={!engineInfoState?.available}
+                  onCheckedChange={(v) => setEngineEnabled(v === true)}
+                />
+                <span className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium">Use the Rust engine for the preview</span>
+                  <span className="text-[10px] text-brand-light/60 font-normal">
+                    Draws video, photos and text with OpenRip's native engine. Shapes, drawings and
+                    masks are still drawn by the app's own renderer, and filters from the Filters panel
+                    don't show yet.
+                  </span>
+                </span>
+              </label>
+              <div className="text-[10px] text-brand-light/60 rounded-lg border border-brand-light/10 bg-brand-light/5 p-3 flex flex-col gap-1">
+                <span>
+                  Engine:{" "}
+                  <span className="text-brand-light/85">
+                    {engineInfoState == null
+                      ? "checking…"
+                      : engineInfoState.available
+                        ? `openrip-node ${engineInfoState.version}`
+                        : `not available (${engineInfoState.error ?? "unknown"})`}
+                  </span>
+                </span>
+                {engineEnabled && engineProject ? (
+                  <span>
+                    Drawing: {engineProject.width}×{engineProject.height} at {engineProject.fps} fps
+                  </span>
+                ) : null}
+                {engineEnabled && engineError ? <span className="text-red-400/80">{engineError}</span> : null}
               </div>
             </div>
           </TabsContent>

@@ -781,6 +781,7 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             // with the clip and independent of the font size; an auto-sized box (`fixed_width`
             // -1) doesn't wrap (calibration session 5; docs/parity/text-wrap.md).
             max_width: Some(f(m, "fixed_width", -1.0) as f32).filter(|w| *w > 0.0).map(|w| w * CAPCUT_WRAP_PER_UNIT),
+            frame: None,
         },
     }
 }

@@ -22,6 +22,7 @@ import { useVideoDecoderManager } from "@/lib/media/VideoDecoderManagerContext";
 import { useProjectsStore } from "@/lib/projects";
 import { generatePosterCanvas } from "@/lib/media/timeline";
 import { sanitizeCornerRadius } from "@/lib/konva/sanitizeCornerRadius";
+import { useEngineDraws } from "@/lib/engine-preview";
 // (prefetch helper removed by request; timeline-driven rendering only)
 
 const calculateIterateRange = (
@@ -126,6 +127,8 @@ const VideoPreview: React.FC<
   hidden = false,
 }) => {
 
+  // The Rust engine draws the preview: skip decoding and drawing, keep the handles.
+  const engineDraws = useEngineDraws();
   const mediaInfo = useRef<MediaInfo | null>(getMediaInfoCached(assetId) || null);
   // `mediaInfo` is stored in a ref for fast access by decoder callbacks, but ref updates
   // don't trigger React renders. We bump this version whenever `mediaInfo.current` changes
@@ -997,7 +1000,7 @@ const VideoPreview: React.FC<
     async (opts?: { force?: boolean }) => {
 
       if (!opts?.force && isPlaying) return;
-      if (hidden || !isInFrame) return;
+      if (hidden || !isInFrame || engineDraws) return;
       if (!canvasRef.current) return;
       if (!assetId) return;
       if (originalFrameRef.current) return;
@@ -1081,12 +1084,13 @@ const VideoPreview: React.FC<
       drawWrappedCanvas,
       posterMasks,
       maskFrameForCurrentFocus,
+      engineDraws,
     ],
   );
 
   const seekToCurrentFrame = useCallback(
     async (isAccurateSeekNeededInput: boolean = false) => {
-      
+      if (engineDraws) return;
 
       // Use ref to avoid triggering seeks when pausing - this prevents frame jumping
       if (isPlaying) return;
@@ -1158,7 +1162,8 @@ const VideoPreview: React.FC<
       isAccurateSeekNeeded,
       assetId,
       makeDecoderId,
-      isInFrame
+      isInFrame,
+      engineDraws,
     ],
   );
 
@@ -1187,7 +1192,7 @@ const VideoPreview: React.FC<
           }
 
           const config = info.videoDecoderConfig;
-          if (!config) continue;
+          if (!config || engineDraws) continue;
 
 
           const logicalId = makeDecoderId(id);
@@ -1241,7 +1246,8 @@ const VideoPreview: React.FC<
     decoderManager,
     getAssetById,
     drawWrappedCanvas,
-    makeDecoderId
+    makeDecoderId,
+    engineDraws,
   ]);
 
   useEffect(() => {
@@ -1260,6 +1266,7 @@ const VideoPreview: React.FC<
   ]);
 
   const startRendering = useCallback(async () => {
+    if (engineDraws) return;
     if (!canvasRef.current) return;
     if (!mediaInfo.current) return;
     if (!displayWidth || !displayHeight) return;
@@ -1431,6 +1438,7 @@ const VideoPreview: React.FC<
     inputMode,
     makeDecoderId,
     renderPosterFallback,
+    engineDraws,
   ]);
 
   useEffect(() => {
@@ -1895,7 +1903,7 @@ const VideoPreview: React.FC<
           draggable={tool === "pointer" && !isTransforming && !inputMode && !hidden}
           ref={imageRef}
           
-          image={imageSource || undefined}
+          image={engineDraws ? undefined : imageSource || undefined}
           x={clipTransform?.x ?? offsetX}
           y={clipTransform?.y ?? offsetY}
           width={nodeWidth}

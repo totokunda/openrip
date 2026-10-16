@@ -21,9 +21,14 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/react-query/queryClient";
 import { useContextMenuStore } from "@/lib/context-menu";
 import { useUpdateToasts } from "@/hooks/use-update-toasts";
+import { initEnginePreview } from "@/lib/engine-preview";
 
 const App: React.FC = () => {
   useUpdateToasts();
+  // The Rust engine preview setting, and keeping the engine's copy of the project current.
+  useEffect(() => {
+    initEnginePreview();
+  }, []);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const layout = useLayoutConfigStore((s) => s.layout);
   const { ghostInStage, clips} = useClipStore();

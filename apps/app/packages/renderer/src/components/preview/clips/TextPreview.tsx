@@ -15,6 +15,7 @@ import { useClipStore } from "@/lib/clip";
 import { BaseClipApplicator } from "./apply/base";
 import ApplicatorFilter from "./custom/ApplicatorFilter";
 import { sanitizeCornerRadius } from "@/lib/konva/sanitizeCornerRadius";
+import { useEngineDraws } from "@/lib/engine-preview";
 // (duplicate removed)
 
 //@ts-ignore
@@ -113,6 +114,9 @@ const TextPreview: React.FC<
   );
 
   const [isEditing, setIsEditing] = useState(false);
+  // The Rust engine draws the preview: hide this text (keeping its handles), except while
+  // it's being typed, so each keystroke shows at once.
+  const engineHides = useEngineDraws() && !isEditing;
   const [caretVisible, setCaretVisible] = useState(true);
   const [caretPosition, setCaretPosition] = useState<number>(0); // Character index for caret position
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
@@ -2219,8 +2223,10 @@ const TextPreview: React.FC<
             ref={backgroundRef}
             fill={backgroundColor}
             opacity={
-              ((backgroundOpacity ?? 100) / 100) *
-              ((clipTransform?.opacity ?? 100) / 100)
+              engineHides
+                ? 0
+                : ((backgroundOpacity ?? 100) / 100) *
+                  ((clipTransform?.opacity ?? 100) / 100)
             }
             cornerRadius={safeBackgroundCornerRadius}
             rotation={clipTransform?.rotation ?? 0}
@@ -2255,7 +2261,7 @@ const TextPreview: React.FC<
           shadowEnabled={shadowEnabled}
           align={textAlign}
           verticalAlign={verticalAlign}
-          opacity={(clipTransform?.opacity ?? 100) / 100}
+          opacity={engineHides ? 0 : (clipTransform?.opacity ?? 100) / 100}
           backgroundEnabled={backgroundEnabled}
           backgroundColor={backgroundColor}
           backgroundOpacity={backgroundOpacity}

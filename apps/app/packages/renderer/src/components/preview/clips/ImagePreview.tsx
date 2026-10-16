@@ -18,6 +18,7 @@ import { BaseClipApplicator } from "./apply/base";
 import { useClipStore } from "@/lib/clip";
 import { useWebGLMask } from "../mask/useWebGLMask";
 import { sanitizeCornerRadius } from "@/lib/konva/sanitizeCornerRadius";
+import { useEngineDraws } from "@/lib/engine-preview";
 
 const ImagePreview: React.FC<
   ImageClipProps & {
@@ -49,6 +50,8 @@ const ImagePreview: React.FC<
 
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // The Rust engine draws the preview: draw nothing here, keep the handles.
+  const engineDraws = useEngineDraws();
   const imageRef = useRef<Konva.Image>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const suppressUntilRef = useRef<number>(0);
@@ -1000,7 +1003,7 @@ const ImagePreview: React.FC<
           ref={imageRef}
           cornerRadius={safeCornerRadius}
           opacity={(clipTransform?.opacity ?? 100) / 100}
-          image={canvasRef.current || undefined}
+          image={engineDraws ? undefined : canvasRef.current || undefined}
           x={clipTransform?.x ?? offsetX}
           y={clipTransform?.y ?? offsetY}
           width={nodeWidth}

@@ -29,6 +29,7 @@ import AudioPreview from "./clips/AudioPreview";
 import ImagePreview from "./clips/ImagePreview";
 import ShapePreview from "./clips/ShapePreview";
 import TextPreview from "./clips/TextPreview";
+import EngineFrame from "./EngineFrame";
 import DrawingPreview from "./clips/DrawingPreview";
 import MaskPreview from "./clips/MaskPreview";
 import { useControlsStore } from "@/lib/control";
@@ -2623,6 +2624,9 @@ const Preview: React.FC<PreviewProps> = () => {
                     recenterAllClips(committedRectWidth, committedRectHeight);
                   }}
                 />
+                {/* The Rust engine's frame, when it draws the preview; clips then only
+                    keep their handles (lib/engine-preview.ts). */}
+                <EngineFrame rectWidth={rectWidth} rectHeight={rectHeight} scale={scale} />
                 
                 {sortClips(filterClips(clips)).map((clip: AnyClipProps) => {
 
