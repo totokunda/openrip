@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use swash::scale::{Render, ScaleContext, Source as GlyphSource};
 use swash::shape::ShapeContext;
-use swash::zeno::{Cap, Format, Join, Stroke, Vector};
+use swash::zeno::{Angle, Cap, Format, Join, Stroke, Transform, Vector};
 
 use crate::RgbaImage;
 
@@ -66,6 +66,10 @@ pub struct TextStyle<'a> {
     /// Wrap lines wider than this (px) between words, or between any two characters of
     /// CJK text; a word wider than the whole line breaks between characters.
     pub max_width: Option<f32>,
+    /// Synthetic bold: how far each glyph edge moves outward (px); 0 for none.
+    pub bold: f32,
+    /// Synthetic italic: shear of the glyphs (degrees, tops to the right); 0 for none.
+    pub italic: f32,
 }
 
 struct Placed {
@@ -239,6 +243,7 @@ impl TextLayout {
                 }
             }
         };
+        let shear = (style.italic != 0.0).then(|| Transform::skew(Angle::from_degrees(style.italic), Angle::ZERO));
         for g in &self.glyphs {
             let alpha = char_alpha.and_then(|a| a.get(g.char_index)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
             if alpha == 0.0 {
@@ -250,11 +255,11 @@ impl TextLayout {
                 // Centred on the outline, so twice as wide as its reach outside the glyph.
                 let mut pen = Stroke::new(2.0 * stroke);
                 pen.join(Join::Round).cap(Cap::Round);
-                if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).style(pen).offset(offset).render(&mut scaler, g.glyph) {
+                if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).embolden(style.bold).transform(shear).style(pen).offset(offset).render(&mut scaler, g.glyph) {
                     draw(cov, &img, x, y, alpha);
                 }
             }
-            if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).offset(offset).render(&mut scaler, g.glyph) {
+            if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).embolden(style.bold).transform(shear).offset(offset).render(&mut scaler, g.glyph) {
                 draw(&mut fill, &img, x, y, alpha);
             }
         }

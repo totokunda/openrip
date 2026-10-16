@@ -358,6 +358,11 @@ impl PreviewEngine {
                 }),
                 // A fraction of the canvas width, scaled with the clip like the text.
                 max_width: text.layout.max_width.map(|f| f * w as f32 * scale.x.abs() as f32),
+                // CapCut's synthetic styles: bold widens the glyphs by `bold_width` (0.008 in
+                // every local draft) in the stroke's unit, italic shears them by
+                // `italic_degree` (always 10). Both provisional until calibration session 5.
+                bold: if run.bold { 0.008 * em } else { 0.0 },
+                italic: if run.italic { 10.0 } else { 0.0 },
             };
             let lay = text::layout(&text.text, &style);
             // Library text animations (typing reveals) as per-character opacity.
@@ -377,7 +382,7 @@ impl PreviewEngine {
                 text.layout.alignment,
                 text.layout.letter_spacing.to_bits(),
                 text.layout.line_spacing.to_bits(),
-                (style.max_width.map(f32::to_bits), origin[0].to_bits(), origin[1].to_bits()),
+                (style.max_width.map(f32::to_bits), origin[0].to_bits(), origin[1].to_bits(), style.bold.to_bits(), style.italic.to_bits()),
                 char_alpha.as_ref().map(|a| a.iter().map(|v| (v * 255.0).round() as u8).collect::<Vec<_>>()),
             ));
             let tick = self.tick;

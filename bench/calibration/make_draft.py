@@ -50,6 +50,8 @@ class Txt:
     anim_dur: float = 0.0
     fixed_width: float = -1.0  # CapCut text box width (-1 = auto-sized box)
     scale: float = 1.0
+    bold: bool = False  # CapCut's B button (bold_width 0.008)
+    italic: bool = False  # CapCut's I button (italic_degree 10)
 
 
 # Library text intros used in the drafts, by CapCut resource id.
@@ -85,14 +87,15 @@ SESSIONS = {
     # Text intros (character timing, and the typewriter's caret), then line wrapping: the
     # same words in boxes of several fixed widths and clip scales, and an auto-sized box.
     "openrip-calibration-5": dict(canvas=(1080, 1920, "9:16"), tracks=[
-        [Img("black.png", 0, 20)],
+        [Img("black.png", 0, 23)],
         # Size 11 keeps the line (767 px) inside the canvas, so nothing wraps or overflows.
         [Txt(0, 3, 11, text=_LINE, anim="type_1", anim_dur=2), Txt(3, 3, 11, text=_LINE, anim="type_2", anim_dur=2),
          Txt(6, 3, 11, text=_LINE, anim="typewriter", anim_dur=2), Txt(9, 2, 15, text="in the park", anim="typewriter", anim_dur=1 / 3),
          Txt(11, 1, 15, text=_WRAP, fixed_width=600), Txt(12, 1, 15, text=_WRAP, fixed_width=600, scale=0.6),
          Txt(13, 1, 15, text=_WRAP, fixed_width=900), Txt(14, 1, 10, text=_WRAP, fixed_width=600),
          Txt(15, 1, 15, text=_WRAP), Txt(16, 1, 15, text="one two three\n" + _WRAP, fixed_width=600),
-         Txt(17, 1, 15, text=_LINE + " " + _LINE, background=0.28, fixed_width=600), Txt(18, 2, 11, text=_LINE, anim="type_1", anim_dur=2, stroke=0.08)],
+         Txt(17, 1, 15, text=_LINE + " " + _LINE, background=0.28, fixed_width=600), Txt(18, 2, 11, text=_LINE, anim="type_1", anim_dur=2, stroke=0.08),
+         Txt(20, 1, 30, text="Bold", bold=True), Txt(21, 1, 30, text="Bold"), Txt(22, 1, 30, text="Italic", italic=True)],
     ]),
     # Landscape: does the fixed width scale with the canvas width?
     "openrip-calibration-5-landscape": dict(canvas=(1920, 1080, "16:9"), tracks=[
@@ -230,9 +233,14 @@ def build(name, spec, template: Path, root: Path):
                         style["range"] = [0, len(c.text)]
                 for style in content["styles"]:
                     style["size"] = c.size
+                    if c.bold:
+                        style["bold"] = True
+                    if c.italic:
+                        style["italic"] = True
                     if c.stroke:
                         style["strokes"] = [{"content": {"render_type": "solid", "solid": {"color": [0, 0, 0]}}, "width": c.stroke, "mode": 0}]
-                text.update(content=json.dumps(content, separators=(",", ":")), font_size=c.size, text_size=round(c.size * 2), fixed_width=c.fixed_width)
+                text.update(content=json.dumps(content, separators=(",", ":")), font_size=c.size, text_size=round(c.size * 2), fixed_width=c.fixed_width,
+                            bold_width=0.008 if c.bold else 0.0, italic_degree=10 if c.italic else 0)
                 if c.background:
                     text.update(background_color="#000000", background_alpha=1.0, background_style=2, background_round_radius=0.4,
                                 background_width=c.background, background_height=c.background, background_vertical_offset=0.0, background_horizontal_offset=0.0)

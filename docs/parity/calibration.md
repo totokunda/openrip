@@ -186,5 +186,6 @@ Two things real drafts use that session 2's short default text never showed: lib
 | 16 s | a line break, then the words, box 600 | wrapping after an explicit line break |
 | 17 s | two copies of the line with a background box, box 600 | the background around wrapped lines |
 | 18–20 s | Type 1 with a black stroke 0.08 | whether the stroke appears with its character |
+| 20 / 21 / 22 s | "Bold" bold, "Bold" regular, "Italic" italic, size 30 | the synthetic bold's strength (`bold_width` 0.008) and the italic shear (10°; matches a cover already) |
 
 **`openrip-calibration-5-landscape`** (16:9, 1920×1080): the words with box widths 600 and 1200, then an auto box at size 8: whether `fixed_width` is relative to the canvas width.
