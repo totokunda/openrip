@@ -52,6 +52,8 @@ pub struct Adjust {
     pub temperature: f32,
     pub tint: f32,
     pub exposure: f32,
+    /// CapCut's Sharpen slider (0..1), a separate pass after the others.
+    pub sharpen: f32,
 }
 
 /// CapCut's exposure lookup tables (17 grids of 17x17, side by side: 289x17), and a key
@@ -66,7 +68,7 @@ pub struct ExposureLuts {
 impl Adjust {
     pub fn is_identity(&self) -> bool {
         let e = 1e-5;
-        self.wheels.is_identity() && [self.brightness, self.contrast, self.saturation, self.highlights, self.shadows, self.whites, self.blacks, self.temperature, self.tint, self.exposure].iter().all(|v| v.abs() <= e)
+        self.wheels.is_identity() && self.sharpen.abs() <= e && [self.brightness, self.contrast, self.saturation, self.highlights, self.shadows, self.whites, self.blacks, self.temperature, self.tint, self.exposure].iter().all(|v| v.abs() <= e)
     }
 
     /// The shader's parameters (see `fs_adjust` in shaders.wgsl).
@@ -92,7 +94,8 @@ impl Adjust {
         p.a = [saturation as f32, brightness as f32, contrast as f32, CONTRAST_PIVOT as f32];
         p.b = [x_factor as f32, left as f32, right as f32, left_slope as f32];
         p.c = [right_slope as f32, pivot_slope as f32, poly(c(self.highlights), 1.0) as f32, poly(c(self.shadows), -1.0) as f32];
-        p.d = [bw_slope as f32, bw_bias as f32, c(self.exposure) as f32, 0.0];
+        // Sharpen: CapCut's `sharpness` (1.6 x slider) times its white/black gain (0.5).
+        p.d = [bw_slope as f32, bw_bias as f32, c(self.exposure) as f32, 0.8 * self.sharpen.clamp(0.0, 1.0)];
         p.on1 = [tt, on(self.saturation), on(self.brightness), on(self.contrast)];
         if !self.wheels.is_identity() {
             // CapCut's slider-to-shader mapping for the primary wheels.
@@ -128,7 +131,7 @@ pub(crate) struct AdjustParams {
     b: [f32; 4],
     /// contrast: right slope difference, slope at the pivot; highlight and shadow exponents
     c: [f32; 4],
-    /// black/white slope and bias, exposure
+    /// black/white slope and bias, exposure, sharpen amount
     d: [f32; 4],
     /// enables: temperature/tint, saturation, brightness, contrast
     on1: [f32; 4],

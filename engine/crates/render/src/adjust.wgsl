@@ -8,7 +8,7 @@ struct AdjustParams {
     a: vec4<f32>,   // saturation, brightness, contrast, contrast pivot
     b: vec4<f32>,   // contrast: steepness, left diff, right diff, left slope diff
     c: vec4<f32>,   // contrast: right slope diff, pivot slope; highlight, shadow exponents
-    d: vec4<f32>,   // black/white slope, bias; exposure
+    d: vec4<f32>,   // black/white slope, bias; exposure; sharpen amount
     on1: vec4<f32>, // temperature/tint, saturation, brightness, contrast
     on2: vec4<f32>, // highlights, shadows, black/white, exposure
     w_lift: vec4<f32>,   // primary wheels: R, G, B, luma
@@ -215,4 +215,45 @@ fn fs_adjust(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         c = clamp(mix(c, lut3d(c), abs(A.d.z)), zero, one);
     }
     return vec4<f32>(c * px.a, px.a);
+}
+
+fn straight(p: vec2<i32>) -> vec4<f32> {
+    let s = vec2<i32>(textureDimensions(src)) - 1;
+    let px = textureLoad(src, clamp(p, vec2<i32>(0), s), 0);
+    if (px.a <= 0.0) {
+        return vec4<f32>(0.0);
+    }
+    return vec4<f32>(px.rgb / px.a, px.a);
+}
+
+fn luma601(c: vec4<f32>) -> f32 {
+    return dot(c.rgb, vec3<f32>(0.299, 0.587, 0.114));
+}
+
+// CapCut's Sharpen: the strongest of four directional second differences of luma
+// (horizontal, vertical, the two diagonals; the first within 0.01 of the strongest),
+// scaled by the amount and added to every channel.
+@fragment
+fn fs_sharpen_luma(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let p = vec2<i32>(floor(pos.xy));
+    let centre = straight(p);
+    if (centre.a <= 0.0) {
+        return vec4<f32>(0.0);
+    }
+    let y = luma601(centre);
+    let f1 = 2.0 * y - luma601(straight(p + vec2<i32>(-1, 0))) - luma601(straight(p + vec2<i32>(1, 0)));
+    let f2 = 2.0 * y - luma601(straight(p + vec2<i32>(0, -1))) - luma601(straight(p + vec2<i32>(0, 1)));
+    let f3 = 2.0 * y - luma601(straight(p + vec2<i32>(1, -1))) - luma601(straight(p + vec2<i32>(-1, 1)));
+    let f4 = 2.0 * y - luma601(straight(p + vec2<i32>(-1, -1))) - luma601(straight(p + vec2<i32>(1, 1)));
+    let m = max(max(abs(f1), abs(f2)), max(abs(f3), abs(f4)));
+    var f = f4;
+    if (abs(abs(f1) - m) <= 0.01) {
+        f = f1;
+    } else if (abs(abs(f2) - m) <= 0.01) {
+        f = f2;
+    } else if (abs(abs(f3) - m) <= 0.01) {
+        f = f3;
+    }
+    let c = clamp(centre.rgb + vec3<f32>(A.d.w * f), vec3<f32>(0.0), vec3<f32>(1.0));
+    return vec4<f32>(c * centre.a, centre.a);
 }

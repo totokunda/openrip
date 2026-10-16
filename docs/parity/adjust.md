@@ -24,6 +24,8 @@ Each step works on the encoded values and clamps to 0–1, in this order:
 | Temperature / tint | Bradford adaptation from 6500 K to 6500 − 1970t + 876t² − 2630t³ K, tint 100 × slider along the isotemperature line, in BT.709 primaries. |
 | Exposure | Mix towards CapCut's brighter or darker table by \|slider\|. |
 
+**Sharpen** is a second pass after these. It adds 0.8 × slider × the strongest of four directional second differences of BT.601 luma (horizontal, vertical and the two diagonals) to every channel. CapCut's sharpness is 1.6 × slider, and its white and black gains are 0.5; the gains are stored as doubles in the bundle's material.
+
 The primary colour wheels run before these, in the same pass:
 1. **Per channel and on luma.** Each wheel maps x to ((x − lift′) / (1/gain′ − lift′))^gamma′ around the offset. The primed values come from CapCut's mappings:
    - lift halved when positive;
@@ -45,7 +47,7 @@ The primary colour wheels run before these, in the same pass:
 ## Not yet
 
 Not drawn yet:
-- sharpen and clarity, which are spatial filters in their own passes;
+- clarity, a multi-pass pyramid filter. Its sliders are at most 0.02 in the local drafts;
 - vignette;
 - HSL and curves. In the local drafts, every curve is empty and only 3 HSL materials change anything;
 - log wheels;

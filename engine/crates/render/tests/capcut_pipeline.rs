@@ -193,3 +193,24 @@ fn colour_wheel_gain_and_offset() {
         assert!((*v as i32 - want).abs() <= 1, "{v} vs {want}");
     }
 }
+
+/// CapCut's Sharpen: at an edge from 100 to 200, slider 1 moves each side by
+/// 0.8 x (2y - left - right): -100 and +100 code values, clamped.
+#[test]
+fn sharpen_steepens_edges_like_capcut() {
+    let Ok(c) = Compositor::new() else { return };
+    let mut data = Vec::new();
+    for _ in 0..8 {
+        for x in 0..8 {
+            data.extend(if x < 4 { [100u8, 100, 100, 255] } else { [200, 200, 200, 255] });
+        }
+    }
+    let img = RgbaImage { width: 8, height: 8, data };
+    let mut l = Layer::from_model(Source::Image(&img), [8, 8], [0.0, 0.0], [1.0, 1.0], 0.0);
+    l.adjust = Some((openrip_render::Adjust { sharpen: 1.0, ..Default::default() }, None));
+    let out = c.render(8, 8, [0, 0, 0], &[l]);
+    let at = |x: usize| out.data[(4 * 8 + x) * 4] as i32;
+    assert!((at(3) - 20).abs() <= 1, "{}", at(3));
+    assert_eq!(at(4), 255);
+    assert_eq!((at(1), at(6)), (100, 200));
+}

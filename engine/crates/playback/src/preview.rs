@@ -339,6 +339,7 @@ impl PreviewEngine {
                 Some("temperature") => &mut a.temperature,
                 Some("tint") => &mut a.tint,
                 Some("exposure") => &mut a.exposure,
+                Some("sharpen") => &mut a.sharpen,
                 _ => continue,
             };
             *slot = v;

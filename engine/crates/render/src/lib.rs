@@ -145,8 +145,9 @@ pub struct Compositor {
     /// RGBA canvas -> NV12 planes for the encoder.
     luma: wgpu::RenderPipeline,
     chroma: wgpu::RenderPipeline,
-    /// CapCut's Adjust sliders (adjust.wgsl).
+    /// CapCut's Adjust sliders and its Sharpen (adjust.wgsl).
     adjust: wgpu::RenderPipeline,
+    sharpen_luma: wgpu::RenderPipeline,
     /// Exposure lookup tables on the GPU, by key, and a stand-in for clips without one.
     luts: std::sync::Mutex<std::collections::HashMap<u64, wgpu::Texture>>,
     no_lut: wgpu::Texture,
@@ -248,6 +249,25 @@ impl Compositor {
                 cache: None,
             })
         };
+        let adjust_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("adjust"), source: wgpu::ShaderSource::Wgsl(include_str!("adjust.wgsl").into()) });
+        let adjust_pipeline = |entry: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&yuv_pipeline_layout),
+                vertex: wgpu::VertexState { module: &adjust_module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+                fragment: Some(wgpu::FragmentState {
+                    module: &adjust_module,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState { format: CANVAS, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         Ok(Compositor {
             yuv: pipeline("fs_yuv", CANVAS, None),
             area: pipeline("fs_area", WIDE, None),
@@ -257,25 +277,8 @@ impl Compositor {
             place_bgra: pipeline("fs_place", wgpu::TextureFormat::Bgra8Unorm, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             luma: pipeline("fs_luma", wgpu::TextureFormat::R8Unorm, None),
             chroma: pipeline("fs_chroma", wgpu::TextureFormat::Rg8Unorm, None),
-            adjust: {
-                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("adjust"), source: wgpu::ShaderSource::Wgsl(include_str!("adjust.wgsl").into()) });
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("fs_adjust"),
-                    layout: Some(&yuv_pipeline_layout),
-                    vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &module,
-                        entry_point: Some("fs_adjust"),
-                        compilation_options: Default::default(),
-                        targets: &[Some(wgpu::ColorTargetState { format: CANVAS, blend: None, write_mask: wgpu::ColorWrites::ALL })],
-                    }),
-                    primitive: Default::default(),
-                    depth_stencil: None,
-                    multisample: Default::default(),
-                    multiview_mask: None,
-                    cache: None,
-                })
-            },
+            sharpen_luma: adjust_pipeline("fs_sharpen_luma"),
+            adjust: adjust_pipeline("fs_adjust"),
             luts: Default::default(),
             no_lut: device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("no lut"),
@@ -405,8 +408,21 @@ impl Compositor {
         pass.draw(0..3, 0..1);
     }
 
-    /// Apply Adjust sliders to `src` into `dst` (same size).
-    fn adjust_pass(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, dst: &wgpu::Texture, adjust: &Adjust, luts: Option<&ExposureLuts>) {
+    /// Apply a clip's colour grade to `src`: the Adjust pass, then Sharpen when set. Returns
+    /// the result (a pooled texture) and any intermediate to recycle.
+    fn grade(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, adjust: &Adjust, luts: Option<&ExposureLuts>) -> (wgpu::Texture, Option<wgpu::Texture>) {
+        let out = self.texture(src.width(), src.height(), CANVAS, wgpu::TextureUsages::empty());
+        self.adjust_pass(enc, &self.adjust, src, &out, adjust, luts);
+        if adjust.sharpen.abs() <= 1e-5 {
+            return (out, None);
+        }
+        let sharp = self.texture(src.width(), src.height(), CANVAS, wgpu::TextureUsages::empty());
+        self.adjust_pass(enc, &self.sharpen_luma, &out, &sharp, adjust, luts);
+        (sharp, Some(out))
+    }
+
+    /// Run one of the grade pipelines from `src` into `dst` (same size).
+    fn adjust_pass(&self, enc: &mut wgpu::CommandEncoder, pipeline: &wgpu::RenderPipeline, src: &wgpu::Texture, dst: &wgpu::Texture, adjust: &Adjust, luts: Option<&ExposureLuts>) {
         // The table for the slider's direction, uploaded once per key.
         let lut = luts.filter(|_| adjust.exposure.abs() > 1e-5).map(|l| {
             let key = l.key ^ (adjust.exposure > 0.0) as u64;
@@ -464,7 +480,7 @@ impl Compositor {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&self.adjust);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind, &[]);
         pass.draw(0..3, 0..1);
     }
@@ -613,8 +629,8 @@ impl Compositor {
             // Adjust sliders on the clip's own pixels, before placement.
             let stage = match layer.adjust.filter(|(a, _)| !a.is_identity()) {
                 Some((a, luts)) => {
-                    let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
-                    self.adjust_pass(enc, &stage, &out, &a, luts);
+                    let (out, middle) = self.grade(enc, &stage, &a, luts);
+                    scratch.extend(middle);
                     if matches!(layer.source, Source::Cached(..)) {
                         keep.push(stage);
                     } else {
