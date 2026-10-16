@@ -812,6 +812,7 @@ version = "0.0.0"
 dependencies = [
  "bytemuck",
  "objc2",
+ "objc2-core-foundation",
  "objc2-core-video",
  "objc2-io-surface",
  "objc2-metal",

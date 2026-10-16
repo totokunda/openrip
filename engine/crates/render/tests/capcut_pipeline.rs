@@ -99,3 +99,28 @@ fn opacity_blends_premultiplied_over() {
     let [r, g, b, _] = px(&out, 8, 8);
     assert!((r as i32 - 128).abs() <= 1 && (g as i32 - 128).abs() <= 1 && (b as i32 - 255).abs() <= 1, "{r} {g} {b}");
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn renders_into_an_iosurface_like_into_memory() {
+    use objc2_core_video::*;
+    let Some(c) = gpu() else { return };
+    let src = image(64, 48, |x, y| [(x * 4) as u8, (y * 5) as u8, 200, 255]);
+    let layers = [Layer::from_model(&src, [96, 64], [0.1, -0.2], [0.8, 0.8], 15.0)];
+    let mem = c.render(96, 64, [10, 20, 30], &layers);
+    let surface = Compositor::output_surface(96, 64).unwrap();
+    c.render_to_surface(&surface, [10, 20, 30], &layers).unwrap();
+    unsafe {
+        assert_eq!(CVPixelBufferLockBaseAddress(&surface, CVPixelBufferLockFlags::ReadOnly), 0);
+        let base = CVPixelBufferGetBaseAddress(&surface) as *const u8;
+        let stride = CVPixelBufferGetBytesPerRow(&surface);
+        for y in 0..64usize {
+            for x in 0..96usize {
+                let bgra = std::slice::from_raw_parts(base.add(y * stride + x * 4), 4);
+                let rgba = &mem.data[(y * 96 + x) * 4..][..4];
+                assert_eq!([bgra[2], bgra[1], bgra[0], bgra[3]], rgba, "({x}, {y})");
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(&surface, CVPixelBufferLockFlags::ReadOnly);
+    }
+}

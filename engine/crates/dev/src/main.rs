@@ -16,6 +16,9 @@
 //!   openrip-dev render-frame <project.json> <seconds> <width> <height> <out.png>
 //!       Render one frame of an imported project with the GPU compositor (images, and video
 //!       frames straight from the hardware decoder; text is not rendered yet).
+//!   openrip-dev play-bench <video> [<width> <height>]
+//!       Decode a video and composite every frame into an IOSurface preview surface (default
+//!       1920x1080), as playback will: per-frame decode and composite cost, and CPU use.
 //!   openrip-dev scrub-bench <media-file>
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
@@ -38,6 +41,7 @@ fn main() -> ExitCode {
         Some("v1-scan") if args.len() >= 2 => v1_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("probe") if args.len() >= 2 => probe(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("render-frame") if args.len() >= 6 => render_frame(&args[1..]).map_err(|e| e.to_string()),
+        Some("play-bench") if args.len() >= 2 => play_bench(&args[1..]).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
@@ -514,4 +518,66 @@ fn render_frame(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!("rendered {} layer(s) at {w}x{h} in {:.1} ms", layers.len(), t0.elapsed().as_secs_f64() * 1000.0);
     save_png(Path::new(&args[4]), &frame)?;
     Ok(())
+}
+
+fn cpu_seconds() -> f64 {
+    let mut usage = std::mem::MaybeUninit::<libc_rusage>::zeroed();
+    unsafe { getrusage(0, usage.as_mut_ptr()) };
+    let u = unsafe { usage.assume_init() };
+    (u.utime_sec + u.stime_sec) as f64 + (u.utime_usec + u.stime_usec) as f64 / 1e6
+}
+
+#[repr(C)]
+struct libc_rusage {
+    utime_sec: i64,
+    utime_usec: i32,
+    stime_sec: i64,
+    stime_usec: i32,
+    rest: [i64; 14],
+}
+
+extern "C" {
+    fn getrusage(who: i32, usage: *mut libc_rusage) -> i32;
+}
+
+#[cfg(target_os = "macos")]
+fn play_bench(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_media::{DecoderOptions, VideoDecoder};
+    use openrip_render::{Compositor, Layer, Source};
+    let (w, h): (u32, u32) = if args.len() >= 3 { (args[1].parse()?, args[2].parse()?) } else { (1920, 1080) };
+    openrip_media::warm_up().join().ok();
+    let mut d = VideoDecoder::open(Path::new(&args[0]), &DecoderOptions::default())?;
+    let c = Compositor::new()?;
+    let surfaces: Vec<_> = (0..3).map(|_| Compositor::output_surface(w, h).expect("surface")).collect();
+    let info = d.info().clone();
+    println!("{} {}x{} -> {w}x{h} preview, native decode: {}", info.codec, info.width, info.height, d.native_videotoolbox());
+    let (mut dec_ms, mut comp_ms) = (Vec::new(), Vec::new());
+    let (wall, cpu0) = (Instant::now(), cpu_seconds());
+    let mut n = 0;
+    loop {
+        let t0 = Instant::now();
+        let Some(frame) = d.next_frame()? else { break };
+        let t1 = Instant::now();
+        let layer = Layer::from_model(Source::Video(&frame), [w, h], [0.0, 0.0], [1.0, 1.0], 0.0);
+        c.render_to_surface(&surfaces[n % 3], [0, 0, 0], &[layer])?;
+        dec_ms.push((t1 - t0).as_secs_f64() * 1e3);
+        comp_ms.push(t1.elapsed().as_secs_f64() * 1e3);
+        n += 1;
+        if frame.time.0 >= 10_000_000 {
+            break;
+        }
+    }
+    let secs = wall.elapsed().as_secs_f64();
+    let cpu = cpu_seconds() - cpu0;
+    summary("decode (per frame)", dec_ms);
+    summary("composite into surface (per frame)", comp_ms);
+    let fps = info.frame_rate.map(|r| r.as_f64()).unwrap_or(30.0);
+    println!("{n} frames in {secs:.2} s = {:.0} fps ({:.1}x real time); CPU {:.0}% of one core while running flat out", n as f64 / secs, n as f64 / secs / fps, 100.0 * cpu / secs);
+    println!("at real time ({fps:.0} fps) that is ~{:.0}% of one core", 100.0 * cpu / n as f64 * fps);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn play_bench(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    Err("play-bench needs macOS (IOSurface output)".into())
 }

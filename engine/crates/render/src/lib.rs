@@ -118,6 +118,8 @@ pub struct Compositor {
     sharpen: wgpu::RenderPipeline,
     bilinear: wgpu::RenderPipeline,
     place: wgpu::RenderPipeline,
+    /// The placement pass for BGRA targets (IOSurfaces handed to the app).
+    place_bgra: wgpu::RenderPipeline,
 }
 
 const CANVAS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -197,6 +199,7 @@ impl Compositor {
             sharpen: pipeline("fs_sharpen", CANVAS, None),
             bilinear: pipeline("fs_bilinear", CANVAS, None),
             place: pipeline("fs_place", CANVAS, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
+            place_bgra: pipeline("fs_place", wgpu::TextureFormat::Bgra8Unorm, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             device,
             queue,
             layout,
@@ -314,18 +317,25 @@ impl Compositor {
     /// One IOSurface plane as a wgpu texture (no copy).
     #[cfg(target_os = "macos")]
     fn wrap_plane(&self, surface: &objc2_io_surface::IOSurfaceRef, plane: usize, (w, h): (u32, u32), format: wgpu::TextureFormat) -> Option<wgpu::Texture> {
+        self.wrap_surface(surface, plane, (w, h), format, false)
+    }
+
+    /// An IOSurface plane as a wgpu texture (no copy); `target` makes it renderable.
+    #[cfg(target_os = "macos")]
+    fn wrap_surface(&self, surface: &objc2_io_surface::IOSurfaceRef, plane: usize, (w, h): (u32, u32), format: wgpu::TextureFormat, target: bool) -> Option<wgpu::Texture> {
         use objc2_metal::{MTLDevice, MTLPixelFormat, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage};
         let mtl_format = match format {
             wgpu::TextureFormat::R8Unorm => MTLPixelFormat::R8Unorm,
             wgpu::TextureFormat::Rg8Unorm => MTLPixelFormat::RG8Unorm,
             wgpu::TextureFormat::R16Unorm => MTLPixelFormat::R16Unorm,
             wgpu::TextureFormat::Rg16Unorm => MTLPixelFormat::RG16Unorm,
+            wgpu::TextureFormat::Bgra8Unorm => MTLPixelFormat::BGRA8Unorm,
             _ => return None,
         };
         let raw = unsafe {
             let hal = self.device.as_hal::<wgpu::hal::api::Metal>()?;
             let desc = MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(mtl_format, w as usize, h as usize, false);
-            desc.setUsage(MTLTextureUsage::ShaderRead);
+            desc.setUsage(if target { MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget } else { MTLTextureUsage::ShaderRead });
             hal.raw_device().newTextureWithDescriptor_iosurface_plane(&desc, surface, plane)?
         };
         let size = wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 };
@@ -337,27 +347,29 @@ impl Compositor {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: if target { wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT } else { wgpu::TextureUsages::TEXTURE_BINDING },
             view_formats: &[],
         };
         Some(unsafe { self.device.create_texture_from_hal::<wgpu::hal::api::Metal>(hal_texture, &desc, wgpu::TextureUses::RESOURCE) })
     }
 
-    /// Render `layers` (bottom first) over an opaque `background` at `width`×`height`.
-    pub fn render(&self, width: u32, height: u32, background: [u8; 3], layers: &[Layer]) -> RgbaImage {
-        let canvas = self.texture(width, height, CANVAS, wgpu::TextureUsages::COPY_SRC);
-        let mut enc = self.device.create_command_encoder(&Default::default());
+    /// Record the passes that draw `layers` (bottom first) over `background` into `canvas`.
+    /// Returns the intermediate textures, which must live until the work is submitted.
+    fn encode_frame(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, background: [u8; 3], layers: &[Layer]) -> Vec<wgpu::Texture> {
+        let (width, height) = (canvas.width(), canvas.height());
+        let place_pipeline = if canvas.format() == wgpu::TextureFormat::Bgra8Unorm { &self.place_bgra } else { &self.place };
+        let enc = enc;
         let bg = wgpu::Color { r: background[0] as f64 / 255.0, g: background[1] as f64 / 255.0, b: background[2] as f64 / 255.0, a: 1.0 };
         // Clear the canvas with an empty placement pass.
         let blank = self.texture(1, 1, CANVAS, wgpu::TextureUsages::empty());
-        let off = Params { src_size: [1.0, 1.0], dst_size: [1.0, 1.0], inv0: [0.0, 0.0, -100.0, 0.0], inv1: [0.0, 0.0, -100.0, 0.0], misc: [0.0; 4] };
-        self.pass(&mut enc, &self.place, &blank, &canvas, off, Some(bg));
         let mut keep = Vec::new(); // textures must outlive the submission
+        let off = Params { src_size: [1.0, 1.0], dst_size: [1.0, 1.0], inv0: [0.0, 0.0, -100.0, 0.0], inv1: [0.0, 0.0, -100.0, 0.0], misc: [0.0; 4] };
+        self.pass(enc, place_pipeline, &blank, canvas, off, Some(bg));
         for layer in layers {
             let (sw, sh) = layer.source.size();
             let src = match layer.source {
                 Source::Image(img) => self.upload(img),
-                Source::Video(frame) => match self.import_video(&mut enc, frame) {
+                Source::Video(frame) => match self.import_video(enc, frame) {
                     Some((rgba, planes)) => {
                         keep.extend(planes);
                         rgba
@@ -372,14 +384,14 @@ impl Compositor {
                 src
             } else if tw < sw && th < sh {
                 let wide = self.texture(tw, th, WIDE, wgpu::TextureUsages::empty());
-                self.pass(&mut enc, &self.area, &src, &wide, resize, Some(wgpu::Color::TRANSPARENT));
+                self.pass(enc, &self.area, &src, &wide, resize, Some(wgpu::Color::TRANSPARENT));
                 let sharp = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
-                self.pass(&mut enc, &self.sharpen, &wide, &sharp, resize, Some(wgpu::Color::TRANSPARENT));
+                self.pass(enc, &self.sharpen, &wide, &sharp, resize, Some(wgpu::Color::TRANSPARENT));
                 keep.extend([src, wide]);
                 sharp
             } else {
                 let up = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
-                self.pass(&mut enc, &self.bilinear, &src, &up, resize, Some(wgpu::Color::TRANSPARENT));
+                self.pass(enc, &self.bilinear, &src, &up, resize, Some(wgpu::Color::TRANSPARENT));
                 keep.push(src);
                 up
             };
@@ -402,9 +414,48 @@ impl Compositor {
                 inv1: [b[0] as f32, b[1] as f32, b[2] as f32, 0.0],
                 misc: [layer.opacity, 0.0, 0.0, 0.0],
             };
-            self.pass(&mut enc, &self.place, &stage, &canvas, place, None);
+            self.pass(enc, place_pipeline, &stage, canvas, place, None);
             keep.push(stage);
         }
+        keep.push(blank);
+        keep
+    }
+
+    /// A new IOSurface-backed BGRA pixel buffer to render into with
+    /// [`Compositor::render_to_surface`] and hand to the app.
+    #[cfg(target_os = "macos")]
+    pub fn output_surface(width: u32, height: u32) -> Option<objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>> {
+        use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString, CFType};
+        use objc2_core_video::*;
+        let props = CFDictionary::<CFString, CFType>::from_slices(&[], &[]);
+        let attrs = unsafe { CFDictionary::<CFString, CFType>::from_slices(&[kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey], &[props.as_ref(), CFBoolean::new(true).as_ref()]) };
+        let mut out: *mut CVPixelBuffer = std::ptr::null_mut();
+        let r = unsafe { CVPixelBufferCreate(None, width as usize, height as usize, kCVPixelFormatType_32BGRA, Some(attrs.as_opaque()), std::ptr::NonNull::from(&mut out)) };
+        (r == 0 && !out.is_null()).then(|| unsafe { CFRetained::from_raw(std::ptr::NonNull::new_unchecked(out)) })
+    }
+
+    /// Render into an IOSurface-backed BGRA pixel buffer (the app's preview hands its
+    /// IOSurface to Electron's `sharedTexture`; nothing is copied to the CPU). Returns once
+    /// the GPU has finished, so the surface can be presented.
+    #[cfg(target_os = "macos")]
+    pub fn render_to_surface(&self, target: &objc2_core_video::CVPixelBuffer, background: [u8; 3], layers: &[Layer]) -> Result<(), RenderError> {
+        let (w, h) = (objc2_core_video::CVPixelBufferGetWidth(target) as u32, objc2_core_video::CVPixelBufferGetHeight(target) as u32);
+        let surface = objc2_core_video::CVPixelBufferGetIOSurface(Some(target)).ok_or_else(|| RenderError::Device("target has no IOSurface".into()))?;
+        let canvas = self.wrap_surface(&surface, 0, (w, h), wgpu::TextureFormat::Bgra8Unorm, true).ok_or_else(|| RenderError::Device("can't render into that surface".into()))?;
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        let keep = self.encode_frame(&mut enc, &canvas, background, layers);
+        self.queue.submit([enc.finish()]);
+        self.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| RenderError::Device(e.to_string()))?;
+        drop(keep);
+        Ok(())
+    }
+
+    /// Render `layers` (bottom first) over an opaque `background` at `width`×`height` and
+    /// read the frame back (tests, stills, analysis).
+    pub fn render(&self, width: u32, height: u32, background: [u8; 3], layers: &[Layer]) -> RgbaImage {
+        let canvas = self.texture(width, height, CANVAS, wgpu::TextureUsages::COPY_SRC);
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        let keep = self.encode_frame(&mut enc, &canvas, background, layers);
         // Read back (rows padded to 256 bytes).
         let row = (width * 4).div_ceil(256) * 256;
         let buf = self.device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (row * height) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
