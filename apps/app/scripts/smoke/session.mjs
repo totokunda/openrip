@@ -1,8 +1,9 @@
 // Drive the built app step by step with Playwright, on a throwaway profile:
 //   node session.mjs <appDir> <outDir> <userDataDir> <clip> <step...>
 // Each step is steps/<name>.mjs; its default export gets { app, win, shot, clock, logs, clipPath,
-// outDir, fs } and returns a line for the log. The renderer's warnings, errors and page errors
-// (with stacks) go to <outDir>/logs.txt. EXE=<binary> runs a packaged build.
+// outDir, udDir, fs } and returns a line for the log; steps can leave values on it for later
+// ones. The renderer's warnings, errors and page errors (with stacks) go to <outDir>/logs.txt.
+// EXE=<binary> runs a packaged build.
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
@@ -24,9 +25,20 @@ win.on("console", (m) => { if (["error", "warning"].includes(m.type())) logs.pus
 win.on("pageerror", (e) => logs.push("[pageerror] " + (e.stack || e.message).slice(0, 1500)));
 await win.waitForLoadState("domcontentloaded");
 await win.waitForTimeout(5000);
+// Maximized, as the app starts itself: with several sessions at once a window can stay small.
+// Wait until it is, and its size has settled, since steps measure the layout.
+const maximized = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isMaximized());
+await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.maximize());
+for (let i = 0; i < 20 && !(await maximized()); i++) await win.waitForTimeout(500);
+for (let last = "", i = 0; i < 20; i++) {
+  await win.waitForTimeout(500);
+  const size = await win.evaluate(() => `${innerWidth}x${innerHeight}`);
+  if (size === last) break;
+  last = size;
+}
 const shot = (n) => win.screenshot({ path: `${outDir}/${n}.png` });
 const clock = async () => (await win.locator("body").innerText()).match(/\d\d:\d\d\.\d\d\s*\/\s*\d\d:\d\d\.\d\d/)?.[0];
-globalThis.ctx = { app, win, shot, clock, logs, clipPath, outDir, fs };
+globalThis.ctx = { app, win, shot, clock, logs, clipPath, outDir, udDir, fs };
 for (const step of steps) {
   const mod = await import(`./steps/${step}.mjs?${Date.now()}`);
   try {
