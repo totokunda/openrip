@@ -53,8 +53,9 @@ export function engineSyncProject(
  * Render the frame at `timeUs` at `width`×`height`. The pixels arrive separately and are
  * drawn into the canvas with id ENGINE_FRAME_CANVAS_ID; this resolves once they are.
  */
-export function engineRender(timeUs: number, width: number, height: number): Promise<EngineRenderResult> {
-  return ipcRenderer.invoke("engine:render", timeUs, width, height);
+/** The frame at `timeUs`; `scrub` while the playhead is dragged (a quick stand-in for video). */
+export function engineRender(timeUs: number, width: number, height: number, scrub = false): Promise<EngineRenderResult> {
+  return ipcRenderer.invoke("engine:render", timeUs, width, height, scrub);
 }
 
 /**

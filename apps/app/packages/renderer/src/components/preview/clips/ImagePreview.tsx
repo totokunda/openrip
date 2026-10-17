@@ -18,7 +18,7 @@ import { BaseClipApplicator } from "./apply/base";
 import { useClipStore } from "@/lib/clip";
 import { useWebGLMask } from "../mask/useWebGLMask";
 import { sanitizeCornerRadius } from "@/lib/konva/sanitizeCornerRadius";
-import { useEngineDraws } from "@/lib/engine-preview";
+import { useClipFocusFrame, useEngineDraws } from "@/lib/engine-preview";
 
 const ImagePreview: React.FC<
   ImageClipProps & {
@@ -67,12 +67,18 @@ const ImagePreview: React.FC<
   const removeClipSelection = useControlsStore((s) => s.removeClipSelection);
   const clearSelection = useControlsStore((s) => s.clearSelection);
   const addClipSelection = useControlsStore((s) => s.addClipSelection);
-  const { selectedClipIds, isFullscreen } = useControlsStore();
+  const selectedClipIds = useControlsStore((s) => s.selectedClipIds);
+  const isFullscreen = useControlsStore((s) => s.isFullscreen);
   const isSelected = useMemo(
     () => selectedClipIds.includes(clipId),
     [clipId, selectedClipIds],
   );
-  const focusFrameFromControls = useControlsStore((s) => s.focusFrame);
+  const rangeStart = useClipStore((s) => Number((s.getClipById(clipId) as any)?.startFrame ?? 0));
+  const rangeEnd = useClipStore((s) => {
+    const e = (s.getClipById(clipId) as any)?.endFrame;
+    return typeof e === "number" ? e : Infinity;
+  });
+  const focusFrameFromControls = useClipFocusFrame(rangeStart, rangeEnd, inputMode || !!overrideClip);
   const clipInfo = useMemo(() => {
     try {
       const overrideAny = overrideClip as any | undefined;
@@ -615,6 +621,8 @@ const ImagePreview: React.FC<
   }, [applyMask]);
 
   const draw = useCallback(async () => {
+    // The engine draws the picture: don't decode or filter it here too.
+    if (engineDraws) return;
     if (!isInFrame) return;
     if (!canvasRef.current) return;
     if (!mediaInfoRef.current) return;
@@ -750,6 +758,7 @@ const ImagePreview: React.FC<
     applyFilters,
     tool,
     isInFrame,
+    engineDraws,
   ]);
 
   useEffect(() => {
@@ -1153,4 +1162,6 @@ const ImagePreview: React.FC<
   );
 };
 
-export default ImagePreview;
+// Memoised: its parent re-renders on every frame of playback, and its own store
+// subscriptions already re-render it when what it shows changes.
+export default React.memo(ImagePreview);

@@ -88,7 +88,9 @@ async function importDraft(folder: string): Promise<CapCutImportResult> {
   if (!engine) return { success: false, error: "The engine isn't available, and it's what reads CapCut drafts." };
   if (!existsSync(path.join(folder, "draft_info.json"))) return { success: false, error: "That folder isn't a CapCut draft (no draft_info.json)." };
 
+  const t0 = performance.now();
   const converted = await engine.capcutToApp(folder);
+  const t1 = performance.now();
   const doc = JSON.parse(converted.json);
   const userData = app.getPath("userData");
   const projectsDir = path.join(userData, "projects-json");
@@ -118,6 +120,9 @@ async function importDraft(folder: string): Promise<CapCutImportResult> {
     await fs.copyFile(cover, coverPath).catch(() => (coverPath = undefined));
   }
 
+  if (process.env.OPENRIP_TRACE) {
+    console.error(`[capcut] import: engine ${(t1 - t0).toFixed(0)} ms, project files ${(performance.now() - t1).toFixed(0)} ms, ${(converted.json.length / 1e6).toFixed(2)} MB`);
+  }
   return {
     success: true,
     data: { id: created.id, name: created.name, fps: created.fps, folderUuid: created.folderUuid, aspectRatio: project.settings.aspectRatio as any, coverPath },

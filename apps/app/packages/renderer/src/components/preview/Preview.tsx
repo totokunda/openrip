@@ -47,7 +47,12 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { SlSizeFullscreen } from "react-icons/sl";
 import FullscreenPreview from "./FullscreenPreview";
-import { getApplicatorsForClip } from "@/lib/applicator-utils";
+import {
+  APPLICATOR_CLIP_TYPES,
+  getApplicableClips,
+  getApplicatorsForClip,
+} from "@/lib/applicator-utils";
+
 import { useWebGLHaldClut } from "./webgl-filters";
 import { useDrawingStore } from "@/lib/drawing";
 import { useMaskStore } from "@/lib/mask";
@@ -62,6 +67,9 @@ import {
   isPolygonInsidePolygon,
   mergePolygons,
 } from "@/lib/polygon";
+
+// The applicators of a clip with none over it: one array, so clip previews keep their props.
+const NO_APPLICATORS: ReturnType<typeof getApplicatorsForClip> = [];
 
 const getFiniteNumber = (value: number | undefined, fallback = 0): number =>
   Number.isFinite(value) ? (value as number) : fallback;
@@ -331,12 +339,34 @@ const Preview: React.FC<PreviewProps> = () => {
     [haldClutInstance],
   );
 
-  // Get applicators for a specific clip using the factory
+  // Get applicators for a specific clip using the factory. The same array is returned until
+  // the clips or the filters over the clip change: a new array on every render would make
+  // every clip preview re-render on each frame of playback (hundreds in a CapCut project).
+  const hasApplicatorClips = useMemo(
+    () => clips.some((c) => APPLICATOR_CLIP_TYPES.includes(c.type)),
+    [clips],
+  );
+  const applicatorCache = useRef(
+    new Map<
+      string,
+      { clips: unknown; config: unknown; key: string; apps: ReturnType<typeof getApplicatorsForClip> }
+    >(),
+  );
   const getClipApplicators = useCallback(
     (clipId: string) => {
-      return getApplicatorsForClip(clipId, applicatorConfig);
+      if (!hasApplicatorClips) return NO_APPLICATORS;
+      const key = getApplicableClips(clipId)
+        .map((c) => c.clipId)
+        .join(",");
+      const hit = applicatorCache.current.get(clipId);
+      if (hit && hit.clips === clips && hit.config === applicatorConfig && hit.key === key) {
+        return hit.apps;
+      }
+      const apps = getApplicatorsForClip(clipId, applicatorConfig);
+      applicatorCache.current.set(clipId, { clips, config: applicatorConfig, key, apps });
+      return apps;
     },
-    [applicatorConfig],
+    [applicatorConfig, clips, hasApplicatorClips],
   );
 
   // Preload all resources for applicator clips

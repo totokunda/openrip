@@ -444,6 +444,11 @@ impl VideoDecoder {
         }
     }
 
+    /// Time of the last frame decoded, and the nominal time between frames.
+    pub fn position(&self) -> (Option<Micros>, Micros) {
+        (self.current.as_ref().map(|c| c.time), self.nominal)
+    }
+
     /// Whether the frame at `t` can be reached without a seek: it's in the cache, or decoding
     /// on from the current position is cheaper than seeking.
     pub fn reachable_without_seek(&self, t: Micros) -> bool {

@@ -210,12 +210,23 @@ export const fetchImage = async (
   if (cachedImage) return cachedImage as WrappedCanvas;
 
   const blob = await toBlob(path);
-  const url = URL.createObjectURL(blob);
-  const img = new Image(width, height);
-  img.src = url;
-  img.decoding = "async";
-
-  await img.decode();
+  // Decoded straight to the size asked for: a photo's thumbnail then costs a scaled decode
+  // (JPEG decodes at 1/2, 1/4 or 1/8 scale), not a full one plus a downscale.
+  let picture: CanvasImageSource | null = null;
+  try {
+    picture = await createImageBitmap(blob, { resizeWidth: Math.max(1, Math.round(width)), resizeHeight: Math.max(1, Math.round(height)), resizeQuality: "medium" });
+  } catch {
+    picture = null;
+  }
+  let url: string | null = null;
+  if (!picture) {
+    url = URL.createObjectURL(blob);
+    const img = new Image(width, height);
+    img.src = url;
+    img.decoding = "async";
+    await img.decode();
+    picture = img;
+  }
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -224,10 +235,11 @@ export const fetchImage = async (
 
   if (ctx) {
     ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(img, 0, 0, width, height);
+    ctx.drawImage(picture, 0, 0, width, height);
   }
 
-  URL.revokeObjectURL(url);
+  if (picture instanceof ImageBitmap) picture.close();
+  if (url) URL.revokeObjectURL(url);
 
   const imageCache = FramesCache.getState();
 

@@ -140,7 +140,10 @@ const TimelineClip: React.FC<
   const addTimeline = useClipStore((s) => s.addTimeline);
   const getAssetById = useClipStore((s) => s.getAssetById);
   const setIsDraggingGlobal = useClipStore((s) => s.setIsDragging);
-  const ctrlFocusFrame = useControlsStore((s) => s.focusFrame);
+  // Only a masked clip's thumbnails follow the playhead (its masks have keyframes); every
+  // other clip ignores it, rather than re-rendering on each frame.
+  const hasMasks = useClipStore((s) => (((s.getClipById(clipId) as any)?.masks?.length ?? 0) as number) > 0);
+  const ctrlFocusFrame = useControlsStore((s) => (hasMasks ? s.focusFrame : 0));
   const tool = useViewportStore((s) => s.tool);
   const getClipById = useClipStore((s) => s.getClipById);
   const [groupedCanvases, setGroupedCanvases] = useState<HTMLCanvasElement[]>(
@@ -459,7 +462,6 @@ const TimelineClip: React.FC<
         applyMask,
         applyFilters,
         groupRef,
-        moveClipToEnd,
         resizeSide,
       );
     } else if (clipType === "video") {
@@ -2205,4 +2207,6 @@ const TimelineClip: React.FC<
   );
 };
 
-export default TimelineClip;
+// Memoised: its parent re-renders on every frame of playback, and its own store
+// subscriptions already re-render it when what it shows changes.
+export default React.memo(TimelineClip);

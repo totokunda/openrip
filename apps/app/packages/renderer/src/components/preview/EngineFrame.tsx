@@ -35,6 +35,8 @@ const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: numb
   const focusFrame = useControlsStore((s) => s.focusFrame);
   const fps = useControlsStore((s) => s.fps);
   const isPlaying = useControlsStore((s) => s.isPlaying);
+  // False while the playhead is dragged: quick frames then, the exact one on release.
+  const accurate = useControlsStore((s) => s.isAccurateSeekNeeded);
   const nodeRef = useRef<Konva.Image>(null);
   const canvas = useMemo(frameCanvas, []);
 
@@ -57,10 +59,10 @@ const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: numb
   // Paused: ask for the frame at the playhead. Playing, the engine sends frames by itself.
   useEffect(() => {
     if (!draws || !fps || isPlaying || size.width < 2 || size.height < 2) return;
-    void engineRender((focusFrame / fps) * 1e6, size.width, size.height).then((r) => {
+    void engineRender((focusFrame / fps) * 1e6, size.width, size.height, !accurate).then((r) => {
       if (!r.ok && !r.superseded) console.warn("[engine] render failed:", r.error);
     });
-  }, [draws, version, focusFrame, fps, size, isPlaying]);
+  }, [draws, version, focusFrame, fps, size, isPlaying, accurate]);
 
   if (!draws) return null;
   return <KonvaImage ref={nodeRef} image={canvas} x={0} y={0} width={rectWidth} height={rectHeight} listening={false} />;

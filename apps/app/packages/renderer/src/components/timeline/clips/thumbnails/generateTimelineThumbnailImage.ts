@@ -18,7 +18,6 @@ export const generateTimelineThumbnailImage = async (
   ) => HTMLCanvasElement,
   applyFilters: (canvas: HTMLCanvasElement, filters: any) => void,
   groupRef: any,
-  moveClipToEnd: (clipId: string) => void,
   resizeSide: "left" | "right" | null,
 ) => {
   if (clipType !== "image") return;
@@ -76,6 +75,10 @@ export const generateTimelineThumbnailImage = async (
         startX = remainder > 0 ? -(tileWidth - remainder) : 0;
       }
 
+      // One upload of the tile: it's a CPU-backed canvas, which every draw would otherwise
+      // copy to the GPU again (seconds for a project with many photo clips).
+      const tile: CanvasImageSource = await createImageBitmap(canvasToTile).catch(() => canvasToTile);
+
       // Repeat the inputCanvas horizontally until we fill the target width
       let x = startX;
       while (x < targetWidth) {
@@ -84,10 +87,11 @@ export const generateTimelineThumbnailImage = async (
 
         // Only draw if the tile is visible (x + drawWidth > 0)
         if (x + drawWidth > 0) {
-          ctx.drawImage(canvasToTile, x, 0, drawWidth, sourceHeight);
+          ctx.drawImage(tile, x, 0, drawWidth, sourceHeight);
         }
         x += drawWidth;
       }
+      if (tile instanceof ImageBitmap) tile.close();
 
       // Apply WebGL filters to image thumbnails
       const imgClip = currentClip as ImageClipProps;
@@ -104,5 +108,4 @@ export const generateTimelineThumbnailImage = async (
     }
   }
   groupRef.current?.getLayer()?.batchDraw();
-  moveClipToEnd(currentClipId);
 };

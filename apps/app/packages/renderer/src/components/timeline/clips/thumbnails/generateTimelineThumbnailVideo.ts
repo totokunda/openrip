@@ -345,8 +345,13 @@ export const generateTimelineThumbnailVideo = async (
     const requestKey = `${currentClipId}|${timelineStartFrame}-${timelineEndFrame}|${thumbnailWidth}x${timelineHeight}|${overHang}|${frameIndices.join(",")}`;
     exactVideoUpdateTimerRef.current = window.setTimeout(async () => {
       const mySeq = ++exactVideoUpdateSeqRef.current;
+      // The first exact pass for this request forces one re-render (below). A later pass
+      // for the same request only redraws if the cache had nothing to paint, and never
+      // forces another: frames evicted from the cache, or ones that don't decode, made
+      // this re-render itself endlessly.
+      const firstForRequest = lastExactRequestKeyRef.current !== requestKey;
       try {
-        if (lastExactRequestKeyRef.current === requestKey) {
+        if (!firstForRequest && hasCachedSamples) {
           return;
         }
 
@@ -595,7 +600,7 @@ export const generateTimelineThumbnailVideo = async (
           lastExactRequestKeyRef.current = requestKey;
 
           // Force rerender if there were no cached samples initially
-          if (!hasCachedSamples) {
+          if (!hasCachedSamples && firstForRequest) {
             setForceRerenderCounter((prev) => prev + 1);
           }
         }

@@ -9,7 +9,7 @@ import { KonvaEventObject } from "konva/lib/Node";
 import Konva from "konva";
 import DrawingLineComponent from "./custom/DrawingLine";
 import { BaseClipApplicator } from "./apply/base";
-import { useEngineDraws } from "@/lib/engine-preview";
+import { useClipFocusFrame, useEngineDraws } from "@/lib/engine-preview";
 
 
 interface DrawingPreviewProps extends DrawingClipProps {
@@ -39,14 +39,18 @@ const DrawingPreview: React.FC<DrawingPreviewProps> = ({
   const { updateClip } = useClipStore();
   const removeClip = useClipStore((s) => s.removeClip);
   const tool = useViewportStore((s) => s.tool);
-  const focusFrameFromControls = useControlsStore((s) => s.focusFrame);
+  const clipFromStore = useClipStore((s) => s.getClipById(clipId)) as any;
+  const focusFrameFromControls = useClipFocusFrame(
+    Number(clipFromStore?.startFrame ?? 0),
+    typeof clipFromStore?.endFrame === "number" ? clipFromStore.endFrame : Infinity,
+    inputMode,
+  );
 
   const focusFrame =
     typeof focusFrameOverride === "number"
       ? focusFrameOverride
       : focusFrameFromControls;
 
-  const clipFromStore = useClipStore((s) => s.getClipById(clipId)) as any;
   const getClipById = useClipStore((s) => s.getClipById);
 
   const groupStart = React.useMemo(() => {
@@ -296,4 +300,6 @@ const DrawingPreview: React.FC<DrawingPreviewProps> = ({
   );
 };
 
-export default DrawingPreview;
+// Memoised: its parent re-renders on every frame of playback, and its own store
+// subscriptions already re-render it when what it shows changes.
+export default React.memo(DrawingPreview);

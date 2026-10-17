@@ -13,6 +13,9 @@ import {
   updateAssetZoomLevel,
 } from "@/lib/assetControl";
 
+// One function, so the memoised clips keep their props when no selection is passed.
+const NEVER_SELECTED = (_clipId: string) => false;
+
 const Timeline: React.FC<
   TimelineProps & {
     index: number;
@@ -36,7 +39,7 @@ const Timeline: React.FC<
   cornerRadius = 1,
   assetMode = false,
   excludeClipId = null,
-  isAssetSelected = () => false,
+  isAssetSelected = NEVER_SELECTED,
 }) => {
 
 
@@ -66,11 +69,9 @@ const Timeline: React.FC<
   }, [allVisibleClips]);
   const clipDuration = useClipStore((s) => s.clipDuration);
 
-  const ctrl = useControlsStore();
-  const asset = useAssetControlsStore();
-  const timelineDuration = assetMode
-    ? asset.timelineDuration
-    : ctrl.timelineDuration;
+  const ctrlTimelineDuration = useControlsStore((s) => s.timelineDuration);
+  const assetTimelineDuration = useAssetControlsStore((s) => s.timelineDuration);
+  const timelineDuration = assetMode ? assetTimelineDuration : ctrlTimelineDuration;
 
   const renderedTimelineHeight = useMemo(() => {
     return timelineHeight - 8;

@@ -15,7 +15,7 @@ import { useClipStore } from "@/lib/clip";
 import { BaseClipApplicator } from "./apply/base";
 import ApplicatorFilter from "./custom/ApplicatorFilter";
 import { sanitizeCornerRadius } from "@/lib/konva/sanitizeCornerRadius";
-import { useEngineDraws } from "@/lib/engine-preview";
+import { useClipFocusFrame, useEngineDraws } from "@/lib/engine-preview";
 // (duplicate removed)
 
 //@ts-ignore
@@ -83,7 +83,11 @@ const TextPreview: React.FC<
     }
   }, [clip, inputMode]);
 
-  const focusFrameFromControls = useControlsStore((s) => s.focusFrame);
+  const focusFrameFromControls = useClipFocusFrame(
+    Number((clip as any)?.startFrame ?? 0) - groupStart,
+    (typeof (clip as any)?.endFrame === "number" ? (clip as any).endFrame : Infinity) - groupStart,
+    inputMode,
+  );
 
   const focusFrame =
     typeof focusFrameOverride === "number"
@@ -107,7 +111,8 @@ const TextPreview: React.FC<
   const removeClipSelection = useControlsStore((s) => s.removeClipSelection);
   const addClipSelection = useControlsStore((s) => s.addClipSelection);
   const clearSelection = useControlsStore((s) => s.clearSelection);
-  const { selectedClipIds, isFullscreen } = useControlsStore();
+  const selectedClipIds = useControlsStore((s) => s.selectedClipIds);
+  const isFullscreen = useControlsStore((s) => s.isFullscreen);
   const isSelected = useMemo(
     () => selectedClipIds.includes(clipId),
     [clipId, selectedClipIds],
@@ -1561,7 +1566,7 @@ const TextPreview: React.FC<
   }, [applicators]);
 
   // Store-driven active flag
-  const focusFrameControls = useControlsStore((s) => s.focusFrame);
+  const focusFrameControls = focusFrameFromControls;
   const clipsState = useClipStore((s) => s.clips);
   const applicatorsActiveStore = useMemo(() => {
     const apps = applicators || [];
@@ -2527,4 +2532,6 @@ const TextPreview: React.FC<
   );
 };
 
-export default TextPreview;
+// Memoised: its parent re-renders on every frame of playback, and its own store
+// subscriptions already re-render it when what it shows changes.
+export default React.memo(TextPreview);

@@ -22,7 +22,7 @@ import { useVideoDecoderManager } from "@/lib/media/VideoDecoderManagerContext";
 import { useProjectsStore } from "@/lib/projects";
 import { generatePosterCanvas } from "@/lib/media/timeline";
 import { sanitizeCornerRadius } from "@/lib/konva/sanitizeCornerRadius";
-import { useEngineDraws } from "@/lib/engine-preview";
+import { useClipFocusFrame, useEngineDraws } from "@/lib/engine-preview";
 // (prefetch helper removed by request; timeline-driven rendering only)
 
 const calculateIterateRange = (
@@ -140,7 +140,12 @@ const VideoPreview: React.FC<
     setMediaInfoVersion((v) => v + 1);
   }, []);
   const decoderManager = useVideoDecoderManager();
-  const focusFrameFromControls = useControlsStore((state) => state.focusFrame);
+  const rangeStart = useClipStore((s) => Number((s.getClipById(clipId) as any)?.startFrame ?? 0));
+  const rangeEnd = useClipStore((s) => {
+    const e = (s.getClipById(clipId) as any)?.endFrame;
+    return typeof e === "number" ? e : Infinity;
+  });
+  const focusFrameFromControls = useClipFocusFrame(rangeStart, rangeEnd, inputMode || !!overrideClip);
   const getActiveProject = useProjectsStore((s) => s.getActiveProject);
   const focusFrame =
     typeof focusFrameOverride === "number"
@@ -260,7 +265,9 @@ const VideoPreview: React.FC<
   const removeClipSelection = useControlsStore((s) => s.removeClipSelection);
   const addClipSelection = useControlsStore((s) => s.addClipSelection);
   const clearSelection = useControlsStore((s) => s.clearSelection);
-  const { selectedClipIds, isFullscreen, isAccurateSeekNeeded } = useControlsStore();
+  const selectedClipIds = useControlsStore((s) => s.selectedClipIds);
+  const isFullscreen = useControlsStore((s) => s.isFullscreen);
+  const isAccurateSeekNeeded = useControlsStore((s) => s.isAccurateSeekNeeded);
   const isSelected = useMemo(
     () => selectedClipIds.includes(clipId),
     [clipId, selectedClipIds],
@@ -2057,4 +2064,6 @@ const VideoPreview: React.FC<
   );
 };
 
-export default VideoPreview;
+// Memoised: its parent re-renders on every frame of playback, and its own store
+// subscriptions already re-render it when what it shows changes.
+export default React.memo(VideoPreview);

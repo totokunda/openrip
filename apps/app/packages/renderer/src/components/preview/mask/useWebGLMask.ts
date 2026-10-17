@@ -29,13 +29,12 @@ export function useWebGLMask({
   const shapeMaskRef = useRef<ShapeMask | null>(null);
   const lassoMaskRef = useRef<LassoMask | null>(null);
   const maskWorkingCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  // Lazy initialization of mask to reduce WebGL context count
-  if (!shapeMaskRef.current) {
-    shapeMaskRef.current = new ShapeMask(maskContextKeyRef.current);
-  }
-  if (!lassoMaskRef.current) {
-    lassoMaskRef.current = new LassoMask(maskContextKeyRef.current);
-  }
+  // Created on first use: each holds a WebGL context and compiled shaders, and most clips
+  // never have a mask (a project with hundreds of clips spent seconds creating them).
+  const ensureMasks = () => {
+    if (!shapeMaskRef.current) shapeMaskRef.current = new ShapeMask(maskContextKeyRef.current);
+    if (!lassoMaskRef.current) lassoMaskRef.current = new LassoMask(maskContextKeyRef.current);
+  };
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -53,10 +52,11 @@ export function useWebGLMask({
 
   const applyMask = useCallback(
     (sourceCanvas: HTMLCanvasElement, frame?: number) => {
-      if (!shapeMaskRef.current) return sourceCanvas;
       if (disabled || masks.length === 0) {
         return sourceCanvas;
       }
+      ensureMasks();
+      if (!shapeMaskRef.current) return sourceCanvas;
 
       if (frame === undefined) {
         if (clip) {

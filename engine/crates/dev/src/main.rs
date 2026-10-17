@@ -80,6 +80,7 @@ fn main() -> ExitCode {
         Some("pipeline-bench") if args.len() >= 2 => pipeline_bench(&args).map_err(|e| e.to_string()),
         Some("cover-parity") if args.len() >= 2 => cover_parity(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
         Some("app-roundtrip") if args.len() >= 2 => app_roundtrip(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("seek-bench") if args.len() >= 2 => seek_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("export-parity") if args.len() >= 3 => export_parity(&args).map_err(|e| e.to_string()),
         Some("wrap-probe") if args.len() >= 3 => wrap_probe(Path::new(&args[1]), Path::new(&args[2])).map_err(|e| e.to_string()),
         Some("thumbs-bench") if args.len() >= 2 => thumbs_bench(&args).map_err(|e| e.to_string()),
@@ -834,6 +835,46 @@ fn thumbs_bench(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Paused seeks as the app makes them: one engine, frames at 24 scattered times at 540 px
+/// wide, then the same times again (warm caches). Set OPENRIP_TRACE for slow segments.
+fn seek_bench(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let project = load_project(path)?;
+    let end = project.duration().0.max(1);
+    let (cw, ch) = (project.canvas.width.max(1), project.canvas.height.max(1));
+    let short: u32 = std::env::args().skip_while(|a| a != "--short").nth(1).and_then(|v| v.parse().ok()).unwrap_or(540);
+    let (w, h) = if cw <= ch { (short, (short * ch / cw) & !1) } else { ((short * cw / ch) & !1, short) };
+    let mut engine = openrip_playback::PreviewEngine::new(project)?;
+    if std::env::args().any(|a| a == "--scrub") {
+        // A playhead dragged across the project: 120 steps, quick frames on and off.
+        for scrub in [true, false] {
+            engine.set_scrubbing(scrub);
+            let mut ms = Vec::new();
+            for i in 0..120i64 {
+                let t = openrip_model::Micros(i * end / 120);
+                let t0 = Instant::now();
+                engine.render_image(t, w, h)?;
+                ms.push(t0.elapsed().as_secs_f64() * 1e3);
+            }
+            ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            println!("drag, quick frames {scrub}: p50 {:.0} ms, p90 {:.0} ms, max {:.0} ms", ms[ms.len() / 2], ms[ms.len() * 9 / 10], ms[ms.len() - 1]);
+        }
+        return Ok(());
+    }
+    for pass in ["cold", "warm"] {
+        let mut ms = Vec::new();
+        for i in 0..24i64 {
+            let t = openrip_model::Micros((i * 7919 % 24) * end / 24 + end / 48);
+            let t0 = Instant::now();
+            engine.render_image(t, w, h)?;
+            ms.push(t0.elapsed().as_secs_f64() * 1e3);
+        }
+        let mut s = ms.clone();
+        s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        println!("{pass}: p50 {:.0} ms, p90 {:.0} ms, max {:.0} ms", s[s.len() / 2], s[s.len() * 9 / 10], s[s.len() - 1]);
+    }
+    Ok(())
+}
+
 /// Every draft under `root` converted to the app's project format and back: the round trip
 /// must draw the same frames (at 0, ¼, ½ and ¾ of the draft) as the draft itself.
 fn app_roundtrip(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -843,7 +884,9 @@ fn app_roundtrip(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     for (i, dir) in dirs.iter().enumerate() {
         let Ok(Imported { project, .. }) = import_draft_dir(dir) else { continue };
         let mut original = openrip_playback::PreviewEngine::new(project.clone())?;
+        let t0 = Instant::now();
         let doc = openrip_v1::to_app_project(&project, &mut |seg| original.text_block(&seg.id));
+        let convert_ms = t0.elapsed().as_secs_f64() * 1e3;
         let back = match openrip_v1::import_v1_json(&doc) {
             Ok(b) => b,
             Err(e) => {
@@ -884,7 +927,7 @@ fn app_roundtrip(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
         compared += 1;
         worst = worst.min(low);
         let note = if back.report.warnings.is_empty() && back.report.problems.is_empty() { String::new() } else { format!("  warnings {:?} problems {:?}", back.report.warnings, back.report.problems) };
-        println!("draft #{i:02}: {} segments, worst frame {low:5.1} dB{note}", project.tracks.iter().map(|t| t.segments.len()).sum::<usize>());
+        println!("draft #{i:02}: {} segments, converted in {convert_ms:.0} ms, worst frame {low:5.1} dB{note}", project.tracks.iter().map(|t| t.segments.len()).sum::<usize>());
     }
     println!("{compared} drafts compared ({skipped} with media missing); worst {worst:.1} dB");
     Ok(())

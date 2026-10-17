@@ -43,7 +43,7 @@ export type EngineAddon = {
   openProjectJson(json: string): ProjectInfo;
   updateProject(json: string): ProjectInfo;
   close(): void;
-  renderFrame(timeUs: number, width: number, height: number): Promise<FrameHandle>;
+  renderFrame(timeUs: number, width: number, height: number, scrub?: boolean): Promise<FrameHandle>;
   release(id: number): void;
   setPreviewSize(width: number, height: number): void;
   startPlayback(fromUs: number): void;
@@ -222,14 +222,22 @@ class EnginePlayback {
  * and a newer one replaces it (the older is answered as superseded), so scrubbing never
  * queues up stale frames.
  */
+/** A rendered frame on its way to the window. */
+type Delivery = { sender: Electron.WebContents; frame: FrameHandle; scrub: boolean; t0: number; t1: number; resolve: (r: RenderResult) => void };
+
 class FrameRenderer {
   #busy = false;
-  #next: { args: [number, number, number]; sender: Electron.WebContents; resolve: (r: RenderResult) => void } | null = null;
+  #next: { args: [number, number, number, boolean]; sender: Electron.WebContents; resolve: (r: RenderResult) => void } | null = null;
+  // Delivery runs beside rendering: the next frame renders while this one reaches the
+  // window, and a frame rendered meanwhile replaces any still waiting (only the newest
+  // matters while scrubbing).
+  #sending = false;
+  #waiting: Delivery | null = null;
 
-  request(sender: Electron.WebContents, timeUs: number, width: number, height: number): Promise<RenderResult> {
+  request(sender: Electron.WebContents, timeUs: number, width: number, height: number, scrub = false): Promise<RenderResult> {
     return new Promise((resolve) => {
       if (this.#next) this.#next.resolve({ ok: false, superseded: true });
-      this.#next = { args: [timeUs, width, height], sender, resolve };
+      this.#next = { args: [timeUs, width, height, scrub], sender, resolve };
       void this.#pump();
     });
   }
@@ -240,30 +248,55 @@ class FrameRenderer {
       const job = this.#next;
       this.#next = null;
       this.#busy = true;
-      job.resolve(await this.#render(job.sender, ...job.args));
+      await this.#render(job.sender, job.resolve, ...job.args);
       this.#busy = false;
     }
   }
 
-  async #render(sender: Electron.WebContents, timeUs: number, width: number, height: number): Promise<RenderResult> {
+  async #render(sender: Electron.WebContents, resolve: (r: RenderResult) => void, timeUs: number, width: number, height: number, scrub: boolean): Promise<void> {
     const engine = addon;
-    if (!engine) return { ok: false, error: "engine not available" };
-    if (openProjectId == null) return { ok: false, error: "no project sent to the engine yet" };
-    if (sender.isDestroyed()) return { ok: false, error: "window closed" };
+    if (!engine) return resolve({ ok: false, error: "engine not available" });
+    if (openProjectId == null) return resolve({ ok: false, error: "no project sent to the engine yet" });
+    if (sender.isDestroyed()) return resolve({ ok: false, error: "window closed" });
     let frame: FrameHandle;
+    const t0 = performance.now();
     try {
-      frame = await engine.renderFrame(Math.max(0, Math.round(timeUs)), width, height);
+      frame = await engine.renderFrame(Math.max(0, Math.round(timeUs)), width, height, scrub);
     } catch (e) {
-      return { ok: false, error: message(e) };
+      return resolve({ ok: false, error: message(e) });
     }
-    try {
-      await sendFrame(engine, sender, frame);
-    } catch (e) {
-      return { ok: false, error: message(e) };
+    const job: Delivery = { sender, frame, scrub, t0, t1: performance.now(), resolve };
+    if (this.#sending) {
+      if (this.#waiting) {
+        engine.release(this.#waiting.frame.id);
+        this.#waiting.resolve({ ok: false, superseded: true });
+      }
+      this.#waiting = job;
+      return;
     }
-    const { timeUs: t, width: w, height: h, renderMs, layers, skipped } = frame;
-    return { ok: true, timeUs: t, width: w, height: h, renderMs, layers, skipped };
+    void this.#deliver(engine, job);
   }
+
+  async #deliver(engine: EngineAddon, first: Delivery) {
+    this.#sending = true;
+    let job: Delivery | null = first;
+    while (job) {
+      try {
+        await sendFrame(engine, job.sender, job.frame);
+        const { timeUs: t, width: w, height: h, renderMs, layers, skipped } = job.frame;
+        if (process.env.OPENRIP_TRACE) {
+          console.error(`[engine] frame${job.scrub ? " (scrub)" : ""}: engine ${renderMs.toFixed(1)} ms, task ${(job.t1 - job.t0).toFixed(1)} ms, send ${(performance.now() - job.t1).toFixed(1)} ms`);
+        }
+        job.resolve({ ok: true, timeUs: t, width: w, height: h, renderMs, layers, skipped });
+      } catch (e) {
+        job.resolve({ ok: false, error: message(e) });
+      }
+      job = this.#waiting;
+      this.#waiting = null;
+    }
+    this.#sending = false;
+  }
+
 }
 
 export class EngineModule implements AppModule {
@@ -304,10 +337,15 @@ export class EngineModule implements AppModule {
       if (!addon) return { ok: false, error: "engine not available" };
       try {
         const id = Number(projectId);
+        const t0 = performance.now();
         const doc = ensureProjectJson({ ...(payload as object) }, id, app.getVersion());
         const json = JSON.stringify(doc);
         if (openProjectId !== id) this.#playback.stop();
+        const t1 = performance.now();
         const project = openProjectId === id ? addon.updateProject(json) : addon.openProjectJson(json);
+        if (process.env.OPENRIP_TRACE) {
+          console.error(`[engine] sync: ${(json.length / 1e6).toFixed(2)} MB, JSON ${(t1 - t0).toFixed(1)} ms, engine ${(performance.now() - t1).toFixed(1)} ms`);
+        }
         // For automated tests: keep the clock, silence the speakers.
         if (openProjectId !== id && process.env.OPENRIP_ENGINE_MUTE) addon.setVolume(0);
         openProjectId = id;
@@ -318,8 +356,8 @@ export class EngineModule implements AppModule {
       }
     });
 
-    ipcMain.handle("engine:render", (event, timeUs: number, width: number, height: number) =>
-      this.#frames.request(event.sender, timeUs, Math.max(2, Math.round(width)), Math.max(2, Math.round(height))),
+    ipcMain.handle("engine:render", (event, timeUs: number, width: number, height: number, scrub?: boolean) =>
+      this.#frames.request(event.sender, timeUs, Math.max(2, Math.round(width)), Math.max(2, Math.round(height)), scrub === true),
     );
 
     ipcMain.handle("engine:play", (event, fromUs: number, width: number, height: number, token: number) => {

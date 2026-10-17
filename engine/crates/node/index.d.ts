@@ -38,7 +38,7 @@ export interface FrameHandle {
 }
 
 /** Render one frame on a worker thread. Call release(id) when Electron is done with it. */
-export function renderFrame(timeUs: number, width: number, height: number): Promise<FrameHandle>
+export function renderFrame(timeUs: number, width: number, height: number, scrub?: boolean): Promise<FrameHandle>
 export function release(id: number): void
 
 export interface Image {

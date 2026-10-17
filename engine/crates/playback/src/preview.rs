@@ -258,6 +258,11 @@ pub struct PreviewEngine {
     shapes: HashMap<u64, (Vec<(std::sync::Arc<RgbaImage>, u64, bool)>, [f64; 2], u64)>,
     /// The block of the text drawn last (left, top, width, height in output pixels).
     last_text_block: Option<[f64; 4]>,
+    /// Lay text out without drawing it (`text_block`).
+    measure_only: bool,
+    /// While the playhead is dragged: video shows a frame that's quick to get (already
+    /// decoded, a short decode ahead, or the GOP's keyframe) rather than the exact one.
+    scrubbing: bool,
     /// Background-removal masks by file, with the tick they were last used.
     mattes: HashMap<String, (std::sync::Arc<RgbaImage>, u64)>,
     /// The frame times each background-removal folder has masks for.
@@ -289,6 +294,8 @@ impl PreviewEngine {
             texts: HashMap::new(),
             shapes: HashMap::new(),
             last_text_block: None,
+            scrubbing: false,
+            measure_only: false,
             mattes: HashMap::new(),
             matte_times: HashMap::new(),
             exposure_luts: HashMap::new(),
@@ -314,6 +321,12 @@ impl PreviewEngine {
         self.failed.clear(); // files may have been relinked
     }
 
+    /// Quick frames for a playhead being dragged (see `scrubbing`); the exact frame again
+    /// once it's off.
+    pub fn set_scrubbing(&mut self, on: bool) {
+        self.scrubbing = on;
+    }
+
     /// Where a text segment's block of lines sits on the canvas at its start (left, top,
     /// width, height in canvas pixels, before its rotation), as it's drawn.
     pub fn text_block(&mut self, segment: &str) -> Option<[f64; 4]> {
@@ -321,7 +334,10 @@ impl PreviewEngine {
         self.project.materials.texts.iter().find(|m| m.id == seg.material)?;
         let (w, h) = (self.project.canvas.width, self.project.canvas.height);
         self.last_text_block = None;
-        self.pixels(&seg, seg.target.start, w, h).ok()?;
+        self.measure_only = true;
+        let r = self.pixels(&seg, seg.target.start, w, h);
+        self.measure_only = false;
+        r.ok()?;
         self.last_text_block.take()
     }
 
@@ -759,6 +775,9 @@ impl PreviewEngine {
             }
             let (x0, y0) = (cx - lay.width as f64 / 2.0, cy - lay.height as f64 / 2.0);
             self.last_text_block = Some([x0, y0, lay.width as f64, lay.height as f64]);
+            if self.measure_only {
+                return Ok(None);
+            }
             let origin = [x0.rem_euclid(1.0) as f32, y0.rem_euclid(1.0) as f32];
             // Everything but the per-character opacity, which animations change every frame.
             let shape_key = key_of((
@@ -889,7 +908,19 @@ impl PreviewEngine {
         let before = d.decoder.stats();
         let t0 = std::time::Instant::now();
         let at = seg.source_time(t).unwrap_or(Micros::ZERO);
-        let frame = d.decoder.frame_at(at).map_err(|e| fail(&e))?;
+        // Dragging the playhead: the exact frame only if it's at most three pictures ahead of
+        // the last one decoded; else a decoded frame within half a second, else the GOP's
+        // keyframe (one decode instead of every picture from the keyframe on).
+        let (pos, step) = d.decoder.position();
+        let near_ahead = pos.is_some_and(|p| at >= p && at.0 - p.0 <= 3 * step.0);
+        let frame = if self.scrubbing && !near_ahead && !d.decoder.frame_near(at, Micros::ZERO).is_some_and(|(_, exact)| exact) {
+            match d.decoder.frame_near(at, Micros(500_000)) {
+                Some((f, _)) => Some(f),
+                None => d.decoder.keyframe_at(at).map_err(|e| fail(&e))?,
+            }
+        } else {
+            d.decoder.frame_at(at).map_err(|e| fail(&e))?
+        };
         if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 10 {
             let after = d.decoder.stats();
             eprintln!(

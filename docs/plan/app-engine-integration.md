@@ -73,6 +73,27 @@ Done (2026-10-16): Projects ▸ Open CapCut Project… lists the drafts CapCut s
 - **Checks.** Every local draft with its media (36) converted to the app's format and back draws exactly the same frames as the draft itself (`openrip-dev app-roundtrip`); the one that didn't had lost CapCut's saved background removal, which the importer now keeps on the app's asset. In the app, a draft opens in about 5 s, plays, and its 56 s export takes 10 s and matches CapCut's own export at 40.7 dB (median, 540×960). Dragging a clip moves it in the engine's picture.
 - **Still CapCut's alone.** The app's panels show only what its clips have (no caption style or effect settings), and stickers and the effects the engine doesn't draw yet stay undrawn, as in any CapCut import.
 
+## Speed on large projects
+
+Done (2026-10-17), measured in the app on the largest local drafts (222, 211 and 120 clips; one has 101 photos and 113 captions). The draft with 222 clips:
+
+| | before | after |
+|---|---|---|
+| open | ~10 s | ~1 s |
+| seek (click to new frame) | 552 ms median, 1.9 s p95 | 170 ms median, 290 ms p95 |
+| scrub | 6 frames/s, renderer blocked 9.9 s | 17 frames/s, never blocked |
+| playback | 22.7 fps | 24.1 fps, no gap over 100 ms, renderer never blocked |
+| an edit reaching the picture | not measured | 40–100 ms |
+
+What it took:
+
+- **Opening.** The engine measured every caption by drawing it (9 s); it now only lays it out (23 ms). Each clip's WebGL mask context was made up front (5 s); it's made on first use. Photo thumbnails decode at their tile size (`createImageBitmap` with a resize) and tile from one GPU upload. Every photo thumbnail also moved its clip to the end of the clip list, which re-rendered the whole project and resynced the engine once per photo, and with a hundred photos tripped React's update-depth limit; it no longer reorders anything.
+- **Scrubbing.** While the playhead is dragged the engine shows the nearest decodable frame: the exact one when it's at most 3 frames ahead of where the decoder is, otherwise a decoded frame within half a second, otherwise the keyframe (`PreviewEngine::set_scrubbing`). Main renders the next frame while the last one is delivered.
+- **Playback.** Clip previews don't draw while the engine does, and they re-render only when the playhead enters or leaves them (`useClipFocusFrame`). The clip previews and timeline clips are memoised, the preview hands each clip the same filter list until the clips or the filters over it change, and components subscribe to the store fields they use rather than the whole store.
+- **Missing media.** A video whose frames never decode (offloaded or deleted media) made its timeline strip re-render itself in a loop, which took most of the renderer during playback and held scrubbing to 4 frames/s. It now redraws once.
+
+The engine-only benchmarks are `openrip-dev seek-bench <draft> [--scrub]` and `pipeline-bench`; with `OPENRIP_TRACE` set, main logs each sync and frame.
+
 ## Addon API
 
 Done:

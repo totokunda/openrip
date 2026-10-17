@@ -197,6 +197,7 @@ pub struct RenderTask {
     time: Micros,
     width: u32,
     height: u32,
+    scrub: bool,
 }
 
 #[cfg(target_os = "macos")]
@@ -225,7 +226,11 @@ impl Task for RenderTask {
             (s.engine.clone(), surface)
         };
         let t0 = Instant::now();
-        let report = engine.lock().unwrap().render_to_surface(self.time, &surface.0).map_err(err)?;
+        let report = {
+            let mut e = engine.lock().unwrap();
+            e.set_scrubbing(self.scrub);
+            e.render_to_surface(self.time, &surface.0).map_err(err)?
+        };
         Ok(Rendered { surface, ms: t0.elapsed().as_secs_f64() * 1e3, layers: report.layers as u32, skipped: report.missing.len() as u32 })
     }
 
@@ -249,11 +254,12 @@ impl Task for RenderTask {
     }
 }
 
-/// Render the frame at `timeUs` into a pooled IOSurface (on a worker thread).
+/// Render the frame at `timeUs` into a pooled IOSurface (on a worker thread). With `scrub`,
+/// video shows a frame that's quick to get while the playhead is dragged.
 #[cfg(target_os = "macos")]
 #[napi]
-pub fn render_frame(time_us: i64, width: u32, height: u32) -> AsyncTask<RenderTask> {
-    AsyncTask::new(RenderTask { time: Micros(time_us), width, height })
+pub fn render_frame(time_us: i64, width: u32, height: u32, scrub: Option<bool>) -> AsyncTask<RenderTask> {
+    AsyncTask::new(RenderTask { time: Micros(time_us), width, height, scrub: scrub.unwrap_or(false) })
 }
 
 /// Let a frame's surface be reused (call when Electron releases it).
@@ -656,11 +662,17 @@ impl Task for DraftTask {
     type JsValue = AppProjectFromDraft;
 
     fn compute(&mut self) -> Result<AppProjectFromDraft> {
+        let t0 = Instant::now();
         let imported = openrip_capcut::import_draft_dir(Path::new(&self.dir)).map_err(err)?;
         let project = imported.project;
+        let t1 = Instant::now();
         // The engine lays out each text, so the app's box around it fits.
         let mut engine = PreviewEngine::new(project.clone()).map_err(err)?;
+        let t2 = Instant::now();
         let doc = openrip_v1::to_app_project(&project, &mut |seg| engine.text_block(&seg.id));
+        if std::env::var_os("OPENRIP_TRACE").is_some() {
+            eprintln!("[capcut] draft {:.0} ms, engine {:.0} ms, convert {:.0} ms", (t1 - t0).as_secs_f64() * 1e3, (t2 - t1).as_secs_f64() * 1e3, t2.elapsed().as_secs_f64() * 1e3);
+        }
         let r = &imported.report;
         let mut notes: Vec<String> = r.foreign.iter().map(|(k, n)| format!("{k}: {n} kept for the engine, not drawn yet")).collect();
         notes.extend(r.warnings.iter().cloned());

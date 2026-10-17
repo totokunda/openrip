@@ -59,6 +59,22 @@ const drawsNow = (s: EnginePreviewState) => s.enabled && !!s.info?.available && 
 /** Whether the engine draws the preview right now. */
 export const useEngineDraws = () => useEnginePreviewStore(drawsNow);
 
+/**
+ * The playhead frame a clip component works with. While the engine draws the preview, a
+ * clip only needs to know whether it's on screen, so this changes only when the playhead
+ * enters or leaves [start, end]: it's `start` inside, `start - 1` before and `end + 1`
+ * after. That spares every clip a re-render on each frame of playback and scrubbing.
+ * Otherwise (or with `exact`) it's the frame itself.
+ */
+export function useClipFocusFrame(start: number, end: number, exact = false): number {
+  const draws = useEngineDraws();
+  return useControlsStore((s) => {
+    const f = s.focusFrame;
+    if (exact || !draws || !Number.isFinite(f)) return f;
+    return f < start ? start - 1 : f > end ? end + 1 : start;
+  });
+}
+
 /** The preview's size on screen in pixels, which playback renders at (set by EngineFrame). */
 let previewSize = { width: 1280, height: 720 };
 export const setEnginePreviewSize = (width: number, height: number) => {
