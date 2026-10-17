@@ -32,9 +32,10 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
    - Later: send `openrip-model` `Edit` commands instead of whole projects.
 4. **Preview surface.** Done (2026-10-16), first cut.
    - `components/preview/EngineFrame.tsx` asks for the frame at the playhead at its on-screen size (`engine:render`; the newest request wins), and draws the canvas the preload paints the shared texture into, under the clips.
-   - Video, image and text clips stop decoding and drawing in engine mode but keep their handles (text shows again while it's typed). Shapes, drawings and masks are still drawn by Konva, on top.
+   - Video, image, text, shape and drawing clips stop decoding and drawing in engine mode but keep their handles (text shows again while it's typed; an eraser stroke's live result shows until it's kept). Masks are still drawn by Konva, on top.
    - Checked in the app with a 10 s iPhone ProRes clip: frames arrive, scrubbing and moving a clip update the engine's picture, playback on the old clock gets 23.6 of 24 fps from the engine, and turning it off brings the old preview back.
-   - Gaps against the old preview: shapes and drawings sit above everything; text baselines sit ~0.1 em lower than Konva's. Filters from the Filters panel (Hald CLUT images) are drawn since 2026-10-16: read as ImageMagick does (edge-aligned, trilinear) and mixed by intensity; the app's own preview and the engine's agree to 0.7 levels on average.
+   - Shapes and drawings are drawn by the engine since 2026-10-16 (`openrip-render::shape`, Konva's geometry for rectangles, ellipses, rounded polygons, stars and tensioned lines). In the app all five shapes and a brush and a highlighter stroke match Konva's to 1.8 levels on average, the rest being the video's resampling. The app's drawing tools name a blend each (multiply for the highlighter) but never hand it to Konva, so the engine draws every line normally too; it can multiply a layer if that's ever wanted.
+   - Gaps against the old preview: masks sit above everything; text baselines sit ~0.1 em lower than Konva's. Filters from the Filters panel (Hald CLUT images) are drawn since 2026-10-16: read as ImageMagick does (edge-aligned, trilinear) and mixed by intensity; the app's own preview and the engine's agree to 0.7 levels on average.
    - Add `EnginePreview.tsx`: one canvas (or a `<video>` fed by `MediaStreamTrackGenerator`, cheaper per the spike) that draws frames received through `sharedTexture.setSharedTextureReceiver`.
    - It replaces the clip-mapping block in `Preview.tsx` and `FullscreenPreview.tsx`. Overlays stay.
    - **Verified:** `spikes/engine-preview` now runs exactly this way: `contextIsolation` on, the preload receives the frames and draws them into the page's canvas (the preload world shares the DOM, so no `VideoFrame` crosses `contextBridge`). A real draft plays at 23.9 of 24 fps.
@@ -77,4 +78,4 @@ To add:
 
 - `sharedTexture` is experimental in Electron 44. The fallback, measured in the frame-transport spike, is a native CALayer under a transparent window region.
 - ~~`contextIsolation` with `sharedTexture`~~: verified in the spike (step 4).
-- Feature gaps against the current preview: shapes, drawings, masks, filters and LUTs, transitions, keyframe easing. The engine renders what CapCut drafts mostly use (video, photos, text with stroke and background, opacity, transforms). The rest comes in order of use.
+- Feature gaps against the current preview: masks, effects, transitions, keyframe easing. The engine renders what CapCut drafts mostly use (video, photos, text with stroke and background, opacity, transforms). The rest comes in order of use.

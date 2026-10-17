@@ -123,12 +123,84 @@ enum Pixels {
     Cover(std::sync::Arc<RgbaImage>, u64),
     /// A transition's blur of everything below it, taps this many output pixels apart.
     Blur(f32),
+    /// A rasterised shape's layers (image, cache key, multiplies) and the canvas point their
+    /// centres go to.
+    Shape(Vec<(std::sync::Arc<RgbaImage>, u64, bool)>, [f64; 2]),
 }
 
 /// The media file a segment plays.
 fn media_path(p: &Project, segment: &str) -> Option<String> {
     let s = p.tracks.iter().flat_map(|t| t.segments.iter()).find(|s| s.id == segment)?;
     p.materials.media.iter().find(|m| m.id == s.material).map(|m| m.path.clone())
+}
+
+/// A shape's paths as the rasteriser's outlines, in its box of `size` units.
+fn render_paths(paths: &[openrip_model::ShapePath], size: [f32; 2]) -> Vec<openrip_render::shape::ShapePath> {
+    use openrip_model::{Geometry, PathBlend, StrokeEnds};
+    use openrip_render::shape::{self as sh, Blend, Ends};
+    let rgba = |c: openrip_model::Rgba| [c.r, c.g, c.b, c.a].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    let [w, h] = size;
+    paths
+        .iter()
+        .map(|p| sh::ShapePath {
+            commands: match &p.geometry {
+                Geometry::Rectangle { corner_radius } => sh::rectangle(w, h, *corner_radius),
+                Geometry::Ellipse => sh::ellipse(w, h),
+                Geometry::Polygon { sides, radius, corner_radius } => sh::polygon(w, h, *sides, *radius, *corner_radius),
+                Geometry::Star { points, inner, outer } => sh::star(w, h, *points, *inner, *outer),
+                Geometry::Line { points, tension, closed } => sh::line(points, *tension, *closed),
+            },
+            fill: p.fill.map(rgba),
+            stroke: p.stroke.map(|s| {
+                let ends = match s.ends {
+                    StrokeEnds::Butt => Ends::Butt,
+                    StrokeEnds::Round => Ends::Round,
+                    StrokeEnds::Square => Ends::Square,
+                };
+                (rgba(s.color), s.width, ends)
+            }),
+            opacity: p.opacity,
+            blend: match p.blend {
+                PathBlend::Normal => Blend::Normal,
+                PathBlend::Multiply => Blend::Multiply,
+                PathBlend::Erase => Blend::Erase,
+            },
+        })
+        .collect()
+}
+
+/// Everything that changes a shape's pixels.
+fn shape_key(shape: &openrip_model::Shape, px: f32, scale: [f32; 2], origin: [f32; 2]) -> u64 {
+    use openrip_model::Geometry;
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut f = |v: f32| v.to_bits().hash(&mut h);
+    [px, scale[0], scale[1], origin[0], origin[1], shape.size[0], shape.size[1]].into_iter().for_each(&mut f);
+    for p in &shape.paths {
+        for c in p.fill.iter().chain(p.stroke.as_ref().map(|s| &s.color)) {
+            [c.r, c.g, c.b, c.a].into_iter().for_each(&mut f);
+        }
+        if let Some(s) = &p.stroke {
+            f(s.width);
+            f(s.ends as u8 as f32);
+        }
+        f(p.opacity);
+        f(p.blend as u8 as f32);
+        f(p.fill.is_some() as u8 as f32);
+        match &p.geometry {
+            Geometry::Rectangle { corner_radius } => [1.0, *corner_radius].into_iter().for_each(&mut f),
+            Geometry::Ellipse => f(2.0),
+            Geometry::Polygon { sides, radius, corner_radius } => [3.0, *sides as f32, *radius, *corner_radius].into_iter().for_each(&mut f),
+            Geometry::Star { points, inner, outer } => [4.0, *points as f32, *inner, *outer].into_iter().for_each(&mut f),
+            Geometry::Line { points, tension, closed } => {
+                [5.0, *tension, *closed as u8 as f32, points.len() as f32].into_iter().for_each(&mut f);
+                points.iter().flatten().copied().for_each(&mut f);
+            }
+        }
+    }
+    let mut out = std::collections::hash_map::DefaultHasher::new();
+    ("shape", h.finish()).hash(&mut out);
+    out.finish()
 }
 
 fn key_of(v: impl std::hash::Hash) -> u64 {
@@ -155,6 +227,8 @@ pub struct PreviewEngine {
     failed: HashMap<String, String>,
     /// Rasterised text by content/style/size/sub-pixel origin, with the tick last used.
     texts: HashMap<u64, (std::sync::Arc<RgbaImage>, [f64; 2], u64)>,
+    /// Rasterised shapes' layers and box centres, by everything that draws them.
+    shapes: HashMap<u64, (Vec<(std::sync::Arc<RgbaImage>, u64, bool)>, [f64; 2], u64)>,
     /// Background-removal masks by file, with the tick they were last used.
     mattes: HashMap<String, (std::sync::Arc<RgbaImage>, u64)>,
     /// The frame times each background-removal folder has masks for.
@@ -184,6 +258,7 @@ impl PreviewEngine {
             fonts: HashMap::new(),
             failed: HashMap::new(),
             texts: HashMap::new(),
+            shapes: HashMap::new(),
             mattes: HashMap::new(),
             matte_times: HashMap::new(),
             exposure_luts: HashMap::new(),
@@ -253,7 +328,7 @@ impl PreviewEngine {
             .project
             .tracks
             .iter()
-            .filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text | TrackKind::Sticker | TrackKind::Filter) && !tr.hidden)
+            .filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text | TrackKind::Sticker | TrackKind::Filter | TrackKind::Graphic) && !tr.hidden)
             .flat_map(|tr| tr.segments.iter().filter(|s| s.visible && s.target.contains(t)).cloned())
             .collect();
         active.sort_by_key(|s| s.render_index);
@@ -354,6 +429,7 @@ impl PreviewEngine {
         self.evict_decoders();
         let tick = self.tick;
         self.texts.retain(|_, (_, _, last)| tick - *last < 3);
+        self.shapes.retain(|_, (_, _, last)| tick - *last < 3);
         self.prepared.retain(|_, (_, last)| tick - *last < 3);
         self.mattes.retain(|_, (_, last)| tick - *last < 3);
         (out, report)
@@ -659,6 +735,33 @@ impl PreviewEngine {
             let at = [cx - (center[0] - image.width as f64 / 2.0), cy - (center[1] - image.height as f64 / 2.0)];
             return Ok(Some(Pixels::Text(image, key, at)));
         }
+        // A shape or drawing, rasterised at the canvas's scale and cached until it changes.
+        if let Some(shape) = self.project.materials.shapes.iter().find(|m| m.id == seg.material) {
+            let local = seg.local_time(t);
+            let (pos, scale) = (seg.transform.position.sample(local), seg.transform.scale.sample(local));
+            let px = shape.unit * h as f32;
+            let scale = [shape.scale[0].abs() * scale.x.abs() as f32, shape.scale[1].abs() * scale.y.abs() as f32];
+            let (cx, cy) = (w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0);
+            let (x0, y0) = (cx - (shape.size[0] * scale[0] * px) as f64 / 2.0, cy - (shape.size[1] * scale[1] * px) as f64 / 2.0);
+            let origin = [x0.rem_euclid(1.0) as f32, y0.rem_euclid(1.0) as f32];
+            let key = shape_key(shape, px, scale, origin);
+            let tick = self.tick;
+            let (layers, center) = match self.shapes.get_mut(&key) {
+                Some((layers, center, last)) => {
+                    *last = tick;
+                    (layers.clone(), *center)
+                }
+                None => {
+                    let r = openrip_render::shape::rasterize(shape.size, scale, px, &render_paths(&shape.paths, shape.size), origin);
+                    let layers: Vec<_> = r.layers.into_iter().enumerate().map(|(i, (img, multiply))| (std::sync::Arc::new(img), key_of((key, i)), multiply)).collect();
+                    self.shapes.insert(key, (layers.clone(), r.center, tick));
+                    (layers, r.center)
+                }
+            };
+            let Some((first, ..)) = layers.first() else { return Ok(None) };
+            let at = [cx - (center[0] - first.width as f64 / 2.0), cy - (center[1] - first.height as f64 / 2.0)];
+            return Ok(Some(Pixels::Shape(layers, at)));
+        }
         // A filter track's segment: CapCut's lookup table from the filter's bundle.
         if let Some(effect) = self.project.materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter) {
             let strength = effect.params.get("intensity").copied().unwrap_or(1.0) as f32;
@@ -775,7 +878,7 @@ impl PreviewEngine {
     fn layers<'a>(&'a self, pixels: &'a [(Segment, Pixels)], t: Micros, w: u32, h: u32) -> Vec<Layer<'a>> {
         pixels
             .iter()
-            .map(|(seg, p)| {
+            .flat_map(|(seg, p)| {
                 let local = seg.local_time(t);
                 let tr = &seg.transform;
                 let (pos, scale, rot) = (tr.position.sample(local), tr.scale.sample(local), tr.rotation.sample(local));
@@ -794,6 +897,7 @@ impl PreviewEngine {
                         opacity: 1.0,
                         adjust: None,
                         matte: None,
+                        multiply: false,
                     },
                     // Twice the canvas, so the image's soft edge is off it.
                     Pixels::Wash(img, key, amount) => Layer {
@@ -806,6 +910,7 @@ impl PreviewEngine {
                         opacity: *amount,
                         adjust: None,
                         matte: None,
+                        multiply: false,
                     },
                     Pixels::Cover(img, key) => {
                         let fit = (w as f64 / img.width as f64).max(h as f64 / img.height as f64);
@@ -819,9 +924,28 @@ impl PreviewEngine {
                             opacity: 1.0,
                             adjust: None,
                         matte: None,
+                        multiply: false,
                         }
                     }
-                    Pixels::Blur(px) => Layer { source: Source::Blur(*px), center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None, matte: None },
+                    Pixels::Blur(px) => Layer { source: Source::Blur(*px), center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None, matte: None, multiply: false },
+                    Pixels::Shape(layers, at) => {
+                        let opacity = seg.opacity.sample(local);
+                        return layers
+                            .iter()
+                            .map(|(img, key, multiply)| Layer {
+                                source: Source::Cached(*key, img),
+                                center: *at,
+                                size: [img.width as f64, img.height as f64],
+                                rotation: rot,
+                                flip_h: tr.flip_h,
+                                flip_v: tr.flip_v,
+                                opacity,
+                                adjust: None,
+                                matte: None,
+                                multiply: *multiply,
+                            })
+                            .collect();
+                    }
                     Pixels::Text(img, key, at) => Layer {
                         source: Source::Cached(*key, img),
                         center: *at,
@@ -832,6 +956,7 @@ impl PreviewEngine {
                         opacity: 1.0,
                         adjust: None,
                         matte: None,
+                        multiply: false,
                     },
                 };
                 if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_)) {
@@ -840,7 +965,7 @@ impl PreviewEngine {
                 if matches!(p, Pixels::Image(..) | Pixels::Video(..)) {
                     layer.adjust = self.adjust_of(seg);
                 }
-                layer
+                vec![layer]
             })
             .collect()
     }

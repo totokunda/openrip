@@ -34,6 +34,8 @@ interface DrawingLineProps {
   rectWidth: number;
   rectHeight: number;
   inputMode?: boolean;
+  /** Drawn by something else (the Rust engine): keep the handles, draw nothing. */
+  hidden?: boolean;
 }
 
 interface Guides {
@@ -94,9 +96,10 @@ const DrawingLineComponent: React.FC<DrawingLineProps> = ({
   rectWidth,
   rectHeight,
   inputMode = false,
+  hidden = false,
 }) => {
   const toolConfig = getToolConfig(line.tool, line.smoothing);
-  const lineOpacity = line.tool === "eraser" ? 1 : line.opacity / 100;
+  const lineOpacity = hidden ? 0 : line.tool === "eraser" ? 1 : line.opacity / 100;
   const ref = useRef<Konva.Line>(null);
   const rectRef = useRef<Konva.Rect>(null);
   const groupRef = useRef<Konva.Group>(null);

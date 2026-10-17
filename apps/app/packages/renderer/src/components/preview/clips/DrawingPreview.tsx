@@ -9,6 +9,7 @@ import { KonvaEventObject } from "konva/lib/Node";
 import Konva from "konva";
 import DrawingLineComponent from "./custom/DrawingLine";
 import { BaseClipApplicator } from "./apply/base";
+import { useEngineDraws } from "@/lib/engine-preview";
 
 
 interface DrawingPreviewProps extends DrawingClipProps {
@@ -32,6 +33,9 @@ const DrawingPreview: React.FC<DrawingPreviewProps> = ({
   focusFrameOverride,
   inputMode = false,
 }) => {
+  // The Rust engine draws the preview: hide the lines (keeping their handles), except an
+  // eraser stroke's live result, which the engine doesn't have until it's kept.
+  const engineHides = useEngineDraws() && !inputMode && !tempLinesOverride;
   const { updateClip } = useClipStore();
   const removeClip = useClipStore((s) => s.removeClip);
   const tool = useViewportStore((s) => s.tool);
@@ -284,6 +288,7 @@ const DrawingPreview: React.FC<DrawingPreviewProps> = ({
             rectWidth={rectWidth}
             rectHeight={rectHeight}
             inputMode={inputMode}
+            hidden={engineHides}
           />
         );
       })}

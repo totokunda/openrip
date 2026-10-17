@@ -26,6 +26,8 @@ pub struct Materials {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub texts: Vec<Text>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shapes: Vec<Shape>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub speeds: Vec<Speed>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub canvas_fills: Vec<CanvasFill>,
@@ -54,6 +56,7 @@ pub struct Materials {
 pub enum MaterialRef<'a> {
     Media(&'a Media),
     Text(&'a Text),
+    Shape(&'a Shape),
     Speed(&'a Speed),
     CanvasFill(&'a CanvasFill),
     AudioFade(&'a AudioFade),
@@ -78,6 +81,7 @@ impl Materials {
         }
         find!(media, Media);
         find!(texts, Text);
+        find!(shapes, Shape);
         find!(speeds, Speed);
         find!(canvas_fills, CanvasFill);
         find!(audio_fades, AudioFade);
@@ -99,6 +103,7 @@ impl Materials {
     pub fn len(&self) -> usize {
         self.media.len()
             + self.texts.len()
+            + self.shapes.len()
             + self.speeds.len()
             + self.canvas_fills.len()
             + self.audio_fades.len()
@@ -296,6 +301,93 @@ pub struct TextShadow {
     pub angle_deg: f32,
     /// Blur radius as a fraction of the font size.
     pub smoothing: f32,
+}
+
+/// A vector graphic: shapes and drawings. Drawn in a box of its own units, `scale`d on each
+/// axis (stroke widths too), centred on the segment's position and turned by its rotation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Shape {
+    pub id: MaterialId,
+    /// The box, in the shape's own units, before `scale`.
+    pub size: [f32; 2],
+    #[serde(default = "unit_scale")]
+    pub scale: [f32; 2],
+    /// One of the shape's units as a fraction of the canvas height.
+    pub unit: f32,
+    /// Drawn in order, each over the ones before.
+    pub paths: Vec<ShapePath>,
+}
+
+fn unit_scale() -> [f32; 2] {
+    [1.0, 1.0]
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShapePath {
+    pub geometry: Geometry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Rgba>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke: Option<ShapeStroke>,
+    #[serde(default = "one")]
+    pub opacity: f32,
+    #[serde(default)]
+    pub blend: PathBlend,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShapeStroke {
+    pub color: Rgba,
+    /// In the shape's units, centred on the outline.
+    pub width: f32,
+    #[serde(default)]
+    pub ends: StrokeEnds,
+}
+
+/// A stroke's caps and joins.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrokeEnds {
+    /// Butt caps, mitred joins.
+    #[default]
+    Butt,
+    /// Round caps and joins (drawings' brushes).
+    Round,
+    /// Square caps, bevelled joins (highlighters).
+    Square,
+}
+
+/// How a path combines with what's under it.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PathBlend {
+    #[default]
+    Normal,
+    /// Darkens what's under it (a highlighter).
+    Multiply,
+    /// Removes the paths drawn before it in the same shape (an eraser).
+    Erase,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum Geometry {
+    /// The box, its corners rounded by `corner_radius` (at most half the shorter side).
+    Rectangle { corner_radius: f32 },
+    /// The ellipse inscribed in the box.
+    Ellipse,
+    /// A regular polygon centred in the box, its first vertex straight up, corners rounded
+    /// by `corner_radius`.
+    Polygon { sides: u32, radius: f32, corner_radius: f32 },
+    /// A star centred in the box, its first point straight up.
+    Star { points: u32, inner: f32, outer: f32 },
+    /// A polyline through points in the box's units (origin at its top-left), curved through
+    /// them by `tension` (0 is straight segments; Konva's cardinal spline).
+    Line { points: Vec<[f32; 2]>, tension: f32, closed: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -649,6 +741,7 @@ pub struct Foreign {
 pub enum AnyMaterial {
     Media(Media),
     Text(Text),
+    Shape(Shape),
     Speed(Speed),
     CanvasFill(CanvasFill),
     AudioFade(AudioFade),
@@ -667,6 +760,7 @@ impl AnyMaterial {
         match self {
             AnyMaterial::Media(m) => &m.id,
             AnyMaterial::Text(m) => &m.id,
+            AnyMaterial::Shape(m) => &m.id,
             AnyMaterial::Speed(m) => &m.id,
             AnyMaterial::CanvasFill(m) => &m.id,
             AnyMaterial::AudioFade(m) => &m.id,
@@ -692,6 +786,7 @@ impl Materials {
         match material {
             AnyMaterial::Media(m) => put(&mut self.media, m, index),
             AnyMaterial::Text(m) => put(&mut self.texts, m, index),
+            AnyMaterial::Shape(m) => put(&mut self.shapes, m, index),
             AnyMaterial::Speed(m) => put(&mut self.speeds, m, index),
             AnyMaterial::CanvasFill(m) => put(&mut self.canvas_fills, m, index),
             AnyMaterial::AudioFade(m) => put(&mut self.audio_fades, m, index),
@@ -717,6 +812,7 @@ impl Materials {
         }
         take!(media, Media);
         take!(texts, Text);
+        take!(shapes, Shape);
         take!(speeds, Speed);
         take!(canvas_fills, CanvasFill);
         take!(audio_fades, AudioFade);

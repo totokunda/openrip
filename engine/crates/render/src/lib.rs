@@ -15,6 +15,7 @@
 //! GPU with the frame's own matrix and range.
 
 pub mod adjust;
+pub mod shape;
 pub mod text;
 
 pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
@@ -127,6 +128,12 @@ impl<'a> From<&'a VideoFrame> for Source<'a> {
     }
 }
 
+/// Premultiplied source times the canvas, plus the canvas where the source is clear.
+const MULTIPLY: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Dst, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
+    alpha: wgpu::BlendComponent::OVER,
+};
+
 /// One image placed on the canvas.
 #[derive(Clone, Debug)]
 pub struct Layer<'a> {
@@ -145,6 +152,8 @@ pub struct Layer<'a> {
     /// A cut-out mask over the whole source (in the texture's own axes, stretched to it; any
     /// channel), multiplied in before placement.
     pub matte: Option<&'a RgbaImage>,
+    /// Multiplies the canvas under it rather than covering it (a highlighter's strokes).
+    pub multiply: bool,
 }
 
 impl<'a> Layer<'a> {
@@ -176,6 +185,7 @@ impl<'a> Layer<'a> {
             opacity: 1.0,
             adjust: None,
             matte: None,
+            multiply: false,
         }
     }
 }
@@ -202,6 +212,9 @@ pub struct Compositor {
     place: wgpu::RenderPipeline,
     /// The placement pass for BGRA targets (IOSurfaces handed to the app).
     place_bgra: wgpu::RenderPipeline,
+    /// Placement that multiplies the canvas (opaque, so cs·cb + cb·(1−αs) is exact).
+    place_multiply: wgpu::RenderPipeline,
+    place_multiply_bgra: wgpu::RenderPipeline,
     /// RGBA canvas -> NV12 planes for the encoder.
     luma: wgpu::RenderPipeline,
     chroma: wgpu::RenderPipeline,
@@ -339,6 +352,8 @@ impl Compositor {
             bilinear: pipeline("fs_bilinear", CANVAS, None),
             place: pipeline("fs_place", CANVAS, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             place_bgra: pipeline("fs_place", wgpu::TextureFormat::Bgra8Unorm, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
+            place_multiply: pipeline("fs_place", CANVAS, Some(MULTIPLY)),
+            place_multiply_bgra: pipeline("fs_place", wgpu::TextureFormat::Bgra8Unorm, Some(MULTIPLY)),
             luma: pipeline("fs_luma", wgpu::TextureFormat::R8Unorm, None),
             chroma: pipeline("fs_chroma", wgpu::TextureFormat::Rg8Unorm, None),
             sharpen_luma: adjust_pipeline("fs_sharpen_luma"),
@@ -964,7 +979,12 @@ impl Compositor {
                 inv1: [b[0] as f32, b[1] as f32, b[2] as f32, 0.0],
                 misc: [layer.opacity, 0.0, 0.0, 0.0],
             };
-            self.pass(enc, place_pipeline, &stage, canvas, place, None);
+            let pipeline = match (layer.multiply, canvas.format() == wgpu::TextureFormat::Bgra8Unorm) {
+                (false, _) => place_pipeline,
+                (true, false) => &self.place_multiply,
+                (true, true) => &self.place_multiply_bgra,
+            };
+            self.pass(enc, pipeline, &stage, canvas, place, None);
             // A keyed image's stage lives on in the cache; anything else is scratch.
             if matches!(layer.source, Source::Cached(..)) && !adjusted {
                 keep.push(stage);

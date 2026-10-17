@@ -20,6 +20,7 @@ import RoundedRegularPolygon from "./custom/RoundedRegularPolygon";
 import { BaseClipApplicator } from "./apply/base";
 import ApplicatorFilter from "./custom/ApplicatorFilter";
 import { sanitizeCornerRadius } from "@/lib/konva/sanitizeCornerRadius";
+import { useEngineDraws } from "@/lib/engine-preview";
 
 //@ts-ignore
 Konva.Filters.Applicator = ApplicatorFilter;
@@ -48,6 +49,8 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
   // (Rect/Ellipse/Line/Star/RegularPolygon). Use a permissive type to satisfy react-konva.
   const shapeRef = useRef<any>(null);
   const transformerRef = useRef<any>(null);
+  // The Rust engine draws the preview: hide this shape, keeping its handles.
+  const engineHides = useEngineDraws() && !inputMode;
   const groupRef = useRef<any>(null);
   const suppressUntilRef = useRef<number>(0);
 
@@ -724,7 +727,7 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
       stroke: strokeWithOpacity,
       strokeWidth,
       draggable: tool === "pointer" && !isTransforming && !inputMode,
-      opacity: (clipTransform?.opacity ?? 100) / 100,
+      opacity: engineHides ? 0 : (clipTransform?.opacity ?? 100) / 100,
       onDragStart: handleDragStart,
       onDragMove: handleDragMove,
       onDragEnd: handleDragEnd,

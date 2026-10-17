@@ -11,8 +11,7 @@
 //! - **Audio.** v1 volume is dB; the model stores linear gain. Fades become materials.
 //! - **Tracks.** v1 lists tracks top row first; the model lists them bottom first.
 //!
-//! AI clips (`model`) are dropped; shapes, drawings and masks are kept verbatim as
-//! `Foreign` materials or reported until the model supports them.
+//! AI clips (`model`) are dropped; masks are reported until the model supports them.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -428,8 +427,12 @@ fn convert_clip(
             });
             mid
         }
+        "shape" | "draw" => {
+            let mid = MaterialId(format!("{id}-{ty}"));
+            materials.shapes.push(if ty == "shape" { convert_shape(&mid, clip) } else { convert_drawing(&mid, clip, world) });
+            mid
+        }
         _ => {
-            // shape / draw: not in the model yet; keep the whole clip verbatim.
             bump(&mut report.kept_foreign, ty);
             let mid = MaterialId(format!("{id}-{ty}"));
             materials.foreign.push(Foreign { id: mid.clone(), app: APP.into(), kind: ty.into(), raw: clip.clone() });
@@ -483,6 +486,8 @@ fn convert_clip(
     // Geometry.
     let (transform, crop, opacity) = match (ty, clip.get("transform").filter(|t| t.is_object())) {
         ("audio" | "filter", _) | (_, None) => (Transform::default(), None, 1.0),
+        // A drawing covers the canvas; its lines carry their own transforms.
+        ("draw", Some(t)) => (Transform::default(), None, (f(t, "opacity", 100.0) / 100.0) as f32),
         (_, Some(t)) => {
             let shape_type = s(clip, "shapeType");
             let center_pivot = ty == "shape" && matches!(shape_type.as_str(), "ellipse" | "polygon" | "star");
@@ -522,6 +527,89 @@ fn convert_clip(
         volume,
         attachments,
     })
+}
+
+/// A colour from `#rrggbb` with an opacity in percent.
+fn hex_alpha(clip: &Value, key: &str, default: &str, opacity_key: &str) -> Rgba {
+    let mut c = Rgba::from_hex(&Some(s(clip, key)).filter(|h| !h.is_empty()).unwrap_or_else(|| default.into())).unwrap_or(Rgba::BLACK);
+    c.a = (f(clip, opacity_key, 100.0) / 100.0).clamp(0.0, 1.0) as f32;
+    c
+}
+
+/// A shape clip as Konva draws it (`ShapePreview.tsx`): in a box of the clip's width and
+/// height, scaled by its scaleX/scaleY, filled then stroked.
+fn convert_shape(id: &MaterialId, clip: &Value) -> Shape {
+    let t = clip.get("transform").cloned().unwrap_or(Value::Null);
+    let (w, h) = (f(&t, "width", 100.0) as f32, f(&t, "height", 100.0) as f32);
+    let corner = f(&t, "cornerRadius", 0.0) as f32;
+    let shape_type = s(clip, "shapeType");
+    let geometry = match shape_type.as_str() {
+        "ellipse" => Geometry::Ellipse,
+        "polygon" => Geometry::Polygon { sides: f(clip, "sides", 3.0).max(3.0) as u32, radius: (w / 3f32.sqrt()).min(h / 1.5), corner_radius: corner },
+        "star" => Geometry::Star { points: f(clip, "points", 5.0).max(2.0) as u32, inner: w.min(h) / 4.0, outer: w.min(h) / 2.0 },
+        "line" => Geometry::Line { points: vec![[0.0, 0.0], [w, 0.0]], tension: 0.0, closed: false },
+        _ => Geometry::Rectangle { corner_radius: corner },
+    };
+    let stroke_width = f(clip, "strokeWidth", 2.0) as f32;
+    Shape {
+        id: id.clone(),
+        size: [w, h],
+        scale: [f(&t, "scaleX", 1.0) as f32, f(&t, "scaleY", 1.0) as f32],
+        unit: (1.0 / WORLD_H) as f32,
+        paths: vec![ShapePath {
+            // A line has no inside.
+            fill: (shape_type != "line").then(|| hex_alpha(clip, "fill", "#3b82f6", "fillOpacity")),
+            stroke: (stroke_width > 0.0).then(|| ShapeStroke { color: hex_alpha(clip, "stroke", "#1e40af", "strokeOpacity"), width: stroke_width, ends: StrokeEnds::Butt }),
+            opacity: 1.0,
+            blend: PathBlend::Normal,
+            geometry,
+        }],
+    }
+}
+
+/// A drawing clip (`DrawingLine.tsx`): its lines over the whole canvas, each placed by its
+/// own transform. Brushes are round and curved by their smoothing, highlighters square and
+/// straight, erasers round, curved at 0.5 and opaque. The app names a blend for each tool
+/// but never hands it to Konva, so every line is drawn normally (its eraser cuts the lines
+/// instead).
+fn convert_drawing(id: &MaterialId, clip: &Value, world: &World) -> Shape {
+    let paths = clip
+        .get("lines")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|line| {
+            let raw: Vec<f64> = line.get("points")?.as_array()?.iter().filter_map(Value::as_f64).collect();
+            let t = line.get("transform").cloned().unwrap_or(Value::Null);
+            let (tx, ty, sx, sy) = (f(&t, "x", 0.0), f(&t, "y", 0.0), f(&t, "scaleX", 1.0), f(&t, "scaleY", 1.0));
+            let (sn, cs) = f(&t, "rotation", 0.0).to_radians().sin_cos();
+            let points: Vec<[f32; 2]> = raw
+                .chunks_exact(2)
+                .map(|p| {
+                    let (x, y) = (p[0] * sx, p[1] * sy);
+                    [(tx + x * cs - y * sn) as f32, (ty + x * sn + y * cs) as f32]
+                })
+                .collect();
+            if points.is_empty() {
+                return None;
+            }
+            let tool = s(line, "tool");
+            let (tension, ends) = match tool.as_str() {
+                "highlighter" => (0.0, StrokeEnds::Square),
+                "eraser" => (0.5, StrokeEnds::Round),
+                _ => (f(line, "smoothing", 0.5) as f32, StrokeEnds::Round),
+            };
+            let color = Rgba::from_hex(&s(line, "stroke")).unwrap_or(Rgba::BLACK);
+            Some(ShapePath {
+                geometry: Geometry::Line { points, tension, closed: false },
+                fill: None,
+                stroke: Some(ShapeStroke { color, width: (f(line, "strokeWidth", 4.0) * (sx.abs() * sy.abs()).sqrt()) as f32, ends }),
+                opacity: if tool == "eraser" { 1.0 } else { (f(line, "opacity", 100.0) / 100.0) as f32 },
+                blend: PathBlend::Normal,
+            })
+        })
+        .collect();
+    Shape { id: id.clone(), size: [world.w as f32, world.h as f32], scale: [1.0, 1.0], unit: (1.0 / WORLD_H) as f32, paths }
 }
 
 fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
@@ -687,6 +775,40 @@ mod tests {
         assert!((p.x - (383.3333333333333 / (1066.6666666666667) * 2.0 - 1.0)).abs() < 1e-9, "{p:?}");
         assert!((p.y - (1.0 - 350.0 / 600.0 * 2.0)).abs() < 1e-9, "{p:?}");
         assert_eq!(t1.transform.rotation.value, 90.0);
+    }
+
+    #[test]
+    fn shapes_and_drawings_become_vector_materials() {
+        let mut d = doc();
+        let tl = d["timeline"].as_object_mut().unwrap();
+        let tracks = tl["tracks"].as_array_mut().unwrap();
+        tracks.insert(0, json!({"type": "shape", "timelineId": "T-shape"}));
+        tracks.insert(0, json!({"type": "draw", "timelineId": "T-draw"}));
+        let clips = tl["clips"].as_array_mut().unwrap();
+        clips.push(json!({"clipId": "s1", "type": "shape", "timelineId": "T-shape", "shapeType": "star", "points": 6,
+            "fill": "#ff0000", "fillOpacity": 50, "strokeWidth": 0, "startTick": "0", "endTick": "1000000", "trimStartTick": "0", "trimEndTick": "0",
+            "transform": {"x": 100, "y": 100, "width": 200, "height": 100, "scaleX": 2, "scaleY": 1, "rotation": 0, "opacity": 100}}));
+        clips.push(json!({"clipId": "d1", "type": "draw", "timelineId": "T-draw", "startTick": "0", "endTick": "1000000", "trimStartTick": "0", "trimEndTick": "0",
+            "lines": [{"lineId": "l1", "tool": "highlighter", "points": [0, 0, 10, 0], "stroke": "#ffff00", "strokeWidth": 10, "opacity": 50, "smoothing": 0.5,
+                       "transform": {"x": 5, "y": 7, "scaleX": 2, "scaleY": 2, "rotation": 90}}]}));
+        let Imported { project, report } = import_v1_json(&d).unwrap();
+        assert!(report.kept_foreign.is_empty(), "{:?}", report.kept_foreign);
+
+        let star = project.materials.shapes.iter().find(|m| m.id.0 == "s1-shape").unwrap();
+        assert_eq!((star.size, star.scale), ([200.0, 100.0], [2.0, 1.0]));
+        assert_eq!(star.paths[0].geometry, Geometry::Star { points: 6, inner: 25.0, outer: 50.0 });
+        assert_eq!(star.paths[0].fill.unwrap().a, 0.5);
+        assert!(star.paths[0].stroke.is_none());
+        // Stars pivot on their centre: x + width·scaleX/2.
+        let (_, s1) = edit::find_segment(&project, "s1").unwrap();
+        assert!((s1.transform.position.value.x - (300.0 / 1066.6666666666667 * 2.0 - 1.0)).abs() < 1e-9);
+
+        // A line's points go through its own transform: scaled 2×, turned 90°, moved to (5, 7).
+        let drawing = project.materials.shapes.iter().find(|m| m.id.0 == "d1-draw").unwrap();
+        let line = &drawing.paths[0];
+        assert_eq!(line.geometry, Geometry::Line { points: vec![[5.0, 7.0], [5.0, 27.0]], tension: 0.0, closed: false });
+        let stroke = line.stroke.unwrap();
+        assert_eq!((stroke.width, stroke.ends, line.blend, line.opacity), (20.0, StrokeEnds::Square, PathBlend::Normal, 0.5));
     }
 
     #[test]
