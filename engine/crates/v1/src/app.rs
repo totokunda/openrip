@@ -3,8 +3,9 @@
 //! canvas, a text, a volume), so each clip also carries the segment it came from and the
 //! materials that segment uses, under `engine`, with the clip fields as written (`base`).
 //! [`crate::import_v1_json`] puts the segment back and applies on top only what the app
-//! changed since: a move, a resize, a turn, a trim, a new text. Everything else (caption
-//! styles, animations, effects, masks, keyframes, exact timing) is drawn as CapCut drew it.
+//! changed since: a move, a resize, a turn, a trim, a new text, and the panels' other fields
+//! the clip carries (text styles, the draft's own adjustments, a filter's strength, …).
+//! Everything else (effects, keyframes, exact timing) is drawn as CapCut drew it.
 
 use serde_json::{json, Map, Value};
 #[cfg(test)]
@@ -75,6 +76,16 @@ pub(crate) const TEXT_STYLE_KEYS: [&str; 20] = [
 /// The Adjust panel's sliders; the app's scale, applied on top of CapCut's own adjustments.
 pub(crate) const ADJUST_KEYS: [&str; 8] = ["brightness", "contrast", "hue", "saturation", "sharpness", "noise", "blur", "vignette"];
 
+/// CapCut's Adjust sliders the engine draws (`PreviewEngine::adjust_of`), by the importer's
+/// names for them. The draft's others (clarity, vignette, fade) are kept as CapCut has them.
+pub(crate) const DRAWN_ADJUST: [&str; 11] = ["brightness", "contrast", "saturation", "highlights", "shadows", "whites", "blacks", "temperature", "tint", "exposure", "sharpen"];
+
+/// How CapCut shows an Adjust slider's value (−1…1 in the draft): times 50, or times 100 for
+/// the one-sided sliders (0…100).
+pub(crate) fn capcut_scale(name: &str) -> f64 {
+    if matches!(name, "sharpen" | "clarity" | "vignette" | "fade") { 100.0 } else { 50.0 }
+}
+
 /// The text animations and transitions the engine draws itself (`playback/src/animation.rs`,
 /// `caption.rs`, `transition.rs`), by the names the app's Animation tab uses.
 pub(crate) const BUILTIN_IN: [&str; 3] = ["type_1", "type_2", "typewriter"];
@@ -142,6 +153,60 @@ fn app_box(world: &World, center: Vec2, size: [f64; 2], rotation: f64) -> Map<St
         m.insert(k.into(), json!(v));
     }
     m
+}
+
+/// A video or photo's own adjustments from the draft, for the Adjust tab, in the clip's order:
+/// CapCut's Adjust sliders (on CapCut's scale), colour wheels, and the HSL, curves, filters
+/// and effects on the clip. The app's sliders (`v1:`) have the Adjust panel's own fields,
+/// and HSL and curves that change nothing aren't listed. The ones the engine draws can be
+/// changed (`drawn`); any can be removed.
+fn draft_adjustments(project: &Project, seg: &Segment) -> Vec<Value> {
+    // A curve within a level of the diagonal changes nothing.
+    let identity = |c: &[CurvePoint]| c.iter().all(|p| [p.anchor, p.left, p.right].iter().all(|(x, y)| (x - y).abs() < 1.0 / 255.0));
+    let mut out = Vec::new();
+    for id in &seg.attachments {
+        let mut entry = match project.materials.get(id) {
+            Some(MaterialRef::Effect(e)) => match (e.category, e.builtin.as_deref()) {
+                (EffectCategory::Adjust, Some(name)) if !name.starts_with("v1:") => {
+                    let scale = capcut_scale(name);
+                    let title = name[..1].to_uppercase() + &name[1..];
+                    let value = e.params.get("intensity").copied().unwrap_or(0.0) * scale;
+                    json!({ "kind": name, "name": title, "value": num(value), "min": if scale == 100.0 { 0.0 } else { -50.0 }, "max": if scale == 100.0 { 100.0 } else { 50.0 }, "drawn": DRAWN_ADJUST.contains(&name) })
+                }
+                (EffectCategory::Adjust | EffectCategory::Audio, _) => continue,
+                (category, _) => {
+                    let name = Some(e.name.clone()).filter(|n| !n.is_empty()).or_else(|| e.library.as_ref().map(|l| l.category.clone()).filter(|c| !c.is_empty()));
+                    let (kind, fallback) = if category == EffectCategory::Filter { ("filter", "Filter") } else { ("effect", "Effect") };
+                    json!({ "kind": kind, "name": name.unwrap_or_else(|| fallback.into()), "drawn": false })
+                }
+            },
+            Some(MaterialRef::ColorWheels(w)) if w.log => json!({ "kind": "log_wheels", "name": "Log wheels", "drawn": false }),
+            // Their strength, as a percentage.
+            Some(MaterialRef::ColorWheels(w)) => json!({ "kind": "color_wheels", "name": "Color wheels", "value": num(w.intensity * 100.0), "min": 0.0, "max": 100.0, "drawn": true }),
+            Some(MaterialRef::Hsl(h)) if h.hue != 0.0 || h.saturation != 0.0 || h.lightness != 0.0 => json!({ "kind": "hsl", "name": "HSL", "drawn": false }),
+            Some(MaterialRef::Curves(c)) if ![&c.luma, &c.red, &c.green, &c.blue].into_iter().all(|ch| identity(ch)) => json!({ "kind": "curves", "name": "Curves", "drawn": false }),
+            _ => continue,
+        };
+        entry["id"] = json!(id.0);
+        out.push(entry);
+    }
+    out
+}
+
+/// The text segments of `new` that an edit laid out anew since `old`: CapCut's texts (they
+/// have no box of their own; the app's text does) whose words or style changed. The app's
+/// box around each follows the engine's new block (the addon's `updateProject`).
+pub fn relaid_texts(old: &Project, new: &Project) -> Vec<String> {
+    use std::collections::HashMap;
+    /// Each text segment's text, by segment id.
+    fn texts(p: &Project) -> HashMap<&str, &Text> {
+        let by_id: HashMap<&MaterialId, &Text> = p.materials.texts.iter().map(|t| (&t.id, t)).collect();
+        p.tracks.iter().flat_map(|t| &t.segments).filter_map(|s| Some((s.id.as_str(), *by_id.get(&s.material)?))).collect()
+    }
+    let before = texts(old);
+    let mut out: Vec<String> = texts(new).into_iter().filter(|(id, now)| now.layout.frame.is_none() && before.get(id).is_some_and(|was| was != now)).map(|(id, _)| id.to_string()).collect();
+    out.sort();
+    out
 }
 
 /// Everything a segment uses: its own material and its attachments.
@@ -300,6 +365,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                 original.insert("y".into(), json!(0.0));
                 clip.insert("transform".into(), Value::Object(b));
                 clip.insert("originalTransform".into(), Value::Object(original));
+                clip.insert("draftAdjustments".into(), Value::Array(draft_adjustments(project, seg)));
             }
         }
         (_, None, Some(t)) => {
@@ -381,7 +447,12 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
             };
             clip.insert("name".into(), json!(name));
             clip.insert("category".into(), json!("CapCut"));
-            clip.insert("intensity".into(), json!(100));
+            // What it is, and whether the engine draws it: filters with their bundle, at their
+            // strength; effects, stickers and adjustment layers not yet.
+            let filter = project.materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter);
+            clip.insert("draftKind".into(), json!(kind_name(track.kind)));
+            clip.insert("drawn".into(), json!(filter.is_some_and(|e| e.resource.is_some()) && track.kind == TrackKind::Filter));
+            clip.insert("intensity".into(), num(filter.and_then(|e| e.params.get("intensity").copied()).unwrap_or(1.0) * 100.0));
         }
     }
 
@@ -392,6 +463,8 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
         .iter()
         .chain(TEXT_STYLE_KEYS.iter())
         .chain(ADJUST_KEYS.iter())
+        // The draft's own adjustments, and a filter bar's strength.
+        .chain(["draftAdjustments", "intensity"].iter())
         .filter_map(|k| clip.get(*k).map(|v| (k.to_string(), v.clone())))
         .collect();
     clip.insert(
@@ -618,6 +691,165 @@ mod tests {
         assert_eq!(adj.params["value"], 25.0);
         let fade = back.materials.audio_fades.iter().find(|f| v.attachments.contains(&f.id)).unwrap();
         assert_eq!(fade.fade_in, Micros(500_000));
+    }
+
+    /// The project with CapCut's own adjustments on the video, besides its filter: two Adjust
+    /// sliders (one the engine draws), colour wheels, an HSL range that changes something and
+    /// one that doesn't, and empty curves.
+    fn adjusted() -> Project {
+        let mut p = project();
+        let slider = |id: &str, name: &str, v: f64| {
+            let mut params = BTreeMap::new();
+            params.insert("intensity".to_string(), v);
+            Effect { id: MaterialId(id.into()), category: EffectCategory::Adjust, name: String::new(), params, builtin: Some(name.into()), resource: Some("/bundle/color".into()), library: None, text_style: None }
+        };
+        p.materials.effects.push(slider("br", "brightness", -0.2));
+        p.materials.effects.push(slider("cl", "clarity", 0.02));
+        let w = WheelValue { red: 0.1, green: 0.0, blue: 0.0, luma: 0.0, saturation: 0.0 };
+        p.materials.color_wheels.push(ColorWheels { id: MaterialId("wh".into()), log: false, lift: w, gamma: WheelValue::default(), gain: WheelValue::default(), offset: WheelValue::default(), intensity: 1.0 });
+        p.materials.hsl.push(HslAdjust { id: MaterialId("h1".into()), range: 1, custom_color: None, hue: 0.0, saturation: 0.0, lightness: 0.0 });
+        p.materials.hsl.push(HslAdjust { id: MaterialId("h2".into()), range: 2, custom_color: None, hue: 10.0, saturation: 0.0, lightness: 0.0 });
+        p.materials.curves.push(ColorCurves { id: MaterialId("cu".into()), luma: Vec::new(), red: Vec::new(), green: Vec::new(), blue: Vec::new() });
+        let v = p.tracks.iter_mut().flat_map(|t| &mut t.segments).find(|s| s.id == "v").unwrap();
+        v.attachments.extend(["br", "cl", "wh", "h1", "h2", "cu"].map(MaterialId::from));
+        p
+    }
+
+    #[test]
+    fn the_drafts_adjustments_are_listed_on_capcuts_scale() {
+        let doc = to_app_project(&adjusted(), &mut |_| None);
+        let v = doc["timeline"]["clips"].as_array().unwrap().iter().find(|c| c["clipId"] == "v").unwrap();
+        let list = v["draftAdjustments"].as_array().unwrap();
+        let ids: Vec<&str> = list.iter().map(|e| e["id"].as_str().unwrap()).collect();
+        // In the clip's order; the HSL range and curves that change nothing aren't listed.
+        assert_eq!(ids, ["fx", "br", "cl", "wh", "h2"]);
+        assert_eq!(list[0], json!({"id": "fx", "kind": "filter", "name": "Film", "drawn": false}));
+        assert_eq!(list[1], json!({"id": "br", "kind": "brightness", "name": "Brightness", "value": -10.0, "min": -50.0, "max": 50.0, "drawn": true}));
+        // Clarity is one-sided (0…100), and not drawn yet.
+        assert_eq!((list[2]["value"].as_f64(), list[2]["max"].as_f64(), list[2]["drawn"].as_bool()), (Some(2.0), Some(100.0), Some(false)));
+        assert_eq!((list[3]["kind"].as_str(), list[3]["value"].as_f64(), list[3]["drawn"].as_bool()), (Some("color_wheels"), Some(100.0), Some(true)));
+        // Unedited, everything stays as the draft had it.
+        let back = import_v1_json(&doc).unwrap().project;
+        assert_eq!(segment(&back, "v").attachments, segment(&adjusted(), "v").attachments);
+    }
+
+    #[test]
+    fn adjust_tab_edits_change_or_remove_the_drafts_adjustments() {
+        let p = adjusted();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "v").unwrap();
+        let list = clip["draftAdjustments"].as_array_mut().unwrap();
+        list[1]["value"] = json!(25);
+        list[3]["value"] = json!(50);
+        // The filter and clarity taken off.
+        list.retain(|e| e["id"] != "fx" && e["id"] != "cl");
+        let back = import_v1_json(&doc).unwrap().project;
+        let v = segment(&back, "v");
+        // The edited ones are copies for this clip, in the draft's place.
+        assert_eq!(v.attachments, ["v-br", "v-wh", "h1", "h2", "cu"].map(MaterialId::from));
+        let br = back.materials.effects.iter().find(|e| e.id.0 == "v-br").unwrap();
+        assert_eq!((br.params["intensity"], br.builtin.as_deref(), br.resource.as_deref()), (0.5, Some("brightness"), Some("/bundle/color")));
+        assert_eq!(back.materials.color_wheels.iter().find(|w| w.id.0 == "v-wh").unwrap().intensity, 0.5);
+        // The draft's own materials are unchanged.
+        assert_eq!(back.materials.effects.iter().find(|e| e.id.0 == "br").unwrap().params["intensity"], -0.2);
+        assert!(back.validate().is_empty(), "{:?}", back.validate());
+    }
+
+    #[test]
+    fn a_filter_bars_intensity_sets_the_filters_strength() {
+        let mut p = project();
+        let mut params = BTreeMap::new();
+        params.insert("intensity".to_string(), 0.3);
+        p.materials.effects.push(Effect { id: MaterialId("lut".into()), category: EffectCategory::Filter, name: "Sunset".into(), params, builtin: None, resource: Some("/bundle/sunset".into()), library: None, text_style: None });
+        p.materials.foreign.push(Foreign { id: MaterialId("st".into()), app: "capcut".into(), kind: "stickers".into(), raw: json!({"name": "Heart"}) });
+        let bar = |id: &str, material: &str| Segment { id: id.into(), material: MaterialId(material.into()), source: None, attachments: Vec::new(), render_index: 15000, ..segment(&p, "v").clone() };
+        let (filter, sticker) = (bar("f", "lut"), bar("s", "st"));
+        p.tracks.push(Track { id: "tf".into(), kind: TrackKind::Filter, name: String::new(), segments: vec![filter], muted: false, hidden: false, locked: false });
+        p.tracks.push(Track { id: "ts".into(), kind: TrackKind::Sticker, name: String::new(), segments: vec![sticker], muted: false, hidden: false, locked: false });
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clips = doc["timeline"]["clips"].as_array_mut().unwrap();
+        let f = clips.iter().find(|c| c["clipId"] == "f").unwrap();
+        assert_eq!((f["intensity"].as_f64(), f["drawn"].as_bool(), f["draftKind"].as_str()), (Some(30.0), Some(true), Some("filter")));
+        let s = clips.iter().find(|c| c["clipId"] == "s").unwrap();
+        assert_eq!((s["name"].as_str(), s["drawn"].as_bool(), s["draftKind"].as_str()), (Some("Heart"), Some(false), Some("sticker")));
+        for c in clips.iter_mut().filter(|c| c["clipId"] == "f") {
+            c["intensity"] = json!(80);
+        }
+        let back = import_v1_json(&doc).unwrap().project;
+        let f = segment(&back, "f");
+        let e = back.materials.effects.iter().find(|e| e.id == f.material).unwrap();
+        assert_eq!((e.params["intensity"], e.resource.as_deref(), e.category), (0.8, Some("/bundle/sunset"), EffectCategory::Filter));
+        assert_eq!(back.materials.effects.iter().find(|e| e.id.0 == "lut").unwrap().params["intensity"], 0.3);
+    }
+
+    /// The app resizes a caption's box about its middle when the engine lays the text out
+    /// anew (a new font, say): the text stays where it was. A move still moves it.
+    #[test]
+    fn a_captions_box_follows_its_text_without_moving_it() {
+        let p = project();
+        let mut doc = to_app_project(&p, &mut |_| Some([400.0, 900.0, 280.0, 120.0]));
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "c").unwrap();
+        clip["fontFamily"] = json!("Georgia");
+        let t = &mut clip["transform"];
+        let (w, h) = (t["width"].as_f64().unwrap(), t["height"].as_f64().unwrap());
+        t["x"] = json!(t["x"].as_f64().unwrap() - 20.0);
+        t["width"] = json!(w + 40.0);
+        t["y"] = json!(t["y"].as_f64().unwrap() - 5.0);
+        t["height"] = json!(h + 10.0);
+        let back = import_v1_json(&doc).unwrap().project;
+        let c = segment(&back, "c");
+        let was = segment(&p, "c").transform.position.value;
+        assert!((c.transform.position.value.x - was.x).abs() < 1e-9 && (c.transform.position.value.y - was.y).abs() < 1e-9, "{:?}", c.transform.position.value);
+        assert_eq!(c.transform.scale.value, segment(&p, "c").transform.scale.value);
+        // Moved 30 world units right as well.
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "c").unwrap();
+        clip["transform"]["x"] = json!(clip["transform"]["x"].as_f64().unwrap() + 30.0);
+        let back = import_v1_json(&doc).unwrap().project;
+        let dx = segment(&back, "c").transform.position.value.x - was.x;
+        assert!((dx - 30.0 / (WORLD_H * 1080.0 / 1920.0) * 2.0).abs() < 1e-9, "{dx}");
+    }
+
+    /// The Text tab's case buttons send the words in the new case as well; the caption keeps
+    /// its spoken-word timing (and so its caption style). New words drop it.
+    #[test]
+    fn a_case_change_keeps_a_captions_spoken_words() {
+        let mut p = project();
+        let words = vec![SpokenWord { range: (0, 5), start: Micros(0), end: Micros(500_000) }, SpokenWord { range: (6, 11), start: Micros(500_000), end: Micros(1_000_000) }];
+        p.materials.texts[0].words = words.clone();
+        let edit = |text: &str, transform: &str| {
+            let mut doc = to_app_project(&p, &mut |_| None);
+            let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "c").unwrap();
+            clip["text"] = json!(text);
+            clip["textTransform"] = json!(transform);
+            let back = import_v1_json(&doc).unwrap().project;
+            back.materials.texts.iter().find(|t| t.id == segment(&back, "c").material).unwrap().clone()
+        };
+        let upper = edit("HELLO THERE", "uppercase");
+        assert_eq!((upper.text.as_str(), &upper.words), ("HELLO THERE", &words));
+        assert!(edit("Goodbye now", "none").words.is_empty());
+    }
+
+    #[test]
+    fn texts_laid_out_anew_are_the_ones_whose_words_or_style_changed() {
+        let p = project();
+        let doc = to_app_project(&p, &mut |_| None);
+        let first = import_v1_json(&doc).unwrap().project;
+        let edit = |key: &str, value: Value| {
+            let mut d = doc.clone();
+            for c in d["timeline"]["clips"].as_array_mut().unwrap() {
+                if c.get(key).is_some() {
+                    c[key] = value.clone();
+                }
+            }
+            import_v1_json(&d).unwrap().project
+        };
+        let upper = edit("textTransform", json!("uppercase"));
+        assert_eq!(relaid_texts(&first, &upper), ["c"]);
+        // Back to the draft's own text: laid out anew again.
+        assert_eq!(relaid_texts(&upper, &first), ["c"]);
+        // A video edit, or none, changes no text.
+        assert!(relaid_texts(&first, &edit("brightness", json!(30))).is_empty());
+        assert!(relaid_texts(&first, &first).is_empty());
     }
 
     #[test]

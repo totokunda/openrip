@@ -14,5 +14,5 @@ CAPCUT_DRAFT=… node session.mjs ../.. out/cc out/ud-cc x capcut perf
 - `OPENRIP_TRACE=1` logs the engine's sync, frame and decode timings to `logs.txt`; `OPENRIP_ENGINE_MUTE=1` silences playback.
 - `EXE=<binary>` runs a packaged build.
 - Screenshots are at 2x: CSS coordinates are half their pixels.
-- Steps: `import`, `timeline`, `play`, `perf` (seek, scrub, playback, edit latency), `profstart`/`profstop` (renderer CPU profile), `capcut`, `selcaption`, `capstyle`, `capanim`. Helpers for new steps are in `steps/_preview.mjs`.
+- Steps: `import`, `timeline`, `play`, `perf` (seek, scrub, playback, edit latency), `profstart`/`profstop` (renderer CPU profile), `capcut`, `capfolder` (a draft folder anywhere, `CAPCUT_FOLDER`), `seek`, `selcaption`, `capstyle`, `capanim`, `capbox` (a caption's box after a case and font change), `capadjust` (the draft's own adjustments in the Adjust tab), `capfilter` (a CapCut filter bar's intensity). Helpers for new steps are in `steps/_preview.mjs`.
 - Clicking the ruler seeks; draft-specific coordinates come from env vars (see each step).

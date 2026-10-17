@@ -15,6 +15,11 @@ export type EngineProjectInfo = {
   fps: number;
   durationUs: number;
   source: string;
+  /**
+   * After a sync: where CapCut texts whose words or style the edit changed are now laid out
+   * (canvas pixels, before their rotation), so their boxes can follow.
+   */
+  textBlocks?: { segment: string; left: number; top: number; width: number; height: number }[];
 };
 
 export type EngineRenderResult =

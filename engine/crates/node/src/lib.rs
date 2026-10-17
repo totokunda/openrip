@@ -67,6 +67,19 @@ pub struct ProjectInfo {
     pub segments: u32,
     /// Where the project came from: "capcut", "openrip" or "v1".
     pub source: String,
+    /// After `updateProject`: where CapCut texts whose words or style the edit changed are
+    /// now laid out, so the app's box around each can follow.
+    pub text_blocks: Vec<TextBlock>,
+}
+
+/// A text segment's block of lines on the canvas, in canvas pixels, before its rotation.
+#[napi(object)]
+pub struct TextBlock {
+    pub segment: String,
+    pub left: f64,
+    pub top: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 /// Load a project: a CapCut draft folder, an OpenRip project JSON, or a v1 project file.
@@ -125,8 +138,19 @@ pub fn update_project(json: String) -> Result<ProjectInfo> {
         drop(guard);
         return start_session(project, source);
     };
-    let info = project_info(&project, source);
-    s.engine.lock().unwrap().set_project(project.clone());
+    let mut info = project_info(&project, source);
+    let relaid = openrip_v1::relaid_texts(&s.project, &project);
+    {
+        let mut engine = s.engine.lock().unwrap();
+        engine.set_project(project.clone());
+        info.text_blocks = relaid
+            .into_iter()
+            .filter_map(|segment| {
+                let [left, top, width, height] = engine.text_block(&segment)?;
+                Some(TextBlock { segment, left, top, width, height })
+            })
+            .collect();
+    }
     if let Some(p) = &s.player {
         p.set_project(project.clone());
     }
@@ -148,6 +172,7 @@ fn project_info(project: &Project, source: &str) -> ProjectInfo {
         tracks: project.tracks.len() as u32,
         segments: project.segment_count() as u32,
         source: source.into(),
+        text_blocks: Vec::new(),
     }
 }
 

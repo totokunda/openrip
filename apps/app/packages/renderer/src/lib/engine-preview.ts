@@ -25,6 +25,7 @@ import { useControlsStore, setPlaybackDriver } from "./control";
 import { useViewportStore } from "./viewport";
 import { useProjectsStore } from "./projects";
 import { getActiveProjectJsonSnapshot } from "./middlewares/json-persistence";
+import { BASE_LONG_SIDE } from "./settings";
 
 type EnginePreviewState = {
   /** The user's setting. */
@@ -105,6 +106,7 @@ async function syncNow() {
     const r = await engineSyncProject(snap.projectId, snapshot);
     if (r.ok) {
       useEnginePreviewStore.setState((s) => ({ project: r.project, version: s.version + 1, error: null }));
+      if (r.project.textBlocks?.length) followTextBlocks(r.project);
     } else {
       useEnginePreviewStore.setState({ error: r.error });
       console.warn("[engine] sync failed:", r.error);
@@ -115,6 +117,32 @@ async function syncNow() {
       syncAgain = false;
       scheduleSync(0);
     }
+  }
+}
+
+/**
+ * A CapCut text the engine laid out anew (a new font, case or words): its box takes the new
+ * block's size about the same middle, so its handles fit the text. The importer places
+ * CapCut text by its box's middle, so this doesn't move it.
+ */
+function followTextBlocks(project: EngineProjectInfo) {
+  const toWorld = BASE_LONG_SIDE / Math.max(1, project.height);
+  const { getClipById, setClipTransform } = useClipStore.getState();
+  for (const block of project.textBlocks ?? []) {
+    const clip = getClipById(block.segment);
+    const t = clip?.transform;
+    // Only converted clips (they carry their CapCut segment); the app's own text keeps the
+    // box the user gave it.
+    if (clip?.type !== "text" || !t || !(clip as any).engine?.segment) continue;
+    const [sx, sy] = [t.scaleX || 1, t.scaleY || 1];
+    const [w, h] = [(block.width * toWorld) / sx, (block.height * toWorld) / sy];
+    if (Math.abs(w - t.width) < 0.01 && Math.abs(h - t.height) < 0.01) continue;
+    // The box turns about its top-left corner.
+    const [sin, cos] = [Math.sin((t.rotation * Math.PI) / 180), Math.cos((t.rotation * Math.PI) / 180)];
+    const middle = (x: number, y: number, bw: number, bh: number) => [x + (cos * bw - sin * bh) / 2, y + (sin * bw + cos * bh) / 2];
+    const [cx, cy] = middle(t.x, t.y, t.width * sx, t.height * sy);
+    const [mx, my] = middle(0, 0, w * sx, h * sy);
+    setClipTransform(clip.clipId, { x: cx - mx, y: cy - my, width: w, height: h });
   }
 }
 

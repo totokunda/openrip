@@ -25,7 +25,7 @@ const APP: &str = "openrip-v1";
 pub(crate) const WORLD_H: f64 = 600.0;
 
 mod app;
-pub use app::to_app_project;
+pub use app::{relaid_texts, to_app_project};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
@@ -418,7 +418,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
 
 /// A clip the app opened from a converted project (`app.rs`): its own segment and materials,
 /// with whatever the app changed since applied on top (timing, a move, resize or turn,
-/// opacity, volume, the text, its size and colour).
+/// opacity, volume, the text and its style, and the other panel fields `app.rs` writes).
 fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: &World, materials: &mut Materials, report: &mut ImportReport) -> Option<(Segment, TrackKind)> {
     let Ok(mut seg) = serde_json::from_value::<Segment>(engine.get("segment")?.clone()) else {
         report.warnings.push("a converted clip's segment couldn't be read; skipped".into());
@@ -494,6 +494,19 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
     if changed("transform") {
         apply_moves(&mut seg, base.get("transform"), clip.get("transform"), world, ty == "text");
     }
+    if matches!(ty, "video" | "image") && differs("draftAdjustments") {
+        edit_draft_adjustments(&mut seg, clip, &base, materials);
+    }
+    if ty == "filter" && differs("intensity") {
+        // A filter bar's strength (the Filter tab's intensity), on a copy of the draft's filter.
+        if let Some(mut e) = materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter).cloned() {
+            e.id = MaterialId(format!("{}-filter", seg.id));
+            e.params.insert("intensity".into(), f(clip, "intensity", 100.0).clamp(0.0, 100.0) / 100.0);
+            seg.material = e.id.clone();
+            materials.effects.retain(|m| m.id != e.id);
+            materials.effects.push(e);
+        }
+    }
     if ty == "text" && (["text", "fontSize", "color"].into_iter().any(changed) || app::TEXT_STYLE_KEYS.into_iter().any(differs)) {
         edit_text(&mut seg, clip, &base, materials);
     }
@@ -501,19 +514,15 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
 }
 
 /// The app's move, resize, turn and opacity change of a converted clip, applied to its own
-/// transform (keyframes included). A text box's size follows its text in the app, so a text
-/// clip is resized only by its scale.
+/// transform (keyframes included). A text box's size follows its text in the app (it takes
+/// the engine's block after a change of words or style), so a text clip is resized only by
+/// its scale, and placed by the middle of its box.
 fn apply_moves(seg: &mut Segment, base: Option<&Value>, now: Option<&Value>, world: &World, text: bool) {
     let (Some(b), Some(t)) = (base, now) else { return };
     let (bsx, bsy, tsx, tsy) = (f(b, "scaleX", 1.0), f(b, "scaleY", 1.0), f(t, "scaleX", 1.0), f(t, "scaleY", 1.0));
     let (bw, bh) = (f(b, "width", 1.0) * bsx, f(b, "height", 1.0) * bsy);
-    let (kx, ky, tw, th) = if text {
-        let (kx, ky) = (tsx / bsx, tsy / bsy);
-        (kx, ky, bw * kx, bh * ky)
-    } else {
-        let (tw, th) = (f(t, "width", 1.0) * tsx, f(t, "height", 1.0) * tsy);
-        (tw / bw, th / bh, tw, th)
-    };
+    let (tw, th) = (f(t, "width", 1.0) * tsx, f(t, "height", 1.0) * tsy);
+    let (kx, ky) = if text { (tsx / bsx, tsy / bsy) } else { (tw / bw, th / bh) };
     let centre = |v: &Value, w: f64, h: f64| {
         let (sn, cs) = f(v, "rotation", 0.0).to_radians().sin_cos();
         (f(v, "x", 0.0) + cs * w / 2.0 - sn * h / 2.0, f(v, "y", 0.0) + sn * w / 2.0 + cs * h / 2.0)
@@ -547,13 +556,19 @@ fn edit_text(seg: &mut Segment, clip: &Value, base: &Value, materials: &mut Mate
     let Some(mut t) = materials.texts.iter().find(|m| m.id == seg.material).cloned() else { return };
     t.id = MaterialId(format!("{}-text", seg.id));
     if clip.get("text") != base.get("text") {
-        t.text = s(clip, "text");
-        let n = t.text.chars().count() as u32;
-        t.runs.truncate(1);
-        if let Some(r) = t.runs.first_mut() {
-            r.range = (0, n);
+        let now = s(clip, "text");
+        // The Text tab's case buttons rewrite the words in the new case: the runs and the
+        // spoken-word timing still fit them.
+        let recased = now.chars().count() == t.text.chars().count() && now.chars().zip(t.text.chars()).all(|(a, b)| a.to_lowercase().eq(b.to_lowercase()));
+        if !recased {
+            let n = now.chars().count() as u32;
+            t.runs.truncate(1);
+            if let Some(r) = t.runs.first_mut() {
+                r.range = (0, n);
+            }
+            t.words.clear();
         }
-        t.words.clear();
+        t.text = now;
     }
     let (now, was) = (f(clip, "fontSize", 0.0), f(base, "fontSize", 0.0));
     if now > 0.0 && was > 0.0 && (now - was).abs() > 1e-9 {
@@ -805,6 +820,39 @@ fn attach_adjustments(id: &str, clip: &Value, materials: &mut Materials, attachm
             });
             attachments.push(mid);
         }
+    }
+}
+
+/// The Adjust tab's changes to a converted clip's own adjustments (`draftAdjustments`, by
+/// material id): one taken off the list comes off the clip; a new value for one the engine
+/// draws (a CapCut Adjust slider, on CapCut's scale, or the colour wheels' strength in
+/// percent) goes on a copy of the draft's material for this clip, in the same place.
+fn edit_draft_adjustments(seg: &mut Segment, clip: &Value, base: &Value, materials: &mut Materials) {
+    let list = |v: &Value| v.get("draftAdjustments").and_then(Value::as_array).cloned().unwrap_or_default();
+    let now = list(clip);
+    for was in list(base) {
+        let id = MaterialId(s(&was, "id"));
+        let Some(entry) = now.iter().find(|e| s(e, "id") == id.0) else {
+            seg.attachments.retain(|a| a != &id);
+            continue;
+        };
+        if !b(&was, "drawn") || same(entry.get("value"), was.get("value")) {
+            continue;
+        }
+        let value = f(entry, "value", 0.0);
+        let copy = MaterialId(format!("{}-{}", seg.id, id.0));
+        let edited = match materials.get(&id).map(|m| m.to_owned_material()) {
+            Some(AnyMaterial::Effect(mut e)) => {
+                let scale = app::capcut_scale(e.builtin.as_deref().unwrap_or_default());
+                e.params.insert("intensity".into(), (value / scale).clamp(-1.0, 1.0));
+                AnyMaterial::Effect(Effect { id: copy.clone(), ..e })
+            }
+            Some(AnyMaterial::ColorWheels(w)) => AnyMaterial::ColorWheels(ColorWheels { id: copy.clone(), intensity: (value / 100.0).clamp(0.0, 1.0), ..w }),
+            _ => continue,
+        };
+        materials.remove(&copy);
+        materials.insert_at(edited, None);
+        seg.attachments.iter_mut().filter(|a| **a == id).for_each(|a| *a = copy.clone());
     }
 }
 

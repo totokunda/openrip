@@ -11,6 +11,20 @@ export interface ProjectInfo {
   segments: number
   /** Where the project came from: "capcut", "openrip" or "v1". */
   source: string
+  /**
+   * After updateProject: where CapCut texts whose words or style the edit changed are now
+   * laid out, so the app's box around each can follow. Empty otherwise.
+   */
+  textBlocks: TextBlock[]
+}
+
+/** A text segment's block of lines on the canvas, in canvas pixels, before its rotation. */
+export interface TextBlock {
+  segment: string
+  left: number
+  top: number
+  width: number
+  height: number
 }
 
 /** The addon's version, so the app can tell which engine it loaded. */

@@ -69,8 +69,8 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
 
   const handleBlur = () => {
     setIsFocused(false);
-    // remove all non-numeric characters
-    const numericValue = tempValue.replace(/[^0-9.]/g, "");
+    // remove all non-numeric characters (keeping a minus sign)
+    const numericValue = tempValue.replace(/[^0-9.-]/g, "");
     const numValue = Number(numericValue);
     const currentDisplay = value.toFixed(toFixed);
     if (tempValue === currentDisplay) return; // No change, skip

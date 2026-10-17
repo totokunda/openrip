@@ -113,9 +113,26 @@ export type ClipAnimationIn = { type: string; duration: number; name?: string };
  */
 export type ClipTransition = { type: string; duration: number; name?: string; resource?: string | null };
 
+/**
+ * One of a CapCut draft's own adjustments on a video or photo, by its material id: an Adjust
+ * slider ("brightness", "highlights", …, `value` on CapCut's scale between `min` and `max`),
+ * the colour wheels ("color_wheels", `value` their strength in percent), or HSL, curves, log
+ * wheels, a filter or an effect on the clip. The ones the engine draws (`drawn`) can be
+ * changed; taking one off the list takes it off the clip.
+ */
+export type DraftAdjustment = {
+  id: string;
+  kind: string;
+  name: string;
+  value?: number;
+  min?: number;
+  max?: number;
+  drawn: boolean;
+};
+
 export type VideoClipProps = ClipProps &
   MediaAdjustments & {
-    
+
     assetId: string;
     assetIdHistory: string[];
     type: "video";
@@ -129,6 +146,7 @@ export type VideoClipProps = ClipProps &
     speed?: number;
     masks: MaskClipProps[];
     transitionOut?: ClipTransition | null;
+    draftAdjustments?: DraftAdjustment[];
   };
 
 export type ImageClipProps = ClipProps &
@@ -142,6 +160,7 @@ export type ImageClipProps = ClipProps &
     mediaAspectRatio?: number; // width / height
     masks: MaskClipProps[];
     transitionOut?: ClipTransition | null;
+    draftAdjustments?: DraftAdjustment[];
   };
 
 export type AudioClipProps = ClipProps & {
@@ -221,6 +240,12 @@ export type FilterClipProps = ClipProps & {
   examplePath?: string;
   exampleAssetUrl?: string;
   intensity?: number;
+  /**
+   * A CapCut draft's bar ("filter", "effect", "sticker" or "adjustment"), and whether the
+   * engine draws it (its filters so far, at `intensity`).
+   */
+  draftKind?: string;
+  drawn?: boolean;
 };
 
 export interface DrawingLineTransform {
