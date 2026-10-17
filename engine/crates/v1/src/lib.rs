@@ -465,6 +465,9 @@ fn convert_clip(
                 let mid = MaterialId(format!("{id}-adj-{name}"));
                 let mut params = BTreeMap::new();
                 params.insert("value".to_string(), v);
+                // The app filters the clip on a canvas of its picture fitted to the world, so
+                // its pixel distances (blur, sharpness, grain) are world units.
+                params.insert("pixel".to_string(), 1.0 / WORLD_H);
                 materials.effects.push(Effect {
                     id: mid.clone(),
                     category: EffectCategory::Adjust,

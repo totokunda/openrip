@@ -171,6 +171,76 @@ pub struct Layer<'a> {
     pub mattes: Vec<Matte<'a>>,
     /// Multiplies the canvas under it rather than covering it (a highlighter's strokes).
     pub multiply: bool,
+    /// The app's own clip filters, after the mattes.
+    pub app_filters: Option<AppFilters>,
+}
+
+/// The app's own clip filters (`components/preview/webgl-filters`), on its scales.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AppFilters {
+    /// −100 to 100.
+    pub brightness: f32,
+    pub contrast: f32,
+    pub hue: f32,
+    pub saturation: f32,
+    /// 0 to 100.
+    pub blur: f32,
+    pub sharpness: f32,
+    pub noise: f32,
+    pub vignette: f32,
+    /// Source pixels per pixel of the app's working canvas (the clip fitted to its world).
+    pub step: f32,
+    /// Varies the grain from frame to frame.
+    pub seed: f32,
+}
+
+impl AppFilters {
+    pub fn is_identity(&self) -> bool {
+        [self.brightness, self.contrast, self.hue, self.saturation, self.blur, self.sharpness, self.noise, self.vignette].iter().all(|v| *v == 0.0)
+    }
+
+    /// The passes the app runs, in its order, with their parameters (`a, b, step, seed`).
+    fn passes<'p>(&self, fx: &'p AppFx) -> Vec<(&'p wgpu::RenderPipeline, [f32; 4])> {
+        let p = |a: f32, b: f32| [a, b, self.step, self.seed];
+        let mut out = Vec::new();
+        if self.brightness != 0.0 {
+            out.push((&fx.brightness, p(self.brightness / 100.0, 0.0)));
+        }
+        if self.contrast != 0.0 {
+            out.push((&fx.contrast, p(self.contrast / 100.0, 0.0)));
+        }
+        if self.hue != 0.0 || self.saturation != 0.0 {
+            out.push((&fx.huesat, p(self.hue * 3.6 / 360.0, self.saturation / 100.0)));
+        }
+        if self.blur > 0.0 {
+            // 0–100 is a radius of 0–10 app pixels.
+            let r = self.blur / 100.0 * 10.0;
+            out.push((&fx.blur_h, p(r, 0.0)));
+            out.push((&fx.blur_v, p(r, 0.0)));
+        }
+        if self.sharpness > 0.0 {
+            out.push((&fx.sharpen, p(self.sharpness / 100.0, 0.0)));
+        }
+        if self.noise > 0.0 {
+            out.push((&fx.noise, p(self.noise / 100.0, 0.0)));
+        }
+        if self.vignette > 0.0 {
+            out.push((&fx.vignette, p(self.vignette / 100.0, 0.0)));
+        }
+        out
+    }
+}
+
+/// The app filters' pipelines (appfx.wgsl).
+struct AppFx {
+    brightness: wgpu::RenderPipeline,
+    contrast: wgpu::RenderPipeline,
+    huesat: wgpu::RenderPipeline,
+    blur_h: wgpu::RenderPipeline,
+    blur_v: wgpu::RenderPipeline,
+    sharpen: wgpu::RenderPipeline,
+    noise: wgpu::RenderPipeline,
+    vignette: wgpu::RenderPipeline,
 }
 
 impl<'a> Layer<'a> {
@@ -203,6 +273,7 @@ impl<'a> Layer<'a> {
             adjust: None,
             mattes: Vec::new(),
             multiply: false,
+            app_filters: None,
         }
     }
 }
@@ -242,6 +313,7 @@ pub struct Compositor {
     lut3d: wgpu::RenderPipeline,
     blur: wgpu::RenderPipeline,
     matte: wgpu::RenderPipeline,
+    appfx: AppFx,
     /// Exposure lookup tables on the GPU, by key, and a stand-in for clips without one.
     luts: std::sync::Mutex<std::collections::HashMap<u64, wgpu::Texture>>,
     no_lut: wgpu::Texture,
@@ -411,6 +483,37 @@ impl Compositor {
                     multiview_mask: None,
                     cache: None,
                 })
+            },
+            appfx: {
+                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("appfx"), source: wgpu::ShaderSource::Wgsl(include_str!("appfx.wgsl").into()) });
+                let pipeline = |entry: &str| {
+                    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some(entry),
+                        layout: Some(&yuv_pipeline_layout),
+                        vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &module,
+                            entry_point: Some(entry),
+                            compilation_options: Default::default(),
+                            targets: &[Some(wgpu::ColorTargetState { format: CANVAS, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                        }),
+                        primitive: Default::default(),
+                        depth_stencil: None,
+                        multisample: Default::default(),
+                        multiview_mask: None,
+                        cache: None,
+                    })
+                };
+                AppFx {
+                    brightness: pipeline("fs_brightness"),
+                    contrast: pipeline("fs_contrast"),
+                    huesat: pipeline("fs_huesat"),
+                    blur_h: pipeline("fs_blur_h"),
+                    blur_v: pipeline("fs_blur_v"),
+                    sharpen: pipeline("fs_sharpen"),
+                    noise: pipeline("fs_noise"),
+                    vignette: pipeline("fs_vignette"),
+                }
             },
             matte: {
                 let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("matte"), source: wgpu::ShaderSource::Wgsl(include_str!("matte.wgsl").into()) });
@@ -975,6 +1078,17 @@ impl Compositor {
                     scratch.push(stage);
                 }
                 scratch.push(mask);
+                (stage, adjusted) = (out, true);
+            }
+            // The app's own filters, after its masks.
+            for (pipeline, params) in layer.app_filters.map(|f| f.passes(&self.appfx)).unwrap_or_default() {
+                let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
+                self.canvas_pass(enc, pipeline, &stage, &stage, &out, &params);
+                if matches!(layer.source, Source::Cached(..)) && !adjusted {
+                    keep.push(stage);
+                } else {
+                    scratch.push(stage);
+                }
                 (stage, adjusted) = (out, true);
             }
             // Canvas pixel centre -> stage texture coordinates.

@@ -488,6 +488,40 @@ impl PreviewEngine {
     }
 
     /// The clip's Adjust sliders (CapCut's colour adjustments), if any.
+    /// The app's own filters on a clip, its working canvas scaled to a picture `tex_h` pixels
+    /// tall shown `fit_h` output pixels tall (before its scale) on a canvas `canvas_h` tall.
+    fn app_filters_of(&self, seg: &Segment, tex_h: u32, fit_h: f64, canvas_h: u32, t: Micros) -> Option<openrip_render::AppFilters> {
+        let mut f = openrip_render::AppFilters::default();
+        // The app's world is 600 units tall (the importer says so on each effect).
+        let mut pixel = 1.0 / 600.0;
+        for e in seg.attachments.iter().filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Adjust)) {
+            let Some(name) = e.builtin.as_deref().and_then(|b| b.strip_prefix("v1:")) else { continue };
+            let v = e.params.get("value").copied().unwrap_or(0.0) as f32;
+            let slot = match name {
+                "brightness" => &mut f.brightness,
+                "contrast" => &mut f.contrast,
+                "hue" => &mut f.hue,
+                "saturation" => &mut f.saturation,
+                "blur" => &mut f.blur,
+                "sharpness" => &mut f.sharpness,
+                "noise" => &mut f.noise,
+                "vignette" => &mut f.vignette,
+                _ => continue,
+            };
+            *slot = v;
+            pixel = e.params.get("pixel").copied().unwrap_or(pixel);
+        }
+        if f.is_identity() {
+            return None;
+        }
+        // The app's pixel is `pixel` of the canvas height; its working canvas is the clip's
+        // fitted picture in those pixels.
+        let app_h = fit_h / (pixel.max(1e-9) * canvas_h as f64);
+        f.step = (tex_h as f64 / app_h.max(1e-9)) as f32;
+        f.seed = (t.0 % 1_000_000_007) as f32 / 1_000_007.0 % 1000.0;
+        Some(f)
+    }
+
     fn adjust_of(&self, seg: &Segment) -> Option<(Adjust, Option<&ExposureLuts>)> {
         let mut a = Adjust::default();
         let mut bundle = None;
@@ -949,6 +983,7 @@ impl PreviewEngine {
                         adjust: None,
                         mattes: Vec::new(),
                         multiply: false,
+                        app_filters: None,
                     },
                     // Twice the canvas, so the image's soft edge is off it.
                     Pixels::Wash(img, key, amount) => Layer {
@@ -962,6 +997,7 @@ impl PreviewEngine {
                         adjust: None,
                         mattes: Vec::new(),
                         multiply: false,
+                        app_filters: None,
                     },
                     Pixels::Cover(img, key) => {
                         let fit = (w as f64 / img.width as f64).max(h as f64 / img.height as f64);
@@ -976,9 +1012,10 @@ impl PreviewEngine {
                             adjust: None,
                         mattes: Vec::new(),
                         multiply: false,
+                        app_filters: None,
                         }
                     }
-                    Pixels::Blur(px) => Layer { source: Source::Blur(*px), center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None, mattes: Vec::new(), multiply: false },
+                    Pixels::Blur(px) => Layer { source: Source::Blur(*px), center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None, mattes: Vec::new(), multiply: false, app_filters: None },
                     Pixels::Shape(layers, at) => {
                         let opacity = seg.opacity.sample(local);
                         return layers
@@ -994,6 +1031,7 @@ impl PreviewEngine {
                                 adjust: None,
                                 mattes: Vec::new(),
                                 multiply: *multiply,
+                                app_filters: None,
                             })
                             .collect();
                     }
@@ -1008,12 +1046,17 @@ impl PreviewEngine {
                         adjust: None,
                         mattes: Vec::new(),
                         multiply: false,
+                        app_filters: None,
                     },
                 };
                 if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_)) {
                     layer.opacity *= seg.opacity.sample(local);
                 }
                 if matches!(p, Pixels::Image(..) | Pixels::Video(..)) {
+                    // The scale along the stored picture's vertical axis (sideways video swaps).
+                    let sideways = matches!(p, Pixels::Video(_, o, _) if o.rem_euclid(180) == 90);
+                    let tex_scale = if sideways { scale[0] } else { scale[1] };
+                    layer.app_filters = self.app_filters_of(seg, layer.source.size().1, layer.size[1] / tex_scale.abs().max(1e-9), h, t);
                     layer.adjust = self.adjust_of(seg);
                 }
                 vec![layer]
