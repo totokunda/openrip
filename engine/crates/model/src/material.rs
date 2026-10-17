@@ -248,6 +248,10 @@ pub struct TextLayout {
     /// app's own text); `None` for CapCut's (the font's ascent + descent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_height: Option<f32>,
+    /// Apply the font's kerning: the app's text does (a browser canvas kerns), CapCut's
+    /// doesn't (its words come out as wide as their unkerned advances).
+    #[serde(default)]
+    pub kerning: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<TextBackground>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

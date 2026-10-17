@@ -694,6 +694,7 @@ impl PreviewEngine {
                 letter_spacing: text.layout.letter_spacing,
                 line_spacing: text.layout.line_spacing,
                 line_height: text.layout.line_height,
+                kerning: text.layout.kerning,
                 // Measured (docs/parity/calibration.md, sessions 3 and 5): the stroke reaches
                 // `width` em outside the glyphs; the background pads each line by its
                 // width/height in em, with corners of 0.55 em × the clip's scale per unit of
@@ -758,7 +759,7 @@ impl PreviewEngine {
                 ),
                 text.layout.alignment,
                 text.layout.letter_spacing.to_bits(),
-                (text.layout.line_spacing.to_bits(), text.layout.line_height.map(f32::to_bits)),
+                (text.layout.line_spacing.to_bits(), text.layout.line_height.map(f32::to_bits), text.layout.kerning),
                 (style.max_width.map(f32::to_bits), origin[0].to_bits(), origin[1].to_bits(), style.bold.to_bits(), style.italic.to_bits(), style.curve.to_bits()),
                 styled.as_ref().map(|(id, _)| id),
             ));

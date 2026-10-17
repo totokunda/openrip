@@ -812,6 +812,7 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
             line_spacing: 0.0,
             // Konva's default line height.
             line_height: Some(1.0),
+            kerning: true,
             background,
             shadow,
             max_width: None,

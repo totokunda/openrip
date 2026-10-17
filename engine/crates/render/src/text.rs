@@ -89,6 +89,8 @@ pub struct TextStyle<'a> {
     /// and descent below the box's middle. `None` for CapCut's boxes, the font's ascent +
     /// descent with the baseline at the ascent.
     pub line_height: Option<f32>,
+    /// Apply the font's kerning (a browser canvas does; CapCut doesn't).
+    pub kerning: bool,
     /// Outline drawn under the fill: colour and how far it reaches outside the glyphs (px).
     pub stroke: Option<([u8; 4], f32)>,
     /// Box behind the text: colour, padding around the block of line boxes (px, x and y),
@@ -264,7 +266,8 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
     let mut lines = Vec::new();
     let mut line_start = 0; // characters before this line
     for line in text.split('\n') {
-        let mut shaper = ctx.builder(font).size(style.size).build();
+        // CapCut's text engine doesn't kern; a browser canvas does.
+        let mut shaper = ctx.builder(font).size(style.size).features(&[("kern", style.kerning as u16)]).build();
         shaper.add_str(line);
         let mut clusters = Vec::new();
         shaper.shape_with(|cluster| {

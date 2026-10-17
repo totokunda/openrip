@@ -11,7 +11,7 @@ fn font() -> Option<Font> {
 }
 
 fn style(font: &Font, max_width: Option<f32>) -> TextStyle<'_> {
-    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, stroke: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None }
+    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: false, stroke: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None }
 }
 
 #[test]
@@ -179,4 +179,13 @@ fn konva_lines_use_chromiums_font_box() {
     let bottom = (0..img.height).rev().find(|&y| (0..img.width).any(|x| img.data[((y * img.width + x) * 4 + 3) as usize] > 128)).unwrap();
     let baseline = (bottom + 1) as f64 - (r.center[1] - 50.0);
     assert!((baseline - 84.65).abs() < 1.0, "{baseline}");
+}
+
+#[test]
+fn kerning_is_optional() {
+    let Some(f) = font() else { return };
+    // Arial kerns "AV" tighter; without kerning the pair keeps its full advances.
+    let plain = layout("AV", &style(&f, None)).width;
+    let kerned = layout("AV", &TextStyle { kerning: true, ..style(&f, None) }).width;
+    assert!(kerned < plain - 1.0, "{kerned} vs {plain}");
 }
