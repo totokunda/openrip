@@ -236,6 +236,16 @@ impl VtDecoder {
         }
     }
 
+    /// The frame for `pts`, waiting for it to decode, without the presentation-order rule
+    /// of [`Self::next`] (the caller knows nothing will present before it). `None` if it
+    /// failed to decode or wasn't submitted for output.
+    pub(crate) fn take(&mut self, pts: i64) -> Option<PixelBuffer> {
+        unsafe { self.session.wait_for_asynchronous_frames() };
+        let mut st = self.shared.state.lock().unwrap();
+        st.wanted.remove(&pts);
+        st.done.remove(&pts).flatten()
+    }
+
     /// Wait for everything in flight and forget it (after a demuxer seek).
     pub(crate) fn reset(&mut self) {
         unsafe { self.session.wait_for_asynchronous_frames() };

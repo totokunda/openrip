@@ -843,10 +843,11 @@ fn seek_bench(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let (cw, ch) = (project.canvas.width.max(1), project.canvas.height.max(1));
     let short: u32 = std::env::args().skip_while(|a| a != "--short").nth(1).and_then(|v| v.parse().ok()).unwrap_or(540);
     let (w, h) = if cw <= ch { (short, (short * ch / cw) & !1) } else { ((short * cw / ch) & !1, short) };
-    let mut engine = openrip_playback::PreviewEngine::new(project)?;
     if std::env::args().any(|a| a == "--scrub") {
-        // A playhead dragged across the project: 120 steps, quick frames on and off.
+        // A playhead dragged across the project: 120 steps, quick frames on and off, each
+        // on a fresh engine so neither inherits the other's decoded frames.
         for scrub in [true, false] {
+            let mut engine = openrip_playback::PreviewEngine::new(project.clone())?;
             engine.set_scrubbing(scrub);
             let mut ms = Vec::new();
             for i in 0..120i64 {
@@ -860,6 +861,7 @@ fn seek_bench(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     }
+    let mut engine = openrip_playback::PreviewEngine::new(project)?;
     for pass in ["cold", "warm"] {
         let mut ms = Vec::new();
         for i in 0..24i64 {

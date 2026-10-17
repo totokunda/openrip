@@ -159,6 +159,8 @@ pub struct VideoDecoder {
     frame_bytes: usize,
     /// The time most recently asked for (cache eviction keeps frames near it).
     request: Micros,
+    /// The last GOP `keyframe_at` decoded: its keyframe's index time and frame time.
+    last_key: Option<(Micros, Micros)>,
     stats: DecodeStats,
 }
 
@@ -231,6 +233,7 @@ impl VideoDecoder {
                 just_seeked: false,
                 skipped: 0,
                 drop_before: ff::AV_NOPTS_VALUE,
+                last_key: None,
                 cache: FrameCache::new(opts.cache_bytes),
                 frame_bytes: ((*par).width.max(1) as usize * (*par).height.max(1) as usize * 3 / 2) << ((info_depth > 8) as usize),
                 request: Micros::ZERO,
@@ -412,15 +415,55 @@ impl VideoDecoder {
     pub fn keyframe_at(&mut self, t: Micros) -> Result<Option<VideoFrame>, MediaError> {
         let t = Micros(t.0.max(0));
         self.request = t;
-        self.seek_before(t, 0)?;
-        match self.decode_cached()? {
-            Some(f) => {
-                let out = f.try_clone()?;
-                self.current = Some(f);
-                Ok(Some(out))
+        // A drag usually asks for several times in one GOP: its keyframe, once decoded, stands
+        // in for all of them.
+        let key = self.keyframe_time(t);
+        if let (Some(k), Some((last, time))) = (key, self.last_key) {
+            if k == last {
+                if let Some(f) = self.cache.nearest(time, Micros::ZERO) {
+                    return Ok(Some(f.try_clone()?));
+                }
             }
-            None => Ok(None),
         }
+        self.seek_before(t, 0)?;
+        let frame = match self.decode_keyframe()? {
+            Some(f) => Some(f),
+            None => self.decode()?,
+        };
+        let Some(f) = frame else { return Ok(None) };
+        self.cache.insert(&f, self.frame_bytes, self.request)?;
+        self.last_key = key.map(|k| (k, f.time));
+        let out = f.try_clone()?;
+        self.current = Some(f);
+        Ok(Some(out))
+    }
+
+    /// Right after a seek, the keyframe alone. VideoToolbox frames are otherwise released
+    /// only once a later packet's decode time passes them (B-frames could present first),
+    /// which costs a few more pictures; nothing that's kept presents before the keyframe a
+    /// seek lands on, so it can be taken as soon as it's decoded. `None`: decode as usual.
+    fn decode_keyframe(&mut self) -> Result<Option<VideoFrame>, MediaError> {
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend, Backend::Native(_)) {
+            let Some(q) = self.next_packet()? else { return Ok(None) };
+            let key = unsafe { (*q.pkt).flags & ff::AV_PKT_FLAG_KEY != 0 };
+            // Reading may have restarted the session (open-GOP keyframe), so look it up now.
+            let Backend::Native(vt) = &mut self.backend else {
+                self.queue.push_front(q);
+                return Ok(None);
+            };
+            if !key {
+                self.queue.push_front(q);
+                return Ok(None);
+            }
+            let pts = q.pts();
+            self.stats.frames_decoded += 1;
+            vt.submit(q.pkt, true)?;
+            let Some(buffer) = vt.take(pts) else { return Ok(None) };
+            let time = self.time_of(pts);
+            return Ok(Some(VideoFrame::from_pixel_buffer(buffer, self.colorspace, self.trc, time, self.nominal)));
+        }
+        Ok(None)
     }
 
     /// Start of the keyframe at or before `t`, from the container's index; `None` when the
