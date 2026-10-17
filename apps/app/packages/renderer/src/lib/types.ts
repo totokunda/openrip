@@ -328,6 +328,11 @@ export type MediaInfo = {
   endFrame?: number;
   originalInput?: Input; // Only used for converting media to 24 fps
   videoDecoderConfig?: VideoDecoderConfig;
+  /**
+   * False when this app's own decoder can't read the picture (ProRes, for one): `video`
+   * is kept for its size and rate, and frames come from the Rust engine instead.
+   */
+  videoDecodable?: boolean;
 };
 
 export type FrameBatch = {

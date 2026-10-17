@@ -17,13 +17,14 @@ export {
   onEngineEnded,
   engineExport,
   engineExportCancel,
+  engineThumbnails,
   onEngineExportProgress,
   getEnginePreviewEnabled,
   setEnginePreviewEnabled,
   ENGINE_FRAME_CANVAS_ID,
   ENGINE_FRAME_EVENT,
 } from "./engine.js";
-export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult } from "./engine.js";
+export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult, EngineThumbnail } from "./engine.js";
 
 // App updates (Electron auto-updater)
 export * from "./appUpdates.js";

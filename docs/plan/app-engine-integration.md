@@ -51,7 +51,7 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
    - The app's frame timer gives way through a `PlaybackDriver` hook in `lib/control.ts`; the per-clip audio players aren't mounted in engine mode.
    - The engine gets original files: `engineSourcePaths` maps proxies and playable copies back to them before each sync, so iPhone ProRes plays from the original (hardware decode, 414 fps on a 1080p clip).
    - Checked: the playhead follows at 0.99x real time with 72 frames in 3 s (24 fps), pause holds, playing on after a seek stops at the end, and switching back to the old player works.
-   - Still converted on import: the media panel's thumbnails and media info come from the old decoder, so a ProRes file still gets its playable copy. Using the engine's `thumbnails`/probe there removes that (step 7).
+   - No playable copy when the engine draws (2026-10-16): a video the app's own decoder can't read (ProRes) keeps its track in the media info for its size and rate (`videoDecodable: false`), and the app's frame fetching (`lib/media/canvas.ts`, `video.ts`) gets its frames from the engine's thumbnailer (`engine:thumbnails`, exact frames, cached on disk) through a stand-in for mediabunny's `CanvasSink`. Importing the standard ProRes clip no longer converts it, and its timeline strip comes from the engine. Without the engine the copy is made as before.
    - Main runs the `PreviewPipeline` (render-ahead).
    - On each display tick it takes the frame for the `Player` clock and sends it.
    - It pushes the clock to the renderer, which sets `focusFrame` from it in place of `__playbackTick`.

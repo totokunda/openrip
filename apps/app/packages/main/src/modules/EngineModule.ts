@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { app, ipcMain, sharedTexture } from "electron";
@@ -53,7 +54,12 @@ export type EngineAddon = {
   exportProject(json: string, path: string, options: EngineExportOptions): Promise<{ frames: number; seconds: number; skippedLayers: number }>;
   exportProgress(): { done: number; total: number };
   cancelExport(): void;
+  setThumbnailCacheDir(dir: string): void;
+  thumbnails(path: string, timesUs: number[], height: number, exact: boolean): Promise<Thumbnail[]>;
 };
+
+/** A frame from the engine's thumbnailer: RGBA, `width * height * 4` bytes. */
+export type Thumbnail = { index: number; timeUs: number; exact: boolean; width: number; height: number; rgba: Buffer };
 
 export type EngineExportOptions = { width: number; height: number; fps: number; codec: string; bitrate: number; audio: boolean };
 
@@ -270,12 +276,26 @@ export class EngineModule implements AppModule {
     } else {
       console.warn(`[engine] not available (${info.error}); using the app's own preview`);
     }
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel"]) {
+    // Exact thumbnails are kept across runs.
+    if (addon) addon.setThumbnailCacheDir(join(app.getPath("userData"), "engine-thumbnails"));
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
     }
     ipcMain.handle("engine:info", () => info);
+
+    // Frames of a video for the app's own decoder when it can't read it (ProRes).
+    ipcMain.handle("engine:thumbnails", async (_event, path: string, timesUs: number[], height: number, exact: boolean) => {
+      if (!addon) return [];
+      const file = path.startsWith("file://") ? fileURLToPath(path) : path;
+      try {
+        return await addon.thumbnails(file, timesUs, height, exact);
+      } catch (e) {
+        console.warn("[engine] thumbnails failed:", message(e));
+        return [];
+      }
+    });
 
     // The project as the JSON autosave would write it (same wrapper), opened on first use
     // and updated in place after that, which keeps the engine's decoders warm.

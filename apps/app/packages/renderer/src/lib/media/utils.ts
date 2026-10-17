@@ -346,10 +346,10 @@ export const getMediaInfo = async (
   if (audioTrack && !(await audioTrack.canDecode())) {
     audioTrack = null;
     console.warn("Audio track cannot be decoded", path);
-  } else if (videoTrack && !(await videoTrack.canDecode())) {
-    videoTrack = null;
-    console.warn("Video track cannot be decoded", path);
   }
+  // A picture the app can't decode keeps its track (size, rate) and is decoded by the engine.
+  const videoDecodable = !videoTrack || (await videoTrack.canDecode());
+  if (!videoDecodable) console.warn("Video track cannot be decoded here; the engine decodes it", path);
 
   const mediaInfo: MediaInfo = {
     path,
@@ -368,6 +368,7 @@ export const getMediaInfo = async (
     endFrame: endFrame,
     originalInput: input ?? undefined,
     videoDecoderConfig,
+    videoDecodable,
   };
 
   mediaCache.setMedia(path, mediaInfo);

@@ -21,6 +21,17 @@ export type EngineRenderResult =
   | { ok: true; timeUs: number; width: number; height: number; renderMs: number; layers: number; skipped: number }
   | { ok: false; superseded?: boolean; error?: string };
 
+/** A frame from the engine's thumbnailer, at the requested height: RGBA, `width * height * 4` bytes. */
+export type EngineThumbnail = { index: number; timeUs: number; exact: boolean; width: number; height: number; rgba: Uint8Array };
+
+/**
+ * Frames of a video at `timesUs` (one per time, `index` into it), `height` pixels tall;
+ * `exact` false allows the GOP's keyframe as a quick stand-in. Empty without the engine.
+ */
+export function engineThumbnails(path: string, timesUs: number[], height: number, exact: boolean): Promise<EngineThumbnail[]> {
+  return ipcRenderer.invoke("engine:thumbnails", path, timesUs, height, exact);
+}
+
 /** Id of the canvas the engine's frames are drawn into; the page creates it. */
 export const ENGINE_FRAME_CANVAS_ID = "openrip-engine-frame";
 /** Event fired on that canvas after each frame is drawn (detail: time, width, height). */

@@ -6,6 +6,7 @@ import { FramesCache, MediaCache } from "./cache";
 import { PREFETCH_BACK, PREFETCH_AHEAD } from "../settings";
 import { buildFrameKey, getCachedSample, getCachedSamples } from "./cache";
 import { canvasDecoders, pruneStaleDecoders } from "./utils";
+import { EngineCanvasSink } from "./engine-sink";
 
 function getOrCreateCanvasDecoder(
   path: string,
@@ -32,12 +33,16 @@ function getOrCreateCanvasDecoder(
     return existing;
   }
   try {
-    const sink = new CanvasSink(mediaInfo.video, {
-      width: targetW,
-      height: targetH,
-      fit: "fill",
-      alpha: canBeTransparent,
-    });
+    // The engine decodes what the app can't.
+    const sink =
+      mediaInfo.videoDecodable === false
+        ? (new EngineCanvasSink(path, targetW, targetH, frameRate) as unknown as CanvasSink)
+        : new CanvasSink(mediaInfo.video, {
+            width: targetW,
+            height: targetH,
+            fit: "fill",
+            alpha: canBeTransparent,
+          });
     const ctx: CanvasDecoderContext = {
       sink,
       inFlight: new Set<number>(),
@@ -141,7 +146,7 @@ export const fetchCanvasSample = async (
 
   let sample: WrappedCanvas | null = null;
   try {
-    const videoCanBeTransparent = await mediaInfo.video.canBeTransparent();
+    const videoCanBeTransparent = mediaInfo.videoDecodable !== false && (await mediaInfo.video.canBeTransparent());
     const decoder = getOrCreateCanvasDecoder(
       path,
       mediaInfo,
@@ -217,7 +222,7 @@ export const fetchCanvasSamples = async (
   ) {
     return samples as (WrappedCanvas | null)[];
   }
-  const videoCanBeTransparent = await mediaInfo.video.canBeTransparent();
+  const videoCanBeTransparent = mediaInfo.videoDecodable !== false && (await mediaInfo.video.canBeTransparent());
   const decoder = getOrCreateCanvasDecoder(
     path,
     mediaInfo,
@@ -447,7 +452,7 @@ export async function* fetchCanvasSamplesStream(
   }
   if (missingPositions.length === 0) return;
 
-  const videoCanBeTransparent = await mediaInfo.video.canBeTransparent();
+  const videoCanBeTransparent = mediaInfo.videoDecodable !== false && (await mediaInfo.video.canBeTransparent());
   const decoder = getOrCreateCanvasDecoder(
     path,
     mediaInfo,

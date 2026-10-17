@@ -40,6 +40,7 @@ import {
 import type { ConvertedMediaItem } from "@app/preload";
 import { useProjectsStore } from "@/lib/projects";
 import { getMediaInfo } from "@/lib/media/utils";
+import { useEnginePreviewStore } from "@/lib/engine-preview";
 import { VIDEO_EXTS, IMAGE_EXTS, AUDIO_EXTS } from "@/lib/settings";
 import {
   useMediaLibraryVersion,
@@ -90,15 +91,17 @@ const playableAttempts = new Set<string>();
 
 /**
  * Media info for each listed item. A video whose picture this app can't decode (e.g.
- * ProRes from an iPhone) first gets a playable H.264 copy, made once, which the list then
- * points to.
+ * ProRes from an iPhone) is decoded by the Rust engine when it draws the preview; without
+ * it, the video first gets a playable H.264 copy, made once, which the list then points to.
  */
 const fetchMediaInfos = async (list: ConvertedMediaItem[], folderUuid?: string) => {
   const infos = await Promise.allSettled(list.map((it) => getMediaInfo(it.assetUrl)));
+  const engine = useEnginePreviewStore.getState();
+  if (engine.enabled && engine.info?.available) return { list, infos };
   const key = (it: ConvertedMediaItem) => `${folderUuid ?? ""}/${it.name}`;
   const undecodable = list.filter((it, i) => {
     const r = infos[i];
-    return it.type === "video" && !it.hasProxy && r.status === "fulfilled" && !r.value.video && !playableAttempts.has(key(it));
+    return it.type === "video" && !it.hasProxy && r.status === "fulfilled" && r.value.videoDecodable === false && !playableAttempts.has(key(it));
   });
   if (undecodable.length === 0) return { list, infos };
   for (const it of undecodable) {

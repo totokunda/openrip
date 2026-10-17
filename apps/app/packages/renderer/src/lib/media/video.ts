@@ -4,6 +4,7 @@ import { CanvasSink, WrappedCanvas } from "mediabunny";
 import { getMediaInfo, nowMs } from "./utils";
 import { MediaCache } from "./cache";
 import { videoDecoders, pruneStaleDecoders } from "./utils";
+import { EngineCanvasSink } from "./engine-sink";
 import { fileURLToPath, pathToFileURL, resolveOriginalPath } from "@app/preload";
 
 function getOrCreateVideoDecoder(
@@ -26,11 +27,15 @@ function getOrCreateVideoDecoder(
     return existing;
   }
   try {
-    const sink = new CanvasSink(mediaInfo.video, {
-      poolSize: 2,
-      fit: "contain", // In case the video changes dimensions over time
-      alpha: canBeTransparent,
-    });
+    // The engine decodes what the app can't, at the picture's own size.
+    const sink =
+      mediaInfo.videoDecodable === false
+        ? (new EngineCanvasSink(path, mediaInfo.video.displayWidth, mediaInfo.video.displayHeight, frameRate) as unknown as CanvasSink)
+        : new CanvasSink(mediaInfo.video, {
+            poolSize: 2,
+            fit: "contain", // In case the video changes dimensions over time
+            alpha: canBeTransparent,
+          });
 
 
     const ctx: VideoDecoderContext = {
@@ -75,7 +80,7 @@ export const getVideoIterator = async (
 
     const startTimestamp = (options?.startIndex || 0) / fps;
     const endTimestamp = options?.endIndex ? options.endIndex / fps : undefined;
-    const videoCanBeTransparent = await mediaInfo.video.canBeTransparent();
+    const videoCanBeTransparent = mediaInfo.videoDecodable !== false && (await mediaInfo.video.canBeTransparent());
     const decoder = getOrCreateVideoDecoder(
       path,
       mediaInfo,
@@ -151,7 +156,7 @@ export const getVideoFrameIterator = async (
   const projectFps = Math.max(1, Math.floor(options.projectFps || 0));
   const speed = options.speed || 1;
 
-  const videoCanBeTransparent = await mediaInfo.video.canBeTransparent();
+  const videoCanBeTransparent = mediaInfo.videoDecodable !== false && (await mediaInfo.video.canBeTransparent());
   const decoderMaybe = getOrCreateVideoDecoder(
     path,
     mediaInfo,
