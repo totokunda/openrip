@@ -256,6 +256,8 @@ pub struct PreviewEngine {
     texts: HashMap<u64, (std::sync::Arc<RgbaImage>, [f64; 2], u64)>,
     /// Rasterised shapes' layers and box centres, by everything that draws them.
     shapes: HashMap<u64, (Vec<(std::sync::Arc<RgbaImage>, u64, bool)>, [f64; 2], u64)>,
+    /// The block of the text drawn last (left, top, width, height in output pixels).
+    last_text_block: Option<[f64; 4]>,
     /// Background-removal masks by file, with the tick they were last used.
     mattes: HashMap<String, (std::sync::Arc<RgbaImage>, u64)>,
     /// The frame times each background-removal folder has masks for.
@@ -286,6 +288,7 @@ impl PreviewEngine {
             failed: HashMap::new(),
             texts: HashMap::new(),
             shapes: HashMap::new(),
+            last_text_block: None,
             mattes: HashMap::new(),
             matte_times: HashMap::new(),
             exposure_luts: HashMap::new(),
@@ -309,6 +312,17 @@ impl PreviewEngine {
         let keep: Vec<String> = self.decoders.keys().filter(|id| self.media_path(id).is_some_and(|path| Some(path) == media_path(&old, id))).cloned().collect();
         self.decoders.retain(|id, _| keep.contains(id));
         self.failed.clear(); // files may have been relinked
+    }
+
+    /// Where a text segment's block of lines sits on the canvas at its start (left, top,
+    /// width, height in canvas pixels, before its rotation), as it's drawn.
+    pub fn text_block(&mut self, segment: &str) -> Option<[f64; 4]> {
+        let seg = self.project.tracks.iter().flat_map(|t| t.segments.iter()).find(|s| s.id == segment)?.clone();
+        self.project.materials.texts.iter().find(|m| m.id == seg.material)?;
+        let (w, h) = (self.project.canvas.width, self.project.canvas.height);
+        self.last_text_block = None;
+        self.pixels(&seg, seg.target.start, w, h).ok()?;
+        self.last_text_block.take()
     }
 
     /// Video decoders open (one per clip in use).
@@ -744,6 +758,7 @@ impl PreviewEngine {
                 };
             }
             let (x0, y0) = (cx - lay.width as f64 / 2.0, cy - lay.height as f64 / 2.0);
+            self.last_text_block = Some([x0, y0, lay.width as f64, lay.height as f64]);
             let origin = [x0.rem_euclid(1.0) as f32, y0.rem_euclid(1.0) as f32];
             // Everything but the per-character opacity, which animations change every frame.
             let shape_key = key_of((

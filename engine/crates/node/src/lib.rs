@@ -632,3 +632,49 @@ pub fn export_progress() -> ExportProgress {
 pub fn cancel_export() {
     EXPORT_CANCEL.store(true, Ordering::Relaxed);
 }
+
+// CapCut drafts as app projects.
+
+#[napi(object)]
+pub struct AppProjectFromDraft {
+    /// The app's project document (JSON), without the app's own `meta`.
+    pub json: String,
+    /// The draft's name.
+    pub name: String,
+    /// Media the draft uses that isn't on this Mac.
+    pub missing_media: Vec<String>,
+    /// What the importer couldn't map, one line each.
+    pub notes: Vec<String>,
+}
+
+pub struct DraftTask {
+    dir: String,
+}
+
+impl Task for DraftTask {
+    type Output = AppProjectFromDraft;
+    type JsValue = AppProjectFromDraft;
+
+    fn compute(&mut self) -> Result<AppProjectFromDraft> {
+        let imported = openrip_capcut::import_draft_dir(Path::new(&self.dir)).map_err(err)?;
+        let project = imported.project;
+        // The engine lays out each text, so the app's box around it fits.
+        let mut engine = PreviewEngine::new(project.clone()).map_err(err)?;
+        let doc = openrip_v1::to_app_project(&project, &mut |seg| engine.text_block(&seg.id));
+        let r = &imported.report;
+        let mut notes: Vec<String> = r.foreign.iter().map(|(k, n)| format!("{k}: {n} kept for the engine, not drawn yet")).collect();
+        notes.extend(r.warnings.iter().cloned());
+        Ok(AppProjectFromDraft { json: doc.to_string(), name: project.name.clone(), missing_media: r.missing_media.clone(), notes })
+    }
+
+    fn resolve(&mut self, _env: Env, out: AppProjectFromDraft) -> Result<AppProjectFromDraft> {
+        Ok(out)
+    }
+}
+
+/// The CapCut draft in folder `dir` as an app project, on a worker thread: the app's own
+/// clips, each carrying its segment so the engine draws it as CapCut did.
+#[napi]
+pub fn capcut_to_app(dir: String) -> AsyncTask<DraftTask> {
+    AsyncTask::new(DraftTask { dir })
+}

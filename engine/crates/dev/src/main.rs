@@ -79,6 +79,7 @@ fn main() -> ExitCode {
         Some("playthrough") if args.len() >= 2 => playthrough(&args).map_err(|e| e.to_string()),
         Some("pipeline-bench") if args.len() >= 2 => pipeline_bench(&args).map_err(|e| e.to_string()),
         Some("cover-parity") if args.len() >= 2 => cover_parity(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
+        Some("app-roundtrip") if args.len() >= 2 => app_roundtrip(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("export-parity") if args.len() >= 3 => export_parity(&args).map_err(|e| e.to_string()),
         Some("wrap-probe") if args.len() >= 3 => wrap_probe(Path::new(&args[1]), Path::new(&args[2])).map_err(|e| e.to_string()),
         Some("thumbs-bench") if args.len() >= 2 => thumbs_bench(&args).map_err(|e| e.to_string()),
@@ -830,6 +831,62 @@ fn thumbs_bench(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!("{name:<38} first {first:>6.1} ms  all {n:>3} in {total:>7.1} ms  ({:.1} ms each, {exact} exact)", total / n.max(1) as f64);
     }
     let _ = std::fs::remove_dir_all(&cache);
+    Ok(())
+}
+
+/// Every draft under `root` converted to the app's project format and back: the round trip
+/// must draw the same frames (at 0, ¼, ½ and ¾ of the draft) as the draft itself.
+fn app_roundtrip(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)?.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.join("draft_info.json").exists()).collect();
+    dirs.sort();
+    let (mut worst, mut compared, mut skipped) = (f64::INFINITY, 0, 0);
+    for (i, dir) in dirs.iter().enumerate() {
+        let Ok(Imported { project, .. }) = import_draft_dir(dir) else { continue };
+        let mut original = openrip_playback::PreviewEngine::new(project.clone())?;
+        let doc = openrip_v1::to_app_project(&project, &mut |seg| original.text_block(&seg.id));
+        let back = match openrip_v1::import_v1_json(&doc) {
+            Ok(b) => b,
+            Err(e) => {
+                println!("draft #{i:02}: re-import failed: {e}");
+                continue;
+            }
+        };
+        let mut again = openrip_playback::PreviewEngine::new(back.project.clone())?;
+        let end = project.tracks.iter().flat_map(|t| t.segments.iter()).map(|s| s.target.end().0).max().unwrap_or(0);
+        let (w, h) = if project.canvas.width >= project.canvas.height { (480, (480 * project.canvas.height / project.canvas.width.max(1)) & !1) } else { ((480 * project.canvas.width / project.canvas.height.max(1)) & !1, 480) };
+        let mut low = f64::INFINITY;
+        let mut missing = false;
+        for q in 0..4 {
+            let t = openrip_model::Micros(end * q / 4);
+            let (a, ra) = original.render_image(t, w, h)?;
+            let (b, _) = again.render_image(t, w, h)?;
+            missing |= !ra.missing.is_empty();
+            let rgb: Vec<u8> = b.data.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+            let db = psnr_rgba_rgb(&a, &rgb);
+            if db < 100.0 {
+                if let Some(dir) = std::env::var_os("OPENRIP_RT_DUMP") {
+                    let dir = PathBuf::from(dir);
+                    std::fs::create_dir_all(&dir)?;
+                    save_png(&dir.join(format!("d{i:02}-q{q}-orig.png")), &a)?;
+                    save_png(&dir.join(format!("d{i:02}-q{q}-back.png")), &b)?;
+                    std::fs::write(dir.join(format!("d{i:02}-app.json")), serde_json::to_string_pretty(&doc)?)?;
+                    std::fs::write(dir.join(format!("d{i:02}-orig.json")), serde_json::to_string_pretty(&project)?)?;
+                    std::fs::write(dir.join(format!("d{i:02}-back.json")), serde_json::to_string_pretty(&back.project)?)?;
+                }
+                println!("  draft #{i:02} at {:.2} s: {db:.1} dB", t.as_secs_f64());
+            }
+            low = low.min(db);
+        }
+        if missing {
+            skipped += 1;
+            continue;
+        }
+        compared += 1;
+        worst = worst.min(low);
+        let note = if back.report.warnings.is_empty() && back.report.problems.is_empty() { String::new() } else { format!("  warnings {:?} problems {:?}", back.report.warnings, back.report.problems) };
+        println!("draft #{i:02}: {} segments, worst frame {low:5.1} dB{note}", project.tracks.iter().map(|t| t.segments.len()).sum::<usize>());
+    }
+    println!("{compared} drafts compared ({skipped} with media missing); worst {worst:.1} dB");
     Ok(())
 }
 

@@ -802,6 +802,10 @@ const hydrateStoresFromProjectJson = async (
           contentBounds: doc.editorState?.contentBounds,
           shouldUpdateViewport: false
         });
+      } else if (useViewportStore && typeof useViewportStore.setState === "function" && doc.settings?.aspectRatio) {
+        // A project made outside the editor (an imported CapCut draft) has no editor state
+        // yet: take its canvas and fit the view to it.
+        useViewportStore.setState({ aspectRatio: doc.settings.aspectRatio, shouldUpdateViewport: true } as any);
       } else {
         console.warn(
           "jsonPersistence: viewport store not ready for JSON snapshot; JSON autosave will rely on project-store changes only until it is available",

@@ -5,6 +5,10 @@
 export { sha256sum } from "./nodeCrypto.js";
 export { versions } from "./versions.js";
 
+// CapCut drafts as projects
+export { capcutListDrafts, capcutPickDraft, capcutImport } from "./capcut.js";
+export type { CapCutDraft, CapCutImportResult } from "./capcut.js";
+
 // The Rust engine in the main process
 export {
   engineInfo,

@@ -13,6 +13,7 @@ import { jsonPersistenceModule } from "./modules/JSONPersistenceModule.js";
 import { appDirProtocol } from "./modules/AppDirProtocol.js";
 import { coreIpc } from "./modules/CoreIpc.js";
 import { engineModule } from "./modules/EngineModule.js";
+import { capCutImportModule } from "./modules/CapCutImportModule.js";
 import { app } from "electron";
 
 export async function initApp(initConfig: AppInitConfig) {
@@ -29,6 +30,7 @@ export async function initApp(initConfig: AppInitConfig) {
     // The Rust engine, before any window asks for it
     .init(engineModule())
     .init(jsonPersistenceModule())
+    .init(capCutImportModule())
     .init(appDirProtocol())
     .init(
       createWindowManagerModule({

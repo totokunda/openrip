@@ -22,7 +22,10 @@ use serde_json::Value;
 
 const APP: &str = "openrip-v1";
 /// v1 canvas height in world units (`BASE_LONG_SIDE`).
-const WORLD_H: f64 = 600.0;
+pub(crate) const WORLD_H: f64 = 600.0;
+
+mod app;
+pub use app::to_app_project;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
@@ -127,9 +130,9 @@ impl Clock {
 
 // ---- geometry ----------------------------------------------------------------
 
-struct World {
-    w: f64,
-    h: f64,
+pub(crate) struct World {
+    pub(crate) w: f64,
+    pub(crate) h: f64,
 }
 
 /// v1 `ClipTransform` → model `Transform` + crop + opacity.
@@ -218,7 +221,15 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
     let mut project = Project::new(
         { let id = s(&meta, "id"); if id.is_empty() { format!("v1-{}", meta.get("projectId").and_then(Value::as_i64).unwrap_or(0)) } else { id } },
         { let n = s(&meta, "name"); if n.is_empty() { "Untitled Project".to_string() } else { n } },
-        canvas_for_aspect(aw, ah),
+        // The exact canvas of a converted draft, while the app's aspect ratio still matches it.
+        settings
+            .get("engineCanvas")
+            .and_then(|c| Some(Canvas { width: c.get("width")?.as_u64()? as u32, height: c.get("height")?.as_u64()? as u32 }))
+            .filter(|c| c.width > 0 && c.height > 0 && ((c.width as f64 / c.height as f64) / (aw / ah) - 1.0).abs() < 0.01)
+            // An aspect ratio given in pixels (the app's presets, a converted draft) is the
+            // canvas itself.
+            .or_else(|| (aw.fract() == 0.0 && ah.fract() == 0.0 && (64.0..=8192.0).contains(&aw) && (64.0..=8192.0).contains(&ah)).then(|| Canvas { width: aw as u32, height: ah as u32 }))
+            .unwrap_or_else(|| canvas_for_aspect(aw, ah)),
         clock.fps,
     );
     project.imported_from = Some(ImportSource { app: APP.into(), version: s(doc, "version") });
@@ -300,14 +311,25 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
                 continue;
             }
         }
-        if let Some(seg) = convert_clip(clip, &ty, &clock, &world, &mut project.materials, &mut report) {
-            let wanted = match ty.as_str() {
-                "video" | "image" => TrackKind::Video,
-                "audio" => TrackKind::Audio,
-                "text" => TrackKind::Text,
-                "filter" => TrackKind::Filter,
-                _ => TrackKind::Graphic,
-            };
+        // A clip converted from a CapCut draft (or any model project) carries its segment.
+        let converted = match clip.get("engine").filter(|e| e.get("segment").is_some()) {
+            Some(engine) => engine_segment(clip, engine, &ty, &clock, &world, &mut project.materials, &mut report),
+            None => convert_clip(clip, &ty, &clock, &world, &mut project.materials, &mut report).map(|seg| {
+                let kind = match ty.as_str() {
+                    "video" | "image" => TrackKind::Video,
+                    "audio" => TrackKind::Audio,
+                    "text" => TrackKind::Text,
+                    "filter" => TrackKind::Filter,
+                    _ => TrackKind::Graphic,
+                };
+                (seg, kind)
+            }),
+        };
+        if let Some((seg, wanted)) = converted {
+            // A filter track holding a draft's effects or stickers takes their kind.
+            if let Some(t) = tracks.iter_mut().find(|t| t.id == s(clip, "timelineId") && t.kind != wanted && t.segments.is_empty() && clip.get("engine").is_some()) {
+                t.kind = wanted;
+            }
             if let Some((group_track, rank, count)) = grouped.get(&s(clip, "clipId")) {
                 if let Some(gi) = tracks.iter().position(|t| &t.id == group_track) {
                     let g = &tracks[gi];
@@ -392,6 +414,130 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
     }
     report.problems = project.validate();
     Ok(Imported { project, report })
+}
+
+/// A clip the app opened from a converted project (`app.rs`): its own segment and materials,
+/// with whatever the app changed since applied on top (timing, a move, resize or turn,
+/// opacity, volume, the text, its size and colour).
+fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: &World, materials: &mut Materials, report: &mut ImportReport) -> Option<(Segment, TrackKind)> {
+    let Ok(mut seg) = serde_json::from_value::<Segment>(engine.get("segment")?.clone()) else {
+        report.warnings.push("a converted clip's segment couldn't be read; skipped".into());
+        return None;
+    };
+    let kind = engine.get("track").and_then(Value::as_str).and_then(app::kind_from_name)?;
+    for m in engine.get("materials").and_then(Value::as_array).into_iter().flatten() {
+        match serde_json::from_value::<AnyMaterial>(m.clone()) {
+            // The app's asset stands for the media (it may have been relinked), keeping what
+            // only the draft knows: CapCut's saved background removal.
+            Ok(AnyMaterial::Media(m)) => match materials.media.iter_mut().find(|a| a.id == m.id) {
+                Some(asset) => asset.matte = asset.matte.take().or(m.matte),
+                None => materials.media.push(m),
+            },
+            Ok(m) if !materials.contains(m.id()) => materials.insert_at(m, None),
+            _ => {}
+        }
+    }
+    // A clip split in the app keeps its payload in both halves: the clip id tells them apart.
+    let id = s(clip, "clipId");
+    if !id.is_empty() {
+        seg.id = id;
+    }
+    let base = engine.get("base").cloned().unwrap_or(Value::Null);
+    let changed = |k: &str| clip.get(k) != base.get(k);
+
+    if ["startTick", "endTick", "trimStartTick", "trimEndTick", "speed"].into_iter().any(changed) {
+        let (start, end) = (clock.frame(clip, "startTick", "startFrame"), clock.frame(clip, "endTick", "endFrame"));
+        let target = TimeRange::new(clock.at(start), clock.at(end) - clock.at(start));
+        if target.duration.0 <= 0 {
+            return None;
+        }
+        if seg.source.is_some() {
+            let speed = f(clip, "speed", seg.speed).clamp(0.1, 100.0);
+            let trim_start = clock.frame(clip, "trimStartTick", "trimStart").max(0);
+            seg.source = Some(TimeRange::new(Micros((clock.at(trim_start).0 as f64 * speed).round() as i64), Micros((target.duration.0 as f64 * speed).round() as i64)));
+            seg.speed = speed;
+        }
+        seg.target = target;
+    }
+    if changed("volume") {
+        seg.volume = Animated::constant(10f64.powf(f(clip, "volume", 0.0) / 20.0) as f32);
+    }
+    if changed("transform") {
+        apply_moves(&mut seg, base.get("transform"), clip.get("transform"), world, ty == "text");
+    }
+    if ty == "text" && ["text", "fontSize", "color"].into_iter().any(changed) {
+        edit_text(&mut seg, clip, &base, materials);
+    }
+    Some((seg, kind))
+}
+
+/// The app's move, resize, turn and opacity change of a converted clip, applied to its own
+/// transform (keyframes included). A text box's size follows its text in the app, so a text
+/// clip is resized only by its scale.
+fn apply_moves(seg: &mut Segment, base: Option<&Value>, now: Option<&Value>, world: &World, text: bool) {
+    let (Some(b), Some(t)) = (base, now) else { return };
+    let (bsx, bsy, tsx, tsy) = (f(b, "scaleX", 1.0), f(b, "scaleY", 1.0), f(t, "scaleX", 1.0), f(t, "scaleY", 1.0));
+    let (bw, bh) = (f(b, "width", 1.0) * bsx, f(b, "height", 1.0) * bsy);
+    let (kx, ky, tw, th) = if text {
+        let (kx, ky) = (tsx / bsx, tsy / bsy);
+        (kx, ky, bw * kx, bh * ky)
+    } else {
+        let (tw, th) = (f(t, "width", 1.0) * tsx, f(t, "height", 1.0) * tsy);
+        (tw / bw, th / bh, tw, th)
+    };
+    let centre = |v: &Value, w: f64, h: f64| {
+        let (sn, cs) = f(v, "rotation", 0.0).to_radians().sin_cos();
+        (f(v, "x", 0.0) + cs * w / 2.0 - sn * h / 2.0, f(v, "y", 0.0) + sn * w / 2.0 + cs * h / 2.0)
+    };
+    let ((bx, by), (tx, ty)) = (centre(b, bw, bh), centre(t, tw, th));
+    let d = Vec2::new((tx - bx) / world.w * 2.0, -(ty - by) / world.h * 2.0);
+    let turn = f(t, "rotation", 0.0) - f(b, "rotation", 0.0);
+    let tr = &mut seg.transform;
+    if d.x.abs() > 1e-9 || d.y.abs() > 1e-9 {
+        let shift = |p: &mut Vec2| *p = Vec2::new(p.x + d.x, p.y + d.y);
+        shift(&mut tr.position.value);
+        tr.position.keys.iter_mut().for_each(|k| shift(&mut k.value));
+    }
+    if kx.is_finite() && ky.is_finite() && ((kx - 1.0).abs() > 1e-9 || (ky - 1.0).abs() > 1e-9) {
+        let grow = |s: &mut Vec2| *s = Vec2::new(s.x * kx, s.y * ky);
+        grow(&mut tr.scale.value);
+        tr.scale.keys.iter_mut().for_each(|k| grow(&mut k.value));
+    }
+    if turn.abs() > 1e-9 {
+        tr.rotation.value += turn;
+        tr.rotation.keys.iter_mut().for_each(|k| k.value += turn);
+    }
+    if b.get("opacity") != t.get("opacity") {
+        seg.opacity = Animated::constant((f(t, "opacity", 100.0) / 100.0) as f32);
+    }
+}
+
+/// A converted text clip whose text, size or colour the app changed: a copy of its text
+/// material for this clip, edited. New words drop the old spoken-word timing.
+fn edit_text(seg: &mut Segment, clip: &Value, base: &Value, materials: &mut Materials) {
+    let Some(mut t) = materials.texts.iter().find(|m| m.id == seg.material).cloned() else { return };
+    t.id = MaterialId(format!("{}-text", seg.id));
+    if clip.get("text") != base.get("text") {
+        t.text = s(clip, "text");
+        let n = t.text.chars().count() as u32;
+        t.runs.truncate(1);
+        if let Some(r) = t.runs.first_mut() {
+            r.range = (0, n);
+        }
+        t.words.clear();
+    }
+    let (now, was) = (f(clip, "fontSize", 0.0), f(base, "fontSize", 0.0));
+    if now > 0.0 && was > 0.0 && (now - was).abs() > 1e-9 {
+        t.runs.iter_mut().for_each(|r| r.size *= (now / was) as f32);
+    }
+    if clip.get("color") != base.get("color") {
+        if let Some(c) = Rgba::from_hex(&s(clip, "color")) {
+            t.runs.iter_mut().for_each(|r| r.fill = Rgba { a: r.fill.a, ..c });
+        }
+    }
+    seg.material = t.id.clone();
+    materials.texts.retain(|m| m.id != t.id);
+    materials.texts.push(t);
 }
 
 fn convert_clip(

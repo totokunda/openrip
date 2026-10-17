@@ -73,6 +73,29 @@ pub enum MaterialRef<'a> {
     Foreign(&'a Foreign),
 }
 
+impl MaterialRef<'_> {
+    /// An owned copy, as stored in a project.
+    pub fn to_owned_material(&self) -> AnyMaterial {
+        match *self {
+            MaterialRef::Media(m) => AnyMaterial::Media(m.clone()),
+            MaterialRef::Text(m) => AnyMaterial::Text(m.clone()),
+            MaterialRef::Shape(m) => AnyMaterial::Shape(m.clone()),
+            MaterialRef::Mask(m) => AnyMaterial::Mask(m.clone()),
+            MaterialRef::Speed(m) => AnyMaterial::Speed(m.clone()),
+            MaterialRef::CanvasFill(m) => AnyMaterial::CanvasFill(m.clone()),
+            MaterialRef::AudioFade(m) => AnyMaterial::AudioFade(m.clone()),
+            MaterialRef::Transition(m) => AnyMaterial::Transition(m.clone()),
+            MaterialRef::Effect(m) => AnyMaterial::Effect(m.clone()),
+            MaterialRef::Hsl(m) => AnyMaterial::Hsl(m.clone()),
+            MaterialRef::Curves(m) => AnyMaterial::Curves(m.clone()),
+            MaterialRef::ColorWheels(m) => AnyMaterial::ColorWheels(m.clone()),
+            MaterialRef::Animations(m) => AnyMaterial::Animations(m.clone()),
+            MaterialRef::Loudness(m) => AnyMaterial::Loudness(m.clone()),
+            MaterialRef::Foreign(m) => AnyMaterial::Foreign(m.clone()),
+        }
+    }
+}
+
 impl Materials {
     pub fn get(&self, id: &MaterialId) -> Option<MaterialRef<'_>> {
         macro_rules! find {

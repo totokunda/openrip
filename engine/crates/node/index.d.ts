@@ -139,3 +139,19 @@ export function exportProgress(): { done: number; total: number }
 /** Stop the running export; the unfinished file is removed. */
 export function cancelExport(): void
 
+
+// CapCut drafts as app projects.
+
+export interface AppProjectFromDraft {
+  /** The app's project document (JSON), without the app's own `meta`. */
+  json: string
+  /** The draft's name. */
+  name: string
+  /** Media the draft uses that isn't on this Mac. */
+  missingMedia: string[]
+  /** What the importer couldn't map, one line each. */
+  notes: string[]
+}
+
+/** The CapCut draft in folder dir as an app project, on a worker thread: the app's own clips, each carrying its segment so the engine draws it as CapCut did. */
+export function capcutToApp(dir: string): Promise<AppProjectFromDraft>

@@ -5,6 +5,7 @@ import {
   LuCheck,
   LuFolder,
   LuFolderPlus,
+  LuFolderInput,
   LuSearch,
   LuTrash2,
 } from "react-icons/lu";
@@ -51,6 +52,7 @@ import { revealPathInFolder, writeFileBuffer } from "@app/preload";
 import { DEFAULT_FPS } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import { SettingsModal } from "../dialogs/SettingsModal";
+import { CapCutImportDialog } from "../dialogs/CapCutImportDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface TopBarProps {
@@ -411,6 +413,7 @@ const TopBar: React.FC<TopBarProps> = () => {
   });
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [capcutOpen, setCapcutOpen] = useState(false);
 
   useEffect(() => {
     const updateCover = async () => {
@@ -478,6 +481,15 @@ const TopBar: React.FC<TopBarProps> = () => {
       <div className="flex flex-row items-center gap-1.5 min-w-0">
         {/* Projects dropdown (top-left) */}
         <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+        <CapCutImportDialog
+          open={capcutOpen}
+          onOpenChange={setCapcutOpen}
+          onImported={(created) => {
+            if (!projects.some((p) => p.id === created.id)) addProject(created);
+            setActiveProjectId(created.id);
+            setProjectSearch("");
+          }}
+        />
         <DropdownMenu>
           <DropdownMenuTrigger className="text-brand-light/90 dark max-w-[220px] h-[34px] flex items-center space-x-2 px-3 font-medium border border-brand-light/10 hover:text-brand-light bg-brand hover:bg-brand-light/10 rounded-[6px] py-[7px] transition-all duration-300 cursor-pointer">
             <LuFolder className="w-4 h-4 shrink-0" />
@@ -568,6 +580,13 @@ const TopBar: React.FC<TopBarProps> = () => {
             >
               <LuFolderPlus className="w-3.5 h-3.5 text-brand-light/80" />
               <span>New Project</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="dark text-[11px] font-medium flex items-center gap-x-2 cursor-pointer mb-1 mx-1"
+              onClick={() => setCapcutOpen(true)}
+            >
+              <LuFolderInput className="w-3.5 h-3.5 text-brand-light/80" />
+              <span>Open CapCut Project…</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

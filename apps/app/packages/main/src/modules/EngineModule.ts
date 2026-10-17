@@ -55,6 +55,7 @@ export type EngineAddon = {
   exportProgress(): { done: number; total: number };
   cancelExport(): void;
   setThumbnailCacheDir(dir: string): void;
+  capcutToApp(dir: string): Promise<{ json: string; name: string; missingMedia: string[]; notes: string[] }>;
   thumbnails(path: string, timesUs: number[], height: number, exact: boolean): Promise<Thumbnail[]>;
 };
 

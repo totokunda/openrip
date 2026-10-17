@@ -64,6 +64,15 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
 7. **The engine by default.** Done (2026-10-16): the setting is on unless the user turned it off, now that the engine draws everything the old preview did (video, photos, text, shapes, drawings, masks, the Filters panel's LUTs, clip adjustments, groups). Checked on a fresh profile: the engine draws from the start, the setting turns it off and on, and a 10 s 1080P export with shapes, drawings, text and adjustments takes 4.2 s.
 8. **Remove the old path**: the clip components' own drawing and decoding, the WebGL filters and masks, the old exporter for what the engine exports, and the media panel's old thumbnails and probe (so a ProRes file needs no playable copy). Keep it until the engine has run as the default for a while.
 
+## CapCut projects in the app
+
+Done (2026-10-16): Projects ▸ Open CapCut Project… lists the drafts CapCut shows on its home screen (with their covers), or takes a draft folder, and makes a new OpenRip project from it. The draft is only read.
+
+- **How a draft becomes an app project.** The engine imports the draft into its model and writes the app's own project format (`openrip-v1` `to_app_project`, addon `capcutToApp`): tracks in CapCut's stacking order (sound at the bottom), clips the editor knows (video, image, audio, text; effects, filters, stickers and adjustment layers as named filter clips), a box around each text where the engine lays it out, and the draft's exact canvas as the aspect ratio. Media are linked into the project's media folder, as the app's own imports are, and CapCut's cover becomes the project's.
+- **What the engine keeps.** Each clip also carries the CapCut segment it came from, the materials that segment uses, and its own fields as written (`engine` on the clip). When the app sends the project back, the importer rebuilds the segment and applies on top only what the app changed: a move, resize or turn (applied to CapCut's own transform, keyframes included), a trim or retime, opacity, volume, a new text, size or colour (on a copy of the text for that clip). Caption styles, animations, effects, masks, transitions, voice effects, background removal and exact timing stay as CapCut had them. A clip split in the app keeps the payload in both halves; its clip id tells them apart.
+- **Checks.** Every local draft with its media (36) converted to the app's format and back draws exactly the same frames as the draft itself (`openrip-dev app-roundtrip`); the one that didn't had lost CapCut's saved background removal, which the importer now keeps on the app's asset. In the app, a draft opens in about 5 s, plays, and its 56 s export takes 10 s and matches CapCut's own export at 40.7 dB (median, 540×960). Dragging a clip moves it in the engine's picture.
+- **Still CapCut's alone.** The app's panels show only what its clips have (no caption style or effect settings), and stickers and the effects the engine doesn't draw yet stay undrawn, as in any CapCut import.
+
 ## Addon API
 
 Done:
