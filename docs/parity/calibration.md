@@ -158,7 +158,7 @@ Detailed numbers: [results/2026-10-16-calibration-3-5.md](results/2026-10-16-cal
   - **Merging.** Neighbouring lines whose widths differ by 0.27 or 0.44 em a side share the wider box; lines 1.25 em apart keep their own.
   - **Corners.** Radius 0.4 draws 9.0, 11.0 and 16.0 px at clip scales 0.672, 0.731 and 0.862, which is 0.22 em × scale (±4%).
 - **Images:** see "Image borders" above. Opacity blends as ours does (45.8 dB at 50%). Minifying fine detail by 37.5% or 75% differs: CapCut is closer to sampling a 2×-box mip pyramid than to exact area averaging (1-px checker at 37.5%: 37.6 against 27.8 dB). Smooth content matches either way (49–66 dB).
-- **720p export of a 1080p canvas:** images match whether we render at 720p or at 1080p and shrink. Text matches far better rendered at 1080p and shrunk bilinearly (37.0 against 26.1 dB). CapCut evidently rasterises text at the canvas size and resamples it like a layer. OpenRip still rasterises text at the output size.
+- **720p export of a 1080p canvas:** images match whether we render at 720p or at 1080p and shrink. With the reference renderer, text matched far better rendered at 1080p and shrunk bilinearly (37.0 against 26.1 dB), as if CapCut rasterised text at the canvas size and resampled it. The engine, since glyphs sit on their baseline and CapCut text is unkerned (2026-10-16), does slightly better at the output size: 39.4 against 39.2 dB on the 720p text samples, and 51.5 against 48.9 dB on the 4K export of session 2. So OpenRip keeps rasterising text at the output size.
 
 ### Steps (sessions 3, 4 and 5 together)
 
