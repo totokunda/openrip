@@ -57,4 +57,4 @@ A text's shadow is in its rich text's `styles[].shadows` in newer drafts, where 
 
 - **The multi-line style.** It draws lines and is 9% off the size rule above, perhaps from its own line fitting (`CPage:_setMaxLineFitable`).
 - **A split caption's punctuation.** In the first half of a split caption, the full stop after the last word stays white while the word is yellow, as if it were a word of its own; OpenRip picks it out with the word.
-- **Vertical position.** Caption pages sit about 0.04 em higher than CapCut's.
+- **Vertical position.** Caption pages sat about 0.04 em higher than CapCut's; part of that was glyphs drawn up to 2 px high, fixed on 2026-10-16 (results/2026-10-16-glyph-offset.md). Measure again.

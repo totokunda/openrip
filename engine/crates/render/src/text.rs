@@ -39,6 +39,26 @@ impl Font {
         if m.units_per_em == 0 { 1.0 } else { (m.ascent + m.descent) / m.units_per_em as f32 }
     }
 
+    /// Chromium's `fontBoundingBoxAscent` and `fontBoundingBoxDescent` for the font, in em:
+    /// the hhea ascender and descender, with the 15% of their sum Blink adds to the ascent of
+    /// Times, Helvetica and Courier on macOS (it measures 920/230 for Helvetica's 770/230,
+    /// and the hhea values for the other system fonts tried).
+    pub fn canvas_font_box_em(&self) -> (f32, f32) {
+        let font = self.as_ref();
+        let m = font.metrics(&[]);
+        let upm = m.units_per_em.max(1) as f32;
+        let hhea = font.table(swash::tag_from_bytes(b"hhea")).filter(|t| t.len() >= 8).map(|t| {
+            let i16_at = |o: usize| i16::from_be_bytes([t[o], t[o + 1]]) as f32;
+            (i16_at(4) / upm, -i16_at(6) / upm)
+        });
+        let (mut a, d) = hhea.unwrap_or((m.ascent / upm, m.descent / upm));
+        let family = font.localized_strings().find_by_id(swash::StringId::Family, None).map(|s| s.to_string());
+        if matches!(family.as_deref(), Some("Times" | "Helvetica" | "Courier")) {
+            a += 0.15 * (a + d);
+        }
+        (a, d)
+    }
+
     fn as_ref(&self) -> swash::FontRef<'_> {
         swash::FontRef { data: &self.data, offset: self.offset, key: self.key }
     }
@@ -64,6 +84,11 @@ pub struct TextStyle<'a> {
     pub letter_spacing: f32,
     /// Extra space between lines, as a fraction of the em size.
     pub line_spacing: f32,
+    /// Line boxes this many em tall, as Konva draws text with `_fixTextRendering` (the app's
+    /// own text): each line's baseline half the difference of Chromium's font-box ascent
+    /// and descent below the box's middle. `None` for CapCut's boxes, the font's ascent +
+    /// descent with the baseline at the ascent.
+    pub line_height: Option<f32>,
     /// Outline drawn under the fill: colour and how far it reaches outside the glyphs (px).
     pub stroke: Option<([u8; 4], f32)>,
     /// Box behind the text: colour, padding around the block of line boxes (px, x and y),
@@ -225,8 +250,15 @@ pub struct RenderedText {
 pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
     let font = style.font.as_ref();
     let m = font.metrics(&[]).scale(style.size);
-    let line_box = m.ascent + m.descent;
+    let line_box = style.line_height.map_or(m.ascent + m.descent, |lh| lh * style.size);
     let advance_y = line_box + style.line_spacing * style.size;
+    let baseline0 = match style.line_height {
+        Some(_) => {
+            let (a, d) = style.font.canvas_font_box_em();
+            line_box / 2.0 + (a - d) / 2.0 * style.size
+        }
+        None => m.ascent,
+    };
     let spacing = style.letter_spacing * style.size;
     let mut ctx = ShapeContext::new();
     let mut lines = Vec::new();
@@ -266,7 +298,7 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
             Align::Center => (width - w) / 2.0,
             Align::Right => width - w,
         };
-        let baseline = m.ascent + i as f32 * advance_y;
+        let baseline = baseline0 + i as f32 * advance_y;
         boxes.push([x0, w, i as f32 * advance_y, line_box]);
         glyphs.extend(line.into_iter().map(|(glyph, x, char_index, advance)| Placed { glyph, x: x0 + x, baseline, advance, line: i, char_index }));
     }
@@ -449,7 +481,8 @@ impl TextLayout {
             let [dx, dy] = synthetic_style_offset(style, self.size);
             let ([gx, gy], rot) = curved(g);
             let (x, y) = (left + gx + dx + shift[0], top + gy + dy + shift[1]);
-            let offset = Vector::new(x.fract(), y.fract());
+            // The sub-pixel rest of the pen position; swash's offset is y-up.
+            let offset = Vector::new(x - x.floor(), -(y - y.floor()));
             // Turned along the curve (clockwise on screen is clockwise in the y-up glyph space).
             let shear = if rot != 0.0 { Some(shear.unwrap_or(Transform::IDENTITY).then(&Transform::rotation(Angle::from_radians(-rot)))) } else { shear };
             if let Some(cov) = outline.as_mut() {
@@ -594,7 +627,7 @@ impl TextLayout {
             for g in &self.glyphs {
                 let [dx, dy] = synthetic_style_offset(style, self.size);
                 let (x, y) = (left + g.x + offset[0] + dx, top + g.baseline + offset[1] + dy);
-                let at = Vector::new(x.fract(), y.fract());
+                let at = Vector::new(x - x.floor(), -(y - y.floor()));
                 let render = |scaler: &mut swash::scale::Scaler, pen: Option<Stroke>| {
                     let mut r = Render::new(&[GlyphSource::Outline]);
                     r.format(Format::Alpha).embolden(style.bold).transform(shear).offset(at);

@@ -884,6 +884,7 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             alignment: i(m, "alignment") as u8,
             letter_spacing: f(m, "letter_spacing", 0.0) as f32,
             line_spacing: f(m, "line_spacing", 0.0) as f32,
+            line_height: None,
             background,
             shadow,
             // A box with a fixed width wraps at a width proportional to `fixed_width`, scaled

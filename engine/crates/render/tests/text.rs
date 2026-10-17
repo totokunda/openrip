@@ -11,7 +11,7 @@ fn font() -> Option<Font> {
 }
 
 fn style(font: &Font, max_width: Option<f32>) -> TextStyle<'_> {
-    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, stroke: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None }
+    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, stroke: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None }
 }
 
 #[test]
@@ -159,4 +159,24 @@ fn curved_text_arches_or_sags_by_the_sign_of_its_angle() {
     let sag = TextStyle { curve: -90.0, ..style(&f, None) };
     let (end, mid) = end_and_middle(&layout(text, &sag).rasterize(&sag, [0.0, 0.0]).image);
     assert!(end < mid - 10.0, "sag: ends {end} should sit above the middle {mid}");
+}
+
+#[test]
+fn konva_lines_use_chromiums_font_box() {
+    // As Chromium measures them on macOS (fontBoundingBoxAscent/Descent at 1000 px).
+    for (path, ascent, descent) in [("/System/Library/Fonts/Supplemental/Arial.ttf", 0.905, 0.212), ("/System/Library/Fonts/Helvetica.ttc", 0.920, 0.230), ("/System/Library/Fonts/Supplemental/Verdana.ttf", 1.005, 0.210)] {
+        let Ok(f) = Font::from_file(std::path::Path::new(path)) else { continue };
+        let (a, d) = f.canvas_font_box_em();
+        assert!((a - ascent).abs() < 0.001 && (d - descent).abs() < 0.001, "{path}: {a} {d}");
+    }
+    let Some(f) = font() else { return };
+    // Lines of 1 em at 100 px; an H sits on the baseline, 50 + (0.905 − 0.212)/2 · 100 below
+    // the block's top.
+    let s = TextStyle { size: 100.0, line_height: Some(1.0), ..style(&f, None) };
+    assert!((layout("one\ntwo", &s).height - 200.0).abs() < 0.01);
+    let r = layout("H", &s).rasterize(&s, [0.0, 0.0]);
+    let img = &r.image;
+    let bottom = (0..img.height).rev().find(|&y| (0..img.width).any(|x| img.data[((y * img.width + x) * 4 + 3) as usize] > 128)).unwrap();
+    let baseline = (bottom + 1) as f64 - (r.center[1] - 50.0);
+    assert!((baseline - 84.65).abs() < 1.0, "{baseline}");
 }

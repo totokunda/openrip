@@ -244,6 +244,10 @@ pub struct TextLayout {
     pub letter_spacing: f32,
     #[serde(default)]
     pub line_spacing: f32,
+    /// Line boxes this many em tall, each line placed in its box as Konva places text (the
+    /// app's own text); `None` for CapCut's (the font's ascent + descent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_height: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<TextBackground>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
