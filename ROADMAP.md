@@ -95,7 +95,7 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
    - Done: `openrip-v1` importer for the TypeScript app's projects (exact frame recovery, geometry conversion, dB→gain, overlap repair). All 7 local projects import cleanly.
    - Done: colour-tool materials (HSL, tone curves with a bezier evaluator, primary/log wheels), mapped from CapCut.
    - Done: CapCut calibration sessions 1–2 ([calibration.md](docs/parity/calibration.md)). Track attribute bits, transform units, the text size unit (proportional to canvas width) and CapCut's rendering pipeline (native export resolution, sharpened two-pass resampling, neutral colour path) are all measured. Session 3 (image borders, other scale factors, opacity, portrait text) is generated and waiting to be exported from CapCut.
-   - Next: shapes, drawings and masks in the model.
+   - Done since then: shapes, drawings and masks in the model (the app's, and CapCut's rectangle mask).
 1. **M1 Open and play.** Import a v1 project and play one video track with audio, A/V in sync.
    - Done: `openrip-media` decoder.
      - Native asynchronous VideoToolbox for H.264/HEVC, 3–4× FFmpeg's hwaccel; FFmpeg for everything else.
@@ -113,7 +113,7 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
 2. **M2 Compose.** Multi-track compositing, transforms, crop, opacity, adjustments, LUT filters.
    - Started: `openrip-render`, a wgpu compositor with CapCut's measured resampling pipeline, transforms and opacity. It matches CapCut's exports as closely as the reference model does. `openrip-dev render-frame` renders imported projects.
    - Done: zero-copy NV12/P010 IOSurface input from the decoder, rendering into IOSurfaces, and text (shaping, stroke, background). `PreviewEngine` renders all 58 local CapCut drafts. `openrip-node` plus `spikes/engine-preview` play a CapCut draft in Electron 44 through `sharedTexture`, end to end with no copies.
-   - Next: move the app to Electron 44 and replace its preview with the engine (needs the user present). Then crop, colour adjustments, text animations, and the image-border AA from session 3.
+   - Done since then: the app runs on Electron 44 with the engine as its default preview and exporter, drawing everything its old preview did ([app-engine-integration.md](docs/plan/app-engine-integration.md)); the addon links a minimal static LGPL FFmpeg, so it needs nothing installed.
 3. **M3 Overlays.** Text, shapes, drawing, lasso/shape masks with keyframes.
 4. **M4 Audio.** Mixing, volume, fades, speed, detaching audio.
    - Started: `openrip-audio`, a decoder plus a mixer with CapCut's mute/hide rules, volume keyframes and fades. On session 1 its mix matches CapCut's exported audio sample for sample (correlation 1.0000, level ratio 1.002). Done since then: pitch-preserving speed changes (FFmpeg atempo, CapCut's default), with `change_pitch` (CapCut's `is_tone_modify`) resampling instead, and audio output with the master clock (`Player`, cpal). Next: reversed audio, and audio effects.
