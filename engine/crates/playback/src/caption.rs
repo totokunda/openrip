@@ -8,6 +8,10 @@
 //! - A page ends at the end of a sentence or after three words, and shows from its first
 //!   word's start to its last word's (held) end; the first page also at its exact start.
 //! - The clock wraps at the span from the first word's start to the last word's end.
+//!
+//! The clock starts at the caption animation's start, the clip's own in a draft. A clip whose
+//! start was cut off in the editor (split, or trimmed) starts that far into the speech: its
+//! animation starts before the clip.
 
 use openrip_model::{Animation, AnimationKind, Micros, SpokenWord};
 
@@ -62,7 +66,7 @@ impl CaptionStyle {
 /// The caption at clip-local time `t`: `None` when the clip has no caption animation OpenRip
 /// draws (the text shows whole), `Some(None)` when no page shows.
 pub fn caption_frame<'a>(animations: impl IntoIterator<Item = &'a Animation>, text: &str, words: &[SpokenWord], t: Micros) -> Option<Option<CaptionFrame>> {
-    let (style, per_page) = animations.into_iter().filter(|a| a.kind == AnimationKind::Caption).find_map(|a| CaptionStyle::of(a.builtin.as_deref()?))?;
+    let (style, per_page, start) = animations.into_iter().filter(|a| a.kind == AnimationKind::Caption).find_map(|a| CaptionStyle::of(a.builtin.as_deref()?).map(|(s, n)| (s, n, a.start)))?;
     if words.is_empty() {
         return None;
     }
@@ -73,7 +77,12 @@ pub fn caption_frame<'a>(animations: impl IntoIterator<Item = &'a Animation>, te
     if span <= 0 {
         return Some(None);
     }
-    let t = t.0.rem_euclid(span);
+    // Nothing before the caption's clock starts.
+    let t = t.0 - start.0;
+    if t < 0 {
+        return Some(None);
+    }
+    let t = t.rem_euclid(span);
     let chars: Vec<char> = text.chars().collect();
     let sentence_end = |r: (u32, u32)| chars.get(r.1 as usize - 1).is_some_and(|c| matches!(c, '.' | '!' | '?' | '…' | '。' | '！' | '？'));
     // Pages: words up to a sentence end, three at a time.
@@ -188,6 +197,21 @@ mod tests {
         // The page starts with the first word, at 600; the clock wraps at 1500 - 600.
         assert_eq!(at(text, &w, 300), None);
         assert_eq!(at(text, &w, 700), Some(("one two three".into(), Some("two".into()))));
+    }
+
+    #[test]
+    fn a_caption_cut_off_at_its_start_keeps_time_with_the_speech() {
+        let text = "one two three four five six";
+        let w = spoken(text, &[(0, 400), (400, 800), (800, 1200), (1200, 1600), (1600, 2000), (2000, 2400)]);
+        // The second half of a split at 1.3 s: its animation started 1.3 s before it.
+        let half = Animation { start: Micros(-1_300_000), ..caption() };
+        let f = caption_frame([&half], text, &w, Micros(0)).unwrap().unwrap();
+        assert_eq!((f.words.len(), f.reading), (3, Some(0)));
+        assert_eq!(f.page, (14, 27));
+        // Extended 0.5 s before its start: nothing until the speech's clock starts.
+        let early = Animation { start: Micros(500_000), ..caption() };
+        assert_eq!(caption_frame([&early], text, &w, Micros(300_000)), Some(None));
+        assert!(caption_frame([&early], text, &w, Micros(600_000)).unwrap().is_some());
     }
 
     #[test]

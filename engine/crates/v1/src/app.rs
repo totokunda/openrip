@@ -676,6 +676,106 @@ mod tests {
         assert_eq!((tr.builtin.as_deref(), tr.duration), (Some("white_fade"), Micros(1_000_000)));
     }
 
+    /// `clip` split at `cut` seconds as the app splits it (`splitClip`): the right half gets
+    /// `id`, starts at the cut and further into its media, and loses the In animation; the
+    /// left half loses the transition; a caption's right half starts that far into its speech.
+    fn split(doc: &mut Value, clip: &str, id: &str, cut: f64) {
+        let clips = doc["timeline"]["clips"].as_array_mut().unwrap();
+        let left = clips.iter_mut().find(|c| c["clipId"] == clip).unwrap();
+        let mut right = left.clone();
+        let start = left["startTick"].as_str().unwrap().parse::<f64>().unwrap() / 1e6;
+        let tick = |s: f64| json!(((s * 1e6) as i64).to_string());
+        left["endTick"] = tick(cut);
+        left["transitionOut"] = Value::Null;
+        right["clipId"] = json!(id);
+        right["startTick"] = tick(cut);
+        right["trimStartTick"] = tick(right["trimStartTick"].as_str().unwrap().parse::<f64>().unwrap() / 1e6 + cut - start);
+        if right["type"] == "text" {
+            right["animationIn"] = Value::Null;
+            right["spokenFrom"] = json!(cut - start);
+        }
+        clips.push(right);
+    }
+
+    #[test]
+    fn a_split_keeps_the_in_animation_on_the_left_and_the_transition_on_the_right() {
+        let p = animated();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        split(&mut doc, "c", "c2", 1.0);
+        split(&mut doc, "v", "v2", 2.5);
+        let back = import_v1_json(&doc).unwrap().project;
+        let kinds = |id: &str| animations(&back, segment(&back, id)).iter().map(|a| (a.kind.clone(), a.start, a.duration)).collect::<Vec<_>>();
+        // The left caption types in over its whole second; its words are on time.
+        assert_eq!(kinds("c"), vec![(AnimationKind::In, Micros(0), Micros(1_000_000)), (AnimationKind::Caption, Micros(0), Micros(2_000_000))]);
+        // The right one shows whole, a second into the speech, its caption covering it.
+        assert_eq!(kinds("c2"), vec![(AnimationKind::Caption, Micros(-1_000_000), Micros(2_000_000))]);
+        let transition = |id: &str| segment(&back, id).attachments.iter().find(|m| back.materials.transitions.iter().any(|t| &t.id == *m)).cloned();
+        assert_eq!((transition("v"), transition("v2")), (None, Some(MaterialId("tr".into()))));
+        assert_eq!(segment(&back, "v2").target, TimeRange::new(Micros(2_500_000), Micros(2_000_000)));
+        assert_eq!(segment(&back, "v2").source.unwrap().start, Micros(3_000_000));
+    }
+
+    #[test]
+    fn an_in_animation_ends_by_the_end_of_a_clip_trimmed_shorter() {
+        let mut p = animated();
+        // Also one the engine doesn't draw, on a second caption: kept, and ended in time too.
+        let undrawn = Animation { kind: AnimationKind::In, start: Micros(0), duration: Micros(900_000), builtin: None, library: Some(LibraryRef { app: "capcut".into(), resource_id: "2".into(), name: "Glitter Horizon".into(), category: String::new() }), resource: None };
+        p.materials.animations.push(Animations { id: MaterialId("an2".into()), items: vec![undrawn] });
+        let mut c3 = segment(&p, "c").clone();
+        (c3.id, c3.target, c3.attachments) = ("c3".into(), TimeRange::new(Micros(2_000_000), Micros(1_000_000)), vec![MaterialId("an2".into())]);
+        p.tracks[1].segments.push(c3);
+        let mut doc = to_app_project(&p, &mut |_| None);
+        for clip in doc["timeline"]["clips"].as_array_mut().unwrap() {
+            match clip["clipId"].as_str() {
+                Some("c") => clip["endTick"] = json!("600000"),
+                Some("c3") => clip["endTick"] = json!("2500000"),
+                _ => {}
+            }
+        }
+        let back = import_v1_json(&doc).unwrap().project;
+        let a = animations(&back, segment(&back, "c"));
+        assert_eq!(a.iter().find(|a| a.kind == AnimationKind::In).map(|a| (a.builtin.as_deref(), a.duration)), Some((Some("type_2"), Micros(600_000))));
+        let a = animations(&back, segment(&back, "c3"));
+        assert_eq!(a.iter().map(|a| (a.library.as_ref().unwrap().name.as_str(), a.duration)).collect::<Vec<_>>(), vec![("Glitter Horizon", Micros(500_000))]);
+        // The app's own text too: its 2 s animation on a 1 s clip.
+        let mut doc = to_app_project(&project(), &mut |_| None);
+        let text = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["type"] == "text").unwrap();
+        text.as_object_mut().unwrap().remove("engine");
+        text["endTick"] = json!("1000000");
+        text["animationIn"] = json!({"type": "type_1", "duration": 2});
+        let back = import_v1_json(&doc).unwrap().project;
+        let seg = back.tracks.iter().flat_map(|t| &t.segments).find(|s| back.materials.texts.iter().any(|t| t.id == s.material)).unwrap();
+        assert_eq!(animations(&back, seg)[0].duration, Micros(1_000_000));
+    }
+
+    #[test]
+    fn a_caption_style_covers_its_clip_after_a_trim() {
+        // CapCut's caption a µs short of its clip is left as the draft has it.
+        let mut p = animated();
+        p.materials.animations[0].items[1].duration = Micros(1_999_999);
+        let back = import_v1_json(&to_app_project(&p, &mut |_| None)).unwrap().project;
+        assert_eq!(segment(&back, "c").attachments, segment(&p, "c").attachments);
+        let p = animated();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "c").unwrap();
+        clip["endTick"] = json!("3000000");
+        let back = import_v1_json(&doc).unwrap().project;
+        let cap = animations(&back, segment(&back, "c")).into_iter().find(|a| a.kind == AnimationKind::Caption).unwrap();
+        assert_eq!((cap.start, cap.duration, cap.builtin.as_deref()), (Micros(0), Micros(3_000_000), Some("caption_word_color")));
+        // A style chosen after the trim covers it too, and a trim of the start (the app moves
+        // the caption into its speech) keeps its words on time.
+        clip_mut(&mut doc, "c")["captionStyle"] = json!("caption_one_word");
+        clip_mut(&mut doc, "c")["startTick"] = json!("500000");
+        clip_mut(&mut doc, "c")["spokenFrom"] = json!(0.5);
+        let back = import_v1_json(&doc).unwrap().project;
+        let cap = animations(&back, segment(&back, "c")).into_iter().find(|a| a.kind == AnimationKind::Caption).unwrap();
+        assert_eq!((cap.start, cap.duration, cap.builtin.as_deref()), (Micros(-500_000), Micros(3_000_000), Some("caption_one_word")));
+    }
+
+    fn clip_mut<'a>(doc: &'a mut Value, id: &str) -> &'a mut Value {
+        doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == id).unwrap()
+    }
+
     #[test]
     fn adjust_and_audio_panel_edits_apply_to_a_converted_video() {
         let p = project();

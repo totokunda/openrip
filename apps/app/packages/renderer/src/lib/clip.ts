@@ -11,6 +11,7 @@ import {
   GroupClipProps,
   ClipType,
   Asset,
+  TextClipProps,
 } from "./types";
 import { v4 as uuidv4 } from "uuid";
 import { useControlsStore } from "./control";
@@ -1149,6 +1150,11 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
             startFrame: desiredStartFrame,
             trimStart: frameDelta + (currentClip.trimStart || 0),
           };
+          // A caption's words keep time with the speech as its start moves.
+          if (currentClip.type === "text" && currentClip.spokenWords) {
+            (newClips[currentClipIndex] as TextClipProps).spokenFrom =
+              (currentClip.spokenFrom ?? 0) + frameDelta / (useControlsStore.getState().fps || 30);
+          }
         }
       }
   
@@ -1603,6 +1609,19 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
         trimStart: safeOldTrimStart + cutRel,
         trimEnd: safeOldTrimEnd,
       };
+
+      // A text's In animation plays where the clip starts, so it stays on the left clip; a
+      // transition leads into the clip after, so it stays on the right one, which ends where
+      // the clip did. A caption's words keep time with the speech: the right clip starts that
+      // far into it.
+      if (clip.type === "text") {
+        const text = newClip2 as TextClipProps;
+        text.animationIn = null;
+        if (text.spokenWords) text.spokenFrom = (text.spokenFrom ?? 0) + cutRel / (useControlsStore.getState().fps || 30);
+      }
+      if (clip.type === "video" || clip.type === "image") {
+        (newClip1 as VideoClipProps | ImageClipProps).transitionOut = null;
+      }
 
       if (clip.type === "image" || clip.type === "video") {
         // Split masks by local frame index (mask frames use the same local frame space

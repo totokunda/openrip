@@ -108,8 +108,12 @@ const tickToFrameForJson = (tick: unknown, fps: number): number => {
     }
     if (t === JSON_POSITIVE_INFINITY_TICK) return Number.POSITIVE_INFINITY;
     if (t === JSON_NEGATIVE_INFINITY_TICK) return Number.NEGATIVE_INFINITY;
+    // Ticks are truncated to whole µs, so round to the nearest frame: truncating again would
+    // bring a frame whose tick isn't whole (175 at 24 fps) back a frame early, and move it a
+    // frame more each time the project is opened.
     const numerator = t * fpsInt;
-    const frame = numerator / JSON_TICKS_PER_SECOND;
+    const half = JSON_TICKS_PER_SECOND / 2n;
+    const frame = (numerator >= 0n ? numerator + half : numerator - half) / JSON_TICKS_PER_SECOND;
     return Number(frame);
   } catch {
     return 0;
@@ -919,7 +923,7 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
   try {
 
     if (useClipStore && typeof useClipStore.subscribe === "function") {
-      useClipStore.subscribe((state) => {
+      useClipStore.subscribe((state, prev) => {
         const clipsSig = computeClipSignature((state as any)?.clips);
         const timelinesSig = computeTimelineSignature((state as any)?.timelines);
         const assetsSig = computeAssetSignature((state as any)?.assets);
@@ -944,7 +948,10 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
         lastTimelineSignature = timelinesSig;
         lastAssetSignature = assetsSig;
 
-        if (clipsChanged || timelinesChanged || assetsChanged) {
+        // The signature covers what the cover shows; any other edit to a clip (a panel's
+        // field: its style, animation, transition…) replaces the clips and is saved too.
+        const clipsEdited = (state as any)?.clips !== (prev as any)?.clips;
+        if (clipsChanged || timelinesChanged || assetsChanged || clipsEdited) {
           scheduleJsonProjectSave(getProjectState);
         }
 

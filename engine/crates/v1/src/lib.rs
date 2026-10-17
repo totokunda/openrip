@@ -483,6 +483,9 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
     if ty == "text" && (differs("animationIn") || differs("captionStyle")) {
         edit_animations(&mut seg, clip, materials, differs("animationIn"), differs("captionStyle"));
     }
+    if ty == "text" {
+        fit_animations(&mut seg, Micros::from_secs_f64(f(clip, "spokenFrom", 0.0)), materials);
+    }
     if matches!(ty, "video" | "image") && differs("transitionOut") {
         seg.attachments.retain(|id| !materials.transitions.iter().any(|m| &m.id == id));
         if let Some(t) = app_transition(&seg.id, clip) {
@@ -720,7 +723,7 @@ fn convert_clip(
     }
 
     if ty == "text" {
-        if let Some(a) = app_animation_in(clip) {
+        if let Some(a) = app_animation_in(clip, target.duration) {
             let mid = MaterialId(format!("{id}-animations"));
             materials.animations.push(Animations { id: mid.clone(), items: vec![a] });
             attachments.push(mid);
@@ -867,11 +870,12 @@ fn same(a: Option<&Value>, b: Option<&Value>) -> bool {
     }
 }
 
-/// The Animation tab's In animation, if it's one the engine draws.
-fn app_animation_in(clip: &Value) -> Option<Animation> {
+/// The Animation tab's In animation, if it's one the engine draws, within the clip's
+/// `length`: a clip trimmed shorter than its animation ends it sooner, as CapCut does.
+fn app_animation_in(clip: &Value, length: Micros) -> Option<Animation> {
     let a = clip.get("animationIn").filter(|a| a.is_object())?;
     let ty = s(a, "type");
-    let duration = Micros::from_secs_f64(f(a, "duration", 0.5).max(0.0));
+    let duration = Micros::from_secs_f64(f(a, "duration", 0.5).max(0.0)).min(length);
     (app::BUILTIN_IN.contains(&ty.as_str()) && duration.0 > 0).then(|| Animation { kind: AnimationKind::In, start: Micros::ZERO, duration, builtin: Some(ty), library: None, resource: None })
 }
 
@@ -892,23 +896,61 @@ fn app_transition(id: &str, clip: &Value) -> Option<Transition> {
     (drawable && duration.0 > 0).then(|| Transition { id: MaterialId(format!("{id}-transition")), name: s(t, "name"), duration, overlap: false, builtin: Some(ty), library: None, resource })
 }
 
-/// Replace a converted clip's In animation and/or caption style with the app's.
-fn edit_animations(seg: &mut Segment, clip: &Value, materials: &mut Materials, replace_in: bool, replace_caption: bool) {
-    let attached: Vec<MaterialId> = seg.attachments.iter().filter(|id| materials.animations.iter().any(|m| &m.id == *id)).cloned().collect();
-    let mut items: Vec<Animation> = attached.iter().filter_map(|id| materials.animations.iter().find(|m| &m.id == id)).flat_map(|m| m.items.iter().cloned()).collect();
-    items.retain(|a| !(replace_in && a.kind == AnimationKind::In) && !(replace_caption && a.kind == AnimationKind::Caption));
-    if replace_in {
-        items.extend(app_animation_in(clip));
-    }
-    if replace_caption {
-        items.extend(app_caption_style(clip, seg.target.duration));
-    }
-    seg.attachments.retain(|id| !attached.contains(id));
+/// A segment's animations: all its animation materials' items.
+fn attached_animations(seg: &Segment, materials: &Materials) -> Vec<Animation> {
+    seg.attachments.iter().filter_map(|id| materials.animations.iter().find(|m| &m.id == id)).flat_map(|m| m.items.iter().cloned()).collect()
+}
+
+/// Give a segment these animations, in a material of its own (the two halves of a clip split
+/// in the app share the draft's materials).
+fn set_animations(seg: &mut Segment, items: Vec<Animation>, materials: &mut Materials) {
+    seg.attachments.retain(|id| !materials.animations.iter().any(|m| &m.id == id));
     if !items.is_empty() {
         let id = MaterialId(format!("{}-animations", seg.id));
         materials.animations.retain(|m| m.id != id);
         materials.animations.push(Animations { id: id.clone(), items });
         seg.attachments.push(id);
+    }
+}
+
+/// Replace a converted clip's In animation and/or caption style with the app's.
+fn edit_animations(seg: &mut Segment, clip: &Value, materials: &mut Materials, replace_in: bool, replace_caption: bool) {
+    let mut items = attached_animations(seg, materials);
+    items.retain(|a| !(replace_in && a.kind == AnimationKind::In) && !(replace_caption && a.kind == AnimationKind::Caption));
+    if replace_in {
+        items.extend(app_animation_in(clip, seg.target.duration));
+    }
+    if replace_caption {
+        items.extend(app_caption_style(clip, seg.target.duration));
+    }
+    set_animations(seg, items, materials);
+}
+
+/// A converted text's animations after a trim or split in the app: its In animation ends by
+/// the clip's end, and its caption covers the clip and keeps time with the speech, starting
+/// `from` into it (what a split or a trim cut off its start, the app's `spokenFrom`). Left as
+/// they are when they fit.
+fn fit_animations(seg: &mut Segment, from: Micros, materials: &mut Materials) {
+    let mut items = attached_animations(seg, materials);
+    let length = seg.target.duration;
+    let mut changed = false;
+    for a in &mut items {
+        match a.kind {
+            AnimationKind::In if a.start.0 + a.duration.0 > length.0 => {
+                a.duration = Micros((length.0 - a.start.0).max(0));
+                changed = true;
+            }
+            // CapCut's own often ends a µs before its clip.
+            AnimationKind::Caption if a.start.0 != -from.0 || a.start.0 + a.duration.0 + 1_000 < length.0 => {
+                a.start = Micros(-from.0);
+                a.duration = Micros(length.0 + from.0);
+                changed = true;
+            }
+            _ => {}
+        }
+    }
+    if changed {
+        set_animations(seg, items, materials);
     }
 }
 

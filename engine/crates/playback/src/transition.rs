@@ -9,20 +9,22 @@
 
 use openrip_model::{Micros, Project, Segment, Transition};
 
-/// The transition a clip is in at `t`, and how far through it (0 to 1, the cut at 0.5).
+/// The transition a clip is in at `t`, and how far through it (0 to 1, the cut at 0.5). A
+/// transition is drawn only where a clip on the same track starts as the one with it ends.
 pub fn transition_at<'a>(project: &'a Project, seg: &Segment, t: Micros) -> Option<(&'a Transition, f64)> {
     let of = |s: &Segment| s.attachments.iter().find_map(|id| project.materials.transitions.iter().find(|tr| &tr.id == id && tr.builtin.is_some() && tr.duration.0 > 0));
     let progress = |tr: &Transition, cut: i64| (t.0 - (cut - tr.duration.0 / 2)) as f64 / tr.duration.0 as f64;
+    let track = project.tracks.iter().find(|tr| tr.segments.iter().any(|s| s.id == seg.id))?;
+    let meets = |a: &Segment, b: &Segment| a.id != b.id && (a.target.end().0 - b.target.start.0).abs() <= 1_000;
     // Into the cut at the end of this clip.
-    if let Some(tr) = of(seg) {
+    if let Some(tr) = of(seg).filter(|_| track.segments.iter().any(|s| meets(seg, s))) {
         let p = progress(tr, seg.target.end().0);
         if (0.0..0.5).contains(&p) {
             return Some((tr, p));
         }
     }
     // Out of the cut at its start, from the clip before it on its track.
-    let track = project.tracks.iter().find(|tr| tr.segments.iter().any(|s| s.id == seg.id))?;
-    let before = track.segments.iter().filter(|s| s.id != seg.id && (s.target.end().0 - seg.target.start.0).abs() <= 1_000).max_by_key(|s| s.target.start)?;
+    let before = track.segments.iter().filter(|s| meets(s, seg)).max_by_key(|s| s.target.start)?;
     let tr = of(before)?;
     let p = progress(tr, seg.target.start.0);
     (0.5..=1.0).contains(&p).then_some((tr, p))
@@ -120,6 +122,19 @@ mod tests {
         assert_eq!(transition_at(&p, b, Micros(2_000_000)).map(|x| x.1), Some(0.5));
         assert_eq!(transition_at(&p, b, Micros(2_150_000)).map(|x| x.1), Some(0.8));
         assert!(transition_at(&p, b, Micros(2_300_000)).is_none());
+    }
+
+    #[test]
+    fn nothing_without_a_clip_after() {
+        let mut p = project("white_flash");
+        p.tracks[0].segments.pop();
+        let a = &p.tracks[0].segments[0];
+        assert!(transition_at(&p, a, Micros(1_850_000)).is_none());
+        // A gap before the next clip is no cut either.
+        let mut p = project("white_flash");
+        p.tracks[0].segments[1].target.start = Micros(2_500_000);
+        let a = &p.tracks[0].segments[0];
+        assert!(transition_at(&p, a, Micros(1_850_000)).is_none());
     }
 
     #[test]

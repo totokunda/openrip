@@ -229,6 +229,11 @@ export type TextClipProps = ClipProps & {
   captionStyle?: string;
   /** Whether the text has spoken-word timing (CapCut's auto captions). */
   spokenWords?: boolean;
+  /**
+   * How far into its speech (s) such a caption starts: what a split or a trim cut off its
+   * start, so the words stay with the speech.
+   */
+  spokenFrom?: number;
 };
 
 export type FilterClipProps = ClipProps & {

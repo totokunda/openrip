@@ -43,8 +43,11 @@ const TRANSITIONS = [
 ];
 
 const NONE = "none";
-/** A CapCut animation or transition the engine doesn't draw: kept as it is. */
+/** A CapCut animation, caption style or transition the engine doesn't draw: kept as it is. */
 const KEEP = "keep";
+
+/** A duration as typed or slid, within the slider's bounds and to hundredths of a second. */
+const within = (d: number, max: number) => Math.round(Math.max(0.1, Math.min(d, max)) * 100) / 100;
 
 interface Option {
   value: string;
@@ -99,22 +102,20 @@ const AnimationProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
     | undefined;
   const updateClip = useClipStore((s) => s.updateClip);
   const fps = useControlsStore((s) => s.fps) || 30;
-  // A transition needs a clip right after this one on its track.
-  const hasNext = useClipStore((s) =>
-    clip
-      ? s.clips.some(
-          (c) =>
-            c.clipId !== clip.clipId &&
-            c.timelineId === clip.timelineId &&
-            Math.abs(c.startFrame - clip.endFrame) <= 1,
-        )
-      : false,
-  );
-  // Blink draws CapCut's downloaded image sequence: offered when the project has one.
+  // A transition needs a clip starting where this one ends on its track, as the engine draws
+  // it; the shorter of the two bounds its duration. In frames, 0 when there's none.
+  const nextFrames = useClipStore((s) => {
+    const next = clip && s.clips.find((c) => c.clipId !== clip.clipId && c.timelineId === clip.timelineId && c.startFrame === clip.endFrame);
+    return next ? next.endFrame - next.startFrame : 0;
+  });
+  // Blink draws CapCut's downloaded image sequence: offered when the project has one, on a
+  // clip or among a draft clip's materials (where it stays when the app replaces it).
   const blinkResource = useClipStore((s) => {
     for (const c of s.clips) {
       const t = (c as VideoClipProps).transitionOut;
       if (t?.type === "blink" && t.resource) return t.resource;
+      const m = ((c as any).engine?.materials ?? []).find((m: any) => m?.type === "transition" && m.builtin === "blink" && m.resource);
+      if (m) return m.resource as string;
     }
     return null;
   });
@@ -126,16 +127,20 @@ const AnimationProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
     const value = !anim ? NONE : anim.type || KEEP;
     const options: Option[] = [{ value: NONE, label: "None" }, ...IN_ANIMATIONS];
     if (value === KEEP) options.push({ value: KEEP, label: `${anim?.name || "CapCut's"} (CapCut)` });
+    // The engine ends an animation longer than its clip (trimmed shorter) with the clip.
+    const inMax = Math.max(0.1, Math.min(5, seconds));
     const setIn = (v: string) => {
       if (v === KEEP) return;
       if (v === NONE) return updateClip(clipId, { animationIn: null });
-      const duration = Math.min(anim?.duration ?? 0.5, seconds);
+      const duration = within(anim?.duration ?? 0.5, inMax);
       const next: ClipAnimationIn = { type: v, duration, name: IN_ANIMATIONS.find((a) => a.value === v)?.label };
       updateClip(clipId, { animationIn: next });
     };
-    const caption = clip.captionStyle ?? NONE;
+    // A draft's style the engine doesn't draw comes as "" (a select can't have that value).
+    const style = clip.captionStyle ?? NONE;
+    const caption = CAPTION_STYLES.some((c) => c.value === style) ? style : KEEP;
     const captionOptions: Option[] = [...CAPTION_STYLES];
-    if (!CAPTION_STYLES.some((c) => c.value === caption)) captionOptions.push({ value: caption, label: "CapCut's style" });
+    if (caption === KEEP) captionOptions.push({ value: KEEP, label: "CapCut's style" });
     return (
       <>
         <Section
@@ -146,10 +151,10 @@ const AnimationProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
           {anim && value !== KEEP && (
             <PropertiesSlider
               label="Duration"
-              value={anim.duration}
-              onChange={(d) => updateClip(clipId, { animationIn: { ...anim, duration: Math.max(0.1, Math.min(d, seconds)) } })}
+              value={Math.min(anim.duration, seconds)}
+              onChange={(d) => updateClip(clipId, { animationIn: { ...anim, duration: within(d, inMax) } })}
               min={0.1}
-              max={Math.max(0.1, Math.min(5, seconds))}
+              max={inMax}
               step={0.1}
               suffix="s"
               toFixed={1}
@@ -162,7 +167,7 @@ const AnimationProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
               label="Words"
               value={caption}
               options={captionOptions}
-              onChange={(v) => updateClip(clipId, { captionStyle: v })}
+              onChange={(v) => v !== KEEP && updateClip(clipId, { captionStyle: v })}
             />
           </Section>
         )}
@@ -175,12 +180,13 @@ const AnimationProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
     const value = !tr ? NONE : tr.type || KEEP;
     const options: Option[] = [{ value: NONE, label: "None" }, ...TRANSITIONS.filter((t) => t.value !== "blink" || blinkResource || tr?.type === "blink")];
     if (value === KEEP) options.push({ value: KEEP, label: `${tr?.name || "CapCut's"} (CapCut)` });
+    const trMax = Math.max(0.1, Math.min(2, seconds, nextFrames ? nextFrames / fps : seconds));
     const setTransition = (v: string) => {
       if (v === KEEP) return;
       if (v === NONE) return updateClip(clipId, { transitionOut: null });
       const next: ClipTransition = {
         type: v,
-        duration: Math.min(tr?.duration ?? 0.5, seconds),
+        duration: within(tr?.duration ?? 0.5, trMax),
         name: TRANSITIONS.find((t) => t.value === v)?.label,
         resource: v === "blink" ? (tr?.type === "blink" ? tr.resource : blinkResource) : null,
       };
@@ -190,7 +196,7 @@ const AnimationProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
       <Section
         title="Transition to the next clip"
         note={
-          !hasNext
+          !nextFrames
             ? "Shows when a clip starts right where this one ends, on the same track."
             : value === KEEP
               ? "The engine doesn't draw this CapCut transition yet; CapCut's export has it."
@@ -202,9 +208,9 @@ const AnimationProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
           <PropertiesSlider
             label="Duration"
             value={tr.duration}
-            onChange={(d) => updateClip(clipId, { transitionOut: { ...tr, duration: Math.max(0.1, Math.min(d, seconds)) } })}
+            onChange={(d) => updateClip(clipId, { transitionOut: { ...tr, duration: within(d, trMax) } })}
             min={0.1}
-            max={Math.max(0.1, Math.min(2, seconds))}
+            max={trMax}
             step={0.1}
             suffix="s"
             toFixed={1}
