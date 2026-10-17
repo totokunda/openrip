@@ -1,0 +1,44 @@
+// Drive the built app step by step with Playwright, on a throwaway profile:
+//   node session.mjs <appDir> <outDir> <userDataDir> <clip> <step...>
+// Each step is steps/<name>.mjs; its default export gets { app, win, shot, clock, logs, clipPath,
+// outDir, fs } and returns a line for the log. The renderer's warnings, errors and page errors
+// (with stacks) go to <outDir>/logs.txt. EXE=<binary> runs a packaged build.
+import { createRequire } from "node:module";
+import fs from "node:fs";
+import path from "node:path";
+// Absolute paths: the app doesn't open projects in a profile given by a relative path.
+const [appDir, outDir, udDir, clipPath, ...steps] = process.argv.slice(2).map((a, i) => (i < 3 ? path.resolve(a) : a));
+fs.mkdirSync(outDir, { recursive: true });
+const require = createRequire(appDir + "/package.json");
+const { _electron: electron } = require("playwright");
+const app = await electron.launch({
+  executablePath: process.env.EXE || require("electron"),
+  args: [process.env.ENTRY ? appDir + "/packages/entry-point.mjs" : appDir, `--user-data-dir=${udDir}`],
+  // The media root ignores --user-data-dir; without this, previews land in the real profile.
+  env: { ...process.env, APEX_USER_DATA_DIR: udDir },
+});
+const logs = [];
+app.process().stderr.on("data", (d) => logs.push("[main:err] " + d.toString().trim()));
+const win = await app.firstWindow();
+win.on("console", (m) => { if (["error", "warning"].includes(m.type())) logs.push(`[renderer:${m.type()}] ${m.text().slice(0, 300)}`); });
+win.on("pageerror", (e) => logs.push("[pageerror] " + (e.stack || e.message).slice(0, 1500)));
+await win.waitForLoadState("domcontentloaded");
+await win.waitForTimeout(5000);
+const shot = (n) => win.screenshot({ path: `${outDir}/${n}.png` });
+const clock = async () => (await win.locator("body").innerText()).match(/\d\d:\d\d\.\d\d\s*\/\s*\d\d:\d\d\.\d\d/)?.[0];
+globalThis.ctx = { app, win, shot, clock, logs, clipPath, outDir, fs };
+for (const step of steps) {
+  const mod = await import(`./steps/${step}.mjs?${Date.now()}`);
+  try {
+    const r = await mod.default(globalThis.ctx);
+    console.log(`STEP ${step}: ok`, r ?? "");
+  } catch (e) {
+    console.log(`STEP ${step}: FAILED`, e.message.split("\n")[0]);
+    await shot(`fail-${step}`);
+    break;
+  }
+}
+fs.writeFileSync(`${outDir}/logs.txt`, logs.join("\n"));
+const noise = /sandbox_extension|Security Warning|unsafe-eval|deprecated|viewport store not ready/;
+console.log("LOGS:\n" + logs.filter((l) => !noise.test(l)).slice(0, 400).join("\n"));
+await app.close();
