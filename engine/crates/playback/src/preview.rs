@@ -22,6 +22,9 @@ const MAX_DECODERS: usize = 12;
 const DECODER_CACHE: usize = 128 << 20;
 /// Clips starting this soon get their decoder opened and positioned in the background.
 const PREFETCH: Micros = Micros(1_500_000);
+/// Memory for decoded stills; the least recently drawn go first beyond it (a 4K still is
+/// 33 MB, and drafts can hold hundreds).
+const STILLS_BUDGET: usize = 512 << 20;
 
 /// Media to get ready off the render thread: a decoder positioned at a clip's in-point, or
 /// a still image decoded.
@@ -248,7 +251,8 @@ pub struct PreviewEngine {
     /// One decoder per segment, so two clips of the same file at different times don't
     /// fight over one decoder's position.
     decoders: HashMap<String, OpenDecoder>,
-    images: HashMap<String, std::sync::Arc<RgbaImage>>,
+    /// Decoded stills by path, with the tick last used (see `STILLS_BUDGET`).
+    images: HashMap<String, (std::sync::Arc<RgbaImage>, u64)>,
     fonts: HashMap<String, Font>,
     /// Paths that failed to load, so they aren't retried every frame.
     failed: HashMap<String, String>,
@@ -261,8 +265,10 @@ pub struct PreviewEngine {
     /// Lay text out without drawing it (`text_block`).
     measure_only: bool,
     /// While the playhead is dragged: video shows a frame that's quick to get (already
-    /// decoded, a short decode ahead, or the GOP's keyframe) rather than the exact one.
+    /// decoded, a short decode ahead, or the GOP's keyframe) rather than the exact one, and
+    /// pictures are stand-ins at about the frame's size, got ready ahead of the drag.
     scrubbing: bool,
+    scrub: crate::scrub::ScrubAhead,
     /// Background-removal masks by file, with the tick they were last used.
     mattes: HashMap<String, (std::sync::Arc<RgbaImage>, u64)>,
     /// The frame times each background-removal folder has masks for.
@@ -295,6 +301,7 @@ impl PreviewEngine {
             shapes: HashMap::new(),
             last_text_block: None,
             scrubbing: false,
+            scrub: crate::scrub::ScrubAhead::new(),
             measure_only: false,
             mattes: HashMap::new(),
             matte_times: HashMap::new(),
@@ -319,11 +326,15 @@ impl PreviewEngine {
         let keep: Vec<String> = self.decoders.keys().filter(|id| self.media_path(id).is_some_and(|path| Some(path) == media_path(&old, id))).cloned().collect();
         self.decoders.retain(|id, _| keep.contains(id));
         self.failed.clear(); // files may have been relinked
+        self.scrub.forget_failures();
     }
 
     /// Quick frames for a playhead being dragged (see `scrubbing`); the exact frame again
     /// once it's off.
     pub fn set_scrubbing(&mut self, on: bool) {
+        if self.scrubbing && !on {
+            self.scrub.stop();
+        }
         self.scrubbing = on;
     }
 
@@ -362,9 +373,17 @@ impl PreviewEngine {
     #[cfg(target_os = "macos")]
     pub fn render_to_surface(&mut self, t: Micros, target: &objc2_core_video::CVPixelBuffer) -> Result<FrameReport, PreviewError> {
         let (w, h) = (objc2_core_video::CVPixelBufferGetWidth(target) as u32, objc2_core_video::CVPixelBufferGetHeight(target) as u32);
+        let t0 = std::time::Instant::now();
         let (pixels, report) = self.gather(t, w, h);
+        let t1 = std::time::Instant::now();
         let layers = self.layers(&pixels, t, w, h);
+        let t2 = std::time::Instant::now();
         self.compositor.render_to_surface(target, [0, 0, 0], &layers)?;
+        if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 30 {
+            let ms = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1e3;
+            let now = std::time::Instant::now();
+            eprintln!("[preview] t={:.3}s {w}x{h}: gather {:.1} ms, layers {:.1} ms, composite {:.1} ms ({} layers)", t.as_secs_f64(), ms(t0, t1), ms(t1, t2), ms(t2, now), layers.len());
+        }
         Ok(report)
     }
 
@@ -404,7 +423,8 @@ impl PreviewEngine {
             }
             Prefetched::Still(path, img) => {
                 self.prefetch.pending.remove(&path);
-                self.images.entry(path).or_insert_with(|| std::sync::Arc::new(img));
+                let tick = self.tick;
+                self.images.entry(path).or_insert_with(|| (std::sync::Arc::new(img), tick));
             }
             Prefetched::Failed(key) => {
                 self.prefetch.pending.remove(&key);
@@ -455,10 +475,17 @@ impl PreviewEngine {
     fn gather(&mut self, t: Micros, w: u32, h: u32) -> (Vec<(Segment, Pixels)>, FrameReport) {
         self.tick += 1;
         self.run_prefetch(t);
+        if self.scrubbing {
+            self.scrub.moved(&self.project, t, w.max(h), &self.failed);
+        }
         let mut report = FrameReport::default();
         let mut out = Vec::new();
         let trace = std::env::var_os("OPENRIP_TRACE").is_some();
-        for seg in self.active(t) {
+        let active = self.active(t);
+        if !self.scrubbing && !self.measure_only {
+            self.load_stills_beside(&active);
+        }
+        for seg in active {
             self.load_exposure_luts(&seg);
             let t0 = std::time::Instant::now();
             let got = self.pixels(&seg, t, w, h);
@@ -483,6 +510,12 @@ impl PreviewEngine {
             }
         }
         report.layers = out.len();
+        // Full stills the scrub workers decoded that no layer collected.
+        for (path, img) in self.scrub.take_decoded() {
+            let tick = self.tick;
+            self.images.entry(path).or_insert((img, tick));
+        }
+        self.evict_stills();
         self.evict_decoders();
         let tick = self.tick;
         self.texts.retain(|_, (_, _, last)| tick - *last < 3);
@@ -501,18 +534,17 @@ impl PreviewEngine {
                 if self.failed.contains_key(&path) {
                     return None;
                 }
-                if !self.images.contains_key(&path) {
-                    match load_png(Path::new(&path)) {
-                        Ok(img) => {
-                            self.images.insert(path.clone(), std::sync::Arc::new(img));
-                        }
+                let img = match self.still(&path) {
+                    Some(img) => img,
+                    None => match load_png(Path::new(&path)) {
+                        Ok(img) => self.keep_still(&path, img),
                         Err(e) => {
                             self.failed.insert(path, e.to_string());
                             return None;
                         }
-                    }
-                }
-                Pixels::Cover(self.images[&path].clone(), key_of(&path))
+                    },
+                };
+                Pixels::Cover(img, key_of(&path))
             }
         })
     }
@@ -887,12 +919,36 @@ impl PreviewEngine {
         }
         let fail = |e: &dyn std::fmt::Display| (media.path.clone(), e.to_string());
         if media.kind == MediaKind::Photo {
-            self.await_prefetch(&media.path);
-            if !self.images.contains_key(&media.path) {
-                let img = load_still(Path::new(&media.path)).map_err(|e| fail(&e))?;
-                self.images.insert(media.path.clone(), std::sync::Arc::new(img));
+            // Dragging the playhead: a stand-in at about the frame's size (uploading a 4K
+            // still costs more than the rest of the frame).
+            if self.scrubbing {
+                let img = match self.scrub.still(&media.path) {
+                    Some(img) => img,
+                    None => {
+                        let full = match self.still(&media.path) {
+                            Some(img) => img,
+                            None => self.keep_still(&media.path, load_still(Path::new(&media.path)).map_err(|e| fail(&e))?),
+                        };
+                        let k = crate::scrub::shrink_factor(full.width, full.height, w.max(h));
+                        let small = if k > 1 { std::sync::Arc::new(crate::scrub::shrink(&full, k)) } else { full };
+                        self.scrub.insert_still(&media.path, small.clone());
+                        small
+                    }
+                };
+                let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), None);
+                return Ok(Some(Pixels::Image(img, key_of(("scrub", &media.path)), mattes)));
             }
-            let img = self.images[&media.path].clone();
+            self.await_prefetch(&media.path);
+            let img = match self.still(&media.path) {
+                Some(img) => img,
+                None => match self.scrub.full(&media.path) {
+                    Some(img) => {
+                        self.images.insert(media.path.clone(), (img.clone(), self.tick));
+                        img
+                    }
+                    None => self.keep_still(&media.path, load_still(Path::new(&media.path)).map_err(|e| fail(&e))?),
+                },
+            };
             let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), None);
             return Ok(Some(Pixels::Image(img, key_of(&media.path), mattes)));
         }
@@ -914,9 +970,14 @@ impl PreviewEngine {
         let (pos, step) = d.decoder.position();
         let near_ahead = pos.is_some_and(|p| at >= p && at.0 - p.0 <= 3 * step.0);
         let frame = if self.scrubbing && !near_ahead && !d.decoder.frame_near(at, Micros::ZERO).is_some_and(|(_, exact)| exact) {
+            // The keyframe's stand-in, if the workers got it ready (see `ScrubAhead`).
+            self.scrub.learn_index(&media.path, || crate::scrub::stand_in_keys(&d.decoder));
             match d.decoder.frame_near(at, Micros(500_000)) {
                 Some((f, _)) => Some(f),
-                None => d.decoder.keyframe_at(at).map_err(|e| fail(&e))?,
+                None => match d.decoder.keyframe_time(at).and_then(|k| self.scrub.keyframe(&media.path, k)) {
+                    Some(f) => Some(f),
+                    None => d.decoder.keyframe_at(at).map_err(|e| fail(&e))?,
+                },
             }
         } else {
             d.decoder.frame_at(at).map_err(|e| fail(&e))?
@@ -998,6 +1059,49 @@ impl PreviewEngine {
         let m = std::sync::Arc::new(turn_to_stored(&raw[..(w * h) as usize], w, h, orientation));
         self.mattes.insert(key, (m.clone(), tick));
         Some(m)
+    }
+
+    /// Start decoding the stills a frame needs that aren't decoded or on their way, on the
+    /// scrub workers, so they decode beside the frame's video and each other (worth it with
+    /// more than one thing to decode).
+    fn load_stills_beside(&mut self, active: &[Segment]) {
+        let (mut stills, mut videos) = (Vec::new(), 0);
+        for seg in active {
+            let Some(m) = self.project.materials.media.iter().find(|m| m.id == seg.material && m.kind != MediaKind::Audio) else { continue };
+            if m.kind != MediaKind::Photo {
+                videos += 1;
+            } else if !self.images.contains_key(&m.path) && !self.failed.contains_key(&m.path) && !self.prefetch.pending.contains(&m.path) && !stills.contains(&m.path) {
+                stills.push(m.path.clone());
+            }
+        }
+        if !stills.is_empty() && stills.len() + videos > 1 {
+            self.scrub.load_full(stills);
+        }
+    }
+
+    /// A decoded still, if it's kept, marked as used.
+    fn still(&mut self, path: &str) -> Option<std::sync::Arc<RgbaImage>> {
+        let tick = self.tick;
+        self.images.get_mut(path).map(|(img, last)| {
+            *last = tick;
+            img.clone()
+        })
+    }
+
+    fn keep_still(&mut self, path: &str, img: RgbaImage) -> std::sync::Arc<RgbaImage> {
+        let img = std::sync::Arc::new(img);
+        self.images.insert(path.to_string(), (img.clone(), self.tick));
+        img
+    }
+
+    /// Drop the least recently used stills beyond `STILLS_BUDGET` (never one this frame drew).
+    fn evict_stills(&mut self) {
+        let mut bytes: usize = self.images.values().map(|(img, _)| img.data.len()).sum();
+        while bytes > STILLS_BUDGET {
+            let Some((path, _)) = self.images.iter().filter(|(_, (_, last))| *last < self.tick).min_by_key(|(_, (_, last))| *last) else { break };
+            let path = path.clone();
+            bytes -= self.images.remove(&path).map_or(0, |(img, _)| img.data.len());
+        }
     }
 
     fn evict_decoders(&mut self) {
@@ -1196,7 +1300,11 @@ pub fn load_png(path: &Path) -> Result<RgbaImage, Box<dyn std::error::Error>> {
     let info = reader.next_frame(&mut buf)?;
     let px = &buf[..info.buffer_size()];
     let data = match info.color_type {
-        png::ColorType::Rgba => px.to_vec(),
+        // Already RGBA: keep the buffer (a 4K still is 33 MB to copy).
+        png::ColorType::Rgba => {
+            buf.truncate(info.buffer_size());
+            buf
+        }
         png::ColorType::Rgb => px.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
         png::ColorType::GrayscaleAlpha => px.chunks_exact(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect(),
         png::ColorType::Grayscale => px.iter().flat_map(|&g| [g, g, g, 255]).collect(),

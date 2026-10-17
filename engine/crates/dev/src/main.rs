@@ -859,6 +859,25 @@ fn seek_bench(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
             println!("drag, quick frames {scrub}: p50 {:.0} ms, p90 {:.0} ms, max {:.0} ms", ms[ms.len() / 2], ms[ms.len() * 9 / 10], ms[ms.len() - 1]);
         }
+        // The app's drag: the playhead crosses 80% of the project in 2 s and each frame
+        // shows wherever it is when the last one is done (into a preview surface, as the
+        // app renders), on a fresh engine.
+        #[cfg(target_os = "macos")]
+        {
+            let mut engine = openrip_playback::PreviewEngine::new(project.clone())?;
+            engine.set_scrubbing(true);
+            let surface = openrip_render::Compositor::output_surface(w, h).ok_or("no surface")?;
+            let (mut ms, t0) = (Vec::new(), Instant::now());
+            while t0.elapsed().as_secs_f64() < 2.0 {
+                let t = openrip_model::Micros(end / 50 + (t0.elapsed().as_secs_f64() / 2.0 * 0.8 * end as f64) as i64);
+                let t1 = Instant::now();
+                engine.render_to_surface(t, &surface)?;
+                ms.push(t1.elapsed().as_secs_f64() * 1e3);
+            }
+            let n = ms.len();
+            ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            println!("real-time drag: {n} frames in 2 s ({:.0}/s), frame p50 {:.0} ms, p90 {:.0} ms, max {:.0} ms", n as f64 / 2.0, ms[n / 2], ms[n * 9 / 10], ms[n - 1]);
+        }
         return Ok(());
     }
     let mut engine = openrip_playback::PreviewEngine::new(project)?;

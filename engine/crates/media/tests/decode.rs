@@ -260,6 +260,44 @@ fn hardware_frames_are_iosurface_backed_yuv() {
 }
 
 #[test]
+fn keyframe_index_lists_each_gop_start() {
+    let Some(dir) = fixtures_dir() else { return };
+    let d = open(&dir.join("h264_bframes.mp4"), HardwareMode::Auto);
+    // A keyframe every 48 frames (index times are decode times here: B-frames put them
+    // two frames early).
+    let keys = d.keyframe_times();
+    assert_eq!(keys.len(), 7);
+    assert!(keys.windows(2).all(|w| w[1] - w[0] == cfr30(48)), "{keys:?}");
+    for t in [Micros(0), cfr30(47), cfr30(48), cfr30(200), cfr30(299)] {
+        assert_eq!(d.keyframe_time(t), keys.iter().rev().find(|k| **k <= t).copied(), "at {t:?}");
+    }
+    // Seeking to an index time can land in the GOP before; the middle of the GOP finds its
+    // keyframe, whose own time maps back to the index time.
+    let mut d = open(&dir.join("h264_bframes.mp4"), HardwareMode::Auto);
+    for (i, w) in keys.windows(2).enumerate() {
+        let f = d.keyframe_at(Micros((w[0].0 + w[1].0) / 2)).unwrap().unwrap();
+        assert_eq!(frame_number(&f), 48 * i as i64);
+        assert_eq!(d.keyframe_time(f.time), Some(w[0]));
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn shrunk_pictures_come_out_smaller() {
+    let Some(dir) = fixtures_dir() else { return };
+    for name in ["h264_bframes.mp4", "hevc.mp4"] {
+        let mut d = VideoDecoder::open(&dir.join(name), &DecoderOptions { shrink_to: 320, ..Default::default() }).unwrap();
+        let f = d.keyframe_at(cfr30(100)).unwrap().unwrap();
+        assert_eq!((f.width(), f.height()), (320, 64), "{name}");
+        // The barcode at half size: frame 96 is the GOP's keyframe.
+        let img = f.to_rgb().unwrap();
+        let n: i64 = (0..10).map(|bit| ((img.pixel(bit * 32 + 16, 32)[0] > 128) as i64) << bit).sum();
+        assert_eq!(n, 96, "{name}");
+        assert_eq!(f.time, cfr30(96), "{name}");
+    }
+}
+
+#[test]
 fn stepping_backward_is_exact_and_mostly_cached() {
     let Some(dir) = fixtures_dir() else { return };
     for c in clips() {

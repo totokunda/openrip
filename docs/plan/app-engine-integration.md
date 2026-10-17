@@ -105,11 +105,47 @@ Done (2026-10-17), measured in the app on the largest local drafts (222, 211 and
 What it took:
 
 - **Opening.** The engine measured every caption by drawing it (9 s); it now only lays it out (23 ms). Each clip's WebGL mask context was made up front (5 s); it's made on first use. Photo thumbnails decode at their tile size (`createImageBitmap` with a resize) and tile from one GPU upload. Every photo thumbnail also moved its clip to the end of the clip list, which re-rendered the whole project and resynced the engine once per photo, and with a hundred photos tripped React's update-depth limit; it no longer reorders anything.
-- **Scrubbing.** While the playhead is dragged the engine shows the nearest decodable frame: the exact one when it's at most 3 frames ahead of where the decoder is, otherwise a decoded frame within half a second, otherwise the keyframe (`PreviewEngine::set_scrubbing`). Main renders the next frame while the last one is delivered.
+- **Scrubbing.** While the playhead is dragged the engine shows the nearest decodable frame: the exact one when it's at most 3 frames ahead of where the decoder is, otherwise a decoded frame within half a second, otherwise the keyframe (`PreviewEngine::set_scrubbing`). Main renders the next frame while the last one is delivered. Since then the pictures a drag needs are got ready ahead of it (below).
 - **Playback.** Clip previews don't draw while the engine does, and they re-render only when the playhead enters or leaves them (`useClipFocusFrame`). The clip previews and timeline clips are memoised, the preview hands each clip the same filter list until the clips or the filters over it change, and components subscribe to the store fields they use rather than the whole store.
 - **Missing media.** A video whose frames never decode (offloaded or deleted media) made its timeline strip re-render itself in a loop, which took most of the renderer during playback and held scrubbing to 4 frames/s. It now redraws once.
 
-The engine-only benchmarks are `openrip-dev seek-bench <draft> [--scrub]` and `pipeline-bench`; with `OPENRIP_TRACE` set, main logs each sync and frame.
+The engine-only benchmarks are `openrip-dev seek-bench <draft> [--scrub]` and `pipeline-bench`; with `OPENRIP_TRACE` set, main logs each sync and frame, and the engine each frame over 30 ms (gather, layers, composite).
+
+### Scrubbing ahead
+
+Done (2026-10-17). Where a scrub frame's time went on the 222-clip draft (one 4K H.264 video with a keyframe every second, and two tracks of full-frame 2160×3840 subtitle PNGs changing every second or so), from `OPENRIP_TRACE`:
+
+- **Engine, 75–150 ms whenever a subtitle changed.** The video's keyframe: ~20 ms of VideoToolbox, almost all latency. Each new still: a PNG decode on the render thread (11–30 ms), then 25–40 ms in the compositor to premultiply and upload all 33 MB of it and shrink it to a 506×900 preview. With nothing new to decode, a frame took ~6 ms.
+- **Delivery, 5–17 ms.** Main hands the window the frame's IOSurface (no pixels are copied) and the preload draws it into the page's canvas. It runs beside the next frame's rendering, so it only caps the rate, at ~80 frames/s; it wasn't the limit, and isn't changed.
+- **Renderer.** No long tasks while dragging.
+
+What changed (`engine/crates/playback/src/scrub.rs`):
+
+- **Stand-ins got ready ahead of the drag.** Each scrub frame tells the engine where the drag is. From its speed over the last 300 ms, it plans the next 300 ms of the drag (1 to 12 s of timeline): each video keyframe and each still the drag will reach, nearest first. Three worker threads get them ready while the render thread draws the current frame; the render thread waits for one a worker already has in hand and does the rest itself. Keyframes decode in parallel (4K keyframes: 21 ms each on one VideoToolbox session, 7 ms each on four).
+- **Stand-ins at the preview's size.** VideoToolbox scales a keyframe as it decodes (`DecoderOptions::shrink_to`, by a whole factor so the long side stays at least the preview's): a 2160×3840 keyframe comes out 540×960, 0.8 MB instead of 12 MB. Stills are box-filtered down the same way (weighted by alpha, clear blocks of four pixels skipped: 6 ms for a 4K subtitle). Uploading a 2 MB stand-in costs next to nothing. Stand-ins have their own memory (96 MB of keyframes, 128 MB of stills) and are only shown while dragging; the frame on release is exact, as before.
+- **Keyframe seeks.** Container index times can be decode times, before the keyframe is shown (B-frames), and seeking to one lands in the GOP before it. Workers seek to the middle of the GOP and file what they decode under its own keyframe.
+- **Only for VideoToolbox's own decoding.** Videos FFmpeg decodes (ProRes, software) give full-size frames, and ProRes, intra-only, would plan every frame; they scrub as before.
+- **Exact frames' stills decode beside their video.** A frame with a video and stills to load, or several stills, decodes the stills on the same workers instead of one after another on the render thread.
+- **A memory budget for stills.** The engine kept every still it had decoded: playing or dragging through the 222-clip draft piles up to 3.4 GB of subtitles (104 of 33 MB) in each engine. Stills now share 512 MB, least recently drawn first out. A PNG that's already RGBA is no longer copied after decoding.
+
+Measured on the 222-clip draft, main's build and this one alternating. The machine was loaded throughout (load average 20–200 from other work). When it was saturated both builds fell to 2–14 frames/s scrubbing and both dropped frames in playback, so the app's numbers are from the runs where it wasn't (13 runs, load 20–90):
+
+| | before | after |
+|---|---|---|
+| scrub in the app (perf step) | 15–18 frames/s, gaps p50 37–86 ms | 41–77 frames/s, gaps p50 12–15 ms |
+| engine during the scrub | 75–150 ms per frame with a new subtitle | 2–10 ms, a few at 30–70 ms |
+| `seek-bench --scrub`, 120-step drag | p50 25 ms, p90 64–76 ms | p50 3–6 ms, p90 14–38 ms |
+| `seek-bench --scrub`, the app's drag in real time | 17–22 frames/s, p50 61–63 ms | 218–383 frames/s, p50 2 ms |
+| `seek-bench --scrub`, peak memory | 3.3 GB | 1.2 GB |
+| seek (click to new frame) | 172–212 ms median | 133–183 ms median |
+| playback | 22.6–24.2 fps, 0–2 gaps over 100 ms | 23.0–24.2 fps, 0–4 gaps over 100 ms |
+| an edit reaching the picture | 55–63 ms | 20–61 ms |
+
+In the calmest runs both builds play at 24.0–24.2 fps with no gap over 100 ms; the gaps above come with load, in both. `pipeline-bench` (playback in the engine alone), run 14 times alternating, shows no difference between them.
+
+`seek-bench --scrub` now also drags in real time: the playhead crosses 80% of the project in 2 s, and each frame renders into a preview surface wherever the playhead is when the last one is done, as in the app.
+
+Left: exact frames still upload 4K stills whole (~25 ms each); premultiplying them off the render thread would take that off seeks and the frame on release.
 
 ## Addon API
 

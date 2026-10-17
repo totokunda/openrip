@@ -34,11 +34,16 @@ pub struct DecoderOptions {
     /// Memory for recently decoded frames (so stepping backward doesn't re-decode a GOP
     /// per frame). 0 disables the cache.
     pub cache_bytes: usize,
+    /// Smaller pictures for stand-ins shown small (scrubbing): when non-zero, pictures are
+    /// shrunk by the largest whole factor that keeps their long side at least this many
+    /// pixels. VideoToolbox scales them as it decodes; only the native VideoToolbox path
+    /// does this, other frames come at the stream's size.
+    pub shrink_to: u32,
 }
 
 impl Default for DecoderOptions {
     fn default() -> Self {
-        DecoderOptions { hardware: HardwareMode::Auto, threads: 0, native_videotoolbox: true, cache_bytes: 384 << 20 }
+        DecoderOptions { hardware: HardwareMode::Auto, threads: 0, native_videotoolbox: true, cache_bytes: 384 << 20, shrink_to: 0 }
     }
 }
 
@@ -124,6 +129,8 @@ pub struct VideoDecoder {
     device: *mut ff::AVBufferRef,
     threads: i32,
     native_videotoolbox: bool,
+    /// How many times smaller pictures come out on each side (see [`DecoderOptions::shrink_to`]).
+    shrink: u32,
     /// Bitstream layout, for H.264/HEVC (to recognise IDR keyframes and disposable pictures).
     nal: Option<nal::Bitstream>,
     backend: Backend,
@@ -207,6 +214,8 @@ impl VideoDecoder {
                 }
             }
             let info_depth = info.bit_depth;
+            let long = (*par).width.max((*par).height).max(1) as u32;
+            let shrink = if opts.shrink_to > 0 { (long / opts.shrink_to).max(1) } else { 1 };
             let extra = if (*par).extradata.is_null() { &[][..] } else { std::slice::from_raw_parts((*par).extradata, (*par).extradata_size as usize) };
             let mut dec = VideoDecoder {
                 input,
@@ -215,6 +224,7 @@ impl VideoDecoder {
                 device,
                 threads: opts.threads as i32,
                 native_videotoolbox: opts.native_videotoolbox,
+                shrink,
                 nal: nal::detect((*par).codec_id, extra),
                 backend: Backend::Ffmpeg { ctx: CodecContext(std::ptr::null_mut()), flush_sent: false },
                 frame: ff::av_frame_alloc(),
@@ -235,7 +245,7 @@ impl VideoDecoder {
                 drop_before: ff::AV_NOPTS_VALUE,
                 last_key: None,
                 cache: FrameCache::new(opts.cache_bytes),
-                frame_bytes: ((*par).width.max(1) as usize * (*par).height.max(1) as usize * 3 / 2) << ((info_depth > 8) as usize),
+                frame_bytes: (((*par).width.max(1) as usize).div_ceil(shrink as usize) * ((*par).height.max(1) as usize).div_ceil(shrink as usize) * 3 / 2) << ((info_depth > 8) as usize),
                 request: Micros::ZERO,
                 stats: DecodeStats::default(),
             };
@@ -256,7 +266,7 @@ impl VideoDecoder {
         if self.hardware && self.native_videotoolbox {
             if let Some(nal::Bitstream { codec, framing: nal::Framing::LengthPrefixed(_), .. }) = self.nal {
                 let par = (*self.input.stream(self.stream)).codecpar;
-                if let Some(vt) = crate::vt::VtDecoder::new(codec, par, self.tb, self.info.bit_depth) {
+                if let Some(vt) = crate::vt::VtDecoder::new(codec, par, self.tb, self.info.bit_depth, self.shrink) {
                     return Ok(Backend::Native(vt));
                 }
             }
@@ -484,6 +494,25 @@ impl VideoDecoder {
                 return None;
             }
             Some(Micros(ff::av_rescale_q((*e).timestamp - self.origin, self.tb, MICROS)))
+        }
+    }
+
+    /// Every keyframe's start in the container's index, in order, as [`Self::keyframe_time`]
+    /// gives them; empty when the container has no index.
+    pub fn keyframe_times(&self) -> Vec<Micros> {
+        if self.origin == ff::AV_NOPTS_VALUE {
+            return Vec::new();
+        }
+        unsafe {
+            let st = self.input.stream(self.stream);
+            let mut out: Vec<Micros> = (0..ff::avformat_index_get_entries_count(st))
+                .filter_map(|i| ff::avformat_index_get_entry(st, i).as_ref())
+                .filter(|e| e.flags() & ff::AVINDEX_KEYFRAME != 0)
+                .map(|e| Micros(ff::av_rescale_q(e.timestamp - self.origin, self.tb, MICROS)))
+                .collect();
+            out.sort_unstable();
+            out.dedup();
+            out
         }
     }
 

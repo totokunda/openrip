@@ -23,7 +23,7 @@ use objc2_core_media::{
 };
 use objc2_core_video::{
     kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey, kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
-    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, CVImageBuffer, CVPixelBuffer,
+    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelBufferHeightKey, kCVPixelBufferWidthKey, CVImageBuffer, CVPixelBuffer,
 };
 use objc2_video_toolbox::{VTDecodeFrameFlags, VTDecodeInfoFlags, VTDecompressionOutputCallbackRecord, VTDecompressionSession};
 
@@ -105,16 +105,20 @@ fn cm_time(value: i64, tb: ff::AVRational) -> CMTime {
 }
 
 impl VtDecoder {
-    /// A session for the stream, or `None` if VideoToolbox can't take it directly.
-    pub(crate) fn new(codec: Codec, par: *const ff::AVCodecParameters, tb: ff::AVRational, bit_depth: u8) -> Option<VtDecoder> {
+    /// A session for the stream, or `None` if VideoToolbox can't take it directly. Its
+    /// pictures come out `shrink` times smaller on each side (sizes rounded up to even).
+    pub(crate) fn new(codec: Codec, par: *const ff::AVCodecParameters, tb: ff::AVRational, bit_depth: u8, shrink: u32) -> Option<VtDecoder> {
         unsafe {
             let extra = std::slice::from_raw_parts((*par).extradata, (*par).extradata_size as usize);
-            Self::with_config(codec, extra, (*par).width, (*par).height, tb, bit_depth)
+            let (w, h) = ((*par).width, (*par).height);
+            let out = (shrink > 1).then(|| [w, h].map(|v| (v.max(1) as u32).div_ceil(shrink).next_multiple_of(2) as i32));
+            Self::with_config(codec, extra, w, h, tb, bit_depth, out.map(|[w, h]| (w, h)))
         }
     }
 
-    /// A session from an avcC/hvcC configuration record.
-    pub(crate) fn with_config(codec: Codec, extra: &[u8], width: i32, height: i32, tb: ff::AVRational, bit_depth: u8) -> Option<VtDecoder> {
+    /// A session from an avcC/hvcC configuration record; `out` sizes its pictures (the
+    /// stream's size if `None`).
+    pub(crate) fn with_config(codec: Codec, extra: &[u8], width: i32, height: i32, tb: ff::AVRational, bit_depth: u8, out: Option<(i32, i32)>) -> Option<VtDecoder> {
         unsafe {
             let (codec_type, atom) = match codec {
                 Codec::H264 => (u32::from_be_bytes(*b"avc1"), "avcC"),
@@ -129,10 +133,17 @@ impl VtDecoder {
             let format = CFRetained::from_raw(NonNull::new_unchecked(format as *mut CMFormatDescription));
             let pixel_format = if bit_depth > 8 { kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange } else { kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange };
             let surface_props = CFDictionary::<CFString, CFType>::from_slices(&[], &[]);
-            let attrs = CFDictionary::<CFString, CFType>::from_slices(
-                &[kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey],
-                &[CFNumber::new_i32(pixel_format as i32).as_ref(), surface_props.as_ref(), CFBoolean::new(true).as_ref()],
-            );
+            let format_num = CFNumber::new_i32(pixel_format as i32);
+            let yes = CFBoolean::new(true);
+            let mut keys = vec![kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey];
+            let mut values: Vec<&CFType> = vec![format_num.as_ref(), surface_props.as_ref(), yes.as_ref()];
+            // A smaller picture than the stream's: VideoToolbox scales as it outputs.
+            let size = out.map(|(w, h)| (CFNumber::new_i32(w), CFNumber::new_i32(h)));
+            if let Some((w, h)) = &size {
+                keys.extend([kCVPixelBufferWidthKey, kCVPixelBufferHeightKey]);
+                values.extend([AsRef::<CFType>::as_ref(w), AsRef::<CFType>::as_ref(h)]);
+            }
+            let attrs = CFDictionary::<CFString, CFType>::from_slices(&keys, &values);
             let shared = Box::new(Shared { state: Mutex::new(State::default()), cond: Condvar::new() });
             let record = VTDecompressionOutputCallbackRecord { decompressionOutputCallback: Some(on_frame), decompressionOutputRefCon: &*shared as *const Shared as *mut c_void };
             let mut session: *mut VTDecompressionSession = std::ptr::null_mut();
@@ -265,7 +276,7 @@ const WARM_UP_AVCC: [u8; 39] = [
 
 /// The first VideoToolbox session in a process costs ~80 ms (later ones ~2 ms); pay it now.
 pub(crate) fn warm_up() {
-    let _ = VtDecoder::with_config(Codec::H264, &WARM_UP_AVCC, 64, 64, ff::AVRational { num: 1, den: 30 }, 8);
+    let _ = VtDecoder::with_config(Codec::H264, &WARM_UP_AVCC, 64, 64, ff::AVRational { num: 1, den: 30 }, 8, None);
 }
 
 impl Drop for VtDecoder {

@@ -23,6 +23,7 @@ pub mod transition;
 pub mod pipeline;
 mod player;
 pub mod preview;
+mod scrub;
 mod server;
 pub mod thumbs;
 mod waveform;
