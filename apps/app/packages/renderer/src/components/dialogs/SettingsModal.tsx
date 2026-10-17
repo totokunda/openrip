@@ -324,9 +324,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span className="flex flex-col gap-1">
                   <span className="text-[11px] font-medium">Use the Rust engine for the preview</span>
                   <span className="text-[10px] text-brand-light/60 font-normal">
-                    Draws video, photos and text with OpenRip's native engine. Shapes, drawings and
-                    masks are still drawn by the app's own renderer, and filters from the Filters panel
-                    don't show yet.
+                    Draws the preview and exports with OpenRip's native engine. Turn it off to use
+                    the app's previous renderer.
                   </span>
                 </span>
               </label>

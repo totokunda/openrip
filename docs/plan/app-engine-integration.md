@@ -57,7 +57,8 @@ Konva stays for everything drawn over the picture: transform handles, masks, dra
    - WebM, VP9/AV1/ProRes, alpha and stills stay on the app's exporter.
    - Checked in the app: a 10 s 1080P export of the standard clip in 2.3 s, H.264 + AAC, 10.04 s long.
    - The resolution now sets the short side for both exporters (1080P portrait is 1080×1920, as in CapCut); it had set the height, so portrait came out 608×1080.
-7. **Remove the old path** once the engine path covers what the old one did: shapes, drawings, masks, filters, effects (some still need calibration sessions).
+7. **The engine by default.** Done (2026-10-16): the setting is on unless the user turned it off, now that the engine draws everything the old preview did (video, photos, text, shapes, drawings, masks, the Filters panel's LUTs, clip adjustments, groups). Checked on a fresh profile: the engine draws from the start, the setting turns it off and on, and a 10 s 1080P export with shapes, drawings, text and adjustments takes 4.2 s.
+8. **Remove the old path**: the clip components' own drawing and decoding, the WebGL filters and masks, the old exporter for what the engine exports, and the media panel's old thumbnails and probe (so a ProRes file needs no playable copy). Keep it until the engine has run as the default for a while.
 
 ## Addon API
 

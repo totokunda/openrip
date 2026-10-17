@@ -54,8 +54,9 @@ export class SettingsModule extends EventEmitter implements AppModule {
       },
     );
 
+    // On unless the user turned it off.
     ipcMain.handle("settings:get-engine-preview", (): boolean => {
-      return this.store.get("useEnginePreview") === true;
+      return this.store.get("useEnginePreview") !== false;
     });
 
     ipcMain.handle("settings:set-engine-preview", (_event, on: boolean): void => {
