@@ -134,6 +134,23 @@ const MULTIPLY: wgpu::BlendState = wgpu::BlendState {
     alpha: wgpu::BlendComponent::OVER,
 };
 
+/// A mask over a layer's own pixels: inside it the layer shows as `inside`, outside as
+/// `outside`, each a straight-alpha colour or (`None`) the layer's own pixels.
+#[derive(Clone, Copy, Debug)]
+pub struct Matte<'a> {
+    /// Coverage in the red channel, stretched over the source.
+    pub mask: &'a RgbaImage,
+    pub inside: Option<[f32; 4]>,
+    pub outside: Option<[f32; 4]>,
+}
+
+impl<'a> Matte<'a> {
+    /// The layer times the mask: clear outside it.
+    pub fn cut(mask: &'a RgbaImage) -> Self {
+        Matte { mask, inside: None, outside: Some([0.0; 4]) }
+    }
+}
+
 /// One image placed on the canvas.
 #[derive(Clone, Debug)]
 pub struct Layer<'a> {
@@ -149,9 +166,9 @@ pub struct Layer<'a> {
     pub opacity: f32,
     /// CapCut's Adjust sliders for this layer, with its exposure tables if known.
     pub adjust: Option<(Adjust, Option<&'a ExposureLuts>)>,
-    /// A cut-out mask over the whole source (in the texture's own axes, stretched to it; any
-    /// channel), multiplied in before placement.
-    pub matte: Option<&'a RgbaImage>,
+    /// Masks over the whole source (in the texture's own axes, stretched to it), applied in
+    /// order before placement.
+    pub mattes: Vec<Matte<'a>>,
     /// Multiplies the canvas under it rather than covering it (a highlighter's strokes).
     pub multiply: bool,
 }
@@ -184,7 +201,7 @@ impl<'a> Layer<'a> {
             flip_v: if sideways { sx < 0.0 } else { sy < 0.0 },
             opacity: 1.0,
             adjust: None,
-            matte: None,
+            mattes: Vec::new(),
             multiply: false,
         }
     }
@@ -396,7 +413,7 @@ impl Compositor {
                 })
             },
             matte: {
-                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("matte"), source: wgpu::ShaderSource::Wgsl(include_str!("filter.wgsl").into()) });
+                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("matte"), source: wgpu::ShaderSource::Wgsl(include_str!("matte.wgsl").into()) });
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("fs_matte"),
                     layout: Some(&yuv_pipeline_layout),
@@ -625,8 +642,8 @@ impl Compositor {
     /// back over the canvas.
     /// One full-texture pass of a filter.wgsl pipeline: `src` and `aux` (bindings 0 and 2)
     /// and four parameters in, `dst` out.
-    fn canvas_pass(&self, enc: &mut wgpu::CommandEncoder, pipeline: &wgpu::RenderPipeline, src: &wgpu::Texture, aux: &wgpu::Texture, dst: &wgpu::Texture, params: [f32; 4]) {
-        let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&params), usage: wgpu::BufferUsages::UNIFORM });
+    fn canvas_pass(&self, enc: &mut wgpu::CommandEncoder, pipeline: &wgpu::RenderPipeline, src: &wgpu::Texture, aux: &wgpu::Texture, dst: &wgpu::Texture, params: &[f32]) {
+        let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(params), usage: wgpu::BufferUsages::UNIFORM });
         let (src_view, aux_view, dst_view) = (src.create_view(&Default::default()), aux.create_view(&Default::default()), dst.create_view(&Default::default()));
         let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -944,22 +961,22 @@ impl Compositor {
                 None => stage,
             };
             let adjusted = layer.adjust.is_some_and(|(a, _)| !a.is_identity());
-            // A cut-out: the clip's pixels times the mask, before placement.
-            let (stage, adjusted) = match layer.matte {
-                Some(m) => {
-                    let mask = self.upload(m);
-                    let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
-                    self.canvas_pass(enc, &self.matte, &stage, &mask, &out, [0.0; 4]);
-                    if matches!(layer.source, Source::Cached(..)) && !adjusted {
-                        keep.push(stage);
-                    } else {
-                        scratch.push(stage);
-                    }
-                    scratch.push(mask);
-                    (out, true)
+            // Cut-outs and masks, before placement.
+            let (mut stage, mut adjusted) = (stage, adjusted);
+            for m in &layer.mattes {
+                let mask = self.upload(m.mask);
+                let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
+                let paint = |p: Option<[f32; 4]>| p.map_or([0.0, 0.0, 0.0, -1.0], |c| [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]]);
+                let params: Vec<f32> = paint(m.inside).into_iter().chain(paint(m.outside)).collect();
+                self.canvas_pass(enc, &self.matte, &stage, &mask, &out, &params);
+                if matches!(layer.source, Source::Cached(..)) && !adjusted {
+                    keep.push(stage);
+                } else {
+                    scratch.push(stage);
                 }
-                None => (stage, adjusted),
-            };
+                scratch.push(mask);
+                (stage, adjusted) = (out, true);
+            }
             // Canvas pixel centre -> stage texture coordinates.
             let (sx, sy) = (dw / tw as f64, dh / th as f64);
             let (s, c) = layer.rotation.to_radians().sin_cos();

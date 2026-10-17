@@ -85,7 +85,7 @@ async function syncNow() {
   try {
     // The engine reads originals (ProRes included) where the app uses proxies or playable
     // copies.
-    const snapshot = await withOriginalMedia(snap.snapshot);
+    const snapshot = withoutMasksWhileEditing(await withOriginalMedia(snap.snapshot));
     const r = await engineSyncProject(snap.projectId, snapshot);
     if (r.ok) {
       useEnginePreviewStore.setState((s) => ({ project: r.project, version: s.version + 1, error: null }));
@@ -114,6 +114,14 @@ async function withOriginalMedia<T>(snapshot: T): Promise<T> {
     if (originals[i] !== a.path) mapped[id] = { ...a, path: originals[i] };
   });
   return { ...(snapshot as any), assets: mapped };
+}
+
+/** While the mask tool is out, clips show unmasked (as the app's own preview does). */
+function withoutMasksWhileEditing<T>(snapshot: T): T {
+  const clips = (snapshot as any)?.timeline?.clips;
+  if (useViewportStore.getState().tool !== "mask" || !Array.isArray(clips)) return snapshot;
+  const s = snapshot as any;
+  return { ...s, timeline: { ...s.timeline, clips: clips.map((c: any) => (c?.masks?.length ? { ...c, masks: [] } : c)) } };
 }
 
 /** Sync soon; edits arriving within `ms` are sent together. */
@@ -145,7 +153,7 @@ export function initEnginePreview() {
     });
   watch(useClipStore.subscribe as any, (s: any) => [s.clips, s.timelines, s.assets]);
   watch(useControlsStore.subscribe as any, (s: any) => [s.fps]);
-  watch(useViewportStore.subscribe as any, (s: any) => [s.aspectRatio]);
+  watch(useViewportStore.subscribe as any, (s: any) => [s.aspectRatio, s.tool === "mask"]);
   watch(useProjectsStore.subscribe as any, (s: any) => [s.activeProjectId, (s as any).projectsLoaded]);
 
   // Playback by the engine: its sound, and its clock moving the playhead. Each run has a

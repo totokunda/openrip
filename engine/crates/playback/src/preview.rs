@@ -107,12 +107,16 @@ pub struct FrameReport {
     pub missing: Vec<(String, String)>,
 }
 
+/// A mask in the stored picture's axes and what it shows inside and outside (a straight
+/// colour, or the clip's own pixels for `None`).
+type Painted = (std::sync::Arc<RgbaImage>, Option<[f32; 4]>, Option<[f32; 4]>);
+
 enum Pixels {
-    /// A still, its cache key, and its mask if the clip has one.
-    Image(std::sync::Arc<RgbaImage>, u64, Option<std::sync::Arc<RgbaImage>>),
-    /// A frame, the clockwise turn that displays it upright (phone video), and its cut-out
-    /// mask if the clip's background is removed.
-    Video(VideoFrame, i32, Option<std::sync::Arc<RgbaImage>>),
+    /// A still, its cache key, and its masks.
+    Image(std::sync::Arc<RgbaImage>, u64, Vec<Painted>),
+    /// A frame, the clockwise turn that displays it upright (phone video), and its masks
+    /// (its cut-out first, if its background is removed).
+    Video(VideoFrame, i32, Vec<Painted>),
     /// Rasterised text, its cache key, and the canvas point its image centre goes to.
     Text(std::sync::Arc<RgbaImage>, u64, [f64; 2]),
     /// A filter track's lookup table and strength, applied to everything below it.
@@ -201,6 +205,10 @@ fn shape_key(shape: &openrip_model::Shape, px: f32, scale: [f32; 2], origin: [f3
     let mut out = std::collections::hash_map::DefaultHasher::new();
     ("shape", h.finish()).hash(&mut out);
     out.finish()
+}
+
+fn painted(mattes: &[Painted]) -> Vec<openrip_render::Matte<'_>> {
+    mattes.iter().map(|(mask, inside, outside)| openrip_render::Matte { mask, inside: *inside, outside: *outside }).collect()
 }
 
 /// An 8-bit mask over an upright `w`×`h` picture, turned into the stored picture's axes
@@ -815,8 +823,8 @@ impl PreviewEngine {
                 self.images.insert(media.path.clone(), std::sync::Arc::new(img));
             }
             let img = self.images[&media.path].clone();
-            let matte = self.masked(seg, (img.width, img.height), 0, None);
-            return Ok(Some(Pixels::Image(img, key_of(&media.path), matte)));
+            let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), None);
+            return Ok(Some(Pixels::Image(img, key_of(&media.path), mattes)));
         }
         let key = seg.id.clone();
         self.await_prefetch(&key);
@@ -845,49 +853,42 @@ impl PreviewEngine {
         let Some(frame) = frame else { return Ok(None) };
         let cutout = media.matte.as_deref().and_then(|dir| self.matte_at(dir, frame.time, orientation));
         let upright = if orientation.rem_euclid(180) == 90 { (frame.height(), frame.width()) } else { (frame.width(), frame.height()) };
-        let matte = self.masked(seg, upright, orientation, cutout);
-        Ok(Some(Pixels::Video(frame, orientation, matte)))
+        let mattes = self.masked(seg, upright, orientation, at, cutout);
+        Ok(Some(Pixels::Video(frame, orientation, mattes)))
     }
 
-    /// The clip's masks over its upright picture of `size`, times its cut-out if it has one,
-    /// in the stored picture's axes (the cut-out alone if it has no masks).
-    fn masked(&mut self, seg: &Segment, size: (u32, u32), orientation: i32, cutout: Option<std::sync::Arc<RgbaImage>>) -> Option<std::sync::Arc<RgbaImage>> {
-        let masks: Vec<&openrip_model::Mask> = self.project.materials.masks.iter().filter(|m| seg.attachments.contains(&m.id)).collect();
-        if masks.is_empty() {
-            return cutout;
-        }
-        // At the cut-out's size, or the picture's up to 2048 pixels on its long side.
-        let sideways = orientation.rem_euclid(180) == 90;
-        let (w, h) = match &cutout {
-            Some(c) if sideways => (c.height, c.width),
-            Some(c) => (c.width, c.height),
-            None => {
-                let k = (2048.0 / size.0.max(size.1) as f64).min(1.0);
-                (((size.0 as f64 * k).round() as u32).max(1), ((size.1 as f64 * k).round() as u32).max(1))
-            }
+    /// The clip's cut-out (if it has one) and masks at `at` (time in its source) over its
+    /// upright picture of `size`, in the stored picture's axes, each with what it shows
+    /// inside and outside.
+    fn masked(&mut self, seg: &Segment, size: (u32, u32), orientation: i32, at: Micros, cutout: Option<std::sync::Arc<RgbaImage>>) -> Vec<Painted> {
+        let mut out: Vec<Painted> = cutout.into_iter().map(|c| (c, None, Some([0.0; 4]))).collect();
+        let masks: Vec<openrip_model::Mask> = self.project.materials.masks.iter().filter(|m| seg.attachments.contains(&m.id)).cloned().collect();
+        // At the picture's size, up to 2048 pixels on its long side.
+        let k = (2048.0 / size.0.max(size.1).max(1) as f64).min(1.0);
+        let (w, h) = (((size.0 as f64 * k).round() as u32).max(1), ((size.1 as f64 * k).round() as u32).max(1));
+        let paint = |p: openrip_model::MaskPaint| match p {
+            openrip_model::MaskPaint::Clip => None,
+            openrip_model::MaskPaint::Color(c) => Some([c.r, c.g, c.b, c.a]),
         };
-        let key = format!("mask:{:x}", key_of((format!("{masks:?}"), w, h, orientation, cutout.as_ref().map(|c| std::sync::Arc::as_ptr(c) as usize))));
         let tick = self.tick;
-        if let Some((m, last)) = self.mattes.get_mut(&key) {
-            *last = tick;
-            return Some(m.clone());
+        for m in &masks {
+            let key = format!("mask:{:x}", key_of((crate::mask::coverage_key(m, at), w, h, orientation)));
+            let image = match self.mattes.get_mut(&key) {
+                Some((img, last)) => {
+                    *last = tick;
+                    img.clone()
+                }
+                // Shapes not drawn yet leave the picture as it is.
+                None => {
+                    let Some(c) = crate::mask::coverage(m, at, w, h) else { continue };
+                    let img = std::sync::Arc::new(turn_to_stored(&c, w, h, orientation));
+                    self.mattes.insert(key, (img.clone(), tick));
+                    img
+                }
+            };
+            out.push((image, paint(m.inside), paint(m.outside)));
         }
-        let mut cover = vec![255u8; (w * h) as usize];
-        for m in masks {
-            // Shapes not drawn yet leave the picture whole.
-            if let Some(c) = crate::mask::coverage(m, w, h) {
-                cover.iter_mut().zip(c).for_each(|(a, b)| *a = ((*a as u16 * b as u16 + 127) / 255) as u8);
-            }
-        }
-        let mut stored = turn_to_stored(&cover, w, h, orientation);
-        if let Some(c) = &cutout {
-            for (v, cut) in stored.data.chunks_exact_mut(4).zip(c.data.chunks_exact(4)) {
-                v.fill(((v[0] as u16 * cut[0] as u16 + 127) / 255) as u8);
-            }
-        }
-        let m = std::sync::Arc::new(stored);
-        self.mattes.insert(key, (m.clone(), tick));
-        Some(m)
+        out
     }
 
     /// The saved background-removal mask for the source frame at `at` (the last one at or
@@ -934,8 +935,8 @@ impl PreviewEngine {
                 // Flips are on screen axes: fold them into the scale signs.
                 let scale = [scale.x * if tr.flip_h { -1.0 } else { 1.0 }, scale.y * if tr.flip_v { -1.0 } else { 1.0 }];
                 let mut layer = match p {
-                    Pixels::Image(i, key, matte) => Layer { matte: matte.as_deref(), ..Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot) },
-                    Pixels::Video(f, orientation, matte) => Layer { matte: matte.as_deref(), ..Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation) },
+                    Pixels::Image(i, key, mattes) => Layer { mattes: painted(mattes), ..Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot) },
+                    Pixels::Video(f, orientation, mattes) => Layer { mattes: painted(mattes), ..Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation) },
                     Pixels::Filter(lut, strength) => Layer {
                         source: Source::Filter(lut, *strength),
                         center: [0.0, 0.0],
@@ -945,7 +946,7 @@ impl PreviewEngine {
                         flip_v: false,
                         opacity: 1.0,
                         adjust: None,
-                        matte: None,
+                        mattes: Vec::new(),
                         multiply: false,
                     },
                     // Twice the canvas, so the image's soft edge is off it.
@@ -958,7 +959,7 @@ impl PreviewEngine {
                         flip_v: false,
                         opacity: *amount,
                         adjust: None,
-                        matte: None,
+                        mattes: Vec::new(),
                         multiply: false,
                     },
                     Pixels::Cover(img, key) => {
@@ -972,11 +973,11 @@ impl PreviewEngine {
                             flip_v: false,
                             opacity: 1.0,
                             adjust: None,
-                        matte: None,
+                        mattes: Vec::new(),
                         multiply: false,
                         }
                     }
-                    Pixels::Blur(px) => Layer { source: Source::Blur(*px), center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None, matte: None, multiply: false },
+                    Pixels::Blur(px) => Layer { source: Source::Blur(*px), center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None, mattes: Vec::new(), multiply: false },
                     Pixels::Shape(layers, at) => {
                         let opacity = seg.opacity.sample(local);
                         return layers
@@ -990,7 +991,7 @@ impl PreviewEngine {
                                 flip_v: tr.flip_v,
                                 opacity,
                                 adjust: None,
-                                matte: None,
+                                mattes: Vec::new(),
                                 multiply: *multiply,
                             })
                             .collect();
@@ -1004,7 +1005,7 @@ impl PreviewEngine {
                         flip_v: tr.flip_v,
                         opacity: 1.0,
                         adjust: None,
-                        matte: None,
+                        mattes: Vec::new(),
                         multiply: false,
                     },
                 };

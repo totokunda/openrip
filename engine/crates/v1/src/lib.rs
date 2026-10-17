@@ -478,8 +478,9 @@ fn convert_clip(
                 attachments.push(mid);
             }
         }
-        if clip.get("masks").and_then(Value::as_array).is_some_and(|m| !m.is_empty()) {
-            bump(&mut report.kept_foreign, "masks (not converted yet)");
+        for m in convert_masks(&id, clip, clock.fps.as_f64(), report) {
+            attachments.push(m.id.clone());
+            materials.masks.push(m);
         }
     }
 
@@ -527,6 +528,104 @@ fn convert_clip(
         volume,
         attachments,
     })
+}
+
+/// The app's masks on a video or image clip (`components/preview/mask`), each keyframe's
+/// shape or lasso held until the next. Shapes and lasso points are in world units from the
+/// clip's top-left, at the scale the clip had when the mask was drawn (the mask's own
+/// `transform`), so they become fractions of the clip's box at that scale. A rectangle turns
+/// about its top-left corner, the other shapes about their centre.
+///
+/// Each side shows the clip or a colour, as the app's WebGL canvas leaves it: the colour
+/// times its opacity, at the opacity squared (it blends the alpha too). Only the first mask
+/// paints outside itself. Crops, and the feather and invert the app stores but doesn't use,
+/// are left out.
+fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) -> Vec<Mask> {
+    let t = clip.get("transform").cloned().unwrap_or(Value::Null);
+    let (cw, ch) = (f(&t, "width", 0.0), f(&t, "height", 0.0));
+    let masks = clip.get("masks").and_then(Value::as_array).cloned().unwrap_or_default();
+    if cw <= 0.0 || ch <= 0.0 {
+        return Vec::new();
+    }
+    // JavaScript's `x || 1`.
+    let or_one = |v: f64| if v == 0.0 || !v.is_finite() { 1.0 } else { v };
+    let paint = |on: bool, color: &str, default: &str, opacity: f64| {
+        if !on {
+            return MaskPaint::Clip;
+        }
+        let c = Rgba::from_hex(&Some(color.to_string()).filter(|c| !c.is_empty()).unwrap_or_else(|| default.into())).unwrap_or(Rgba::BLACK);
+        let o = (opacity / 100.0).clamp(0.0, 1.0) as f32;
+        MaskPaint::Color(Rgba { r: c.r * o, g: c.g * o, b: c.b * o, a: o * o })
+    };
+    let mut out = Vec::new();
+    for (index, m) in masks.iter().enumerate() {
+        let tool = s(m, "tool");
+        if tool != "shape" && tool != "lasso" {
+            continue;
+        }
+        let mt = [m.get("transform"), clip.get("originalTransform"), clip.get("transform")].into_iter().flatten().find(|v| v.is_object()).cloned().unwrap_or(Value::Null);
+        let (bw, bh) = (or_one(f(&mt, "scaleX", 1.0)) * cw, or_one(f(&mt, "scaleY", 1.0)) * ch);
+        let mut frames: Vec<(f64, &Value)> = m.get("keyframes").and_then(Value::as_object).into_iter().flatten().filter_map(|(k, v)| Some((k.parse::<f64>().ok()?, v))).collect();
+        frames.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut keys: Vec<MaskKey> = Vec::new();
+        for (frame, data) in frames {
+            let at = Micros::from_secs_f64(frame / fps);
+            if tool == "lasso" {
+                let Some(pts) = data.get("lassoPoints").and_then(Value::as_array) else {
+                    if data.get("lassoPointsBinPath").is_some() {
+                        bump(&mut report.kept_foreign, "mask lassos saved as binary files (not read yet)");
+                    }
+                    continue;
+                };
+                let points: Vec<[f32; 2]> = pts.iter().filter_map(Value::as_f64).collect::<Vec<_>>().chunks_exact(2).map(|p| [(p[0] / bw) as f32, (p[1] / bh) as f32]).collect();
+                keys.push(MaskKey { at, shape: MaskShape::Polygon { points }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0 });
+                continue;
+            }
+            let Some(b) = data.get("shapeBounds").filter(|b| b.is_object()) else { continue };
+            let (w, h) = (f(b, "width", 0.0) * f(b, "scaleX", 1.0), f(b, "height", 0.0) * f(b, "scaleY", 1.0));
+            let rotation = f(b, "rotation", 0.0);
+            let (x, y) = (f(b, "x", 0.0), f(b, "y", 0.0));
+            let shape_type = s(b, "shapeType");
+            let (cx, cy) = if matches!(shape_type.as_str(), "ellipse" | "polygon" | "star") {
+                (x + w / 2.0, y + h / 2.0)
+            } else {
+                let (sn, cs) = rotation.to_radians().sin_cos();
+                (x + cs * w / 2.0 - sn * h / 2.0, y + sn * w / 2.0 + cs * h / 2.0)
+            };
+            let shape = match shape_type.as_str() {
+                "ellipse" => MaskShape::Ellipse,
+                "polygon" => MaskShape::Triangle,
+                "star" => MaskShape::Star,
+                _ => MaskShape::Rectangle { round_corner: 0.0 },
+            };
+            keys.push(MaskKey {
+                at,
+                shape,
+                center: [(cx / bw * 2.0 - 1.0) as f32, (1.0 - cy / bh * 2.0) as f32],
+                size: [(w / bw) as f32, (h / bh) as f32],
+                rotation: rotation as f32,
+            });
+        }
+        if keys.is_empty() {
+            continue;
+        }
+        // Before the first key the mask takes the first key's shape.
+        let first = keys.remove(0);
+        out.push(Mask {
+            id: MaterialId(format!("{id}-mask{index}")),
+            shape: first.shape,
+            center: first.center,
+            size: first.size,
+            rotation: first.rotation,
+            feather: 0.0,
+            invert: false,
+            inside: paint(m.get("maskColorEnabled").and_then(Value::as_bool).unwrap_or(false), &s(m, "maskColor"), "#ffffff", f(m, "maskOpacity", 100.0)),
+            outside: paint(index == 0 && m.get("backgroundColorEnabled").and_then(Value::as_bool).unwrap_or(false), &s(m, "backgroundColor"), "#000000", f(m, "backgroundOpacity", 100.0)),
+            keys,
+            library: None,
+        });
+    }
+    out
 }
 
 /// A colour from `#rrggbb` with an opacity in percent.
@@ -809,6 +908,36 @@ mod tests {
         assert_eq!(line.geometry, Geometry::Line { points: vec![[5.0, 7.0], [5.0, 27.0]], tension: 0.0, closed: false });
         let stroke = line.stroke.unwrap();
         assert_eq!((stroke.width, stroke.ends, line.blend, line.opacity), (20.0, StrokeEnds::Square, PathBlend::Normal, 0.5));
+    }
+
+    #[test]
+    fn masks_become_fractions_of_the_clip_with_held_keys() {
+        let mut d = doc();
+        let clip = &mut d["timeline"]["clips"][0];
+        clip["masks"] = json!([
+            {"id": "m0", "tool": "shape", "maskColorEnabled": true, "maskColor": "#ffffff", "backgroundColorEnabled": true, "backgroundColor": "#000000", "backgroundOpacity": 50,
+             "transform": {"x": 0, "y": 0, "width": 1066.6666666666667, "height": 600, "scaleX": 1, "scaleY": 1},
+             "keyframes": {
+                "24": {"shapeBounds": {"x": 0, "y": 0, "width": 600, "height": 300, "shapeType": "ellipse"}},
+                "0": {"shapeBounds": {"x": 100, "y": 50, "width": 200, "height": 100, "rotation": 90, "shapeType": "rectangle"}}}},
+            {"id": "m1", "tool": "lasso", "backgroundColorEnabled": true, "keyframes": {"0": {"lassoPoints": [0, 0, 533.3333333333334, 0, 0, 300]}}}
+        ]);
+        let Imported { project, report } = import_v1_json(&d).unwrap();
+        assert!(report.kept_foreign.is_empty(), "{:?}", report.kept_foreign);
+        let (_, v1) = edit::find_segment(&project, "v1").unwrap();
+        assert!(v1.attachments.iter().any(|a| a.0 == "v1-mask0") && v1.attachments.iter().any(|a| a.0 == "v1-mask1"));
+        let m = &project.materials.masks[0];
+        // Turned 90° clockwise about its top-left (100, 50): the centre goes to (50, 150).
+        assert_eq!(m.shape, MaskShape::Rectangle { round_corner: 0.0 });
+        let close = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5;
+        assert!(close(m.center, [-0.90625, 0.5]) && close(m.size, [0.1875, 1.0 / 6.0]), "{m:?}");
+        assert_eq!((m.keys.len(), m.keys[0].at, m.keys[0].shape.clone()), (1, Micros(1_000_000), MaskShape::Ellipse));
+        assert_eq!(m.inside, MaskPaint::Color(Rgba { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }));
+        assert_eq!(m.outside, MaskPaint::Color(Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.25 }));
+        // Only the first mask paints outside itself.
+        let lasso = &project.materials.masks[1];
+        assert_eq!(lasso.shape, MaskShape::Polygon { points: vec![[0.0, 0.0], [0.5, 0.0], [0.0, 0.5]] });
+        assert_eq!((lasso.inside, lasso.outside), (MaskPaint::Clip, MaskPaint::Clip));
     }
 
     #[test]

@@ -73,24 +73,3 @@ fn fs_blur(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     }
     return sum / 2.0;
 }
-
-// A cut-out (CapCut's background removal, from the masks it saved with the draft): the
-// clip's premultiplied pixels times the mask, which covers the whole clip and is sampled
-// bilinearly, stretched to it.
-fn mask_texel(q: vec2<i32>) -> f32 {
-    let d = vec2<i32>(textureDimensions(lut));
-    return textureLoad(lut, clamp(q, vec2<i32>(0), d - vec2<i32>(1)), 0).r;
-}
-
-@fragment
-fn fs_matte(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let px = textureLoad(src, vec2<i32>(floor(pos.xy)), 0);
-    let scale = vec2<f32>(textureDimensions(lut)) / vec2<f32>(textureDimensions(src));
-    let p = pos.xy * scale - vec2<f32>(0.5);
-    let i = floor(p);
-    let f = p - i;
-    let a = vec2<i32>(i);
-    let top = mix(mask_texel(a), mask_texel(a + vec2<i32>(1, 0)), f.x);
-    let bottom = mix(mask_texel(a + vec2<i32>(0, 1)), mask_texel(a + vec2<i32>(1, 1)), f.x);
-    return px * mix(top, bottom, f.y);
-}

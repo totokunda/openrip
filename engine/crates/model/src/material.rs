@@ -308,8 +308,9 @@ pub struct TextShadow {
     pub smoothing: f32,
 }
 
-/// A mask over a clip's own picture (CapCut's video masks): what's inside shows, the rest is
-/// cut out (the other way round when inverted). It moves, turns and scales with the clip.
+/// A mask over a clip's own picture: CapCut's video masks (the clip inside, cut out
+/// outside, or the other way round when inverted) and the app's masks (either side the clip
+/// or a colour). It moves, turns and scales with the clip.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Mask {
     pub id: MaterialId,
@@ -326,8 +327,47 @@ pub struct Mask {
     pub feather: f32,
     #[serde(default)]
     pub invert: bool,
+    #[serde(default = "MaskPaint::clip")]
+    pub inside: MaskPaint,
+    #[serde(default = "MaskPaint::clear")]
+    pub outside: MaskPaint,
+    /// Poses held from a time on (the app's mask keyframes), in order; before the first,
+    /// the shape and place above.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<MaskKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library: Option<LibraryRef>,
+}
+
+/// A mask's shape and place from `at` (time in the clip's source; for stills, in the clip)
+/// until the next key.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MaskKey {
+    pub at: Micros,
+    pub shape: MaskShape,
+    pub center: [f32; 2],
+    pub size: [f32; 2],
+    #[serde(default)]
+    pub rotation: f32,
+}
+
+/// What one side of a mask shows.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskPaint {
+    /// The clip's own pixels.
+    Clip,
+    /// A colour (clear when transparent).
+    Color(Rgba),
+}
+
+impl MaskPaint {
+    pub fn clip() -> Self {
+        MaskPaint::Clip
+    }
+    pub fn clear() -> Self {
+        MaskPaint::Color(Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -335,6 +375,16 @@ pub struct Mask {
 pub enum MaskShape {
     /// Corners rounded by `round_corner` of the shorter half-side.
     Rectangle { round_corner: f32 },
+    /// The ellipse inscribed in the box.
+    Ellipse,
+    /// The app's triangle: apex at the top middle, base along the bottom, all moved up a
+    /// sixth of the height so its centroid is the box's centre.
+    Triangle,
+    /// The app's five-pointed star, stretched to the box, inner points at half its radii.
+    Star,
+    /// A closed polygon (the app's lasso), points in fractions of the picture's width and
+    /// height from its top-left; `center`, `size` and `rotation` don't apply.
+    Polygon { points: Vec<[f32; 2]> },
     /// A shape not drawn yet, by CapCut's name for it (`circle`, `linear`, `heart`, …).
     Other { name: String },
 }

@@ -678,6 +678,9 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         rotation: f(c, "rotation", 0.0) as f32,
                         feather: f(c, "feather", 0.0) as f32,
                         invert: b(c, "invert", false),
+                        inside: MaskPaint::Clip,
+                        outside: MaskPaint::clear(),
+                        keys: Vec::new(),
                         library: Some(library_ref(m)),
                     });
                     true
