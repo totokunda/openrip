@@ -17,6 +17,7 @@ import LineProperties from '../properties/LineProperties'
 import { useDrawingStore } from '@/lib/drawing';
 import { useViewportStore } from '@/lib/viewport';
 import MaskPropertiesPanel from '../properties/mask/MaskPropertiesPanel';
+import AnimationProperties from '../properties/AnimationProperties'
 import FilterProperties from '../properties/FilterProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
 
@@ -73,6 +74,11 @@ const ClipPropertiesPanel:React.FC<PropertiesPanelProps> = ({panelSize}) => {
     return false;
   }, [clip?.type]);
 
+  // In animations and caption styles for text, transitions for video and photos.
+  const hasAnimation = useMemo(() => {
+    return clip?.type === 'text' || clip?.type === 'video' || clip?.type === 'image';
+  }, [clip?.type]);
+
   const hasLine = useMemo(() => {
     if (clip?.type === 'draw' && selectedLineId) return true;
     return false;
@@ -94,8 +100,9 @@ const ClipPropertiesPanel:React.FC<PropertiesPanelProps> = ({panelSize}) => {
     if (hasDuration || hasFilter) tabTotal++;
     if (hasAppearance) tabTotal++;
     if (hasAdjust) tabTotal++;
+    if (hasAnimation) tabTotal++;
     return tabTotal;
-  }, [hasLine, hasMask, hasTransform, hasAudio, hasDuration, hasFilter, hasAppearance, hasAdjust]);
+  }, [hasLine, hasMask, hasTransform, hasAudio, hasDuration, hasFilter, hasAppearance, hasAdjust, hasAnimation]);
 
 
   useEffect(() => {
@@ -143,6 +150,7 @@ const ClipPropertiesPanel:React.FC<PropertiesPanelProps> = ({panelSize}) => {
     if (currentTab === "duration" && (hasDuration || hasFilter)) return "duration";
     if (currentTab === "appearance" && hasAppearance) return "appearance";
     if (currentTab === "adjust" && hasAdjust) return "adjust";
+    if (currentTab === "animation" && hasAnimation) return "animation";
     // If current tab is invalid, return first available tab
     if (hasLine) return "line";
     if (hasTransform) return "transform";
@@ -158,7 +166,7 @@ const ClipPropertiesPanel:React.FC<PropertiesPanelProps> = ({panelSize}) => {
     if (validTab !== selectedTab) {
       setSelectedTab(validTab);
     }
-  }, [clipId, hasLine, hasMask, hasTransform, hasAudio, hasDuration, hasAppearance, hasAdjust, tool]);
+  }, [clipId, hasLine, hasMask, hasTransform, hasAudio, hasDuration, hasAppearance, hasAdjust, hasAnimation, tool]);
 
 
   return (
@@ -175,6 +183,7 @@ const ClipPropertiesPanel:React.FC<PropertiesPanelProps> = ({panelSize}) => {
             {(hasLine) && <TabsTrigger value="line" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Line</TabsTrigger>}
             {(hasText) && <TabsTrigger value="text" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Text</TabsTrigger>}
             {(hasTransform) && <TabsTrigger value="transform" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Transform</TabsTrigger>}
+            {(hasAnimation) && <TabsTrigger value="animation" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Animation</TabsTrigger>}
             {(hasMask) && <TabsTrigger value="mask" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Mask</TabsTrigger>}
             {(hasAudio) && <TabsTrigger value="audio" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Audio</TabsTrigger>}
             {(hasDuration || hasFilter) && <TabsTrigger value="duration" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">
@@ -198,6 +207,9 @@ const ClipPropertiesPanel:React.FC<PropertiesPanelProps> = ({panelSize}) => {
           {(hasTransform) && <TabsContent  value="transform" className="min-w-0 divide-y divide-brand-light/10 m-0">
             <PositionProperties clipId={clipId}  />
             <LayoutProperties clipId={clipId}  />
+          </TabsContent>}
+          {(hasAnimation) && <TabsContent value="animation" className="min-w-0 m-0">
+            <AnimationProperties clipId={clipId} />
           </TabsContent>}
           {(hasMask) && <TabsContent value="mask" className="min-w-0 m-0">
             <MaskPropertiesPanel clipId={clipId} />

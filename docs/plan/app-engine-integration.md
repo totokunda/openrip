@@ -71,7 +71,18 @@ Done (2026-10-16): Projects ▸ Open CapCut Project… lists the drafts CapCut s
 - **How a draft becomes an app project.** The engine imports the draft into its model and writes the app's own project format (`openrip-v1` `to_app_project`, addon `capcutToApp`): tracks in CapCut's stacking order (sound at the bottom), clips the editor knows (video, image, audio, text; effects, filters, stickers and adjustment layers as named filter clips), a box around each text where the engine lays it out, and the draft's exact canvas as the aspect ratio. Media are linked into the project's media folder, as the app's own imports are, and CapCut's cover becomes the project's.
 - **What the engine keeps.** Each clip also carries the CapCut segment it came from, the materials that segment uses, and its own fields as written (`engine` on the clip). When the app sends the project back, the importer rebuilds the segment and applies on top only what the app changed: a move, resize or turn (applied to CapCut's own transform, keyframes included), a trim or retime, opacity, volume, a new text, size or colour (on a copy of the text for that clip). Caption styles, animations, effects, masks, transitions, voice effects, background removal and exact timing stay as CapCut had them. A clip split in the app keeps the payload in both halves; its clip id tells them apart.
 - **Checks.** Every local draft with its media (36) converted to the app's format and back draws exactly the same frames as the draft itself (`openrip-dev app-roundtrip`); the one that didn't had lost CapCut's saved background removal, which the importer now keeps on the app's asset. In the app, a draft opens in about 5 s, plays, and its 56 s export takes 10 s and matches CapCut's own export at 40.7 dB (median, 540×960). Dragging a clip moves it in the engine's picture.
-- **Still CapCut's alone.** The app's panels show only what its clips have (no caption style or effect settings), and stickers and the effects the engine doesn't draw yet stay undrawn, as in any CapCut import.
+- **The panels edit CapCut clips** (2026-10-17). A converted clip also carries the panel fields for what the draft has, and the importer applies a change to any of them on top of the draft's segment:
+  - **Text:** font, bold, italic, underline, alignment, letter case, stroke, shadow and background, with sizes as fractions of the font size, as for the app's own text. A CapCut background keeps its padding and rounding when its colour changes.
+  - **Adjust:** the sliders go on top of CapCut's own adjustments and start at zero.
+  - **Masks:** the app's masks go on top of CapCut's.
+  - **Audio:** fades replace the draft's.
+  - Numbers compare by value (the app writes 3 for 3.0), and a project converted before a field existed treats that field as unchanged.
+- **Animation tab** (2026-10-17), for the app's own clips and CapCut's alike:
+  - **Text:** the In animations the engine draws (Type 1, Type 2, Typewriter) with their duration. Captions with spoken-word timing also get a style: whole text, three words with the spoken one highlighted, or one word at a time.
+  - **Video and photos:** the transition into the next clip on the track (White Flash, White Fade, and Blink when the project has CapCut's image sequence for it), with its duration.
+  - A draft's animation or transition the engine doesn't draw is listed by name and kept until replaced.
+  - These are the ones the local drafts use: In animations 47 times in 22 drafts, caption styles 43 times in 6, transitions 8 times in 2; no draft animates video or photos.
+- **Still CapCut's alone:** effects, filters and stickers from the draft are named bars without settings, and the draft's own adjustments, masks and keyframes aren't shown in the panels. The app's text box doesn't follow a change of font or case, so its handles can be narrower than the text.
 
 ## Speed on large projects
 

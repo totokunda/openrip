@@ -100,6 +100,19 @@ export type Asset = {
   thumbnail?: string;
 }
 
+/**
+ * A text's In animation as the engine draws it ("type_1", "type_2", "typewriter"), or ""
+ * for one from a CapCut draft the engine doesn't draw (kept as CapCut had it).
+ */
+export type ClipAnimationIn = { type: string; duration: number; name?: string };
+
+/**
+ * The transition from a video or photo into the next clip on its track ("white_flash",
+ * "white_fade", "blink"), or "" for a CapCut one the engine doesn't draw. Blink draws the
+ * image sequence CapCut downloaded with it (`resource`).
+ */
+export type ClipTransition = { type: string; duration: number; name?: string; resource?: string | null };
+
 export type VideoClipProps = ClipProps &
   MediaAdjustments & {
     
@@ -115,6 +128,7 @@ export type VideoClipProps = ClipProps &
     fadeOut?: number;
     speed?: number;
     masks: MaskClipProps[];
+    transitionOut?: ClipTransition | null;
   };
 
 export type ImageClipProps = ClipProps &
@@ -127,6 +141,7 @@ export type ImageClipProps = ClipProps &
     mediaHeight?: number;
     mediaAspectRatio?: number; // width / height
     masks: MaskClipProps[];
+    transitionOut?: ClipTransition | null;
   };
 
 export type AudioClipProps = ClipProps & {
@@ -189,6 +204,12 @@ export type TextClipProps = ClipProps & {
   backgroundColor?: string;
   backgroundOpacity?: number;
   backgroundCornerRadius?: number;
+  // Animation
+  animationIn?: ClipAnimationIn | null;
+  /** How a caption that follows the speech pages its words ("none" shows it whole). */
+  captionStyle?: string;
+  /** Whether the text has spoken-word timing (CapCut's auto captions). */
+  spokenWords?: boolean;
 };
 
 export type FilterClipProps = ClipProps & {

@@ -444,6 +444,9 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
     }
     let base = engine.get("base").cloned().unwrap_or(Value::Null);
     let changed = |k: &str| clip.get(k) != base.get(k);
+    // Fields added to the conversion later: a project converted before has no base for them,
+    // and counts as unchanged. Numbers compare by value (the app writes 3 for 3.0).
+    let differs = |k: &str| base.get(k).is_some_and(|was| !same(clip.get(k), Some(was)));
 
     if ["startTick", "endTick", "trimStartTick", "trimEndTick", "speed"].into_iter().any(changed) {
         let (start, end) = (clock.frame(clip, "startTick", "startFrame"), clock.frame(clip, "endTick", "endFrame"));
@@ -462,10 +465,36 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
     if changed("volume") {
         seg.volume = Animated::constant(10f64.powf(f(clip, "volume", 0.0) / 20.0) as f32);
     }
+    if ["fadeIn", "fadeOut"].into_iter().any(differs) {
+        // The app's fades replace the draft's.
+        seg.attachments.retain(|id| !materials.audio_fades.iter().any(|m| &m.id == id));
+        attach_fade(&seg.id.clone(), clip, materials, &mut seg.attachments);
+    }
+    if matches!(ty, "video" | "image") {
+        // The app's adjustments and masks go on top of the draft's own.
+        if app::ADJUST_KEYS.into_iter().any(differs) {
+            attach_adjustments(&seg.id.clone(), clip, materials, &mut seg.attachments);
+        }
+        for m in convert_masks(&seg.id, clip, clock.fps.as_f64(), report) {
+            seg.attachments.push(m.id.clone());
+            materials.masks.push(m);
+        }
+    }
+    if ty == "text" && (differs("animationIn") || differs("captionStyle")) {
+        edit_animations(&mut seg, clip, materials, differs("animationIn"), differs("captionStyle"));
+    }
+    if matches!(ty, "video" | "image") && differs("transitionOut") {
+        seg.attachments.retain(|id| !materials.transitions.iter().any(|m| &m.id == id));
+        if let Some(t) = app_transition(&seg.id, clip) {
+            materials.transitions.retain(|m| m.id != t.id);
+            seg.attachments.push(t.id.clone());
+            materials.transitions.push(t);
+        }
+    }
     if changed("transform") {
         apply_moves(&mut seg, base.get("transform"), clip.get("transform"), world, ty == "text");
     }
-    if ty == "text" && ["text", "fontSize", "color"].into_iter().any(changed) {
+    if ty == "text" && (["text", "fontSize", "color"].into_iter().any(changed) || app::TEXT_STYLE_KEYS.into_iter().any(differs)) {
         edit_text(&mut seg, clip, &base, materials);
     }
     Some((seg, kind))
@@ -534,6 +563,59 @@ fn edit_text(seg: &mut Segment, clip: &Value, base: &Value, materials: &mut Mate
         if let Some(c) = Rgba::from_hex(&s(clip, "color")) {
             t.runs.iter_mut().for_each(|r| r.fill = Rgba { a: r.fill.a, ..c });
         }
+    }
+    let differs = |k: &str| base.get(k).is_some_and(|was| !same(clip.get(k), Some(was)));
+    if differs("textTransform") && !differs("text") {
+        let shown = transform_case(&t.text, &s(clip, "textTransform"));
+        // A case change can change the length (ß → SS): then the runs become one.
+        if shown.chars().count() != t.text.chars().count() {
+            t.runs.truncate(1);
+            if let Some(r) = t.runs.first_mut() {
+                r.range = (0, shown.chars().count() as u32);
+            }
+            t.words.clear();
+        }
+        t.text = shown;
+    }
+    if differs("fontFamily") {
+        let name = s(clip, "fontFamily");
+        if !name.is_empty() {
+            t.runs.iter_mut().for_each(|r| r.font = FontRef { name: name.clone(), path: String::new() });
+        }
+    }
+    if differs("fontWeight") {
+        t.runs.iter_mut().for_each(|r| r.bold = f(clip, "fontWeight", 400.0) >= 700.0);
+    }
+    if differs("fontStyle") {
+        t.runs.iter_mut().for_each(|r| r.italic = s(clip, "fontStyle") == "italic");
+    }
+    if differs("textDecoration") {
+        t.runs.iter_mut().for_each(|r| r.underline = s(clip, "textDecoration") == "underline");
+    }
+    if differs("textAlign") {
+        t.layout.alignment = match s(clip, "textAlign").as_str() {
+            "left" => 0,
+            "right" => 2,
+            _ => 1,
+        };
+    }
+    // Sizes are fractions of the font size, as for the app's own text (`text_effects`).
+    let style = text_effects(clip);
+    if ["strokeEnabled", "stroke", "strokeWidth", "strokeOpacity"].into_iter().any(differs) {
+        t.runs.iter_mut().for_each(|r| r.stroke = style.stroke);
+    }
+    if ["shadowEnabled", "shadowColor", "shadowOpacity", "shadowOffsetX", "shadowOffsetY", "shadowBlur"].into_iter().any(differs) {
+        t.layout.shadow = style.shadow;
+    }
+    if ["backgroundEnabled", "backgroundColor", "backgroundOpacity", "backgroundCornerRadius"].into_iter().any(differs) {
+        t.layout.background = style.background.map(|b| match t.layout.background {
+            // A CapCut background keeps its padding around each line.
+            Some(old) => TextBackground { color: b.color, corner_radius: b.corner_radius, style: b.style, ..old },
+            // A new one gets CapCut's default padding, if the text is CapCut's (it has no
+            // Konva line boxes).
+            None if t.layout.line_height.is_none() => TextBackground { width: 0.14, height: 0.14, ..b },
+            None => b,
+        });
     }
     seg.material = t.id.clone();
     materials.texts.retain(|m| m.id != t.id);
@@ -619,43 +701,22 @@ fn convert_clip(
     let mut volume = Animated::constant(1.0f32);
     if is_av {
         volume = Animated::constant(10f64.powf(f(clip, "volume", 0.0) / 20.0) as f32);
-        let (fade_in, fade_out) = (f(clip, "fadeIn", 0.0), f(clip, "fadeOut", 0.0));
-        if fade_in > 0.0 || fade_out > 0.0 {
-            let mid = MaterialId(format!("{id}-fade"));
-            materials.audio_fades.push(AudioFade {
-                id: mid.clone(),
-                fade_in: Micros::from_secs_f64(fade_in),
-                fade_out: Micros::from_secs_f64(fade_out),
-            });
+        attach_fade(&id, clip, materials, &mut attachments);
+    }
+
+    if ty == "text" {
+        if let Some(a) = app_animation_in(clip) {
+            let mid = MaterialId(format!("{id}-animations"));
+            materials.animations.push(Animations { id: mid.clone(), items: vec![a] });
             attachments.push(mid);
         }
     }
-
-    // Adjustments (video/image): keep v1's own scale under a "v1:" name until the
-    // colour milestone defines a shared adjustment scale.
     if matches!(ty, "video" | "image") {
-        for name in ["brightness", "contrast", "hue", "saturation", "sharpness", "noise", "blur", "vignette"] {
-            let v = f(clip, name, 0.0);
-            if v != 0.0 {
-                let mid = MaterialId(format!("{id}-adj-{name}"));
-                let mut params = BTreeMap::new();
-                params.insert("value".to_string(), v);
-                // The app filters the clip on a canvas of its picture fitted to the world, so
-                // its pixel distances (blur, sharpness, grain) are world units.
-                params.insert("pixel".to_string(), 1.0 / WORLD_H);
-                materials.effects.push(Effect {
-                    id: mid.clone(),
-                    category: EffectCategory::Adjust,
-                    name: name.into(),
-                    params,
-                    builtin: Some(format!("v1:{name}")),
-                    resource: None,
-                    library: None,
-                    text_style: None,
-                });
-                attachments.push(mid);
-            }
+        if let Some(t) = app_transition(&id, clip) {
+            attachments.push(t.id.clone());
+            materials.transitions.push(t);
         }
+        attach_adjustments(&id, clip, materials, &mut attachments);
         for m in convert_masks(&id, clip, clock.fps.as_f64(), report) {
             attachments.push(m.id.clone());
             materials.masks.push(m);
@@ -706,6 +767,101 @@ fn convert_clip(
         volume,
         attachments,
     })
+}
+
+/// The clip's audio fades, as a material it's attached to.
+fn attach_fade(id: &str, clip: &Value, materials: &mut Materials, attachments: &mut Vec<MaterialId>) {
+    let (fade_in, fade_out) = (f(clip, "fadeIn", 0.0), f(clip, "fadeOut", 0.0));
+    if fade_in > 0.0 || fade_out > 0.0 {
+        let mid = MaterialId(format!("{id}-fade"));
+        materials.audio_fades.retain(|m| m.id != mid);
+        materials.audio_fades.push(AudioFade { id: mid.clone(), fade_in: Micros::from_secs_f64(fade_in), fade_out: Micros::from_secs_f64(fade_out) });
+        attachments.push(mid);
+    }
+}
+
+/// The Adjust panel's sliders (video/image), each an effect the clip is attached to. They
+/// keep v1's own scale under a "v1:" name until the colour milestone defines a shared one.
+fn attach_adjustments(id: &str, clip: &Value, materials: &mut Materials, attachments: &mut Vec<MaterialId>) {
+    for name in app::ADJUST_KEYS {
+        let v = f(clip, name, 0.0);
+        if v != 0.0 {
+            let mid = MaterialId(format!("{id}-adj-{name}"));
+            let mut params = BTreeMap::new();
+            params.insert("value".to_string(), v);
+            // The app filters the clip on a canvas of its picture fitted to the world, so
+            // its pixel distances (blur, sharpness, grain) are world units.
+            params.insert("pixel".to_string(), 1.0 / WORLD_H);
+            materials.effects.retain(|m| m.id != mid);
+            materials.effects.push(Effect {
+                id: mid.clone(),
+                category: EffectCategory::Adjust,
+                name: name.into(),
+                params,
+                builtin: Some(format!("v1:{name}")),
+                resource: None,
+                library: None,
+                text_style: None,
+            });
+            attachments.push(mid);
+        }
+    }
+}
+
+/// Whether two of the app's values are the same: numbers by value (3 and 3.0 are), objects
+/// and arrays field by field, the rest exactly.
+fn same(a: Option<&Value>, b: Option<&Value>) -> bool {
+    match (a, b) {
+        (Some(Value::Number(x)), Some(Value::Number(y))) => (x.as_f64().unwrap_or(f64::NAN) - y.as_f64().unwrap_or(f64::NAN)).abs() < 1e-6,
+        (Some(Value::Object(x)), Some(Value::Object(y))) => x.len() == y.len() && x.iter().all(|(k, v)| same(Some(v), y.get(k))),
+        (Some(Value::Array(x)), Some(Value::Array(y))) => x.len() == y.len() && x.iter().zip(y).all(|(v, w)| same(Some(v), Some(w))),
+        _ => a == b,
+    }
+}
+
+/// The Animation tab's In animation, if it's one the engine draws.
+fn app_animation_in(clip: &Value) -> Option<Animation> {
+    let a = clip.get("animationIn").filter(|a| a.is_object())?;
+    let ty = s(a, "type");
+    let duration = Micros::from_secs_f64(f(a, "duration", 0.5).max(0.0));
+    (app::BUILTIN_IN.contains(&ty.as_str()) && duration.0 > 0).then(|| Animation { kind: AnimationKind::In, start: Micros::ZERO, duration, builtin: Some(ty), library: None, resource: None })
+}
+
+/// The Animation tab's caption style, over the whole clip.
+fn app_caption_style(clip: &Value, duration: Micros) -> Option<Animation> {
+    let ty = s(clip, "captionStyle");
+    app::BUILTIN_CAPTION.contains(&ty.as_str()).then(|| Animation { kind: AnimationKind::Caption, start: Micros::ZERO, duration, builtin: Some(ty), library: None, resource: None })
+}
+
+/// The Animation tab's transition into the next clip, if it's one the engine draws.
+fn app_transition(id: &str, clip: &Value) -> Option<Transition> {
+    let t = clip.get("transitionOut").filter(|t| t.is_object())?;
+    let ty = s(t, "type");
+    let duration = Micros::from_secs_f64(f(t, "duration", 0.5).max(0.0));
+    let resource = Some(s(t, "resource")).filter(|r| !r.is_empty());
+    // Blink draws CapCut's own image sequence.
+    let drawable = app::BUILTIN_TRANSITION.contains(&ty.as_str()) && (ty != "blink" || resource.is_some());
+    (drawable && duration.0 > 0).then(|| Transition { id: MaterialId(format!("{id}-transition")), name: s(t, "name"), duration, overlap: false, builtin: Some(ty), library: None, resource })
+}
+
+/// Replace a converted clip's In animation and/or caption style with the app's.
+fn edit_animations(seg: &mut Segment, clip: &Value, materials: &mut Materials, replace_in: bool, replace_caption: bool) {
+    let attached: Vec<MaterialId> = seg.attachments.iter().filter(|id| materials.animations.iter().any(|m| &m.id == *id)).cloned().collect();
+    let mut items: Vec<Animation> = attached.iter().filter_map(|id| materials.animations.iter().find(|m| &m.id == id)).flat_map(|m| m.items.iter().cloned()).collect();
+    items.retain(|a| !(replace_in && a.kind == AnimationKind::In) && !(replace_caption && a.kind == AnimationKind::Caption));
+    if replace_in {
+        items.extend(app_animation_in(clip));
+    }
+    if replace_caption {
+        items.extend(app_caption_style(clip, seg.target.duration));
+    }
+    seg.attachments.retain(|id| !attached.contains(id));
+    if !items.is_empty() {
+        let id = MaterialId(format!("{}-animations", seg.id));
+        materials.animations.retain(|m| m.id != id);
+        materials.animations.push(Animations { id: id.clone(), items });
+        seg.attachments.push(id);
+    }
 }
 
 /// The app's masks on a video or image clip (`components/preview/mask`), each keyframe's
@@ -889,9 +1045,9 @@ fn convert_drawing(id: &MaterialId, clip: &Value, world: &World) -> Shape {
     Shape { id: id.clone(), size: [world.w as f32, world.h as f32], scale: [1.0, 1.0], unit: (1.0 / WORLD_H) as f32, paths }
 }
 
-fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
-    let raw = s(clip, "text");
-    let text = match s(clip, "textTransform").as_str() {
+/// `text` in the case the app's `textTransform` shows it in.
+fn transform_case(raw: &str, transform: &str) -> String {
+    match transform {
         "uppercase" => raw.to_uppercase(),
         "lowercase" => raw.to_lowercase(),
         "capitalize" => raw
@@ -905,12 +1061,22 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
             })
             .collect::<Vec<_>>()
             .join(" "),
-        _ => raw,
-    };
+        _ => raw.to_string(),
+    }
+}
+
+/// A text clip's stroke, shadow and background, with sizes as fractions of its font size.
+struct TextEffects {
+    stroke: Option<Stroke>,
+    shadow: Option<TextShadow>,
+    background: Option<TextBackground>,
+}
+
+fn text_effects(clip: &Value) -> TextEffects {
     let font_size = f(clip, "fontSize", 48.0).max(1.0);
     let rel = |px: f64| (px / font_size) as f32;
     let stroke = b(clip, "strokeEnabled").then(|| Stroke {
-        color: hex(clip, "stroke", Rgba::BLACK),
+        color: hex_alpha(clip, "stroke", "#000000", "strokeOpacity"),
         width: rel(f(clip, "strokeWidth", 2.0)),
     });
     let background = b(clip, "backgroundEnabled").then(|| {
@@ -931,6 +1097,13 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
             smoothing: rel(f(clip, "shadowBlur", 4.0)),
         }
     });
+    TextEffects { stroke, shadow, background }
+}
+
+fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
+    let text = transform_case(&s(clip, "text"), &s(clip, "textTransform"));
+    let font_size = f(clip, "fontSize", 48.0).max(1.0);
+    let TextEffects { stroke, shadow, background } = text_effects(clip);
     let chars = text.chars().count() as u32;
     Text {
         id: id.clone(),

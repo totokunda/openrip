@@ -63,6 +63,44 @@ pub(crate) fn kind_from_name(name: &str) -> Option<TrackKind> {
     })
 }
 
+/// The text panel's style fields (`TextProperties` and its stroke, shadow and background
+/// sections) a converted text clip carries; a change to any of them is applied on import.
+pub(crate) const TEXT_STYLE_KEYS: [&str; 20] = [
+    "fontFamily", "fontWeight", "fontStyle", "textDecoration", "textAlign", "textTransform",
+    "strokeEnabled", "stroke", "strokeWidth", "strokeOpacity",
+    "shadowEnabled", "shadowColor", "shadowOpacity", "shadowOffsetX", "shadowOffsetY", "shadowBlur",
+    "backgroundEnabled", "backgroundColor", "backgroundOpacity", "backgroundCornerRadius",
+];
+
+/// The Adjust panel's sliders; the app's scale, applied on top of CapCut's own adjustments.
+pub(crate) const ADJUST_KEYS: [&str; 8] = ["brightness", "contrast", "hue", "saturation", "sharpness", "noise", "blur", "vignette"];
+
+/// The text animations and transitions the engine draws itself (`playback/src/animation.rs`,
+/// `caption.rs`, `transition.rs`), by the names the app's Animation tab uses.
+pub(crate) const BUILTIN_IN: [&str; 3] = ["type_1", "type_2", "typewriter"];
+pub(crate) const BUILTIN_CAPTION: [&str; 2] = ["caption_word_color", "caption_one_word"];
+pub(crate) const BUILTIN_TRANSITION: [&str; 3] = ["white_flash", "white_fade", "blink"];
+
+/// A clip's animations (all its animation materials' items).
+fn animations<'a>(project: &'a Project, seg: &Segment) -> Vec<&'a Animation> {
+    seg.attachments.iter().filter_map(|id| project.materials.animations.iter().find(|m| &m.id == id)).flat_map(|m| m.items.iter()).collect()
+}
+
+/// A built-in name the engine draws, or "" for one only the source app draws.
+fn builtin_or_empty(builtin: &Option<String>, known: &[&str]) -> String {
+    builtin.clone().filter(|b| known.contains(&b.as_str())).unwrap_or_default()
+}
+
+/// A number as the app writes it: rounded to hundredths.
+fn num(v: f64) -> Value {
+    json!((v * 100.0).round() / 100.0)
+}
+
+/// Opacity as the app's 0–100.
+fn pct(a: f32) -> Value {
+    json!((a.clamp(0.0, 1.0) as f64 * 100.0).round())
+}
+
 fn hex(c: Rgba) -> String {
     let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     format!("#{:02x}{:02x}{:02x}", b(c.r), b(c.g), b(c.b))
@@ -230,6 +268,23 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                 let trim_end = (full - trim_start - (end - start)).max(0);
                 clip.insert("trimStartTick".into(), json!(ticks.tick(trim_start)));
                 clip.insert("trimEndTick".into(), json!(ticks.tick(trim_end)));
+                let fade = seg.attachments.iter().find_map(|id| project.materials.audio_fades.iter().find(|f| &f.id == id));
+                clip.insert("fadeIn".into(), num(fade.map_or(0.0, |f| f.fade_in.as_secs_f64())));
+                clip.insert("fadeOut".into(), num(fade.map_or(0.0, |f| f.fade_out.as_secs_f64())));
+            }
+            if ty != "audio" {
+                // CapCut's own adjustments stay as they are; the app's sliders start at zero.
+                for k in ADJUST_KEYS {
+                    clip.insert(k.into(), json!(0));
+                }
+                // The transition into the next clip on the track.
+                let tr = seg.attachments.iter().find_map(|id| project.materials.transitions.iter().find(|t| &t.id == id));
+                clip.insert(
+                    "transitionOut".into(),
+                    tr.map_or(Value::Null, |t| {
+                        json!({ "type": builtin_or_empty(&t.builtin, &BUILTIN_TRANSITION), "name": t.name, "duration": num(t.duration.as_secs_f64()), "resource": t.resource })
+                    }),
+                );
             }
             if ty != "audio" {
                 let (mw, mh) = (m.width.max(1) as f64, m.height.max(1) as f64);
@@ -264,6 +319,43 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
             clip.insert("color".into(), json!(run.map_or("#ffffff".into(), |r| hex(r.fill))));
             clip.insert("textAlign".into(), json!(match t.layout.alignment { 0 => "left", 2 => "right", _ => "center" }));
             clip.insert("verticalAlign".into(), json!("middle"));
+            clip.insert("textDecoration".into(), json!(if run.is_some_and(|r| r.underline) { "underline" } else { "none" }));
+            clip.insert("textTransform".into(), json!("none"));
+            // Stroke, shadow and background sizes in the app's units: as the app's own text
+            // keeps them, fractions of the font size times its size (`convert_text`).
+            let fs = (em_px * to_world).round().max(1.0);
+            let stroke = run.and_then(|r| r.stroke).filter(|s| s.width > 0.0);
+            clip.insert("strokeEnabled".into(), json!(stroke.is_some()));
+            clip.insert("stroke".into(), json!(hex(stroke.map_or(Rgba::BLACK, |s| s.color))));
+            clip.insert("strokeWidth".into(), num(stroke.map_or(2.0, |s| s.width as f64 * fs)));
+            clip.insert("strokeOpacity".into(), pct(stroke.map_or(1.0, |s| s.color.a)));
+            let shadow = t.layout.shadow.filter(|s| s.color.a > 0.0);
+            let (dist, angle) = shadow.map_or((2.0f64.hypot(2.0) / fs, -45.0f64), |s| (s.distance as f64, s.angle_deg as f64));
+            clip.insert("shadowEnabled".into(), json!(shadow.is_some()));
+            clip.insert("shadowColor".into(), json!(hex(shadow.map_or(Rgba::BLACK, |s| s.color))));
+            clip.insert("shadowOpacity".into(), pct(shadow.map_or(0.75, |s| s.color.a)));
+            // The model's angle has +y up; the app's offsets are y-down.
+            clip.insert("shadowOffsetX".into(), num(dist * fs * angle.to_radians().cos()));
+            clip.insert("shadowOffsetY".into(), num(-dist * fs * angle.to_radians().sin()));
+            clip.insert("shadowBlur".into(), num(shadow.map_or(4.0, |s| s.smoothing as f64 * fs)));
+            let bg = t.layout.background.filter(|b| b.color.a > 0.0);
+            clip.insert("backgroundEnabled".into(), json!(bg.is_some()));
+            clip.insert("backgroundColor".into(), json!(hex(bg.map_or(Rgba::BLACK, |b| b.color))));
+            clip.insert("backgroundOpacity".into(), pct(bg.map_or(1.0, |b| b.color.a)));
+            clip.insert("backgroundCornerRadius".into(), num(bg.filter(|b| b.style == 2).map_or(0.0, |b| b.corner_radius as f64 * fs)));
+            // The Animation tab: the In animation, and for captions that follow the speech,
+            // their style.
+            let anims = animations(project, seg);
+            let anim_in = anims.iter().find(|a| a.kind == AnimationKind::In && a.duration.0 > 0);
+            clip.insert(
+                "animationIn".into(),
+                anim_in.map_or(Value::Null, |a| {
+                    json!({ "type": builtin_or_empty(&a.builtin, &BUILTIN_IN), "name": a.library.as_ref().map(|l| l.name.clone()).unwrap_or_default(), "duration": num(a.duration.as_secs_f64()) })
+                }),
+            );
+            let caption = anims.iter().find(|a| a.kind == AnimationKind::Caption);
+            clip.insert("captionStyle".into(), json!(caption.map_or("none".to_string(), |a| builtin_or_empty(&a.builtin, &BUILTIN_CAPTION))));
+            clip.insert("spokenWords".into(), json!(!t.words.is_empty()));
             let (w, h, c) = match block {
                 Some([l, top, w, h]) => {
                     let c = Vec2::new((l + w / 2.0) / project.canvas.width as f64 * 2.0 - 1.0, 1.0 - (top + h / 2.0) / project.canvas.height as f64 * 2.0);
@@ -295,8 +387,13 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
 
     // What the engine needs to draw it as it was, and the app's fields as written, so an
     // import can tell what the app changed.
-    let base_keys = ["startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "volume", "transform", "text", "fontSize", "color"];
-    let base: Map<String, Value> = base_keys.iter().filter_map(|k| clip.get(*k).map(|v| (k.to_string(), v.clone()))).collect();
+    let base_keys = ["startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color", "animationIn", "captionStyle", "transitionOut"];
+    let base: Map<String, Value> = base_keys
+        .iter()
+        .chain(TEXT_STYLE_KEYS.iter())
+        .chain(ADJUST_KEYS.iter())
+        .filter_map(|k| clip.get(*k).map(|v| (k.to_string(), v.clone())))
+        .collect();
     clip.insert(
         "engine".into(),
         json!({ "track": kind_name(track.kind), "segment": serde_json::to_value(seg).unwrap_or(Value::Null), "materials": segment_materials(project, seg), "base": base }),
@@ -338,8 +435,19 @@ mod tests {
         p.materials.texts.push(Text {
             id: MaterialId("t".into()),
             text: "Hello there".into(),
-            runs: vec![TextRun { range: (0, 11), font: FontRef { name: "Arial".into(), path: String::new() }, size: 15.0, size_unit: SizeUnit::CapCut, fill: Rgba::WHITE, stroke: None, bold: false, italic: false, underline: false }],
-            layout: TextLayout { alignment: 1, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: false, background: None, shadow: None, max_width: None, curve: 0.0, frame: None },
+            runs: vec![TextRun { range: (0, 11), font: FontRef { name: "Arial".into(), path: "/fonts/a.ttf".into() }, size: 15.0, size_unit: SizeUnit::CapCut, fill: Rgba::WHITE, stroke: Some(Stroke { color: Rgba::BLACK, width: 0.08 }), bold: false, italic: false, underline: false }],
+            layout: TextLayout {
+                alignment: 1,
+                letter_spacing: 0.0,
+                line_spacing: 0.0,
+                line_height: None,
+                kerning: false,
+                background: Some(TextBackground { color: Rgba { r: 1.0, g: 0.0, b: 0.0, a: 0.5 }, corner_radius: 0.4, width: 0.14, height: 0.14, style: 2 }),
+                shadow: Some(TextShadow { color: Rgba::BLACK, distance: 0.1, angle_deg: -45.0, smoothing: 0.05 }),
+                max_width: None,
+                curve: 0.0,
+                frame: None,
+            },
             words: Vec::new(),
         });
         let text = Segment { id: "c".into(), material: MaterialId("t".into()), source: None, target: TimeRange::new(Micros(0), Micros(2_000_000)), render_index: 14000, transform: Transform::default(), attachments: Vec::new(), ..video.clone() };
@@ -368,6 +476,148 @@ mod tests {
         // Text above video.
         let (v, t) = (segment(&back, "v").render_index, segment(&back, "c").render_index);
         assert!(t > v);
+        // The caption keeps its own material, styles and all.
+        assert_eq!(segment(&back, "c").material, MaterialId("t".into()));
+        assert_eq!(back.materials.texts.iter().find(|t| t.id.0 == "t"), p.materials.texts.first());
+    }
+
+    /// The app writes whole numbers without a fraction; that isn't an edit.
+    #[test]
+    fn numbers_written_back_as_integers_are_not_edits() {
+        let p = project();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let text: String = serde_json::to_string(&doc).unwrap().replace(".0,", ",").replace(".0}", "}");
+        doc = serde_json::from_str(&text).unwrap();
+        let back = import_v1_json(&doc).unwrap().project;
+        assert_eq!(segment(&back, "c").material, MaterialId("t".into()));
+        assert_eq!(segment(&back, "v").attachments, segment(&p, "v").attachments);
+    }
+
+    #[test]
+    fn text_panel_edits_apply_to_a_converted_caption() {
+        let p = project();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "c").unwrap();
+        let fs = clip["fontSize"].as_f64().unwrap();
+        assert_eq!((clip["strokeEnabled"].as_bool(), clip["shadowEnabled"].as_bool(), clip["backgroundEnabled"].as_bool()), (Some(true), Some(true), Some(true)));
+        clip["strokeWidth"] = json!(fs * 0.2);
+        clip["stroke"] = json!("#00ff00");
+        clip["shadowEnabled"] = json!(false);
+        clip["backgroundColor"] = json!("#0000ff");
+        clip["fontFamily"] = json!("Georgia");
+        clip["fontWeight"] = json!(700);
+        clip["textAlign"] = json!("left");
+        clip["textTransform"] = json!("uppercase");
+        let back = import_v1_json(&doc).unwrap().project;
+        let t = back.materials.texts.iter().find(|t| t.id == segment(&back, "c").material).unwrap();
+        let run = &t.runs[0];
+        let stroke = run.stroke.unwrap();
+        assert!((stroke.width - 0.2).abs() < 1e-4 && stroke.color.g == 1.0, "{stroke:?}");
+        assert_eq!((run.font.name.as_str(), run.font.path.as_str(), run.bold), ("Georgia", "", true));
+        assert_eq!((t.layout.alignment, t.text.as_str()), (0, "HELLO THERE"));
+        assert!(t.layout.shadow.is_none());
+        // The background takes the new colour and keeps CapCut's padding and rounding.
+        let bg = t.layout.background.unwrap();
+        assert_eq!((bg.color.b, bg.color.a, bg.width, bg.style), (1.0, 0.5, 0.14, 2));
+        assert!((bg.corner_radius - 0.4).abs() < 0.05, "{bg:?}");
+    }
+
+    /// The project with a typing animation and a caption style on the caption, and a
+    /// transition at the end of the video.
+    fn animated() -> Project {
+        let mut p = project();
+        let lib = |name: &str| Some(LibraryRef { app: "capcut".into(), resource_id: "1".into(), name: name.into(), category: String::new() });
+        p.materials.animations.push(Animations {
+            id: MaterialId("an".into()),
+            items: vec![
+                Animation { kind: AnimationKind::In, start: Micros(0), duration: Micros(1_000_000), builtin: Some("type_2".into()), library: lib("Type 2"), resource: Some("/cache/t2".into()) },
+                Animation { kind: AnimationKind::Caption, start: Micros(0), duration: Micros(2_000_000), builtin: Some("caption_word_color".into()), library: None, resource: None },
+            ],
+        });
+        p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: "White Flash".into(), duration: Micros(500_000), overlap: false, builtin: Some("white_flash".into()), library: None, resource: None });
+        for t in &mut p.tracks {
+            for s in &mut t.segments {
+                s.attachments.push(MaterialId(if s.id == "c" { "an" } else { "tr" }.into()));
+            }
+        }
+        p
+    }
+
+    #[test]
+    fn animations_and_transitions_show_and_survive_unedited() {
+        let p = animated();
+        let doc = to_app_project(&p, &mut |_| None);
+        let clips = doc["timeline"]["clips"].as_array().unwrap();
+        let c = clips.iter().find(|c| c["clipId"] == "c").unwrap();
+        assert_eq!(c["animationIn"], json!({"type": "type_2", "name": "Type 2", "duration": 1.0}));
+        assert_eq!(c["captionStyle"], json!("caption_word_color"));
+        let v = clips.iter().find(|c| c["clipId"] == "v").unwrap();
+        assert_eq!((v["transitionOut"]["type"].as_str(), v["transitionOut"]["duration"].as_f64()), (Some("white_flash"), Some(0.5)));
+        let back = import_v1_json(&doc).unwrap().project;
+        assert_eq!(segment(&back, "c").attachments, segment(&p, "c").attachments);
+        assert_eq!(segment(&back, "v").attachments, segment(&p, "v").attachments);
+    }
+
+    #[test]
+    fn animation_tab_edits_replace_the_draft_ones() {
+        let p = animated();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        for clip in doc["timeline"]["clips"].as_array_mut().unwrap() {
+            if clip["clipId"] == "c" {
+                clip["animationIn"] = json!({"type": "typewriter", "duration": 0.8});
+                clip["captionStyle"] = json!("caption_one_word");
+            } else if clip["clipId"] == "v" {
+                clip["transitionOut"] = Value::Null;
+            }
+        }
+        let back = import_v1_json(&doc).unwrap().project;
+        let items: Vec<&Animation> = animations(&back, segment(&back, "c"));
+        assert_eq!(items.len(), 2);
+        let a_in = items.iter().find(|a| a.kind == AnimationKind::In).unwrap();
+        assert_eq!((a_in.builtin.as_deref(), a_in.duration), (Some("typewriter"), Micros(800_000)));
+        let cap = items.iter().find(|a| a.kind == AnimationKind::Caption).unwrap();
+        assert_eq!((cap.builtin.as_deref(), cap.duration), (Some("caption_one_word"), Micros(2_000_000)));
+        assert!(!segment(&back, "v").attachments.iter().any(|id| back.materials.transitions.iter().any(|t| &t.id == id)));
+        // The draft's effect stays on the video.
+        assert!(segment(&back, "v").attachments.contains(&MaterialId("fx".into())));
+    }
+
+    #[test]
+    fn the_apps_own_clips_get_animations_and_transitions() {
+        let p = project();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        for clip in doc["timeline"]["clips"].as_array_mut().unwrap() {
+            clip.as_object_mut().unwrap().remove("engine");
+            if clip["type"] == "text" {
+                clip["animationIn"] = json!({"type": "type_1", "duration": 0.6});
+            } else {
+                clip["transitionOut"] = json!({"type": "white_fade", "duration": 1});
+            }
+        }
+        let back = import_v1_json(&doc).unwrap().project;
+        let text = back.tracks.iter().flat_map(|t| &t.segments).find(|s| back.materials.texts.iter().any(|t| t.id == s.material)).unwrap();
+        let a = animations(&back, text);
+        assert_eq!((a.len(), a[0].builtin.as_deref(), a[0].duration), (1, Some("type_1"), Micros(600_000)));
+        let video = back.tracks.iter().flat_map(|t| &t.segments).find(|s| back.materials.media.iter().any(|m| m.id == s.material)).unwrap();
+        let tr = back.materials.transitions.iter().find(|t| video.attachments.contains(&t.id)).unwrap();
+        assert_eq!((tr.builtin.as_deref(), tr.duration), (Some("white_fade"), Micros(1_000_000)));
+    }
+
+    #[test]
+    fn adjust_and_audio_panel_edits_apply_to_a_converted_video() {
+        let p = project();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "v").unwrap();
+        clip["brightness"] = json!(25);
+        clip["fadeIn"] = json!(0.5);
+        let back = import_v1_json(&doc).unwrap().project;
+        let v = segment(&back, "v");
+        // The draft's effect stays, the app's adjustment and fade come on top.
+        assert!(v.attachments.contains(&MaterialId("fx".into())));
+        let adj = back.materials.effects.iter().find(|e| v.attachments.contains(&e.id) && e.builtin.as_deref() == Some("v1:brightness")).unwrap();
+        assert_eq!(adj.params["value"], 25.0);
+        let fade = back.materials.audio_fades.iter().find(|f| v.attachments.contains(&f.id)).unwrap();
+        assert_eq!(fade.fade_in, Micros(500_000));
     }
 
     #[test]

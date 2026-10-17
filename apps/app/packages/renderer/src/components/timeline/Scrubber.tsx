@@ -49,6 +49,8 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
     const progress = (centerX - startPadding) / stageWidth;
     const [startFrame, endFrame] = timelineDuration;
     const framePosition = startFrame + progress * (endFrame - startFrame);
+    // Release snaps to this frame: a click without a move would otherwise snap to frame 0.
+    setCurrentFrame(Math.round(framePosition));
     setFocusFrame(Math.round(framePosition));
     setFocusAnchorRatio(Math.max(0, Math.min(1, progress)));
   };
