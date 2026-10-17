@@ -108,8 +108,8 @@ pub struct FrameReport {
 }
 
 enum Pixels {
-    /// A still and its cache key.
-    Image(std::sync::Arc<RgbaImage>, u64),
+    /// A still, its cache key, and its mask if the clip has one.
+    Image(std::sync::Arc<RgbaImage>, u64, Option<std::sync::Arc<RgbaImage>>),
     /// A frame, the clockwise turn that displays it upright (phone video), and its cut-out
     /// mask if the clip's background is removed.
     Video(VideoFrame, i32, Option<std::sync::Arc<RgbaImage>>),
@@ -201,6 +201,25 @@ fn shape_key(shape: &openrip_model::Shape, px: f32, scale: [f32; 2], origin: [f3
     let mut out = std::collections::hash_map::DefaultHasher::new();
     ("shape", h.finish()).hash(&mut out);
     out.finish()
+}
+
+/// An 8-bit mask over an upright `w`×`h` picture, turned into the stored picture's axes
+/// (undoing the clockwise turn that displays it upright), as an RGBA image.
+fn turn_to_stored(upright: &[u8], w: u32, h: u32, orientation: i32) -> RgbaImage {
+    let (sw, sh) = if orientation.rem_euclid(180) == 90 { (h, w) } else { (w, h) };
+    let mut data = vec![0u8; (sw * sh * 4) as usize];
+    for y in 0..sh {
+        for x in 0..sw {
+            let (ux, uy) = match orientation.rem_euclid(360) {
+                90 => (sh - 1 - y, x),
+                180 => (sw - 1 - x, sh - 1 - y),
+                270 => (y, sw - 1 - x),
+                _ => (x, y),
+            };
+            data[((y * sw + x) * 4) as usize..][..4].fill(upright[(uy * w + ux) as usize]);
+        }
+    }
+    RgbaImage { width: sw, height: sh, data }
 }
 
 fn key_of(v: impl std::hash::Hash) -> u64 {
@@ -795,7 +814,9 @@ impl PreviewEngine {
                 let img = load_still(Path::new(&media.path)).map_err(|e| fail(&e))?;
                 self.images.insert(media.path.clone(), std::sync::Arc::new(img));
             }
-            return Ok(Some(Pixels::Image(self.images[&media.path].clone(), key_of(&media.path))));
+            let img = self.images[&media.path].clone();
+            let matte = self.masked(seg, (img.width, img.height), 0, None);
+            return Ok(Some(Pixels::Image(img, key_of(&media.path), matte)));
         }
         let key = seg.id.clone();
         self.await_prefetch(&key);
@@ -822,8 +843,51 @@ impl PreviewEngine {
             );
         }
         let Some(frame) = frame else { return Ok(None) };
-        let matte = media.matte.as_deref().and_then(|dir| self.matte_at(dir, frame.time, orientation));
+        let cutout = media.matte.as_deref().and_then(|dir| self.matte_at(dir, frame.time, orientation));
+        let upright = if orientation.rem_euclid(180) == 90 { (frame.height(), frame.width()) } else { (frame.width(), frame.height()) };
+        let matte = self.masked(seg, upright, orientation, cutout);
         Ok(Some(Pixels::Video(frame, orientation, matte)))
+    }
+
+    /// The clip's masks over its upright picture of `size`, times its cut-out if it has one,
+    /// in the stored picture's axes (the cut-out alone if it has no masks).
+    fn masked(&mut self, seg: &Segment, size: (u32, u32), orientation: i32, cutout: Option<std::sync::Arc<RgbaImage>>) -> Option<std::sync::Arc<RgbaImage>> {
+        let masks: Vec<&openrip_model::Mask> = self.project.materials.masks.iter().filter(|m| seg.attachments.contains(&m.id)).collect();
+        if masks.is_empty() {
+            return cutout;
+        }
+        // At the cut-out's size, or the picture's up to 2048 pixels on its long side.
+        let sideways = orientation.rem_euclid(180) == 90;
+        let (w, h) = match &cutout {
+            Some(c) if sideways => (c.height, c.width),
+            Some(c) => (c.width, c.height),
+            None => {
+                let k = (2048.0 / size.0.max(size.1) as f64).min(1.0);
+                (((size.0 as f64 * k).round() as u32).max(1), ((size.1 as f64 * k).round() as u32).max(1))
+            }
+        };
+        let key = format!("mask:{:x}", key_of((format!("{masks:?}"), w, h, orientation, cutout.as_ref().map(|c| std::sync::Arc::as_ptr(c) as usize))));
+        let tick = self.tick;
+        if let Some((m, last)) = self.mattes.get_mut(&key) {
+            *last = tick;
+            return Some(m.clone());
+        }
+        let mut cover = vec![255u8; (w * h) as usize];
+        for m in masks {
+            // Shapes not drawn yet leave the picture whole.
+            if let Some(c) = crate::mask::coverage(m, w, h) {
+                cover.iter_mut().zip(c).for_each(|(a, b)| *a = ((*a as u16 * b as u16 + 127) / 255) as u8);
+            }
+        }
+        let mut stored = turn_to_stored(&cover, w, h, orientation);
+        if let Some(c) = &cutout {
+            for (v, cut) in stored.data.chunks_exact_mut(4).zip(c.data.chunks_exact(4)) {
+                v.fill(((v[0] as u16 * cut[0] as u16 + 127) / 255) as u8);
+            }
+        }
+        let m = std::sync::Arc::new(stored);
+        self.mattes.insert(key, (m.clone(), tick));
+        Some(m)
     }
 
     /// The saved background-removal mask for the source frame at `at` (the last one at or
@@ -848,22 +912,7 @@ impl PreviewEngine {
         if raw.len() < (w * h) as usize {
             return None;
         }
-        // Upright → stored: undo the clockwise turn that displays the picture upright.
-        let (sw, sh) = if orientation.rem_euclid(180) == 90 { (h, w) } else { (w, h) };
-        let mut data = vec![0u8; (sw * sh * 4) as usize];
-        for y in 0..sh {
-            for x in 0..sw {
-                let (ux, uy) = match orientation.rem_euclid(360) {
-                    90 => (sh - 1 - y, x),
-                    180 => (sw - 1 - x, sh - 1 - y),
-                    270 => (y, sw - 1 - x),
-                    _ => (x, y),
-                };
-                let v = raw[(uy * w + ux) as usize];
-                data[((y * sw + x) * 4) as usize..][..4].fill(v);
-            }
-        }
-        let m = std::sync::Arc::new(RgbaImage { width: sw, height: sh, data });
+        let m = std::sync::Arc::new(turn_to_stored(&raw[..(w * h) as usize], w, h, orientation));
         self.mattes.insert(key, (m.clone(), tick));
         Some(m)
     }
@@ -885,7 +934,7 @@ impl PreviewEngine {
                 // Flips are on screen axes: fold them into the scale signs.
                 let scale = [scale.x * if tr.flip_h { -1.0 } else { 1.0 }, scale.y * if tr.flip_v { -1.0 } else { 1.0 }];
                 let mut layer = match p {
-                    Pixels::Image(i, key) => Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot),
+                    Pixels::Image(i, key, matte) => Layer { matte: matte.as_deref(), ..Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot) },
                     Pixels::Video(f, orientation, matte) => Layer { matte: matte.as_deref(), ..Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation) },
                     Pixels::Filter(lut, strength) => Layer {
                         source: Source::Filter(lut, *strength),

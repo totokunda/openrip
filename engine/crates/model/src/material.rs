@@ -28,6 +28,8 @@ pub struct Materials {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shapes: Vec<Shape>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<Mask>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub speeds: Vec<Speed>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub canvas_fills: Vec<CanvasFill>,
@@ -57,6 +59,7 @@ pub enum MaterialRef<'a> {
     Media(&'a Media),
     Text(&'a Text),
     Shape(&'a Shape),
+    Mask(&'a Mask),
     Speed(&'a Speed),
     CanvasFill(&'a CanvasFill),
     AudioFade(&'a AudioFade),
@@ -82,6 +85,7 @@ impl Materials {
         find!(media, Media);
         find!(texts, Text);
         find!(shapes, Shape);
+        find!(masks, Mask);
         find!(speeds, Speed);
         find!(canvas_fills, CanvasFill);
         find!(audio_fades, AudioFade);
@@ -104,6 +108,7 @@ impl Materials {
         self.media.len()
             + self.texts.len()
             + self.shapes.len()
+            + self.masks.len()
             + self.speeds.len()
             + self.canvas_fills.len()
             + self.audio_fades.len()
@@ -301,6 +306,37 @@ pub struct TextShadow {
     pub angle_deg: f32,
     /// Blur radius as a fraction of the font size.
     pub smoothing: f32,
+}
+
+/// A mask over a clip's own picture (CapCut's video masks): what's inside shows, the rest is
+/// cut out (the other way round when inverted). It moves, turns and scales with the clip.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Mask {
+    pub id: MaterialId,
+    pub shape: MaskShape,
+    /// Centre in the picture, in half-widths and half-heights from its middle (+y up).
+    pub center: [f32; 2],
+    /// Width and height as fractions of the picture's.
+    pub size: [f32; 2],
+    /// Degrees, clockwise.
+    #[serde(default)]
+    pub rotation: f32,
+    /// CapCut's feather, 0 to 1.
+    #[serde(default)]
+    pub feather: f32,
+    #[serde(default)]
+    pub invert: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<LibraryRef>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum MaskShape {
+    /// Corners rounded by `round_corner` of the shorter half-side.
+    Rectangle { round_corner: f32 },
+    /// A shape not drawn yet, by CapCut's name for it (`circle`, `linear`, `heart`, …).
+    Other { name: String },
 }
 
 /// A vector graphic: shapes and drawings. Drawn in a box of its own units, `scale`d on each
@@ -742,6 +778,7 @@ pub enum AnyMaterial {
     Media(Media),
     Text(Text),
     Shape(Shape),
+    Mask(Mask),
     Speed(Speed),
     CanvasFill(CanvasFill),
     AudioFade(AudioFade),
@@ -761,6 +798,7 @@ impl AnyMaterial {
             AnyMaterial::Media(m) => &m.id,
             AnyMaterial::Text(m) => &m.id,
             AnyMaterial::Shape(m) => &m.id,
+            AnyMaterial::Mask(m) => &m.id,
             AnyMaterial::Speed(m) => &m.id,
             AnyMaterial::CanvasFill(m) => &m.id,
             AnyMaterial::AudioFade(m) => &m.id,
@@ -787,6 +825,7 @@ impl Materials {
             AnyMaterial::Media(m) => put(&mut self.media, m, index),
             AnyMaterial::Text(m) => put(&mut self.texts, m, index),
             AnyMaterial::Shape(m) => put(&mut self.shapes, m, index),
+            AnyMaterial::Mask(m) => put(&mut self.masks, m, index),
             AnyMaterial::Speed(m) => put(&mut self.speeds, m, index),
             AnyMaterial::CanvasFill(m) => put(&mut self.canvas_fills, m, index),
             AnyMaterial::AudioFade(m) => put(&mut self.audio_fades, m, index),
@@ -813,6 +852,7 @@ impl Materials {
         take!(media, Media);
         take!(texts, Text);
         take!(shapes, Shape);
+        take!(masks, Mask);
         take!(speeds, Speed);
         take!(canvas_fills, CanvasFill);
         take!(audio_fades, AudioFade);

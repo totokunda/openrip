@@ -662,6 +662,26 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                     out.animations.push(Animations { id, items });
                     true
                 }
+                // Video masks: the shape's centre, size and rotation in the clip's picture.
+                "common_mask" => {
+                    let c = m.get("config").unwrap_or(&Value::Null);
+                    let shape = match s(m, "resource_type").as_str() {
+                        "rectangle" => MaskShape::Rectangle { round_corner: f(c, "roundCorner", 0.0) as f32 },
+                        other => MaskShape::Other { name: other.to_string() },
+                    };
+                    bump(&mut report.library_items, "mask".to_string());
+                    out.masks.push(Mask {
+                        id,
+                        shape,
+                        center: [f(c, "centerX", 0.0) as f32, f(c, "centerY", 0.0) as f32],
+                        size: [f(c, "width", 1.0) as f32, f(c, "height", 1.0) as f32],
+                        rotation: f(c, "rotation", 0.0) as f32,
+                        feather: f(c, "feather", 0.0) as f32,
+                        invert: b(c, "invert", false),
+                        library: Some(library_ref(m)),
+                    });
+                    true
+                }
                 "transitions" => {
                     let lib = library_ref(m);
                     bump(&mut report.library_items, "transition".to_string());
@@ -1187,6 +1207,20 @@ mod tests {
         assert_eq!((seg.material.0.as_str(), seg.attachments.contains(&MaterialId::from("A1"))), ("T1", true));
         assert_eq!(project.materials.animations[0].items[0].builtin.as_deref(), Some("caption_word_color"));
         assert_eq!(project.materials.texts[0].words.len(), 1);
+    }
+
+    #[test]
+    fn imports_a_video_mask_and_attaches_it() {
+        let mut d = sample_draft();
+        d["materials"]["common_mask"] = json!([{"id": "M1", "type": "mask", "resource_type": "rectangle", "resource_id": "7374021450748924432", "name": "Rectangle",
+            "config": {"centerX": 0.1, "centerY": 0.2, "width": 0.5, "height": 0.28, "rotation": 15.0, "feather": 0.3, "roundCorner": 0.4, "invert": true}}]);
+        d["tracks"][0]["segments"][0]["extra_material_refs"] = json!(["M1"]);
+        let Imported { project, report } = import_draft_json(&d, "hint").unwrap();
+        let m = &project.materials.masks[0];
+        assert_eq!(m.shape, MaskShape::Rectangle { round_corner: 0.4 });
+        assert_eq!((m.center, m.size, m.rotation, m.feather, m.invert), ([0.1, 0.2], [0.5, 0.28], 15.0, 0.3, true));
+        assert!(project.tracks[0].segments[0].attachments.contains(&MaterialId::from("M1")));
+        assert_eq!(report.mapped.get("common_mask"), Some(&1));
     }
 
     #[test]

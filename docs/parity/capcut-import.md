@@ -36,7 +36,7 @@ The importer only reads CapCut's files; it never writes to CapCut's data folder.
 | `beats` | 191 | Beat markers; P2 DSP feature. |
 | `text_templates` | 43 | Library text templates: placeholder plus base text. |
 | `realtime_denoises`, `smart_crops`, `vocal_beautifys` | 29 / 10 / 5 | AI features; unsupported by design. |
-| `audio_effects`, `stickers`, `time_marks`, `common_mask`, `drafts` | 8 / 4 / 4 / 2 / 2 | Map as their features land (masks first). |
+| `stickers`, `time_marks`, `drafts` | 4 / 4 / 2 | Map as their features land. `audio_effects` (voice effects) and `common_mask` (video masks, [masks.md](masks.md)) are mapped now. |
 
 **Library items** (CapCut-only assets we can't ship; need built-in equivalents or placeholders): text effects 185, text shapes 122, animations 2,731, text templates 43, transitions 8, stickers 4, filters 3, a few video effects.
 
