@@ -21,6 +21,13 @@ openrip-audio.workspace = true
 openrip-render.workspace = true
 openrip-export.workspace = true
 serde_json.workspace = true
+# Only to switch FFmpeg to static linking (see the feature below).
+ffmpeg-sys-next = { version = "9.0.1", default-features = false, optional = true }
+
+[features]
+# Link FFmpeg statically from FFMPEG_DIR (engine/scripts/build-ffmpeg.sh), so the addon
+# needs no FFmpeg installed. The app's builds use it (apps/app/scripts/build-engine.mjs).
+static-ffmpeg = ["dep:ffmpeg-sys-next", "ffmpeg-sys-next/static"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }

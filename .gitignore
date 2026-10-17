@@ -161,3 +161,6 @@ packages/renderer/public/filters
 
 # The Rust engine addon, built by apps/app/scripts/build-engine.mjs
 apps/app/native/
+
+# FFmpeg built for the engine addon (engine/scripts/build-ffmpeg.sh)
+engine/.ffmpeg/

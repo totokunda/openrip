@@ -1185,6 +1185,7 @@ dependencies = [
 name = "openrip-dev"
 version = "0.1.0"
 dependencies = [
+ "ffmpeg-sys-next",
  "openrip-audio",
  "openrip-capcut",
  "openrip-export",
@@ -1239,6 +1240,7 @@ dependencies = [
 name = "openrip-node"
 version = "0.1.0"
 dependencies = [
+ "ffmpeg-sys-next",
  "napi",
  "napi-build",
  "napi-derive",
