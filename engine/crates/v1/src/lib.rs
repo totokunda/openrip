@@ -268,7 +268,21 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
         });
     }
 
-    for clip in timeline.get("clips").and_then(Value::as_array).into_iter().flatten() {
+    // Grouped clips draw where their group sits, the group's first child on top, and its
+    // track hides or mutes them (`lib/clipOrdering.ts`): each child gets a track of its own
+    // just above the group's.
+    let clips_json: Vec<&Value> = timeline.get("clips").and_then(Value::as_array).into_iter().flatten().collect();
+    let mut grouped: BTreeMap<String, (String, usize, usize)> = BTreeMap::new(); // child → (group track, rank, count)
+    for g in clips_json.iter().filter(|c| s(c, "type") == "group") {
+        let children: Vec<String> = g.get("children").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_array).flatten().filter_map(Value::as_str).map(String::from).collect();
+        for (rank, child) in children.iter().enumerate() {
+            grouped.insert(child.clone(), (s(g, "timelineId"), rank, children.len()));
+        }
+    }
+    // Sort keys for the tracks: the file's own in order, children just above their group's.
+    let mut order: Vec<f64> = (0..tracks.len()).map(|i| i as f64).collect();
+
+    for clip in clips_json.iter().copied() {
         let ty = s(clip, "type");
         match ty.as_str() {
             "model" => {
@@ -287,7 +301,6 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
             }
         }
         if let Some(seg) = convert_clip(clip, &ty, &clock, &world, &mut project.materials, &mut report) {
-            let track_id = s(clip, "timelineId");
             let wanted = match ty.as_str() {
                 "video" | "image" => TrackKind::Video,
                 "audio" => TrackKind::Audio,
@@ -295,10 +308,22 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
                 "filter" => TrackKind::Filter,
                 _ => TrackKind::Graphic,
             };
+            if let Some((group_track, rank, count)) = grouped.get(&s(clip, "clipId")) {
+                if let Some(gi) = tracks.iter().position(|t| &t.id == group_track) {
+                    let g = &tracks[gi];
+                    let track = Track { id: format!("{}-{}", group_track, s(clip, "clipId")), kind: wanted, name: String::new(), segments: vec![seg], muted: g.muted, hidden: g.hidden, locked: false };
+                    // The last child lowest, the first on top, all between the group's track and the next.
+                    order.push(order[gi] + 0.5 + 0.4 * (count - rank) as f64 / (count + 1) as f64);
+                    tracks.push(track);
+                    continue;
+                }
+            }
+            let track_id = s(clip, "timelineId");
             let ti = match tracks.iter().position(|t| t.id == track_id && t.kind == wanted) {
                 Some(i) => i,
                 None => {
                     report.warnings.push(format!("{ty} clip without a matching track; created one"));
+                    order.push(order.get(tracks.iter().position(|t| t.id == track_id).unwrap_or(usize::MAX)).copied().unwrap_or(tracks.len() as f64) + 0.05);
                     tracks.push(Track {
                         id: format!("{track_id}-{ty}"),
                         kind: wanted,
@@ -314,6 +339,10 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
             tracks[ti].segments.push(seg);
         }
     }
+
+    let mut keyed: Vec<(f64, Track)> = order.into_iter().zip(tracks).collect();
+    keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut tracks: Vec<Track> = keyed.into_iter().map(|(_, t)| t).collect();
 
     // Resolve overlaps by moving clips onto a new track just above.
     let mut i = 0;
@@ -943,6 +972,26 @@ mod tests {
         let lasso = &project.materials.masks[1];
         assert_eq!(lasso.shape, MaskShape::Polygon { points: vec![[0.0, 0.0], [0.5, 0.0], [0.0, 0.5]] });
         assert_eq!((lasso.inside, lasso.outside), (MaskPaint::Clip, MaskPaint::Clip));
+    }
+
+    #[test]
+    fn grouped_clips_stack_at_their_group_first_child_on_top() {
+        let mut d = doc();
+        let tl = d["timeline"].as_object_mut().unwrap();
+        // A hidden group track above the text track; the children say they're on the media track.
+        tl["tracks"].as_array_mut().unwrap().insert(0, json!({"type": "media", "timelineId": "T-group", "hidden": true}));
+        let clips = tl["clips"].as_array_mut().unwrap();
+        clips.push(json!({"clipId": "g", "type": "group", "timelineId": "T-group", "startTick": "0", "endTick": "1000000", "children": [["c1", "c2"]]}));
+        for id in ["c1", "c2"] {
+            clips.push(json!({"clipId": id, "type": "text", "timelineId": "T-media", "groupId": "g", "text": id, "startTick": "0", "endTick": "1000000", "trimStartTick": "0", "trimEndTick": "0"}));
+        }
+        let Imported { project, .. } = import_v1_json(&d).unwrap();
+        let at = |seg: &str| project.tracks.iter().position(|t| t.segments.iter().any(|s| s.id == seg)).unwrap();
+        let group = project.tracks.iter().position(|t| t.id == "T-group").unwrap();
+        // Bottom first: the group's track, then c2, then c1 on top; below every track above the group's.
+        assert_eq!((at("c2"), at("c1")), (group + 1, group + 2));
+        assert!(project.tracks[at("c1")].hidden && project.tracks[at("c2")].hidden);
+        assert_eq!(project.tracks.len(), group + 3);
     }
 
     #[test]
