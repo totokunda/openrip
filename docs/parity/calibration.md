@@ -230,3 +230,25 @@ Two things real drafts use that session 2's short default text never showed: lib
 - **Bold:** strength matches (`bold_width` 0.008 grows each edge by 1.30 px in CapCut, 1.31 px in ours at size 30). swash's embolden also moved each glyph by its strength right and up; corrected, the bold clip goes from 15.4 to 31.3 dB.
 - **Italic:** 10° matches, but CapCut shears about a line 0.268 em above the baseline, not the baseline. Corrected, the italic clip goes from 9.2 to 24.9 dB, the same as the regular clip with its known vertical offset.
 - **Stroke with Type 1:** black stroke over the black background, so it can't be seen; unmeasured.
+
+## Session 6: masks, stickers and curved text
+
+`openrip-calibration-6` (9:16) measures what no local draft shows: the rectangle mask's rotation, feather, rounded corners and invert ([masks.md](masks.md)), the size a library sticker is drawn at, and curved text at several angles ([curved-text.md](curved-text.md)). `openrip-calibration-6-landscape` (16:9) shows whether a sticker's size follows the canvas width or height. Masks and stickers are cloned from the user's own drafts, so their bundles are already in CapCut's cache.
+
+| Time | Content |
+|---|---|
+| 0–8 s | the pattern under a 0.5 × 0.3 rectangle mask: plain, turned 30°, feather 0.3, feather 1, round corner 0.5, round corner 1, inverted, then centre (0.3, −0.2) turned 45° with feather 0.2 and round corner 0.3 |
+| 8–11 s | three PNG stickers (465×466, 540×540, 471×540) at scale 1, centred |
+| 11–12 s | the 540×540 sticker at scale 0.5, 200 px right and 300 px up |
+| 12–15 s | the 280×280 GIF sticker at scale 1 (100 frames) |
+| 15–20 s | "OpenRip bends this line" at size 15, curved 60°, 120°, 180°, −90°, 360° |
+
+Landscape: the 540×540 sticker (0–1 s) and the GIF (1–2 s) at scale 1, centred, over black.
+
+### Steps
+
+1. Install the drafts (quits CapCut, writes them, reopens it):
+   ```
+   osascript -e 'quit app "CapCut"'; while pgrep -x CapCut >/dev/null; do sleep 1; done; python3 /Users/tosinkuye/openrip/bench/calibration/make_draft.py --template "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/1015" --register --replace openrip-calibration-6 openrip-calibration-6-landscape && open -a CapCut
+   ```
+2. In CapCut, export into `bench/calibration/out/` at **1080p, 30 fps, H.264, bitrate Higher**: `openrip-calibration-6` named `openrip-calibration-6`, and `openrip-calibration-6-landscape` named `openrip-calibration-6-landscape`.
