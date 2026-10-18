@@ -87,12 +87,26 @@ Done (2026-10-16): Projects ▸ Open CapCut Project… lists the drafts CapCut s
   - **Saving:** a change in the tab (or any other panel) is saved within half a second; before, only a change of timing or placement was saved by itself. Opening a project no longer brings clips back a frame early: ticks are truncated to whole µs and were truncated again into frames, so most of a draft's clips (and its transitions with them) moved a frame on every open.
   - The tab's changes undo like any other edit ([Undo and redo](#undo-and-redo)).
 - **The draft's own adjustments, filters and text boxes** (2026-10-17):
-  - **Adjust tab:** a video or photo lists what the draft put on it, under "From the CapCut draft" (`draftAdjustments` on the clip, by material). CapCut's Adjust sliders and the colour wheels' strength, which the engine draws, are sliders on CapCut's scale (−50…50; sharpen 0…100; the wheels in percent). Clarity, vignette, fade, HSL, curves, log wheels and any filter or effect on the clip are listed by name as not drawn yet. Each can be taken off the clip, an edited one goes back to the draft's value, and the header puts back all of the draft's. An edit goes on a copy of the draft's material for that clip. The app's own sliders still go on top. In the local drafts, CapCut's sliders are on 79 clips in 5 drafts and colour wheels on 26 clips in 1; HSL and curves that change nothing (within a level) aren't listed, which leaves one clip with HSL.
-  - **Filter bars:** a CapCut filter on its own track gets the Filter tab's intensity, set to the draft's strength; it sets the strength the engine mixes the filter's table in by. Effects, stickers and adjustment layers say the engine doesn't draw them yet.
+  - **Adjust tab:** a video or photo lists what the draft put on it, under "From the CapCut draft" (`draftAdjustments` on the clip, by material). CapCut's Adjust sliders and the colour wheels' strength, which the engine draws, are sliders on CapCut's scale (−50…50; sharpen 0…100; the wheels in percent). Log wheels and any filter or effect on the clip are listed by name as not drawn yet (clarity, vignette, fade, HSL and curves were drawn later the same day; see below). Each can be taken off the clip, an edited one goes back to the draft's value, and the header puts back all of the draft's. An edit goes on a copy of the draft's material for that clip. The app's own sliders still go on top. In the local drafts, CapCut's sliders are on 79 clips in 5 drafts and colour wheels on 26 clips in 1; HSL and curves that change nothing (within a level) aren't listed, which leaves one clip with HSL.
+  - **Filter bars:** a CapCut filter on its own track gets the Filter tab's intensity, set to the draft's strength; it sets the strength the engine mixes the filter's table in by. Effects and adjustment layers say the engine doesn't draw them yet (stickers were drawn later the same day).
   - **Text box:** when an edit changes a CapCut text's words or style (font, case, size, bold…), `updateProject` lays it out again and returns its block (`textBlocks`), and the app's box takes the block's size about the same middle. The importer places CapCut text by the middle of its box, so the box can change size without moving the text.
   - **Case:** the Text tab's case buttons rewrite the words in the new case; the importer treats that as a case change, so a caption keeps its spoken-word timing and caption style.
   - Checked in the app: on the calibration draft with one Adjust slider per clip, brightness from −25 to 40 lightens the engine's frame (mean 0.100 → 0.165), removing it gives the plain picture, and putting the draft's back gives the same frame as before; on a draft with colour wheels, their strength at 0% darkens the frame from 0.571 to 0.510. On a draft with two filter tracks (media paths pointed at the offload volume, opened from a folder), the top filter at 0% and at 100% both change the frame, and its clips list eight sliders (two not drawn). Uppercasing the small draft's caption widens its box from 128 to 147 px, Georgia narrows it to 124 px, and its middle stays put; a word-timed caption keeps showing a page of three words after uppercasing. Harness steps: `capadjust`, `capfilter`, `capbox`, `capfolder`, `seek`.
-- **Still CapCut's alone:** the draft's masks and keyframes aren't shown in the panels; video effects, stickers, adjustment layers, clarity, vignette, fade, HSL, curves and log wheels aren't drawn, so they have no settings yet.
+- **More of the draft drawn and editable** (2026-10-17):
+  - **Adjust tab:** clarity, vignette and fade are drawn and are sliders on CapCut's 0…100 ([colour.md](../parity/colour.md)). Each HSL range is drawn, with hue, saturation and lightness sliders on −100…100 (`values` in its `draftAdjustments` entry). Curves are drawn and can be taken off; CapCut edits them on a curve, so they have no slider.
+  - **Sticker bars:** PNG and GIF stickers are drawn ([stickers.md](../parity/stickers.md)), and the Filter tab's slider is their opacity.
+  - Checked in the app with the harness steps `capcolour` and `capsticker`.
+    - Each new slider changes the engine's frame; the HSL saturation moves it; taking the curves off changes it; putting the draft's back restores the first frame.
+    - A sticker is drawn, and its opacity at 30% fades it.
+- **Still CapCut's alone:**
+  - the draft's masks and keyframes aren't shown in the panels;
+  - video effects aren't drawn: the one local use's bundle isn't in CapCut's cache;
+  - adjustment layers and log wheels aren't drawn (no local draft uses either);
+  - heart and star masks aren't drawn;
+  - CapCut's AI colour match and correction can't be drawn without its models;
+  - a sticker's size at scale 1 is unchecked against CapCut.
+
+  None of these have settings yet.
 
 ## Speed on large projects
 
