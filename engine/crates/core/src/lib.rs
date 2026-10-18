@@ -7,8 +7,8 @@
 //!
 //! - [`load_project`] / [`parse_project_json`]: a CapCut draft, an OpenRip project or a v1
 //!   project (the app's own format) as a [`Project`].
-//! - [`Session`]: one open project for preview: render frames, play with the audio clock,
-//!   swap in edits.
+//! - [`Session`]: one open project for preview: render frames into surfaces the platform
+//!   shows, play with the audio clock, swap in edits.
 //! - [`Thumbnails`]: timeline thumbnails and waveforms, cached on disk.
 //! - [`export_project`]: render and encode a project, with progress and cancel.
 //! - [`capcut_to_app`]: a CapCut draft converted to the app's project document.
@@ -27,9 +27,7 @@ pub use capcut::{capcut_to_app, AppProjectFromDraft};
 pub use export::{codec_named, export_project, Codec, ExportControl, ExportOptions, ExportProgress, ExportResult};
 pub use openrip_model::{Micros, Project};
 pub use project::{load_project, parse_project_json, ProjectInfo, Source, TextBlock};
-#[cfg(target_os = "macos")]
-pub use session::{DisplayFrame, FrameHandle, FrameJob, RenderedFrame};
-pub use session::{Image, Renderer, Session};
+pub use session::{DisplayFrame, FrameHandle, FrameJob, Image, RenderedFrame, Renderer, Session, Surface};
 pub use thumbs::{Thumbnail, Thumbnails, Waveform};
 
 /// Everything the API can fail with. The messages are what a client shows (the app's

@@ -19,8 +19,3 @@ openrip-export.workspace = true
 openrip-platform.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }
-objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVBase", "objc2-io-surface"] }
-objc2-io-surface = { version = "0.3", default-features = false, features = ["std", "IOSurfaceRef", "objc2-core-foundation"] }

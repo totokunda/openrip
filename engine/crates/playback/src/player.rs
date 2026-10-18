@@ -1,7 +1,7 @@
 //! Audio playback and the master clock.
 //!
 //! A mixer thread keeps ~150 ms of the timeline's mix ahead of the output device; the
-//! device callback (cpal) plays it and counts what it played. [`Player::position`] is
+//! device callback (the audio output seam, `crate::output`) plays it and counts what it played. [`Player::position`] is
 //! that count minus the device's output latency: video frames are chosen by it, so picture
 //! follows sound, as in CapCut and every NLE. With nothing to play (silence) the same
 //! clock still runs, because the mix is silence rather than nothing.
@@ -9,12 +9,13 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
+use std::time::Duration;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use openrip_audio::{sample_at, Mixer, CHANNELS};
 use openrip_model::{Micros, Project};
 use openrip_platform::tasks::{self, Task};
+
+use crate::output::{audio_output, AudioOutput, OutputStream};
 
 /// Mixed audio kept ahead of the device.
 const AHEAD_MS: i64 = 150;
@@ -55,14 +56,20 @@ struct Shared {
 pub struct Player {
     shared: Arc<Shared>,
     rate: u32,
-    /// The thread that owns the device's stream, and the mixer.
-    output: Option<JoinHandle<()>>,
+    /// The device's stream, and the mixer.
+    output: Option<OutputStream>,
     mixer: Option<Task>,
 }
 
 impl Player {
     /// Open the default output device and start the (paused) mixer for `project`.
     pub fn new(project: Project) -> Result<Player, PlayerError> {
+        let output = audio_output().ok_or(PlayerError::NoDevice)?;
+        Self::with_output(project, output.as_ref())
+    }
+
+    /// Like [`Player::new`], on `output`.
+    pub fn with_output(project: Project, output: &dyn AudioOutput) -> Result<Player, PlayerError> {
         let shared = Arc::new(Shared {
             state: Mutex::new(State { ring: VecDeque::new(), ring_start: 0, next_mix: 0, playing: false, generation: 0, project: None }),
             cond: Condvar::new(),
@@ -71,31 +78,10 @@ impl Player {
             volume: AtomicU32::new(1.0f32.to_bits()),
             quit: AtomicBool::new(false),
         });
-        // cpal streams can't move between threads on every platform: the output thread
-        // owns it for the player's whole life.
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        let out = {
+        let (out, rate) = {
             let shared = shared.clone();
-            std::thread::Builder::new()
-                .name("audio-output".into())
-                .spawn(move || {
-                    let opened = open_output(shared.clone());
-                    match opened {
-                        Ok((stream, rate)) => {
-                            let _ = ready_tx.send(Ok(rate));
-                            while !shared.quit.load(Ordering::Relaxed) {
-                                std::thread::park_timeout(std::time::Duration::from_millis(200));
-                            }
-                            drop(stream);
-                        }
-                        Err(e) => {
-                            let _ = ready_tx.send(Err(e));
-                        }
-                    }
-                })
-                .map_err(|e| PlayerError::Output(e.to_string()))?
+            output.start(Box::new(move |out, channels, latency| fill(&shared, out, channels, latency)))?
         };
-        let rate = ready_rx.recv().map_err(|e| PlayerError::Output(e.to_string()))??;
         let mix = {
             let shared = shared.clone();
             tasks::spawn("audio-mixer", move || run_mixer(Mixer::with_rate(project, rate), &shared, rate)).map_err(|e| PlayerError::Output(e.to_string()))?
@@ -157,56 +143,37 @@ impl Drop for Player {
     fn drop(&mut self) {
         self.shared.quit.store(true, Ordering::SeqCst);
         self.shared.cond.notify_all();
-        if let Some(t) = self.output.take() {
-            t.thread().unpark();
-            let _ = t.join();
-        }
+        self.output.take();
         if let Some(t) = self.mixer.take() {
             let _ = t.join();
         }
     }
 }
 
-fn open_output(shared: Arc<Shared>) -> Result<(cpal::Stream, u32), PlayerError> {
-    let host = cpal::default_host();
-    let device = host.default_output_device().ok_or(PlayerError::NoDevice)?;
-    let config = device.default_output_config().map_err(|e| PlayerError::Output(e.to_string()))?.config();
-    let (rate, channels) = (config.sample_rate, config.channels as usize);
-    let stream = device
-        .build_output_stream(
-            config,
-            move |out: &mut [f32], info: &cpal::OutputCallbackInfo| {
-                let ts = info.timestamp();
-                let latency = ts.playback.duration_since(ts.callback);
-                shared.latency_us.store(latency.as_micros() as i64, Ordering::Relaxed);
-                let gain = f32::from_bits(shared.volume.load(Ordering::Relaxed));
-                let frames = out.len() / channels;
-                let mut st = shared.state.lock().unwrap();
-                if !st.playing {
-                    out.fill(0.0);
-                    return;
-                }
-                let have = st.ring.len() / CHANNELS;
-                let n = have.min(frames);
-                for f in 0..frames {
-                    let (l, r) = if f < n { (st.ring[f * 2], st.ring[f * 2 + 1]) } else { (0.0, 0.0) };
-                    for c in 0..channels {
-                        out[f * channels + c] = gain * if c % 2 == 0 { l } else { r };
-                    }
-                }
-                st.ring.drain(..n * CHANNELS);
-                st.ring_start += n as i64;
-                // The clock advances only by what was really played (an underrun stalls it,
-                // and the picture waits with it).
-                shared.played.store(st.ring_start, Ordering::SeqCst);
-                shared.cond.notify_all();
-            },
-            |e| eprintln!("[audio-output] {e}"),
-            None,
-        )
-        .map_err(|e| PlayerError::Output(e.to_string()))?;
-    stream.play().map_err(|e| PlayerError::Output(e.to_string()))?;
-    Ok((stream, rate))
+/// One device buffer: the next of the ring, or silence while paused.
+fn fill(shared: &Shared, out: &mut [f32], channels: usize, latency: Duration) {
+    shared.latency_us.store(latency.as_micros() as i64, Ordering::Relaxed);
+    let gain = f32::from_bits(shared.volume.load(Ordering::Relaxed));
+    let frames = out.len() / channels;
+    let mut st = shared.state.lock().unwrap();
+    if !st.playing {
+        out.fill(0.0);
+        return;
+    }
+    let have = st.ring.len() / CHANNELS;
+    let n = have.min(frames);
+    for f in 0..frames {
+        let (l, r) = if f < n { (st.ring[f * 2], st.ring[f * 2 + 1]) } else { (0.0, 0.0) };
+        for c in 0..channels {
+            out[f * channels + c] = gain * if c % 2 == 0 { l } else { r };
+        }
+    }
+    st.ring.drain(..n * CHANNELS);
+    st.ring_start += n as i64;
+    // The clock advances only by what was really played (an underrun stalls it, and the
+    // picture waits with it).
+    shared.played.store(st.ring_start, Ordering::SeqCst);
+    shared.cond.notify_all();
 }
 
 fn run_mixer(mut mixer: Mixer, shared: &Shared, rate: u32) {

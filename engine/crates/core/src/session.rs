@@ -1,34 +1,20 @@
 //! One open project for preview: frames on demand, playback by the audio clock, edits
 //! swapped in without reopening anything.
 //!
-//! Frames are rendered into a small pool of IOSurface-backed buffers (macOS). A buffer is
-//! reused only after [`Session::release`], so a client must release every frame it's
-//! handed.
+//! Frames are rendered into a small pool of surfaces ([`Surface`]: IOSurface-backed buffers
+//! on macOS, pixels read back elsewhere). A surface is reused only after
+//! [`Session::release`], so a client must release every frame it's handed.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use openrip_model::{Micros, Project};
-use openrip_playback::{Player, PreviewEngine};
-#[cfg(target_os = "macos")]
-use openrip_playback::PreviewPipeline;
+use openrip_playback::{Player, PreviewEngine, PreviewPipeline};
+pub use openrip_render::Surface;
 
 use crate::project::{ProjectInfo, Source, TextBlock};
 use crate::{Error, Result};
-
-/// A render target buffer; CoreVideo buffers may be used from any thread.
-#[cfg(target_os = "macos")]
-struct Surface(objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>);
-#[cfg(target_os = "macos")]
-unsafe impl Send for Surface {}
-
-/// The IOSurfaceRef behind a pixel buffer, as the pointer value a client hands on (Electron's
-/// `sharedTexture` takes its bytes).
-#[cfg(target_os = "macos")]
-fn io_surface_ptr(pb: &objc2_core_video::CVPixelBuffer) -> Option<u64> {
-    objc2_core_video::CVPixelBufferGetIOSurface(Some(pb)).map(|io| objc2_core_foundation::CFRetained::as_ptr(&io).as_ptr() as usize as u64)
-}
 
 pub struct Session {
     project: Project,
@@ -36,14 +22,12 @@ pub struct Session {
     /// Audio output and master clock (absent when there is no output device).
     player: Option<Arc<Player>>,
     /// The render-ahead preview, created on the first `set_preview_size`.
-    #[cfg(target_os = "macos")]
     pipeline: Option<PreviewPipeline>,
     /// Frames handed out by `frame_for_display`, until they're released.
-    #[cfg(target_os = "macos")]
-    shown: HashMap<u32, openrip_playback::pipeline::Surface>,
-    #[cfg(target_os = "macos")]
+    shown: HashMap<u32, Surface>,
+    /// Frames handed out by `hand_out`, until they're released.
     held: HashMap<u32, Surface>,
-    #[cfg(target_os = "macos")]
+    /// Released surfaces, for the next frames.
     free: Vec<Surface>,
     next_id: u32,
 }
@@ -78,13 +62,9 @@ impl Session {
             project,
             engine: Renderer(Arc::new(Mutex::new(engine))),
             player,
-            #[cfg(target_os = "macos")]
             pipeline: None,
-            #[cfg(target_os = "macos")]
             shown: HashMap::new(),
-            #[cfg(target_os = "macos")]
             held: HashMap::new(),
-            #[cfg(target_os = "macos")]
             free: Vec::new(),
             next_id: 0,
         };
@@ -111,7 +91,6 @@ impl Session {
         if let Some(p) = &self.player {
             p.set_project(project.clone());
         }
-        #[cfg(target_os = "macos")]
         if let Some(p) = &self.pipeline {
             p.set_project(project.clone());
         }
@@ -129,22 +108,23 @@ impl Session {
 
     /// Let a frame's surface be reused (when the client no longer references it).
     pub fn release(&mut self, id: u32) {
-        #[cfg(target_os = "macos")]
-        {
-            if let Some(surface) = self.shown.remove(&id) {
-                if let Some(p) = &self.pipeline {
-                    p.recycle(surface);
-                }
-                return;
+        if let Some(surface) = self.shown.remove(&id) {
+            if let Some(p) = &self.pipeline {
+                p.recycle(surface);
             }
-            if let Some(surface) = self.held.remove(&id) {
-                if self.free.len() < 4 {
-                    self.free.push(surface);
-                }
+            return;
+        }
+        if let Some(surface) = self.held.remove(&id) {
+            if self.free.len() < 4 {
+                self.free.push(surface);
             }
         }
-        #[cfg(not(target_os = "macos"))]
-        let _ = id;
+    }
+
+    /// The surface of a frame handed out and not yet released (its pixels, where the
+    /// platform has no zero-copy hand-off).
+    pub fn surface(&self, id: u32) -> Option<&Surface> {
+        self.shown.get(&id).or_else(|| self.held.get(&id))
     }
 
     /// Start playback (audio, and the master clock) at `time`. False without an output device.
@@ -181,7 +161,6 @@ impl Session {
 // ---- Frames on demand, into pooled surfaces ----
 
 /// A frame to render on a worker thread (see [`Session::frame_job`]).
-#[cfg(target_os = "macos")]
 pub struct FrameJob {
     renderer: Renderer,
     surface: Surface,
@@ -192,7 +171,6 @@ pub struct FrameJob {
 }
 
 /// A rendered frame, not yet handed to the client (see [`Session::hand_out`]).
-#[cfg(target_os = "macos")]
 pub struct RenderedFrame {
     surface: Surface,
     time: Micros,
@@ -204,11 +182,12 @@ pub struct RenderedFrame {
 }
 
 /// A frame handed to the client: its surface stays alive until [`Session::release`].
-#[cfg(target_os = "macos")]
 #[derive(Clone, Debug)]
 pub struct FrameHandle {
     pub id: u32,
-    /// The IOSurfaceRef pointer (BGRA), for Electron's `sharedTexture`.
+    /// The IOSurfaceRef pointer (BGRA), for Electron's `sharedTexture`. Elsewhere the pixels
+    /// are [`Session::surface`]'s.
+    #[cfg(target_os = "macos")]
     pub io_surface: u64,
     pub width: u32,
     pub height: u32,
@@ -219,16 +198,15 @@ pub struct FrameHandle {
     pub skipped: u32,
 }
 
-#[cfg(target_os = "macos")]
 impl Session {
     /// Get a frame at `time` ready to render into a pooled surface: [`FrameJob::render`] on
     /// any thread, then [`Session::hand_out`]. With `scrub`, video shows a frame that's quick
     /// to get while the playhead is dragged.
     pub fn frame_job(&mut self, time: Micros, width: u32, height: u32, scrub: bool) -> Result<FrameJob> {
-        let reusable = self.free.iter().position(|f| objc2_core_video::CVPixelBufferGetWidth(&f.0) == width as usize && objc2_core_video::CVPixelBufferGetHeight(&f.0) == height as usize);
+        let reusable = self.free.iter().position(|f| f.width() == width && f.height() == height);
         let surface = match reusable {
             Some(i) => self.free.swap_remove(i),
-            None => Surface(openrip_render::Compositor::output_surface(width, height).ok_or(Error::NoSurface)?),
+            None => Surface::new(width, height).ok_or(Error::NoSurface)?,
         };
         Ok(FrameJob { renderer: self.engine.clone(), surface, time, width, height, scrub })
     }
@@ -237,20 +215,30 @@ impl Session {
     pub fn hand_out(&mut self, frame: RenderedFrame) -> Result<FrameHandle> {
         self.next_id = self.next_id.wrapping_add(1);
         let id = self.next_id;
-        let ptr = io_surface_ptr(&frame.surface.0).ok_or(Error::NoIoSurface)?;
+        #[cfg(target_os = "macos")]
+        let io_surface = frame.surface.io_surface_ptr().ok_or(Error::NoIoSurface)?;
         self.held.insert(id, frame.surface);
-        Ok(FrameHandle { id, io_surface: ptr, width: frame.width, height: frame.height, time_us: frame.time.0, render_ms: frame.ms, layers: frame.layers, skipped: frame.skipped })
+        Ok(FrameHandle {
+            id,
+            #[cfg(target_os = "macos")]
+            io_surface,
+            width: frame.width,
+            height: frame.height,
+            time_us: frame.time.0,
+            render_ms: frame.ms,
+            layers: frame.layers,
+            skipped: frame.skipped,
+        })
     }
 }
 
-#[cfg(target_os = "macos")]
 impl FrameJob {
-    pub fn render(self) -> Result<RenderedFrame> {
+    pub fn render(mut self) -> Result<RenderedFrame> {
         let t0 = Instant::now();
         let report = {
             let mut e = self.renderer.0.lock().unwrap();
             e.set_scrubbing(self.scrub);
-            e.render_to_surface(self.time, &self.surface.0)?
+            e.render_into(self.time, &mut self.surface)?
         };
         Ok(RenderedFrame { surface: self.surface, time: self.time, width: self.width, height: self.height, ms: t0.elapsed().as_secs_f64() * 1e3, layers: report.layers as u32, skipped: report.missing.len() as u32 })
     }
@@ -259,11 +247,12 @@ impl FrameJob {
 // ---- Render-ahead preview (what the app's preview uses) ----
 
 /// A frame of the render-ahead preview, handed to the client until it's released.
-#[cfg(target_os = "macos")]
 #[derive(Clone, Debug)]
 pub struct DisplayFrame {
     pub id: u32,
-    /// The IOSurfaceRef pointer (BGRA), for Electron's `sharedTexture`.
+    /// The IOSurfaceRef pointer (BGRA), for Electron's `sharedTexture`. Elsewhere the pixels
+    /// are [`Session::surface`]'s.
+    #[cfg(target_os = "macos")]
     pub io_surface: u64,
     pub width: u32,
     pub height: u32,
@@ -271,7 +260,6 @@ pub struct DisplayFrame {
     pub render_ms: f64,
 }
 
-#[cfg(target_os = "macos")]
 impl Session {
     /// Size of the preview surfaces; creates the pipeline on the first call.
     pub fn set_preview_size(&mut self, width: u32, height: u32) -> Result<()> {
@@ -325,12 +313,20 @@ impl Session {
     pub fn frame_for_display(&mut self) -> Option<DisplayFrame> {
         let now = self.player.as_ref().map_or(Micros(i64::MAX), |p| p.position());
         let f = self.pipeline.as_ref()?.frame(now)?;
-        let pb = &f.surface.0;
-        let ptr = io_surface_ptr(pb)?;
-        let (w, h) = (objc2_core_video::CVPixelBufferGetWidth(pb) as u32, objc2_core_video::CVPixelBufferGetHeight(pb) as u32);
+        #[cfg(target_os = "macos")]
+        let io_surface = f.surface.io_surface_ptr()?;
+        let (w, h) = (f.surface.width(), f.surface.height());
         self.next_id = self.next_id.wrapping_add(1);
         let id = self.next_id;
         self.shown.insert(id, f.surface);
-        Some(DisplayFrame { id, io_surface: ptr, width: w, height: h, time_us: f.time.0, render_ms: f.render_ms })
+        Some(DisplayFrame {
+            id,
+            #[cfg(target_os = "macos")]
+            io_surface,
+            width: w,
+            height: h,
+            time_us: f.time.0,
+            render_ms: f.render_ms,
+        })
     }
 }

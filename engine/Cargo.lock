@@ -1187,9 +1187,6 @@ dependencies = [
 name = "openrip-core"
 version = "0.1.0"
 dependencies = [
- "objc2-core-foundation",
- "objc2-core-video",
- "objc2-io-surface",
  "openrip-audio",
  "openrip-capcut",
  "openrip-export",
@@ -1230,6 +1227,7 @@ dependencies = [
  "openrip-audio",
  "openrip-model",
  "openrip-playback",
+ "openrip-render",
  "serde_json",
  "thiserror 2.0.21",
 ]

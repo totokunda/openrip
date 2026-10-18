@@ -3,7 +3,7 @@
 //!
 //! A worker thread owns the [`PreviewEngine`]. While playing it renders the frames due over
 //! the next few frame times, by the given clock (the audio [`crate::Player`] in the app),
-//! into a pool of IOSurfaces. The display takes [`PreviewPipeline::frame`] for the clock time
+//! into a pool of surfaces (IOSurfaces on macOS, see `openrip_render::Surface`). The display takes [`PreviewPipeline::frame`] for the clock time
 //! of each refresh: the newest frame due, with older ones dropped. Paused, it renders the
 //! requested time at once (newest request wins).
 
@@ -11,20 +11,14 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
-use objc2_core_foundation::CFRetained;
-use objc2_core_video::CVPixelBuffer;
 use openrip_model::{FrameRate, Micros, Project};
 use openrip_platform::tasks::{self, Task};
-use openrip_render::Compositor;
+pub use openrip_render::Surface;
 
 use crate::{PreviewEngine, PreviewError};
 
 /// Frames rendered ahead of the clock while playing.
 const AHEAD: usize = 4;
-
-/// A rendered frame's surface; CoreVideo buffers are thread-safe.
-pub struct Surface(pub CFRetained<CVPixelBuffer>);
-unsafe impl Send for Surface {}
 
 pub struct RenderedFrame {
     pub time: Micros,
@@ -230,15 +224,15 @@ fn run(engine: &mut PreviewEngine, shared: &Shared) {
                 st = shared.cond.wait_timeout(st, wait).unwrap().0;
             }
         };
-        let surface = match surface.take() {
+        let mut surface = match surface.take() {
             Some(s) => s,
-            None => match Compositor::output_surface(size.0, size.1) {
-                Some(s) => Surface(s),
+            None => match Surface::new(size.0, size.1) {
+                Some(s) => s,
                 None => continue,
             },
         };
         let t0 = Instant::now();
-        let ok = engine.render_to_surface(t, &surface.0).is_ok();
+        let ok = engine.render_into(t, &mut surface).is_ok();
         let render_ms = t0.elapsed().as_secs_f64() * 1e3;
         let mut st = shared.state.lock().unwrap();
         if ok && st.generation == generation {

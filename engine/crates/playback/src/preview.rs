@@ -13,7 +13,7 @@ use openrip_media::{open_video, Decoder, DecoderOptions, MediaError, VideoFrame}
 use openrip_model::{Animation, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_platform::assets;
 use openrip_render::text::{self, Align, Font, TextStyle};
-use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source, Uploader};
+use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source, Surface, Uploader};
 
 /// CapCut's default font, used when a text run names none.
 const DEFAULT_FONT: &str = "/Applications/CapCut.app/Contents/Resources/Font/SystemFont/en.ttf";
@@ -405,18 +405,17 @@ impl PreviewEngine {
         Ok((frame, report))
     }
 
-    /// Render the frame at `t` into an IOSurface-backed BGRA pixel buffer (see
-    /// [`Compositor::output_surface`]) for the app to present.
-    #[cfg(target_os = "macos")]
-    pub fn render_to_surface(&mut self, t: Micros, target: &objc2_core_video::CVPixelBuffer) -> Result<FrameReport, PreviewError> {
-        let (w, h) = (objc2_core_video::CVPixelBufferGetWidth(target) as u32, objc2_core_video::CVPixelBufferGetHeight(target) as u32);
+    /// Render the frame at `t` into a surface for the platform to present (on macOS an
+    /// IOSurface-backed BGRA pixel buffer, see [`Surface`]).
+    pub fn render_into(&mut self, t: Micros, target: &mut Surface) -> Result<FrameReport, PreviewError> {
+        let (w, h) = (target.width(), target.height());
         let t0 = std::time::Instant::now();
         let (pixels, report) = self.gather(t, w, h);
         let t1 = std::time::Instant::now();
         let layers = self.layers(&pixels, t, w, h);
         let t2 = std::time::Instant::now();
         let written = self.compositor.pixels_written();
-        self.compositor.render_to_surface(target, [0, 0, 0], &layers)?;
+        self.compositor.render_into(target, [0, 0, 0], &layers)?;
         if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 30 {
             let ms = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1e3;
             let now = std::time::Instant::now();
@@ -424,6 +423,15 @@ impl PreviewEngine {
             eprintln!("[preview] t={:.3}s {w}x{h}: gather {:.1} ms, layers {:.1} ms, composite {:.1} ms ({} layers, {mp:.1} MP written to the GPU)", t.as_secs_f64(), ms(t0, t1), ms(t1, t2), ms(t2, now), layers.len());
         }
         Ok(report)
+    }
+
+    /// Render the frame at `t` into an IOSurface-backed BGRA pixel buffer (see
+    /// [`Compositor::output_surface`]) for the app to present.
+    #[cfg(target_os = "macos")]
+    pub fn render_to_surface(&mut self, t: Micros, target: &objc2_core_video::CVPixelBuffer) -> Result<FrameReport, PreviewError> {
+        // Another retain on the buffer, for the surface's time.
+        let buffer = unsafe { objc2_core_foundation::CFRetained::retain(std::ptr::NonNull::from(target)) };
+        self.render_into(t, &mut Surface::from_pixel_buffer(buffer))
     }
 
     /// Render the frame at `t` into an NV12 pixel buffer for the encoder (export).

@@ -13,15 +13,12 @@
 //!   The UI widens the tolerance with drag speed and sends one accurate request when the
 //!   drag ends.
 
-#[cfg(target_os = "macos")]
 pub mod animation;
-#[cfg(target_os = "macos")]
 pub mod caption;
 pub mod colour;
 mod gif;
 pub mod mask;
-#[cfg(target_os = "macos")]
-pub mod transition;
+pub mod output;
 pub mod pipeline;
 mod player;
 pub mod preview;
@@ -29,10 +26,11 @@ mod scrub;
 mod server;
 pub mod sticker;
 pub mod thumbs;
+pub mod transition;
 mod waveform;
 
-#[cfg(target_os = "macos")]
-pub use pipeline::{Clock, PipelineStats, PreviewPipeline, RenderedFrame};
+pub use pipeline::{Clock, PipelineStats, PreviewPipeline, RenderedFrame, Surface};
+pub use output::{audio_output, set_audio_output, AudioOutput, OutputStream};
 pub use player::{Player, PlayerError};
 pub use preview::{FrameReport, PreviewEngine, PreviewError};
 pub use server::{Delivered, FrameServer, Quality, SeekMode, ServerStats};
