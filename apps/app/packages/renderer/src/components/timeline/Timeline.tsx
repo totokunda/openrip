@@ -13,6 +13,7 @@ import {
   updateAssetZoomLevel,
 } from "@/lib/assetControl";
 import { canDeleteTrack } from "./TrackControls";
+import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 
 // One function, so the memoised clips keep their props when no selection is passed.
 const NEVER_SELECTED = (_clipId: string) => false;
@@ -30,7 +31,7 @@ const Timeline: React.FC<
   timelineWidth,
   timelineY,
   timelineHeight = 54,
-  timelinePadding = 24,
+  timelinePadding = TIME_ZERO_X,
   timelineId,
   index,
   scrollY,

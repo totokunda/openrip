@@ -203,7 +203,7 @@ export const generateTimelineThumbnailVideo = async (
     // Always paint a background so we never show transparent/white gaps.
     // We intentionally "overfill" the entire canvas; the Konva clip will cut it.
     ctx.clearRect(0, 0, targetWidth, targetHeight);
-    ctx.fillStyle = "#0B0B0D";
+    ctx.fillStyle = "#1e4c51"; // CapCut's video colour, under the thumbnails
     ctx.fillRect(0, 0, targetWidth, targetHeight);
 
     // When resizing from the left for video, truncate from the left by

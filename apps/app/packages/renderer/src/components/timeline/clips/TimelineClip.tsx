@@ -78,6 +78,7 @@ import {
 } from "./thumbnails";
 import { Html } from "react-konva-utils";
 import { cn } from "@/lib/utils";
+import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 
 /**
  * text rx/RxText
@@ -103,7 +104,7 @@ const TimelineClip: React.FC<
   timelineWidth = 0,
   timelineY = 0,
   timelineHeight = 54,
-  timelinePadding = 24,
+  timelinePadding = TIME_ZERO_X,
   clipId,
   timelineId,
   clipType,
@@ -386,7 +387,7 @@ const TimelineClip: React.FC<
   const overHang = useMemo(() => {
     let overhang = 0;
     const positionX =
-      clipPosition.x == 24 || clipWidth <= imageWidth ? 0 : -clipPosition.x;
+      clipPosition.x == timelinePadding || clipWidth <= imageWidth ? 0 : -clipPosition.x;
 
     if (clipWidth - positionX <= timelineWidth && positionX > 0) {
       overhang = timelineWidth - (clipWidth - positionX);
@@ -398,7 +399,7 @@ const TimelineClip: React.FC<
     let overhang = 0;
     // Default behavior for clips that fit within timeline or are at the start
     const positionX =
-      clipPosition.x == 24 || clipWidth <= imageWidth ? 0 : -clipPosition.x;
+      clipPosition.x == timelinePadding || clipWidth <= imageWidth ? 0 : -clipPosition.x;
     if (clipWidth - positionX <= timelineWidth && positionX > 0) {
       overhang = timelineWidth - (clipWidth - positionX);
     }
@@ -512,7 +513,7 @@ const TimelineClip: React.FC<
     } else if (clipType === "text") {
       generateTimelineThumbnailText(clipType, imageCanvas, groupRef);
     } else if (clipType === "filter") {
-      generateTimelineThumbnailFilter(clipType, imageCanvas, groupRef);
+      generateTimelineThumbnailFilter(clipType, imageCanvas, groupRef, (currentClip as FilterClipProps)?.draftKind);
     } else if (clipType === "draw") {
       generateTimelineThumbnailDrawing(clipType, imageCanvas, clipRef);
     }
@@ -1937,8 +1938,8 @@ const TimelineClip: React.FC<
                 y={timelineHeight / 2}
                 width={textWidth + 8}
                 height={14}
-                cornerRadius={2}
-                fill="rgba(0, 0, 0, 0.0)"
+                cornerRadius={3}
+                fill="rgba(255, 255, 255, 0.09)"
                 offsetY={7.5}
               />
               <Text
@@ -1953,7 +1954,7 @@ const TimelineClip: React.FC<
                   (currentClip as TextClipProps)?.fontFamily ?? "-apple-system, BlinkMacSystemFont, sans-serif"
                 }
                 fontStyle="500"
-                fill="#151517"
+                fill="#e0e0e0"
                 align="left"
                 verticalAlign="middle"
                 offsetY={5}
@@ -1967,8 +1968,8 @@ const TimelineClip: React.FC<
                 y={timelineHeight / 2}
                 width={textWidth + 8}
                 height={14}
-                cornerRadius={2}
-                fill="rgba(0, 0, 0, 0.0)"
+                cornerRadius={3}
+                fill="rgba(255, 255, 255, 0.09)"
                 offsetY={7.5}
               />
               <Text
@@ -1979,7 +1980,7 @@ const TimelineClip: React.FC<
                 fontSize={9.5}
                 fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
                 fontStyle="500"
-                fill="#ffffff"
+                fill="#e0e0e0"
                 align="left"
                 verticalAlign="middle"
                 offsetY={5}

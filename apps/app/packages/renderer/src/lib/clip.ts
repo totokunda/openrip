@@ -35,6 +35,7 @@ import {
 } from "./timeline-edit";
 
 import _ from "lodash";
+import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 
 interface ClipStore {
   // Clips
@@ -387,7 +388,8 @@ export const resolveOverlapsTimelines = (
   const main = mainTrackOf(timelines);
 
   for (let i = 0; i < timelines.length; i++) {
-    const timeline = { ...timelines[i], timelineHeight: trackHeightFor(timelines[i].type, timelines[i] === main) };
+    // Every track starts time 0 after the Cover column (an older project saved 24 px).
+    const timeline = { ...timelines[i], timelinePadding: TIME_ZERO_X, timelineHeight: trackHeightFor(timelines[i].type, timelines[i] === main) };
 
     // First timeline starts at 0
     if (i === 0) {
@@ -739,7 +741,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
         timelineHeight: getTimelineHeightForClip(type === "media" ? "video" : type),
         timelineWidth: ref?.timelineWidth ?? 0,
         timelineY: 0,
-        timelinePadding: ref?.timelinePadding ?? 24,
+        timelinePadding: TIME_ZERO_X,
         muted: false,
         hidden: false,
       };
@@ -1222,7 +1224,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
         timelineHeight: timeline.timelineHeight ?? 54,
         timelineWidth: timeline.timelineWidth ?? 0,
         timelineY: timeline.timelineY ?? 0,
-        timelinePadding: timeline.timelinePadding ?? 24,
+        timelinePadding: TIME_ZERO_X,
         type: timeline.type ?? "media",
         muted: timeline.muted ?? false,
         hidden: timeline.hidden ?? false,
@@ -1525,7 +1527,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
         timelineWidth: clipTimeline?.timelineWidth ?? 0,
         timelineY:
           (clipTimeline?.timelineY ?? 0) + (clipTimeline?.timelineHeight ?? 54),
-        timelinePadding: clipTimeline?.timelinePadding ?? 0,
+        timelinePadding: TIME_ZERO_X,
         muted: false,
         hidden: false,
       };
@@ -1741,7 +1743,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
           timelineHeight: getTimelineHeightForClip("group"),
           timelineWidth: last?.timelineWidth ?? 0,
           timelineY: (last?.timelineY ?? 0) + (last?.timelineHeight ?? 54),
-          timelinePadding: last?.timelinePadding ?? 24,
+          timelinePadding: TIME_ZERO_X,
           muted: false,
           hidden: false,
         };
@@ -1951,7 +1953,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
           timelineHeight: height,
           timelineWidth: ref?.timelineWidth ?? 0,
           timelineY: 0,
-          timelinePadding: ref?.timelinePadding ?? 24,
+          timelinePadding: TIME_ZERO_X,
           muted: false,
           hidden: false,
         };
@@ -2237,7 +2239,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
           timelineHeight: getTimelineHeightForClip(desiredType),
           timelineWidth: last?.timelineWidth ?? 0,
           timelineY: (last?.timelineY ?? 0) + (last?.timelineHeight ?? 54),
-          timelinePadding: last?.timelinePadding ?? 24,
+          timelinePadding: TIME_ZERO_X,
           muted: false,
           hidden: false,
         };

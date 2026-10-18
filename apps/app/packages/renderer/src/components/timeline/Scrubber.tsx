@@ -3,6 +3,7 @@ import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
 import { SNAP_PX, snapPoints, snapToPoints } from "@/lib/timeline-edit";
 import { cn } from "@/lib/utils";
+import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 
 interface ScrubControlProps {
   stageHeight: number;
@@ -29,8 +30,8 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
   const [position, setPosition] = useState(18);
   const [currentFrame, setCurrentFrame] = useState(0);
   // Geometry constants: keep in sync with timeline ticks padding and handle width
-  const startPadding = 24; // ticks start at x = 24
-  const handleHalf = 6; // half of top handle width (w-3 ≈ 12px)
+  const startPadding = TIME_ZERO_X; // ticks start at time 0, after the Cover column
+  const handleHalf = 5; // half of the head's width (10 px)
   const containerRef = useRef<HTMLDivElement>(null);
   const [wasPlaying, setWasPlaying] = useState(false);
 
@@ -180,17 +181,14 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
       className="absolute flex z-50 top-0 cursor-col-resize"
     >
       <div className="flex flex-col items-center">
+        {/* CapCut's playhead: a hollow white shield over a 1 px white line. */}
         <div
+          data-testid="playhead-handle"
           className={cn(
-            "w-3 h-4 rounded-t-sm rounded-b-lg border-2 border-white shadow-md bg-white",
+            "w-[10px] h-[14px] rounded-t-[3px] rounded-b-[5px] border-2 border-white",
           )}
         ></div>
-        <div
-          style={{ height: stageHeight }}
-          className={cn(
-            "rounded-b-full flex items-center w-[0.10rem] bg-white shadow-md",
-          )}
-        ></div>
+        <div style={{ height: stageHeight }} className="w-px bg-white"></div>
       </div>
     </div>
   );

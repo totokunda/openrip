@@ -104,7 +104,9 @@ export const generateTimelineThumbnailAudio = async (
   const segDurationSec = Math.max(1e-6, segEndSec - segStartSec);
   const barDurationSec = segDurationSec / barCount;
 
-  const color = "#7791C4";
+  // CapCut's audio: extracted from a video it keeps the video's teal, music is blue.
+  const fromVideo = getAssetById(currentClip.assetId)?.type === "video";
+  const color = fromVideo ? "#33757d" : "#4a6aa0";
   const volumeDb = Number((currentClip as any)?.volume ?? 0);
   const fadeInSec = Math.max(0, Number((currentClip as any)?.fadeIn ?? 0));
   const fadeOutSec = Math.max(0, Number((currentClip as any)?.fadeOut ?? 0));
@@ -167,15 +169,14 @@ export const generateTimelineThumbnailAudio = async (
   bgctx.imageSmoothingQuality = "high";
 
   const backgroundGradient = bgctx.createLinearGradient(0, 0, 0, bgCanvas.height);
-  backgroundGradient.addColorStop(0, "#121832");
-  backgroundGradient.addColorStop(1, "#0B0F1F");
+  backgroundGradient.addColorStop(0, fromVideo ? "#1d4950" : "#182f55");
+  backgroundGradient.addColorStop(1, fromVideo ? "#1d4950" : "#182f55");
   bgctx.fillStyle = backgroundGradient;
   bgctx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
 
   const vignette = bgctx.createLinearGradient(0, 0, bgCanvas.width, 0);
-  vignette.addColorStop(0, "rgba(0,0,0,0.35)");
-  vignette.addColorStop(0.5, "rgba(0,0,0,0)");
-  vignette.addColorStop(1, "rgba(0,0,0,0.35)");
+  vignette.addColorStop(0, "rgba(0,0,0,0)");
+  vignette.addColorStop(1, "rgba(0,0,0,0)");
   bgctx.fillStyle = vignette;
   bgctx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
 

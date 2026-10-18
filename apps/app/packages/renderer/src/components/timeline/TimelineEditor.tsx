@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Stage, Layer, Text, Line, Rect } from "react-konva";
+import { Stage, Layer, Text, Line, Rect, Group } from "react-konva";
 import Konva from "konva";
 import { ScrubControl } from "./Scrubber";
 import Timeline from "./Timeline";
@@ -40,6 +40,7 @@ import { convertFrameRange } from "@/lib/media/fps";
 import { useViewportStore } from "@/lib/viewport";
 import { insertionFrame, mainTrackOf, mainTrackPreview } from "@/lib/timeline-edit";
 import { MarkerEditor, MarkerFlags } from "./Markers";
+import { RULER_HEIGHT, TIME_ZERO_X } from "@/lib/timeline-geometry";
 
 interface TimelineEditorProps {}
 
@@ -175,11 +176,11 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
           x={0}
           y={0}
           width={stageWidth}
-          height={28}
+          height={RULER_HEIGHT}
           // Ensure the ruler area always captures clicks (even when transparent),
           // so seeking works while vertically scrolled and clips are under it.
           fill={
-            maxScroll > 0 && thumbY() > 24 ? "#222124" : "rgba(0,0,0,0)"
+            maxScroll > 0 && thumbY() > 24 ? "#262626" : "rgba(0,0,0,0)"
           }
           listening
           onClick={onRulerClick}
@@ -194,8 +195,9 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
             return null;
           }
 
+          // CapCut's ruler: 10.5 px majors with their label beside them, 5.5 px minors.
           const isMajor = tick.type === "major";
-          const tickHeight = isMajor ? 21 : 7;
+          const tickHeight = isMajor ? 10.5 : 5.5;
           const tickY = 0;
 
           return (
@@ -208,11 +210,7 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
                   xPosition + startPadding,
                   tickY + tickHeight,
                 ]}
-                stroke={
-                  isMajor
-                    ? "rgba(255, 255, 255, 0.3)"
-                    : "rgba(255, 255, 255, 0.1)"
-                }
+                stroke={isMajor ? "#727272" : "#404040"}
                 strokeWidth={1}
                 listening={false}
               />
@@ -221,10 +219,10 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
               {isMajor && (
                 <Text
                   x={xPosition + 4 + startPadding}
-                  y={tickY + tickHeight - 8}
+                  y={tickY + 2}
                   text={formatTickLabel(tick.x, tick.format)}
-                  fontSize={8.5}
-                  fill="rgba(255, 255, 255, 0.4)"
+                  fontSize={10.5}
+                  fill="#6c6c6c"
                   fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
                   listening={false}
                 />
@@ -236,6 +234,30 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
     );
   },
 );
+
+/**
+ * CapCut's Cover tile, in the column between the track headers and time 0 on the main track:
+ * a dashed rounded tile with "Cover" in it. Drawn only, dimmed: the cover editor it opens in
+ * CapCut isn't here yet, and clicks go through to the timeline.
+ */
+const CoverTile: React.FC<{ top: number; height: number }> = ({ top, height }) => {
+  const size = Math.max(0, Math.min(42, height - 4, TIME_ZERO_X - 8));
+  if (size < 20) return null;
+  return (
+    <Group x={(TIME_ZERO_X - size) / 2} y={top + (height - size) / 2} opacity={0.6} listening={false}>
+      <Rect width={size} height={size} cornerRadius={4} fill="#3b3b3b" stroke="#5c5c5c" strokeWidth={1} dash={[3, 2]} />
+      <Text
+        width={size}
+        y={size / 2 - 5.5}
+        text="Cover"
+        align="center"
+        fontSize={11}
+        fill="#cccccc"
+        fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
+      />
+    </Group>
+  );
+};
 
 const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -509,7 +531,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         return;
       }
 
-      const timelinePadding = 24;
+      const timelinePadding = TIME_ZERO_X;
       const stageWidth = dimensions.stageWidth;
       const timelines = useClipStore.getState().timelines;
 
@@ -700,7 +722,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         const newTimeline = {
           type: getTimelineTypeForClip(data),
           timelineId,
-          timelinePadding: 24,
+          timelinePadding: TIME_ZERO_X,
           timelineWidth: size.width,
           timelineY: 0,
           timelineHeight: timelineHeight,
@@ -725,7 +747,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         const newTimeline = {
           type: getTimelineTypeForClip(data),
           timelineId,
-          timelinePadding: 24,
+          timelinePadding: TIME_ZERO_X,
           timelineWidth: size.width,
           timelineY: (hoveredTimeline?.timelineY ?? 0) + timelineHeight,
           timelineHeight: timelineHeight,
@@ -1121,7 +1143,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       if (!stage) return;
       const pos = stage.getPointerPosition();
       if (!pos) return;
-      const tickAreaHeight = 24; // top ruler area height
+      const tickAreaHeight = RULER_HEIGHT; // top ruler area height
       if (pos.y <= tickAreaHeight) {
         setIsRulerDragging(true);
         panStateRef.current.startX = pos.x;
@@ -1170,7 +1192,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
   const seekToPointerX = useCallback(
     (pointerX: number) => {
       // Map pointer X to frame within the visible window [startFrame, endFrame]
-      const timelinePadding = 24; // left padding used by timeline
+      const timelinePadding = TIME_ZERO_X; // time 0, after the Cover column
       const [startFrame, endFrame] = controlStore.timelineDuration;
       const innerX = Math.max(
         0,
@@ -1264,12 +1286,18 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                         assetMode={false}
                       />
                     ))}
+                    {(() => {
+                      // Where Timeline draws the main track's band (its y + 32, 8 px shorter).
+                      const main = mainTrackOf(timelines);
+                      if (!main) return null;
+                      return <CoverTile top={(main.timelineY ?? 0) + 32} height={(main.timelineHeight ?? 0) - 8} />;
+                    })()}
                   </Layer>
                   <Layer visible={hasClips}>
                     {/* Time labels along the top */}
                     <TimelineMoments
                       stageWidth={dimensions.stageWidth}
-                      startPadding={24}
+                      startPadding={TIME_ZERO_X}
                       maxScroll={maxScroll}
                       onRulerClick={handleRulerClick}
                       thumbY={() => {
@@ -1305,7 +1333,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                         return thumbY;
                       }}
                     />
-                    <MarkerFlags stageWidth={dimensions.stageWidth} startPadding={24} />
+                    <MarkerFlags stageWidth={dimensions.stageWidth} startPadding={TIME_ZERO_X} />
                   </Layer>
                   {/* Snap guideline overlay */}
                   <Layer listening={false}>
@@ -1465,7 +1493,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
             )}
           </>
         )}
-        <MarkerEditor anchor={containerRef} stageWidth={dimensions.stageWidth} startPadding={24} />
+        <MarkerEditor anchor={containerRef} stageWidth={dimensions.stageWidth} startPadding={TIME_ZERO_X} />
         <div style={{ display: hasClips ? undefined : "none" }}>
           <ScrubControl
             stageHeight={dimensions.stageHeight - 30}

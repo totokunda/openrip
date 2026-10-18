@@ -67,6 +67,7 @@ import {
   isPolygonInsidePolygon,
   mergePolygons,
 } from "@/lib/polygon";
+import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 
 // The applicators of a clip with none over it: one array, so clip previews keep their props.
 const NO_APPLICATORS: ReturnType<typeof getApplicatorsForClip> = [];
@@ -1731,7 +1732,7 @@ const Preview: React.FC<PreviewProps> = () => {
             timelineY: 0,
             timelineHeight: 40,
             timelineWidth: 0,
-            timelinePadding: 24,
+            timelinePadding: TIME_ZERO_X,
             muted: false,
             hidden: false,
           };

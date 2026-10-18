@@ -4,13 +4,14 @@ import { useControlsStore } from "@/lib/control";
 import { TimelineProps } from "@/lib/types";
 import React, { useMemo } from "react";
 import { Rect, Line } from "react-konva";
+import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 
 const GhostTimeline: React.FC<TimelineProps> = ({
   timelineY,
   timelineHeight,
   timelineId,
   timelineWidth,
-  timelinePadding = 24,
+  timelinePadding = TIME_ZERO_X,
 }) => {
   const {
     ghostStartEndFrame,
