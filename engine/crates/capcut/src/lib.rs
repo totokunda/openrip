@@ -689,9 +689,23 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                 // Video masks: the shape's centre, size and rotation in the clip's picture.
                 "common_mask" => {
                     let c = m.get("config").unwrap_or(&Value::Null);
-                    let shape = match s(m, "resource_type").as_str() {
-                        "rectangle" => MaskShape::Rectangle { round_corner: f(c, "roundCorner", 0.0) as f32 },
-                        other => MaskShape::Other { name: other.to_string() },
+                    // By its type or name, else by the shape's bundle (the folder in CapCut's
+                    // effect cache: …/effect/1068046517/… is the circle).
+                    let path = s(m, "path");
+                    let bundle = path.split("/effect/").nth(1).and_then(|rest| rest.split('/').next()).unwrap_or_default();
+                    let ty = s(m, "resource_type");
+                    let name = s(m, "name").to_lowercase();
+                    let is = |names: &[&str], id: &str| names.contains(&ty.as_str()) || names.contains(&name.as_str()) || bundle == id;
+                    let shape = if is(&["rectangle"], "1068046516") {
+                        MaskShape::Rectangle { round_corner: f(c, "roundCorner", 0.0) as f32 }
+                    } else if is(&["circle"], "1068046517") {
+                        MaskShape::Circle
+                    } else if is(&["linear", "line"], "1068046514") {
+                        MaskShape::Linear
+                    } else if is(&["mirror"], "1068046513") {
+                        MaskShape::Mirror
+                    } else {
+                        MaskShape::Other { name: ty }
                     };
                     bump(&mut report.library_items, "mask".to_string());
                     out.masks.push(Mask {
@@ -1285,6 +1299,16 @@ mod tests {
         assert_eq!((m.center, m.size, m.rotation, m.feather, m.invert), ([0.1, 0.2], [0.5, 0.28], 15.0, 0.3, true));
         assert!(project.tracks[0].segments[0].attachments.contains(&MaterialId::from("M1")));
         assert_eq!(report.mapped.get("common_mask"), Some(&1));
+        // The other shapes CapCut's bundles draw, by type, by name or by their bundle's folder.
+        let shapes = [("circle", "", ""), ("", "Linear", ""), ("", "", "/cache/effect/1068046513/abc"), ("heart", "Heart", "/cache/effect/1068046512/abc")];
+        for (k, (ty, name, path)) in shapes.iter().enumerate() {
+            d["materials"]["common_mask"][0]["resource_type"] = json!(ty);
+            d["materials"]["common_mask"][0]["name"] = json!(name);
+            d["materials"]["common_mask"][0]["path"] = json!(path);
+            let shape = import_draft_json(&d, "hint").unwrap().project.materials.masks[0].shape.clone();
+            let want = [MaskShape::Circle, MaskShape::Linear, MaskShape::Mirror, MaskShape::Other { name: "heart".into() }];
+            assert_eq!(shape, want[k]);
+        }
     }
 
     #[test]

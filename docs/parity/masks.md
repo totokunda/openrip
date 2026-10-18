@@ -35,7 +35,24 @@ OpenRip's mask tool (from Apex Studio, where masks fed AI models) draws rectangl
 
 `Mask` materials (`openrip-model`) carry the shape, centre (in half-sizes from the picture's middle, +y up), size, rotation, feather, invert, what each side shows (the clip, or a colour, clear for a cut-out) and any held keys. The preview draws each attached mask's coverage over the upright picture (at the picture's size, up to 2048 pixels on its long side), turns it into the stored picture's axes and hands it to the compositor, which paints the clip's pixels inside and outside by it before placing the clip (a background-removal matte is the first such pass). Photos take masks too.
 
-Of CapCut's shapes only the rectangle is drawn; others are imported (and keep their bundle reference) but leave the picture whole until their bundles are read. In the app's engine mode the mask tool sends the project without masks, so the clip shows whole while masks are edited.
+CapCut's rectangle, circle, linear and mirror masks are drawn. Heart and star draw an SVG outline in their bundles; they are imported, keeping their bundle reference, but leave the picture whole. In the app's engine mode the mask tool sends the project without masks, so the clip shows whole while masks are edited.
+
+### Circle, linear and mirror (2026-10-17)
+
+Read from their bundles (`lumi_circle_mask`, `lumi_linear_mask`, `lumi_mirror_mask`, in `effect/1068046517`, `…514` and `…513`). They use the same offsets as the rectangle: half-heights from the centre, v up.
+
+- **Circle:**
+  - The offset is turned by 360° plus the rotation, as for the rectangle.
+  - Coverage is 1 − smoothstep(1 − s, 1 + s, (x/a)² + (y/b)²), where a and b are the box's half-sizes. The edge softness s is 15 × feather, plus up to 0.05 more for long thin ellipses: ((r − 1)/10)² × 0.05, where r is the longer side over the shorter, clamped to 1–11.
+- **Linear:**
+  - d is the offset's distance along (−sin θ, cos θ), where θ = −rotation.
+  - Coverage is smoothstep(−0.005·decay − feather, feather, d), so it keeps the side the rotation turns "up" to.
+- **Mirror:**
+  - d is the same distance, without its sign.
+  - Coverage is 1 − smoothstep(h − 0.005·decay − feather, h + 0.005·decay + feather, d), where h is the box's height. It keeps a band as tall as the box; its width doesn't apply.
+- **Invert** swaps coverage, as for the rectangle.
+
+The importer recognises a shape by its `resource_type`, its name, or its bundle's folder. No local draft uses these three, so they follow the bundles but are unchecked against CapCut. A calibration draft (like session 6, with these shapes) would confirm them.
 
 ## Checks
 

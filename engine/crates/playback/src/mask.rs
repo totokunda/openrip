@@ -36,6 +36,9 @@ pub fn coverage(mask: &Mask, at: Micros, w: u32, h: u32) -> Option<Vec<u8>> {
     let p = pose(mask, at);
     let mut out = match p.shape {
         MaskShape::Rectangle { round_corner } => rectangle(&p, *round_corner as f64, mask.feather as f64, w, h),
+        MaskShape::Circle => circle(&p, mask.feather as f64, w, h),
+        MaskShape::Linear => line(&p, mask.feather as f64, w, h, false),
+        MaskShape::Mirror => line(&p, mask.feather as f64, w, h, true),
         MaskShape::Other { .. } => return None,
         MaskShape::Polygon { points } => {
             let pts: Vec<[f64; 2]> = points.iter().map(|q| [q[0] as f64 * w as f64, q[1] as f64 * h as f64]).collect();
@@ -185,6 +188,78 @@ fn rectangle(p: &Pose, round: f64, feather: f64, w: u32, h: u32) -> Vec<u8> {
     out
 }
 
+/// A pixel's offset from the mask's centre in units of the picture's half-height (v up), as
+/// CapCut's mask shaders compute it, for every pixel of a `w`×`h` picture.
+fn offsets(p: &Pose, w: u32, h: u32, mut f: impl FnMut(usize, [f64; 2])) {
+    let aspect = w as f64 / h as f64;
+    for y in 0..h {
+        let v = 1.0 - (y as f64 + 0.5) / h as f64;
+        for x in 0..w {
+            let u = (x as f64 + 0.5) / w as f64;
+            f((y * w + x) as usize, [((u - 0.5) * 2.0 - p.center[0]) * aspect, (v - 0.5) * 2.0 - p.center[1]]);
+        }
+    }
+}
+
+/// GLSL's smoothstep, a step at `e0` when the edges meet.
+fn smoothstep(e0: f64, e1: f64, x: f64) -> f64 {
+    if e1 <= e0 {
+        return if x > e0 { 1.0 } else { 0.0 };
+    }
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// How much CapCut widens a turned mask's edge for smoothing (0 at 0°, 1 at 45°), from its
+/// angle in radians.
+fn decay(theta: f64) -> f64 {
+    use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+    (1.0 - ((theta.rem_euclid(FRAC_PI_2) / FRAC_PI_4) - 1.0).powi(2)).max(0.0).powf(0.125)
+}
+
+/// CapCut's circle bundle (`lumi_circle_mask`): the offset turned by 360° plus the rotation,
+/// then (x/a)² + (y/b)² against 1 for the box's half-sizes a and b, softened by 15 × the
+/// feather and, for long thin ellipses, a little more.
+fn circle(p: &Pose, feather: f64, w: u32, h: u32) -> Vec<u8> {
+    let aspect = w as f64 / h as f64;
+    let (a, b) = ((p.size[0] * aspect).max(1e-6), p.size[1].max(1e-6));
+    let ratio = if p.size[0] > p.size[1] { p.size[0] / p.size[1].max(1e-6) } else { p.size[1] / p.size[0].max(1e-6) };
+    let k = (ratio.clamp(1.0, 11.0) - 1.0) / 10.0;
+    let soft = feather * 15.0 + k * k * 0.05;
+    let (sn, cs) = (360.0 + p.rotation).to_radians().sin_cos();
+    let mut out = vec![0u8; (w * h) as usize];
+    offsets(p, w, h, |i, [px, py]| {
+        let (qx, qy) = (cs * px - sn * py, sn * px + cs * py);
+        let r = qx * qx / (a * a) + qy * qy / (b * b);
+        out[i] = ((1.0 - smoothstep(1.0 - soft, 1.0 + soft, r)) * 255.0).round() as u8;
+    });
+    out
+}
+
+/// CapCut's linear and mirror bundles (`lumi_linear_mask`, `lumi_mirror_mask`): the offset's
+/// distance along the direction the rotation turns "up" to. The linear mask keeps what's on
+/// that side of the line, softened by the feather; the mirror keeps a band of half the box's
+/// height (in half-heights) either side of it.
+fn line(p: &Pose, feather: f64, w: u32, h: u32, mirror: bool) -> Vec<u8> {
+    let theta = -p.rotation.to_radians();
+    let (ox, oy) = (-theta.sin(), theta.cos());
+    let d = 0.005 * decay(theta);
+    let half = p.size[1];
+    let mut out = vec![0u8; (w * h) as usize];
+    offsets(p, w, h, |i, [px, py]| {
+        let along = ox * px + oy * py;
+        let kept = if !mirror {
+            smoothstep(-d - feather, feather, along)
+        } else if half <= 0.0 {
+            0.0
+        } else {
+            1.0 - smoothstep(half - d - feather, half + d + feather, along.abs())
+        };
+        out[i] = (kept * 255.0).round() as u8;
+    });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,6 +303,44 @@ mod tests {
         let t = coverage(&m, Micros(1_000_000), w, h).unwrap();
         // Box 0..50 square; apex at (25, 0 − 50/6), base at y = 50 − 50/6 ≈ 41.7.
         assert_eq!((at(&t, 25, 20), at(&t, 25, 43), at(&t, 75, 75), at(&t, 1, 30)), (255, 0, 0, 0));
+    }
+
+    /// CapCut's circle: a 0.5 × 0.5 box on a square picture is the disc of radius a quarter of
+    /// the side, hard-edged without feather; feather softens its edge both ways.
+    #[test]
+    fn capcuts_circle_is_the_ellipse_in_its_box() {
+        let mut m = rect([0.0, 0.0], [0.5, 0.5]);
+        m.shape = MaskShape::Circle;
+        let (w, h) = (100, 100);
+        let c = coverage(&m, Micros::ZERO, w, h).unwrap();
+        let at = |c: &[u8], x: u32, y: u32| c[(y * w + x) as usize];
+        assert_eq!((at(&c, 50, 50), at(&c, 50, 26), at(&c, 50, 23), at(&c, 74, 50), at(&c, 77, 50), at(&c, 65, 65), at(&c, 70, 70)), (255, 255, 0, 255, 0, 255, 0));
+        m.feather = 0.02;
+        let soft = coverage(&m, Micros::ZERO, w, h).unwrap();
+        let edge = at(&soft, 75, 50);
+        assert!(edge > 40 && edge < 215, "{edge}");
+    }
+
+    /// CapCut's linear mask keeps the side the rotation points up to; the mirror a band either
+    /// side of the line, as tall as the box.
+    #[test]
+    fn capcuts_linear_and_mirror_masks() {
+        let mut m = rect([0.0, 0.0], [1.0, 0.25]);
+        m.shape = MaskShape::Linear;
+        let (w, h) = (100, 100);
+        let at = |c: &[u8], x: u32, y: u32| c[(y * w + x) as usize];
+        let c = coverage(&m, Micros::ZERO, w, h).unwrap();
+        assert_eq!((at(&c, 50, 10), at(&c, 50, 90)), (255, 0));
+        // Turned 90° clockwise, "up" points left... or right: the kept side moves sideways.
+        m.rotation = 90.0;
+        let c = coverage(&m, Micros::ZERO, w, h).unwrap();
+        assert_ne!(at(&c, 10, 50), at(&c, 90, 50));
+        assert_eq!(at(&c, 10, 50).max(at(&c, 90, 50)), 255);
+        m.rotation = 0.0;
+        m.shape = MaskShape::Mirror;
+        // A band 0.25 half-heights either side: rows 37.5..62.5.
+        let c = coverage(&m, Micros::ZERO, w, h).unwrap();
+        assert_eq!((at(&c, 50, 50), at(&c, 50, 40), at(&c, 50, 36), at(&c, 50, 64)), (255, 255, 0, 0));
     }
 
     #[test]

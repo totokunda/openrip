@@ -422,6 +422,15 @@ pub enum MaskShape {
     /// A closed polygon (the app's lasso), points in fractions of the picture's width and
     /// height from its top-left; `center`, `size` and `rotation` don't apply.
     Polygon { points: Vec<[f32; 2]> },
+    /// CapCut's circle: the ellipse inscribed in the box, its edge softened as CapCut's
+    /// bundle does it.
+    Circle,
+    /// CapCut's linear mask: the side of a line through the centre that the rotation points
+    /// up from (`size` doesn't apply).
+    Linear,
+    /// CapCut's mirror: a band along a line through the centre, as tall as the box (its
+    /// width doesn't apply).
+    Mirror,
     /// A shape not drawn yet, by CapCut's name for it (`circle`, `linear`, `heart`, …).
     Other { name: String },
 }
