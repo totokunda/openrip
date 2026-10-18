@@ -169,3 +169,36 @@ export interface AppProjectFromDraft {
 
 /** The CapCut draft in folder dir as an app project, on a worker thread: the app's own clips, each carrying its segment so the engine draws it as CapCut did. */
 export function capcutToApp(dir: string): Promise<AppProjectFromDraft>
+
+// The Audio tab: beats, loudness, voiceover.
+
+export interface BeatGrid {
+  /** Beats per minute. */
+  bpm: number
+  /** Each beat's time in the file's media, in seconds. */
+  times: Float64Array
+  /** 1 where the beat starts a bar (in fours), else 0. */
+  downbeats: Uint8Array
+}
+
+/** The beats in a file's audio (all of it), on a worker thread, kept in the thumbnail cache folder; null if it has no audio. */
+export function beats(path: string): Promise<BeatGrid | null>
+
+export interface Loudness {
+  /** EBU R128 integrated loudness, LUFS; null for silence. */
+  integrated: number | null
+  /** The largest sample, dBFS. */
+  peak: number
+}
+
+/** The loudness of a file over durationUs from startUs of its media (all of it for null), as CapCut measures it for "Normalize loudness"; null if it has no audio. */
+export function loudness(path: string, startUs: number, durationUs: number | null): Promise<Loudness | null>
+
+/** Start recording a voiceover from the default microphone into a new WAV file (one at a time: a running one is stopped and kept). */
+export function startRecording(path: string): { rate: number; channels: number }
+/** The recording's level since the last call (peak and RMS, 0..1); null when not recording. */
+export function recordingLevel(): { peak: number; rms: number } | null
+/** Stop recording and finish the file; null when not recording. */
+export function stopRecording(): { path: string; durationUs: number; rate: number; channels: number } | null
+/** For automated tests: record from a stand-in microphone that hears a steady 440 Hz tone. */
+export function useToneInput(): void

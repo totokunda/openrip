@@ -425,8 +425,8 @@ impl Mixer {
     /// load). A filter is CapCut's (its bundle, `resource`) or OpenRip's own (`builtin`
     /// names its kind).
     fn voice_of(&mut self, seg: &Segment, local: i64, decoder: &mut dyn AudioSource, report: &mut MixReport) -> Option<i64> {
-        let effects: Vec<openrip_model::Effect> = seg.attachments.iter().filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Audio)).cloned().collect();
-        if effects.is_empty() {
+        let audio = |id: &openrip_model::MaterialId| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Audio);
+        if !seg.attachments.iter().any(|id| audio(id).is_some()) {
             return None;
         }
         let continuous = matches!(self.voices.get(&seg.id), Some(Some(v)) if v.next_out == local);
@@ -434,6 +434,7 @@ impl Mixer {
             if matches!(self.voices.get(&seg.id), Some(None)) {
                 return None;
             }
+            let effects: Vec<openrip_model::Effect> = seg.attachments.iter().filter_map(|id| audio(id)).cloned().collect();
             let mut chains = Vec::new();
             for effect in &effects {
                 let (what, chain) = match (&effect.resource, &effect.builtin) {

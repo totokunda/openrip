@@ -239,7 +239,10 @@ pub fn beat_scan(root: &Path) -> Result<()> {
                     let recall = offsets.len() as f64 / tt.len().max(1) as f64;
                     let precision = ot.iter().filter(|x| near(**x, &tt).is_some()).count() as f64 / ot.len().max(1) as f64;
                     let f = if recall + precision > 0.0 { 2.0 * recall * precision / (recall + precision) } else { 0.0 };
-                    let their_bpm = if tt.len() > 1 { 60.0 * (tt.len() - 1) as f64 / (tt[tt.len() - 1] - tt[0]) } else { 0.0 };
+                    // CapCut's tempo from its median beat interval (it leaves out beats here and there).
+                    let mut gaps: Vec<f64> = tt.windows(2).map(|w| w[1] - w[0]).collect();
+                    gaps.sort_by(f64::total_cmp);
+                    let their_bpm = gaps.get(gaps.len() / 2).map_or(0.0, |g| 60.0 / g);
                     let offset = offsets.iter().sum::<f64>() / offsets.len().max(1) as f64;
                     // Of CapCut's bar starts that we have a beat at, how many we call bar starts.
                     let bars: Vec<bool> = theirs.iter().filter(|b| b.downbeat).filter_map(|b| ours.beats.iter().find(|o| (o.at.as_secs_f64() - b.at.as_secs_f64()).abs() <= 0.07).map(|o| o.downbeat)).collect();
