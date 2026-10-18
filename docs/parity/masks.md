@@ -25,17 +25,47 @@ The result multiplies the clip before it's placed.
 
 OpenRip's mask tool (from Apex Studio, where masks fed AI models) draws rectangles, ellipses, triangles, five-pointed stars and lassos on a video or image clip (`components/preview/mask`):
 
-- Each mask keeps keyframes by source frame, each a shape (`shapeBounds`) or a lasso (`lassoPoints`), held until the next; before the first, the first applies.
+- Each mask keeps keyframes by source frame, each a shape (`shapeBounds`), a lasso (`lassoPoints`) or brush strokes (`brushStrokes`), with an optional easing (`ease`, as the clip keyframes'). Before the first keyframe the first applies.
 - Positions are world units from the clip's top-left, at the scale the clip had when the mask was drawn (the mask's `transform`). A rectangle turns about its top-left corner, the other shapes about their centre; the triangle's centroid sits at its box's centre; the star's inner points are at half its radii, stretched to the box.
-- Inside shows the mask colour (white by default) or the clip, outside the background colour (black by default) or the clip. Only the first mask paints outside itself. Edges are hard, tested at pixel centres; the feather and invert the app stores aren't used.
+- Inside shows the mask colour (white by default) or the clip, outside the background colour (black by default) or the clip. Only the first mask paints outside itself. The app's own preview draws hard edges, tested at pixel centres, and ignores the feather and invert it stores; the engine applies both (below).
 - A colour comes out of its WebGL canvas as the colour times its opacity at the opacity squared, since the blend applies to alpha too.
 - While the mask tool is out, the preview shows clips unmasked.
 
 ## OpenRip
 
-`Mask` materials (`openrip-model`) carry the shape, centre (in half-sizes from the picture's middle, +y up), size, rotation, feather, invert, what each side shows (the clip, or a colour, clear for a cut-out) and any held keys. The preview draws each attached mask's coverage over the upright picture (at the picture's size, up to 2048 pixels on its long side), turns it into the stored picture's axes and hands it to the compositor, which paints the clip's pixels inside and outside by it before placing the clip (a background-removal matte is the first such pass). Photos take masks too.
+`Mask` materials (`openrip-model`) carry the shape, centre (in half-sizes from the picture's middle, +y up), size, rotation, feather, invert, what each side shows (the clip, or a colour, clear for a cut-out) and any keys over time. A CapCut mask's keyframes are the segment's (`KFTypeCommonMask…`, [keyframes.md](keyframes.md)): its centre, size, rotation, feather and rounded corners travel by CapCut's curve. The preview draws each attached mask's coverage over the upright picture (at the picture's size, up to 2048 pixels on its long side), turns it into the stored picture's axes and hands it to the compositor, which paints the clip's pixels inside and outside by it before placing the clip (a background-removal matte is the first such pass). Photos take masks too.
 
-CapCut's rectangle, circle, linear and mirror masks are drawn. Heart and star draw an SVG outline in their bundles; they are imported, keeping their bundle reference, but leave the picture whole. In the app's engine mode the mask tool sends the project without masks, so the clip shows whole while masks are edited.
+CapCut's rectangle, circle, linear, mirror, heart and star masks are drawn. The pen (`contour`) is imported but not drawn: its one local use has an empty path. In the app's engine mode the mask tool sends the project without masks, so the clip shows whole while masks are edited.
+
+### Heart and star (2026-10-18)
+
+The heart's bundle (`effect/1068046512`, `lumi_heart_mask`) draws its shape from a picture, not from the SVG outline beside it (`material.svg`, a star icon):
+
+- **The picture.** `amazingfeature/image/mask.png` is 1024² and holds a distance field. Its shader reads it as `(r·4·256 + g·255)/701`. The outline is at 0.5, and the field rises about 0.004 a texel inward, up to 1.
+- **Where it goes.** The vertex shader works in units of the picture's half-height, from the mask's centre (y down). It turns the offset by 360° − rotation and divides by the box size times 1.7 (`boundaryScale`).
+  - So the picture spans 1.7 times the box.
+  - The heart inside it measures 603 × 541 texels: 1.001 of the box's width and 0.898 of its height.
+- **The edge.** It's `smoothstep(0.49 − d, 0.51 + d)`, with d half the feather, and invert swaps the sides.
+
+The star's bundle (`pentagram`) isn't on this machine. If it's the same kind (a picture and a shader that decodes it), it's drawn the same way: the importer accepts any mask bundle whose shader decodes such a field (`MaskShape::Picture`, pointing at the picture). The preview reads the picture once, at run time from CapCut's cache (nothing is copied into the repo), and samples it bilinearly.
+
+**Checks.** Only the heart's bundle is on this machine, and no local draft uses a heart or a star, so there's no cover or export to compare with. A unit test draws the heart from the bundle when it's there. In a 0.5 × 0.5 box on a square picture, it spans the box's width and 0.9 of its height, centred. It's upright, its lobes at the top and its point at the bottom, and a 90° turn puts the point on the left. Another test draws a synthetic disc field, which comes out as the circle in the box.
+
+### The app's feather, invert, keys and brush (2026-10-18)
+
+- **Feather.** The app's feather (`featherAmount`, 0–100 as CapCut's slider) is CapCut's feather × 100. It softens the edge in the mask's own units, as CapCut's shapes do:
+  - the rectangle uses CapCut's rectangle;
+  - the ellipse softens around 1 on (x/a)² + (y/b)² by 15 × the feather, as CapCut's circle does;
+  - the triangle and star use the rectangle's band (6 × the feather) on a pixel's gauge, its distance from the centre over the outline's along the same ray;
+  - a lasso softens across its outline, by 6 × the feather of half its shorter side.
+  A feather of 0 is the hard edge as before. New masks start at 0; masks saved earlier carry the old default of 2, a light softening.
+- **Invert** swaps inside and out.
+- **Keys** of the same shape (or lassos with the same number of points) travel from one pose to the next by the first key's easing: linear by default, or CapCut's curve for the presets and custom handles. Poses of different shapes hold until the next key.
+- **The brush.** The app has a brush tool, but it doesn't save strokes yet. The data model takes them (`brushStrokes`: points and a width in world units, and whether a stroke erases). The engine draws them as round-ended strokes, unioned in order, with an eraser clearing what's under it, and softened by the feather (6 × the feather of the stroke's half-width).
+
+### Masks on adjustment layers
+
+CapCut masks adjustment layers too: a local draft's adjustment layer has a rectangle mask (category `adjust`). The engine doesn't draw adjustment layers yet, so their masks aren't drawn either. Effects in CapCut 9.5.0 take masks the same way (the Effect inspector's Mask tab), and aren't drawn for the same reason.
 
 ### Circle, linear and mirror (2026-10-17)
 

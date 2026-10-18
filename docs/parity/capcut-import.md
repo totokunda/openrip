@@ -21,7 +21,7 @@ The importer only reads CapCut's files; it never writes to CapCut's data folder.
 | Import time | 3.4 ms average, 13.4 ms max per draft |
 | Media files missing on this machine | 740 of 1,026 (→ relink is a P0 feature) |
 
-**Mapped to OpenRip types:** videos, photos, audios, texts (rich runs, stroke, shadow, background), speeds, canvas fills, audio fades, transitions, Adjust sliders (brightness, contrast, saturation, sharpen, highlights, shadows, temperature, tint, vignette, blacks, whites, exposure, fade, clarity), **HSL (8 named ranges plus custom colour, −100…100), tone curves (bezier anchors per luma/R/G/B channel), primary and log colour wheels (lift/gamma/gain/offset)**, filters/effects, and keyframes (position, scale, rotation, opacity, volume).
+**Mapped to OpenRip types:** videos, photos, audios, texts (rich runs, stroke, shadow, background), speeds, canvas fills, audio fades, transitions, Adjust sliders (brightness, contrast, saturation, sharpen, highlights, shadows, temperature, tint, vignette, blacks, whites, exposure, fade, clarity), **HSL (8 named ranges plus custom colour, −100…100), tone curves (bezier anchors per luma/R/G/B channel), primary and log colour wheels (lift/gamma/gain/offset)**, filters/effects, and keyframes: the transform, opacity, volume, the Adjust sliders, filter strength, colour wheels, HSL, a text's style and a mask's geometry, with CapCut's curves ([keyframes.md](keyframes.md)).
 
 **Kept verbatim, not interpreted yet** (ordered by how much real projects use them):
 
@@ -47,4 +47,4 @@ The importer only reads CapCut's files; it never writes to CapCut's data folder.
 **Calibrated against CapCut** (see [calibration.md](calibration.md)): transform units match the model (half-canvas, +y up, clockwise, contain-fit scale); track flags are 1 = muted, 2 = hidden, 4 = locked; hidden tracks are silent too; stacking follows track order in CapCut's default track mode; one text size unit = 0.005789 of the canvas width as an em size. Session 2 measured CapCut's rendering pipeline (native export resolution, two-pass resampling with a sharpened downscale, neutral colour path, text size proportional to canvas width); image borders, other scale factors, opacity and portrait text are in session 3.
 
 **Still to verify against CapCut exports:**
-- The keyframe curve-control space. Every curve seen so far is `Line`, so non-linear curves are imported as linear for now.
+- Keyframe value units for the text, Adjust and HSL types (no local draft keys them; [keyframes.md](keyframes.md)). The curve itself matches CapCut's own bit for bit.

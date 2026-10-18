@@ -16,11 +16,11 @@ Agreed 2026-10-16. What the engine draws next is chosen from two sources: what r
 | Adjust sliders | 5 drafts | ✅ 9 within ±2 code values; fade, clarity, vignette as close as plain video (2026-10-17, [colour.md](../parity/colour.md)); ❌ temperature/tint on fine detail |
 | HSL, curves | 1 draft each (3 ranges; 40 clips) | ✅ (2026-10-17, [colour.md](../parity/colour.md)); ❌ log wheels (no local use) |
 | Audio clips, fades, loudness | 7–35 drafts | ✅ |
-| Speed changes, keyframes (opacity, position) | 14 and 12 uses | ✅ |
+| Speed changes, keyframes (opacity, position) | 14 and 12 uses | ✅ with CapCut's curves, bit for bit, and every keyframe type the engine draws ([keyframes.md](../parity/keyframes.md)) |
 | Stabilisation | 12, 2 drafts | ❌ |
 | Transitions | 8, 2 drafts | ✅ Blink, White Flash, White Fade ([transitions.md](../parity/transitions.md)) |
 | Voice effects | 8, 5 drafts | ✅ Deep, Low, Voice Crisper, Demonized; Deep 2 without its reverb ([voice-effects.md](../parity/voice-effects.md)) |
-| Masks | 2 drafts | ✅ Rectangle, matching both covers ([masks.md](../parity/masks.md)); circle, linear and mirror from their bundles (no local use to check against); ❌ heart, star |
+| Masks | 2 drafts | ✅ Rectangle, matching both covers ([masks.md](../parity/masks.md)); circle, linear, mirror and heart from their bundles, the star if its bundle is the heart's kind (no local use to check against); ❌ pen |
 | Stickers | 11, 4 drafts (1 shown; the rest on hidden tracks) | ✅ PNG and GIF stickers from CapCut's cache (2026-10-17, [stickers.md](../parity/stickers.md)); their size is provisional, unchecked against CapCut |
 | Video effects | 1 | ❌ its bundle isn't in CapCut's cache |
 | AI features (matting, smart crop, AI denoise) | 1–29 | No models in OpenRip; background removal draws from the masks CapCut saved in the draft ([cutouts.md](../parity/cutouts.md)) |

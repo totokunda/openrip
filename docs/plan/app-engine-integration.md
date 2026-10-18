@@ -99,14 +99,42 @@ Done (2026-10-16): Projects ▸ Open CapCut Project… lists the drafts CapCut s
     - Each new slider changes the engine's frame; the HSL saturation moves it; taking the curves off changes it; putting the draft's back restores the first frame.
     - A sticker is drawn, and its opacity at 30% fades it.
 - **Still CapCut's alone:**
-  - the draft's masks and keyframes aren't shown in the panels;
+  - the draft's masks aren't shown in the panels, nor the keys of the properties `keyframes` doesn't cover (below);
   - video effects aren't drawn: the one local use's bundle isn't in CapCut's cache;
   - adjustment layers and log wheels aren't drawn (no local draft uses either);
-  - heart and star masks aren't drawn;
   - CapCut's AI colour match and correction can't be drawn without its models;
   - a sticker's size at scale 1 is unchecked against CapCut.
 
   None of these have settings yet.
+
+## Keyframes
+
+Done (2026-10-18): the data model and the engine. The keyframe diamonds, the inspector's navigators and the keyframe graph are UI still to build on it ([keyframes.md](../parity/keyframes.md) has the engine side and how CapCut's curve was matched).
+
+- **On a clip.** `keyframes` (`lib/types.ts`) maps a property to its keys, sorted by frame. Each key is `{ frame, value, ease? }`:
+  - `frame` is clip-local: 0 is where the clip starts on the timeline, at the project's rate. It can be fractional, so a CapCut key keeps its exact µs.
+  - `value` is in the clip field's own units. `position` is the box's centre in world units (y down; the transform's `x`/`y` are its turned top-left corner). `scale` is `[scaleX, scaleY]`, `rotation` degrees about the centre, `opacity` 0–100 and `volume` dB. Then the Adjust sliders on their scale, `intensity` for a filter bar (a sticker bar's opacity), a text's `color` (`#rrggbb`), `fontSize`, `stroke`, `strokeWidth`, `strokeOpacity`, `shadowColor`, `shadowOpacity`, `shadowBlur`, `backgroundColor` and `backgroundOpacity`. And `draft:<id>` for one of a converted clip's `draftAdjustments` (CapCut's scale), or `draft:<id>:hue` (`:saturation`, `:lightness`) for an HSL range.
+  - `ease` shapes the span to the next key. It's `"linear"` (the default) or `"hold"`, or CapCut's graph presets `"easeIn"`, `"easeOut"` and `"easeInOut"`: CapCut's curve with its default handles (0.4 of the span, flat) leaving this key, arriving at the next, or both. Or it's a custom curve `{ out: {frames, value}, in: {frames, value}, straight? }`: the handles as offsets from this key and from the next, in frames and the property's units, one number for all components or one per component.
+  - While a property has keys, they decide its value and the field's own value is ignored, as in CapCut.
+- **Helpers** (`lib/keyframes.ts`, pure: each returns new objects, never writing to what it's given, since the undo history shares clips between states):
+  - read: `listKeyframes`, `hasKeyframes`, `keyframeAt`, `previousKeyframe`/`nextKeyframe` (the navigator's ‹ ›), `keyframeFrames` (every keyed frame, for the clip's diamonds), `keyframeableProperties`;
+  - edit: `setKeyframe` (add or replace), `removeKeyframe`, `moveKeyframe`, `setKeyframeEase`, `clearKeyframes`;
+  - sample: `sampleKeyframes(keys, frame, property, fps)` and `valueAt(clip, property, timelineFrame, fps)` (keys, else the field) compute values as the engine does: CapCut's curve and solver in f32, colours in 0–1 channels and volume as gain;
+  - clip operations: `shiftKeyframes`, `scaleKeyframes` and `splitKeyframes`;
+  - the edit rule: `editProperty(clip, property, timelineFrame, value)` returns the patch for `updateClip`. While the property has keys it sets the key at the playhead; otherwise it changes the field, and a turn or scale keeps the box's centre. `toggleKeyframe` is the diamond: a key with the value at the playhead, or none if there was one. `propertyValue` gives a field's value in keyframe units.
+- **The store.**
+  - Keys stay on the content. A trim of a clip's start shifts them by minus the trim. A speed change from s0 to s1 scales them, and their handles, by s0/s1, and a frame-rate change by the ratio of the rates.
+  - A split gives each half the keys on its side, plus one at the cut so the motion carries on. A curve is cut in two, as CapCut splits a keyframed clip.
+  - Keys are plain JSON on the clip, so the autosave and undo keep them with no special handling.
+- **To the engine.** The importer (`engine/crates/v1/src/keys.rs`) turns keys into the segment's: frames into µs, values into model units. Presets become CapCut's handles, and a custom curve's handle points convert like the values, so a curve keeps its shape through dB to gain.
+- **CapCut clips.** `to_app_project` shows a converted clip's own keys in `keyframes`, for the properties above, and in `base`. When the project comes back, a property whose keys differ from `base` replaces the segment's keys for it; the others stay exactly CapCut's.
+  - Keys the app doesn't show (a mask's, a text's shadow) stay on the media through a trim or speed change.
+  - Unedited, a converted clip comes back exactly.
+- **Masks.** A mask keyframe takes an `ease` too: poses of the same shape travel by it, linear by default. `featherAmount` (0–100, CapCut's) and `inverted` are drawn. A brush mask's strokes go in `brushStrokes` (the brush tool doesn't save them yet). See [masks.md](../parity/masks.md).
+- **Checked:**
+  - the unit tests in `tests/keyframes.test.ts` (`node --test`) and the v1 crate;
+  - the harness steps `keyframes` and `keyframescheck`: keys set through the store change the engine's frames over time; CapCut's rule; a split; save and reopen;
+  - opening a keyed draft in the app shows its texts' opacity keys in `keyframes`.
 
 ## Speed on large projects
 
@@ -237,4 +265,4 @@ To add:
 
 - `sharedTexture` is experimental in Electron 44. The fallback, measured in the frame-transport spike, is a native CALayer under a transparent window region.
 - ~~`contextIsolation` with `sharedTexture`~~: verified in the spike (step 4).
-- Feature gaps against the current preview: effects, transitions, keyframe easing. The engine renders what CapCut drafts mostly use (video, photos, text with stroke and background, opacity, transforms). The rest comes in order of use.
+- Feature gaps against the current preview: effects, transitions. The engine renders what CapCut drafts mostly use (video, photos, text with stroke and background, opacity, transforms). The rest comes in order of use.
