@@ -3,6 +3,7 @@
 // block about the same middle; reports the box (from Konva's transformer, CSS px) and
 // whether the engine's frame changed.
 import { engineFrame } from "./_preview.mjs";
+import { textCase, textFont } from "./_undo.mjs";
 const box = (win) =>
   win.evaluate(() => {
     for (const stage of window.Konva?.stages ?? []) {
@@ -20,26 +21,14 @@ const fmt = (b) => (b ? `${b.w.toFixed(1)}×${b.h.toFixed(1)} at (${b.cx.toFixed
 export default async ({ win, shot }) => {
   const b0 = await box(win);
   const f0 = await engineFrame(win);
-  const at = await win.evaluate(() => {
-    const h = [...document.querySelectorAll("h4")].find((e) => (e.innerText || "").trim() === "Text Transform");
-    const el = h?.parentElement?.querySelectorAll("button")[1];
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  });
-  if (!at) throw new Error("no Text Transform buttons");
-  await win.mouse.click(at.x, at.y);
-  await win.waitForTimeout(2000);
+  await textCase(win, "uppercase");
+  await win.waitForTimeout(1000);
   const b1 = await box(win);
   const f1 = await engineFrame(win);
   await shot("b1-uppercase-box");
   const font = process.env.BOX_FONT || "Georgia";
-  await win.locator("[data-testid=inspector] [role=tabpanel] [role=combobox]").first().click();
-  await win.waitForTimeout(400);
-  await win.keyboard.type(font);
-  await win.waitForTimeout(400);
-  await win.keyboard.press("Enter");
-  await win.waitForTimeout(2000);
+  await textFont(win, font);
+  await win.waitForTimeout(1000);
   const b2 = await box(win);
   const f2 = await engineFrame(win);
   await shot("b2-font-box");

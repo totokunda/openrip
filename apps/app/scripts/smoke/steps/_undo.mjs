@@ -74,6 +74,28 @@ export const undoCase = async (ctx, check, name, edit, { frame = true } = {}) =>
 // Open an inspector tab (tab() scrolls the strip to it).
 export const openTab = (win, name) => tab(win, name);
 
+// Text ▸ Basic's controls (components/properties/text), each waiting for the engine's picture:
+// a Case button ("uppercase", "lowercase", "capitalize"), a font from the font menu, and a
+// colour typed into a well's picker (`well` its test id: text-color, text-stroke-color, …).
+export const textCase = (win, value) => settled(win, () => win.locator(`[data-testid=inspector] [data-testid=text-case] [data-value=${value}]`).click());
+export const textFont = (win, family) =>
+  settled(win, async () => {
+    await win.locator("[data-testid=text-font]").click();
+    await win.locator("[data-testid=font-search]").fill(family);
+    await win.waitForTimeout(300);
+    await win.locator(`[role=listbox] [data-font="${family}"]`).first().click();
+  });
+export const textColor = (win, well, hex) =>
+  settled(win, async () => {
+    const w = win.locator(`[data-testid=${well}]`);
+    await w.scrollIntoViewIfNeeded();
+    await w.click();
+    const f = win.locator("[data-testid=color-hex]");
+    await f.fill(hex.replace("#", ""));
+    await f.press("Enter");
+    await win.keyboard.press("Escape");
+  });
+
 // The number field under a panel label ("Position", "Volume", …).
 export const field = (win, label) =>
   win.locator("[data-testid=inspector] [role=tabpanel] label", { hasText: new RegExp(`^${label}$`) }).first().locator("xpath=..").locator("xpath=..").locator("input").first();

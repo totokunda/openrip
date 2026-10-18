@@ -41,7 +41,7 @@ export default async (ctx) => {
   // A text style from the Text tab: a new text clip, selected, on its Text tab.
   const texts = (await doc()).timeline.clips.filter((c) => c.type === "text").length;
   await left("text");
-  await win.locator("[data-testid=assets-section-styles]").click();
+  await win.locator("[data-testid='assets-section-presets:All']").click();
   await settled(win, () => win.locator("[data-testid=text-preset-outline]").click());
   const after = (await doc()).timeline.clips.filter((c) => c.type === "text");
   check("Text tab: a style adds a text at the playhead", after.length === texts + 1 && after.some((c) => c.strokeEnabled), `${texts} → ${after.length} texts`);

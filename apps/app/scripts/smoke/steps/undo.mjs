@@ -5,7 +5,7 @@
 // toolbar's buttons. UNDO_CASES="a,b" runs some of the cases only.
 import { clickSplit, drag, previewRect, seek, settled, timelineRect } from "./_preview.mjs";
 import { addTransition, bar, checks, choose, savedProject, select } from "./_anim.mjs";
-import { field, openTab, press, state, thumb, typeInto, undoCase } from "./_undo.mjs";
+import { field, openTab, press, state, textCase, textColor, textFont, thumb, typeInto, undoCase } from "./_undo.mjs";
 
 export default async (ctx) => {
   const { win, udDir } = ctx;
@@ -56,34 +56,17 @@ export default async (ctx) => {
     uppercase: async () => {
       await pick("text", 0);
       await openTab(win, "Text");
-      const at = await win.evaluate(() => {
-        const h = [...document.querySelectorAll("[data-testid=inspector] h4")].find((e) => (e.innerText || "").trim() === "Text Transform");
-        const r = h?.parentElement?.querySelectorAll("button")[1]?.getBoundingClientRect();
-        return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
-      });
-      await settled(win, () => win.mouse.click(at.x, at.y));
+      await textCase(win, "uppercase");
     },
     color: async () => {
       await pick("text", 0);
       await openTab(win, "Text");
-      const inputs = win.locator("[data-testid=inspector] [role=tabpanel] input");
-      for (let i = 0; i < (await inputs.count()); i++) {
-        if (!/^#?[0-9a-f]{6}$/i.test(await inputs.nth(i).inputValue())) continue;
-        await inputs.nth(i).click({ clickCount: 3 });
-        await inputs.nth(i).fill("#ff3030");
-        await settled(win, () => inputs.nth(i).press("Enter"));
-        return;
-      }
-      throw new Error("no colour field");
+      await textColor(win, "text-color", "ff3030");
     },
     font: async () => {
       await pick("text", 0);
       await openTab(win, "Text");
-      await win.locator("[data-testid=inspector] [role=tabpanel] [role=combobox]").first().click();
-      await win.waitForTimeout(400);
-      await win.keyboard.type("Georgia");
-      await win.waitForTimeout(400);
-      await settled(win, () => win.keyboard.press("Enter"));
+      await textFont(win, "Georgia");
     },
     // The text's In animation, seen a quarter of a second in.
     animation: async () => {

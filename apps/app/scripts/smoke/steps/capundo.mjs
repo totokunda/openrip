@@ -8,7 +8,7 @@
 // back.
 import { drag, rulerMap, seek, settled } from "./_preview.mjs";
 import { bar, checks, clipsWhere, savedProject, select } from "./_anim.mjs";
-import { openTab, press, state, thumb, typeInto, undoCase } from "./_undo.mjs";
+import { openTab, press, state, textCase, textFont, thumb, typeInto, undoCase } from "./_undo.mjs";
 
 export default async (ctx) => {
   const { win, udDir } = ctx;
@@ -27,14 +27,6 @@ export default async (ctx) => {
   await toHead();
   // Select by clicking its bar, away from the playhead (undo puts clips back with their ids).
   const pick = async (clip) => select(ctx, doc, clip.clipId);
-  const textTransform = async (i) => {
-    const at = await win.evaluate((i) => {
-      const h = [...document.querySelectorAll("[data-testid=inspector] h4")].find((e) => (e.innerText || "").trim() === "Text Transform");
-      const r = h?.parentElement?.querySelectorAll("button")[i]?.getBoundingClientRect();
-      return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
-    }, i);
-    await settled(win, () => win.mouse.click(at.x, at.y));
-  };
   const CASES = process.env.DRAFT_ADJUST
     ? {
         "draft slider": async () => {
@@ -62,16 +54,12 @@ export default async (ctx) => {
         "caption case": async () => {
           await pick(caption);
           await openTab(win, "Text");
-          await textTransform(1);
+          await textCase(win, "uppercase");
         },
         "caption font": async () => {
           await pick(caption);
           await openTab(win, "Text");
-          await win.locator("[data-testid=inspector] [role=tabpanel] [role=combobox]").first().click();
-          await win.waitForTimeout(400);
-          await win.keyboard.type(process.env.BOX_FONT || "Georgia");
-          await win.waitForTimeout(400);
-          await settled(win, () => win.keyboard.press("Enter"));
+          await textFont(win, process.env.BOX_FONT || "Georgia");
         },
         "video position": async () => {
           await pick(video);
