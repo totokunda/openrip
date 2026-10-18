@@ -57,6 +57,16 @@ export type EngineAddon = {
   setThumbnailCacheDir(dir: string): void;
   capcutToApp(dir: string): Promise<{ json: string; name: string; missingMedia: string[]; notes: string[] }>;
   thumbnails(path: string, timesUs: number[], height: number, exact: boolean): Promise<Thumbnail[]>;
+  /** The beats in a file's audio (times in s of its media; downbeats 1 where a bar starts), cached; null without audio. */
+  beats(path: string): Promise<{ bpm: number; times: Float64Array; downbeats: Uint8Array } | null>;
+  /** EBU R128 loudness (LUFS, null for silence) and peak (dBFS) of a file's range, as CapCut measures it. */
+  loudness(path: string, startUs: number, durationUs: number | null): Promise<{ integrated: number | null; peak: number } | null>;
+  /** Voiceover recording into a WAV file (lib/VoiceoverModule.ts). */
+  startRecording(path: string): { rate: number; channels: number };
+  recordingLevel(): { peak: number; rms: number } | null;
+  stopRecording(): { path: string; durationUs: number; rate: number; channels: number } | null;
+  /** Record a stand-in microphone that hears a tone (automated tests). */
+  useToneInput(): void;
 };
 
 /** A frame from the engine's thumbnailer: RGBA, `width * height * 4` bytes. */
@@ -312,7 +322,7 @@ export class EngineModule implements AppModule {
     }
     // Exact thumbnails are kept across runs.
     if (addon) addon.setThumbnailCacheDir(join(app.getPath("userData"), "engine-thumbnails"));
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails"]) {
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:beats", "engine:loudness"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -328,6 +338,30 @@ export class EngineModule implements AppModule {
       } catch (e) {
         console.warn("[engine] thumbnails failed:", message(e));
         return [];
+      }
+    });
+
+    // The Audio tab: a file's beats for the beat markers, and a clip's loudness for
+    // "Normalize loudness" (lib/beats.ts, lib/audio.ts).
+    ipcMain.handle("engine:beats", async (_event, path: string) => {
+      if (!addon) return null;
+      const file = path.startsWith("file://") ? fileURLToPath(path) : path;
+      try {
+        const g = await addon.beats(file);
+        return g && { bpm: g.bpm, beats: Array.from(g.times, (time, i) => ({ time, downbeat: g.downbeats[i] === 1 })) };
+      } catch (e) {
+        console.warn("[engine] beats failed:", message(e));
+        return null;
+      }
+    });
+    ipcMain.handle("engine:loudness", async (_event, path: string, startSec: number, durationSec: number | null) => {
+      if (!addon) return null;
+      const file = path.startsWith("file://") ? fileURLToPath(path) : path;
+      try {
+        return await addon.loudness(file, Math.round(startSec * 1e6), durationSec == null ? null : Math.round(durationSec * 1e6));
+      } catch (e) {
+        console.warn("[engine] loudness failed:", message(e));
+        return null;
       }
     });
 

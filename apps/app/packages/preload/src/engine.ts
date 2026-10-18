@@ -37,6 +37,23 @@ export function engineThumbnails(path: string, timesUs: number[], height: number
   return ipcRenderer.invoke("engine:thumbnails", path, timesUs, height, exact);
 }
 
+/** A file's beats as the engine finds them (lib/beats.ts `BeatGrid`): times in s of its media. */
+export type EngineBeats = { bpm: number; beats: { time: number; downbeat: boolean }[] };
+
+/** The beats in the audio of `path` (a path or file URL), cached by the engine per file; null without audio or the engine. */
+export function engineBeats(path: string): Promise<EngineBeats | null> {
+  return ipcRenderer.invoke("engine:beats", path);
+}
+
+/**
+ * The EBU R128 loudness (LUFS; null for silence) and peak (dBFS) of `path` over `durationSec`
+ * from `startSec` of its media (all of it for null), as CapCut measures it for "Normalize
+ * loudness" (lib/audio.ts `MeasureLoudness`); null without audio or the engine.
+ */
+export function engineLoudness(path: string, startSec: number, durationSec: number | null): Promise<{ integrated: number | null; peak: number } | null> {
+  return ipcRenderer.invoke("engine:loudness", path, startSec, durationSec);
+}
+
 /** Id of the canvas the engine's frames are drawn into; the page creates it. */
 export const ENGINE_FRAME_CANVAS_ID = "openrip-engine-frame";
 /** Event fired on that canvas after each frame is drawn (detail: time, width, height). */

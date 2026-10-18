@@ -13,6 +13,7 @@ import { jsonPersistenceModule } from "./modules/JSONPersistenceModule.js";
 import { appDirProtocol } from "./modules/AppDirProtocol.js";
 import { coreIpc } from "./modules/CoreIpc.js";
 import { engineModule } from "./modules/EngineModule.js";
+import { voiceoverModule } from "./modules/VoiceoverModule.js";
 import { capCutImportModule } from "./modules/CapCutImportModule.js";
 import { appMenu } from "./modules/AppMenu.js";
 import { app } from "electron";
@@ -30,6 +31,8 @@ export async function initApp(initConfig: AppInitConfig) {
     .init(coreIpc())
     // The Rust engine, before any window asks for it
     .init(engineModule())
+    // Voiceover recording through the engine, once it's loaded
+    .init(voiceoverModule())
     .init(jsonPersistenceModule())
     .init(capCutImportModule())
     .init(appMenu())
