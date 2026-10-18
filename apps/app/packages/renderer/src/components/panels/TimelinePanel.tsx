@@ -24,7 +24,7 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
       defaultSize={defaultSize}
       minSize={minSize}
       data-testid="timeline"
-      className="bg-brand flex flex-col rounded-md w-full overflow-hidden"
+      className="bg-brand-background flex flex-col rounded-lg w-full overflow-hidden"
     >
       <Controls />
       <div className="flex flex-col justify-center flex-1 min-h-0 overflow-auto">

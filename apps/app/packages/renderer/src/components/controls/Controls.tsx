@@ -502,11 +502,11 @@ const Controls = () => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [tool, selectedMaskId, selectedLineId, selectedIds]);
   return (
-    <div data-testid="timeline-toolbar" className="relative flex items-center h-9 shrink-0 border-b border-brand-light/[0.06]">
-      <div className="flex items-center w-full justify-between px-2.5">
+    <div data-testid="timeline-toolbar" className="relative flex items-center h-8 shrink-0 border-b-[0.5px] border-brand-hairline">
+      <div className="flex items-center w-full justify-between px-2">
         {/* CapCut's order, left to right; Undo and Redo name themselves. Split stays
             right after Redo. */}
-        <div className="flex items-center gap-x-1 [&>div]:h-7 [&>div]:w-7 [&>div]:py-0">
+        <div className="flex items-center gap-x-2 [&>div]:h-7 [&>div]:w-7 [&>div]:py-0">
           <UndoButton />
           <RedoButton />
           <Tool title="Split" id="split"><SplitButton /></Tool>
@@ -518,7 +518,7 @@ const Controls = () => {
           <NotYet title="Freeze frame" id="freeze" icon={LuSnowflake} />
           <Tool title="Detach audio" id="detach"><SeparateButton /></Tool>
         </div>
-        <div className="flex items-center gap-x-1">
+        <div className="flex items-center gap-x-2">
           <NotYet title="Recording a voiceover" id="voiceover" icon={LuMic} />
           <MagnetToggle />
           <SnappingToggle />

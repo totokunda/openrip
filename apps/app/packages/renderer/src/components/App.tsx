@@ -9,7 +9,7 @@ import MediaModelPanel from "./panels/MediaModelPanel";
 import PreviewPanel from "./panels/PreviewPanel";
 import TimelinePanel from "./panels/TimelinePanel";
 import PropertiesPanel from "./panels/PropertiesPanel";
-import { useLayoutConfigStore } from "@/lib/layout-config";
+import { layoutStorageKey, useLayoutConfigStore } from "@/lib/layout-config";
 import Topbar from "./bars/Topbar";
 import { DndContext, DragEndEvent, DragOverlay } from "@dnd-kit/core";
 import { MediaItem, MediaThumb } from "@/components/media/Item";
@@ -42,10 +42,11 @@ const Loading: React.FC<{ title: string; note: string }> = ({ title, note }) => 
 );
 
 /**
- * The 3 px gap between panels, which is also the handle that resizes them. Each layout's
- * groups save their sizes (autoSaveId, in localStorage) so a layout opens as it was left.
+ * The gaps between panels (7 px between columns, 6 px between rows, as CapCut's), which are
+ * also the handles that resize them. Each layout's groups save their sizes (autoSaveId, in
+ * localStorage) so a layout opens as it was left; "Reset current layout" clears them.
  */
-const handle = "bg-transparent data-[panel-group-direction=horizontal]:w-[3px] data-[panel-group-direction=vertical]:h-[3px]";
+const handle = "bg-transparent data-[panel-group-direction=horizontal]:w-[7px] data-[panel-group-direction=vertical]:h-[6px]";
 
 const App: React.FC = () => {
   useUpdateToasts();
@@ -59,6 +60,7 @@ const App: React.FC = () => {
   }, []);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const layout = useLayoutConfigStore((s) => s.layout);
+  const resetCount = useLayoutConfigStore((s) => s.resetCount);
   const view = useShellStore((s) => s.view);
   const { ghostInStage, clips} = useClipStore();
   const projectsLoaded = useProjectsStore((s) => s.projectsLoaded);
@@ -225,74 +227,79 @@ const App: React.FC = () => {
       >
         <Topbar />
         <Toaster />
-        <div className="flex flex-1 min-h-0 w-full px-[3px] pb-[3px]">
+        {/* The panels, 8 px from the window's edges. Sizes are CapCut's Default, Media,
+            Attributes and Vertical layouts as shares of the window (capcut-ui-spec.md §1). */}
+        <div key={`${layout}-${resetCount}`} className="flex flex-1 min-h-0 w-full px-2 pb-2">
           {layout === "default" && (
-            <ResizablePanelGroup
-              direction="vertical"
-              autoSaveId="openrip:layout:default"
-              className="flex-1 overflow-hidden"
-            >
-              <ResizablePanel id="upper" order={1} defaultSize={58} minSize={30} maxSize={75}>
-                <ResizablePanelGroup
-                  direction="horizontal"
-                  autoSaveId="openrip:layout:default:upper"
-                  className="overflow-hidden"
-                >
-                  <MediaModelPanel order={1} />
+            <ResizablePanelGroup direction="vertical" autoSaveId={layoutStorageKey("default")} className="flex-1 overflow-hidden">
+              <ResizablePanel id="upper" order={1} defaultSize={55} minSize={30} maxSize={75}>
+                <ResizablePanelGroup direction="horizontal" autoSaveId={`${layoutStorageKey("default")}:upper`} className="overflow-hidden">
+                  <MediaModelPanel order={1} defaultSize={34.6} />
                   <ResizableHandle className={handle} />
-                  <PreviewPanel order={2} />
+                  <PreviewPanel order={2} defaultSize={38.4} />
                   <ResizableHandle className={handle} />
-                  <PropertiesPanel order={3} />
+                  <PropertiesPanel order={3} defaultSize={27} />
                 </ResizablePanelGroup>
               </ResizablePanel>
               <ResizableHandle className={handle} />
-              <TimelinePanel order={2} />
+              <TimelinePanel order={2} defaultSize={45} />
             </ResizablePanelGroup>
           )}
           {layout === "media" && (
-            <ResizablePanelGroup
-              direction="horizontal"
-              autoSaveId="openrip:layout:media"
-              className="flex-1"
-            >
-              <MediaModelPanel order={1} defaultSize={30} minSize={20} maxSize={50} />
+            <ResizablePanelGroup direction="horizontal" autoSaveId={layoutStorageKey("media")} className="flex-1">
+              <MediaModelPanel order={1} defaultSize={32.5} minSize={20} maxSize={50} />
               <ResizableHandle className={handle} />
-              <ResizablePanel id="rest" order={2} defaultSize={70} minSize={30}>
-                <ResizablePanelGroup direction="vertical" autoSaveId="openrip:layout:media:rest">
-                  <ResizablePanel id="upper" order={1} defaultSize={58} minSize={30}>
-                    <ResizablePanelGroup direction="horizontal" autoSaveId="openrip:layout:media:upper">
-                      <PreviewPanel order={1} defaultSize={60} minSize={30} />
+              <ResizablePanel id="rest" order={2} defaultSize={67.5} minSize={30}>
+                <ResizablePanelGroup direction="vertical" autoSaveId={`${layoutStorageKey("media")}:rest`}>
+                  <ResizablePanel id="upper" order={1} defaultSize={54} minSize={30}>
+                    <ResizablePanelGroup direction="horizontal" autoSaveId={`${layoutStorageKey("media")}:upper`}>
+                      <PreviewPanel order={1} defaultSize={63} minSize={30} />
                       <ResizableHandle className={handle} />
-                      <PropertiesPanel order={2} defaultSize={40} minSize={25} />
+                      <PropertiesPanel order={2} defaultSize={37} minSize={25} />
                     </ResizablePanelGroup>
                   </ResizablePanel>
                   <ResizableHandle className={handle} />
-                  <TimelinePanel order={2} />
+                  <TimelinePanel order={2} defaultSize={46} />
                 </ResizablePanelGroup>
               </ResizablePanel>
             </ResizablePanelGroup>
           )}
           {layout === "properties" && (
-            <ResizablePanelGroup
-              direction="horizontal"
-              autoSaveId="openrip:layout:properties"
-              className="flex-1"
-            >
-              <ResizablePanel id="rest" order={1} defaultSize={70} minSize={40}>
-                <ResizablePanelGroup direction="vertical" autoSaveId="openrip:layout:properties:rest">
-                  <ResizablePanel id="upper" order={1} defaultSize={58} minSize={30}>
-                    <ResizablePanelGroup direction="horizontal" autoSaveId="openrip:layout:properties:upper">
-                      <MediaModelPanel order={1} defaultSize={38} minSize={22} />
+            <ResizablePanelGroup direction="horizontal" autoSaveId={layoutStorageKey("properties")} className="flex-1">
+              <ResizablePanel id="rest" order={1} defaultSize={75.4} minSize={40}>
+                <ResizablePanelGroup direction="vertical" autoSaveId={`${layoutStorageKey("properties")}:rest`}>
+                  <ResizablePanel id="upper" order={1} defaultSize={54} minSize={30}>
+                    <ResizablePanelGroup direction="horizontal" autoSaveId={`${layoutStorageKey("properties")}:upper`}>
+                      <MediaModelPanel order={1} defaultSize={40} minSize={22} />
                       <ResizableHandle className={handle} />
-                      <PreviewPanel order={2} defaultSize={62} minSize={30} />
+                      <PreviewPanel order={2} defaultSize={60} minSize={30} />
                     </ResizablePanelGroup>
                   </ResizablePanel>
                   <ResizableHandle className={handle} />
-                  <TimelinePanel order={2} />
+                  <TimelinePanel order={2} defaultSize={46} />
                 </ResizablePanelGroup>
               </ResizablePanel>
               <ResizableHandle className={handle} />
-              <PropertiesPanel order={2} defaultSize={30} minSize={20} />
+              <PropertiesPanel order={2} defaultSize={24.6} minSize={18} />
+            </ResizablePanelGroup>
+          )}
+          {layout === "vertical" && (
+            <ResizablePanelGroup direction="horizontal" autoSaveId={layoutStorageKey("vertical")} className="flex-1">
+              <ResizablePanel id="rest" order={1} defaultSize={73.4} minSize={40}>
+                <ResizablePanelGroup direction="vertical" autoSaveId={`${layoutStorageKey("vertical")}:rest`}>
+                  <ResizablePanel id="upper" order={1} defaultSize={54} minSize={30}>
+                    <ResizablePanelGroup direction="horizontal" autoSaveId={`${layoutStorageKey("vertical")}:upper`}>
+                      <MediaModelPanel order={1} defaultSize={66} minSize={30} />
+                      <ResizableHandle className={handle} />
+                      <PropertiesPanel order={2} defaultSize={34} minSize={25} />
+                    </ResizablePanelGroup>
+                  </ResizablePanel>
+                  <ResizableHandle className={handle} />
+                  <TimelinePanel order={2} defaultSize={46} />
+                </ResizablePanelGroup>
+              </ResizablePanel>
+              <ResizableHandle className={handle} />
+              <PreviewPanel order={2} defaultSize={26.6} minSize={18} />
             </ResizablePanelGroup>
           )}
         </div>

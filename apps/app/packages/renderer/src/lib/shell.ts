@@ -17,6 +17,9 @@ interface ShellState {
   /** Open the media picker once the editor shows (the home screen's Import media). */
   importOnOpen: boolean;
   setImportOnOpen: (on: boolean) => void;
+  /** The editor's Settings dialog (the top bar's gear, Menu, the inspector's Modify). */
+  settingsOpen: boolean;
+  setSettingsOpen: (open: boolean) => void;
 }
 
 export const useShellStore = create<ShellState>((set) => ({
@@ -26,4 +29,6 @@ export const useShellStore = create<ShellState>((set) => ({
   setHomeSection: (homeSection) => set({ homeSection }),
   importOnOpen: false,
   setImportOnOpen: (importOnOpen) => set({ importOnOpen }),
+  settingsOpen: false,
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
 }));

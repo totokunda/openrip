@@ -16,7 +16,7 @@ import ClipExportModal, {
 } from "@/components/dialogs/ClipExportModal";
 
 const Key: React.FC<{ text: string }> = ({ text }) => (
-  <span className=" text-[10px] text-brand-light/60">{text}</span>
+  <span className="text-[12px] text-[#949494] tracking-wide">{text}</span>
 );
 
 const GlobalContextMenu: React.FC = () => {
@@ -447,7 +447,7 @@ const GlobalContextMenu: React.FC = () => {
             group.items.length > 0 && (
               <div key={group.id}>
                 {group.label && (
-                  <div className="px-2.5 py-1 text-[10px] uppercase tracking-wide text-brand-light/50">
+                  <div className="px-2.5 py-1 text-[12px] text-[#6c6c6c]">
                     {group.label}
                   </div>
                 )}
@@ -457,9 +457,9 @@ const GlobalContextMenu: React.FC = () => {
                     disabled={item.disabled}
                     onClick={() => onSelect(item.action)}
                     className={cn(
-                      "w-full px-2.5 py-1.5 text-left text-[11.5px] flex items-center rounded justify-between hover:bg-brand-light/10 text-brand-light",
+                      "w-full h-8 px-2.5 text-left text-[13px] flex items-center rounded-[4px] justify-between hover:bg-brand-hover text-brand-light",
                       item.disabled &&
-                        "opacity-50 cursor-default! hover:bg-brand",
+                        "text-[#525252] cursor-default! hover:bg-transparent",
                     )}
                   >
                     <span>{item.label}</span>
@@ -467,20 +467,20 @@ const GlobalContextMenu: React.FC = () => {
                   </button>
                 ))}
                 {gi < groups.length - 1 && (
-                  <div className="my-1 h-px bg-brand-light/10 -mx-1" />
+                  <div className="my-1 h-px bg-brand-hover mx-1" />
                 )}
               </div>
             ),
         )}
       </div>
     ) : (
-      <div className="py-1">
+      <div className="p-1">
         {items.map((item) => (
           <button
             key={item.id}
             disabled={item.disabled}
             onClick={() => onSelect(item.action)}
-            className="w-full px-2.5 py-1.5 text-left text-[11px] flex items-center justify-between hover:bg-brand-light/10 disabled:opacity-50 text-brand-light"
+            className="w-full h-8 px-2.5 text-left text-[13px] flex items-center justify-between rounded-[4px] hover:bg-brand-hover disabled:text-[#525252] text-brand-light"
           >
             <span>{item.label}</span>
             {item.shortcut && <Key text={item.shortcut} />}
@@ -501,7 +501,7 @@ const GlobalContextMenu: React.FC = () => {
               top: position.y,
               zIndex: 100,
             }}
-            className="w-52 font-poppins select-none rounded-md border border-brand-light/10 bg-brand-background-light shadow-lg"
+            className="w-[238px] font-poppins select-none rounded-[8px] border-[0.5px] border-black bg-brand-header shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)]"
           >
             {content}
           </div>,

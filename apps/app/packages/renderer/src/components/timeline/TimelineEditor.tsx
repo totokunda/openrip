@@ -1234,7 +1234,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                   key={hmrStageKey}
                   width={dimensions.stageWidth}
                   height={dimensions.stageHeight}
-                  className="border-b border-brand-light/10 bg-brand z-10 relative"
+                  className="border-b border-brand-light/10 bg-brand-background z-10 relative"
                   onClick={handleStageClick}
                   onMouseDown={handleStageMouseDown}
                   onMouseMove={handleStageMouseMove}
@@ -1439,7 +1439,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                 >
                   <Droppable
                     id="timeline"
-                    className="w-full rounded-lg bg-brand-background/60 text-brand-light/90 duration-100 ease-in-out "
+                    className="w-full rounded-[4px] border border-dashed border-[#3e3e3e] bg-[#292929] text-[#cccccc] duration-100 ease-in-out "
                     accepts={["media"]}
                     highlight={{
                       borderColor: "#A477C4",

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   LuChevronDown,
+  LuCheck,
+  LuKeyboard,
   LuChevronLeft,
   LuFolderPlus,
   LuFolderInput,
@@ -42,6 +44,7 @@ import { SHORTCUT_SECTIONS } from "@/lib/shortcuts";
 import { SettingsModal } from "../dialogs/SettingsModal";
 import { CapCutImportDialog } from "../dialogs/CapCutImportDialog";
 import { createAndOpenProject, goHome, openProject } from "@/lib/project-actions";
+import { useShellStore } from "@/lib/shell";
 
 interface TopBarProps {
 
@@ -77,6 +80,8 @@ const ShortcutRow: React.FC<{ action: string; keys: string[] }> = ({
 const TopBar: React.FC<TopBarProps> = () => {
   const layout = useLayoutConfigStore((s) => s.layout);
   const setLayout = useLayoutConfigStore((s) => s.setLayout);
+  const resetLayout = useLayoutConfigStore((s) => s.resetLayout);
+  const [layoutOpen, setLayoutOpen] = useState(false);
   const aspectRatio = useViewportStore((s) => s.aspectRatio);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -294,7 +299,8 @@ const TopBar: React.FC<TopBarProps> = () => {
     }
   };
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsOpen = useShellStore((s) => s.settingsOpen);
+  const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
   const [capcutOpen, setCapcutOpen] = useState(false);
 
   useEffect(() => {
@@ -358,15 +364,19 @@ const TopBar: React.FC<TopBarProps> = () => {
   }, [clips, timelines, getClipsForGroup]);
 
   const button =
-    "h-7 flex items-center gap-x-1.5 px-2 rounded-[5px] text-[11px] text-brand-light/80 hover:text-brand-light hover:bg-brand-light/10 transition-colors cursor-pointer";
+    "h-6 flex items-center gap-x-1.5 px-1.5 rounded-[4px] text-[12px] text-brand-light/75 hover:text-brand-light hover:bg-brand-light/[0.08] transition-colors cursor-pointer";
+  // Menus as CapCut draws them: the header surface, 32 px rows, a hairline outline.
+  const menu = "dark bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] p-1";
+  const row = "dark h-8 text-[13px] text-brand-light gap-x-2.5 px-2.5 rounded-[4px] cursor-pointer focus:bg-brand-hover";
   const LAYOUTS: { id: AppLayoutId; label: string }[] = [
     { id: "default", label: "Default" },
     { id: "media", label: "Media" },
     { id: "properties", label: "Inspector" },
+    { id: "vertical", label: "Vertical" },
   ];
 
   return (
-    <div data-testid="topbar" className="w-full relative h-10 shrink-0 px-2 flex items-center justify-between font-poppins">
+    <div data-testid="topbar" className="w-full relative h-[35px] shrink-0 px-2 flex items-center justify-between font-poppins">
       <div className="flex flex-row items-center gap-1 min-w-0 z-10">
         <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} hideTrigger />
         <CapCutImportDialog
@@ -395,34 +405,24 @@ const TopBar: React.FC<TopBarProps> = () => {
             <span>Menu</span>
             <LuChevronDown className="w-3 h-3 opacity-70" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="dark w-56 font-poppins bg-brand-background/95 backdrop-blur-md border border-brand-light/10 rounded-[8px]"
-          >
+          <DropdownMenuContent align="start" className={cn(menu, "w-56")}>
             <DropdownMenuItem
-              className="dark text-[11px] font-medium flex items-center gap-x-2 cursor-pointer"
+              className={row}
               disabled={isExporting}
               onClick={() => {
                 void createAndOpenProject().catch((e) => toast.error((e as Error).message));
               }}
             >
-              <LuFolderPlus className="w-3.5 h-3.5 text-brand-light/80" />
+              <LuFolderPlus className="w-4 h-4 text-brand-light/80" />
               <span>New project</span>
             </DropdownMenuItem>
-            <DropdownMenuItem
-              className="dark text-[11px] font-medium flex items-center gap-x-2 cursor-pointer"
-              disabled={isExporting}
-              onClick={() => setCapcutOpen(true)}
-            >
-              <LuFolderInput className="w-3.5 h-3.5 text-brand-light/80" />
+            <DropdownMenuItem className={row} disabled={isExporting} onClick={() => setCapcutOpen(true)}>
+              <LuFolderInput className="w-4 h-4 text-brand-light/80" />
               <span>Open a CapCut project…</span>
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="dark text-[11px] font-medium flex items-center gap-x-2 cursor-pointer"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <span className="w-3.5" />
+            <DropdownMenuSeparator className="bg-brand-hover mx-1" />
+            <DropdownMenuItem className={row} onClick={() => setSettingsOpen(true)}>
+              <LuSettings className="w-4 h-4 text-brand-light/80" />
               <span>Settings…</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -453,40 +453,37 @@ const TopBar: React.FC<TopBarProps> = () => {
             }}
             placeholder="Project 1"
             title="Rename the project"
-            className="pointer-events-auto w-[260px] h-7 text-center rounded-[5px] px-3 text-[12px] font-medium text-brand-light/90 placeholder:text-brand-light/40 border border-transparent hover:bg-brand-light/[0.05] focus:bg-brand-light/[0.08] focus:border-brand-light/10 transition-colors"
+            className="pointer-events-auto w-[260px] h-6 text-center rounded-[4px] px-3 text-[13px] font-semibold text-brand-lighter placeholder:text-brand-light/40 border border-transparent hover:bg-brand-light/[0.05] focus:bg-brand focus:border-brand-light/10 transition-colors"
           />
         </div>
       )}
 
       <div className="flex items-center justify-end gap-1 z-10">
-        {/* The layouts, as CapCut's toggles: each keeps its own panel sizes. */}
-        <div className="h-7 p-0.5 flex items-center rounded-[6px] bg-brand-light/[0.04] mr-1" role="group" aria-label="Layout">
-          {LAYOUTS.map((l) => (
-            <button
-              key={l.id}
-              type="button"
-              title={`${l.label} layout`}
-              aria-pressed={layout === l.id}
-              data-testid={`layout-${l.id}`}
-              onClick={() => setLayout(l.id)}
-              className={cn(
-                "h-6 w-7 flex items-center justify-center rounded-[4px] transition-colors cursor-pointer",
-                layout === l.id ? "bg-brand-light/12 opacity-100" : "opacity-45 hover:opacity-90",
-              )}
-            >
-              <LayoutIcon type={l.id} className="scale-[0.7]" />
-            </button>
-          ))}
-        </div>
-        <DropdownMenu open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
-          <DropdownMenuTrigger title="Keyboard shortcuts" className={button}>
-            <span className="text-brand-light/60">⌘</span>
-            <span>Shortcuts</span>
+        {/* The layouts, from an icon as in CapCut: each keeps its own panel sizes. */}
+        <DropdownMenu open={layoutOpen} onOpenChange={setLayoutOpen}>
+          <DropdownMenuTrigger title="Layout" data-testid="layout-menu" className={cn(button, "gap-x-1 text-brand-light/60")}>
+            <LayoutIcon type={layout} className="scale-[0.8]" />
+            <LuChevronDown className="w-3 h-3" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="dark w-[400px] font-poppins p-0 overflow-hidden bg-brand-background/95 backdrop-blur-md border border-brand-light/10 rounded-[8px] z-[100]"
-          >
+          <DropdownMenuContent align="end" className={cn(menu, "w-[178px]")}>
+            {LAYOUTS.map((l) => (
+              <DropdownMenuItem key={l.id} data-testid={`layout-${l.id}`} className={row} onClick={() => setLayout(l.id)}>
+                <span className="w-3.5 flex justify-center text-brand-accent">{layout === l.id && <LuCheck className="w-3.5 h-3.5" />}</span>
+                <span>{l.label}</span>
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator className="bg-brand-hover mx-1" />
+            <DropdownMenuItem data-testid="layout-reset" className={row} onClick={() => resetLayout()}>
+              <span className="w-3.5" />
+              <span>Reset current layout</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+          <DropdownMenuTrigger title="Keyboard shortcuts" data-testid="shortcuts" className={cn(button, "w-7 justify-center px-0 text-brand-light/60")}>
+            <LuKeyboard className="w-[18px] h-[18px]" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className={cn(menu, "w-[400px] p-0 overflow-hidden z-[100]")}>
             <div className="border-b border-brand-light/10 px-3 py-2">
               <span className="text-[11px] text-brand-light/70">Keyboard shortcuts</span>
             </div>
@@ -514,18 +511,18 @@ const TopBar: React.FC<TopBarProps> = () => {
           title="Settings"
           data-testid="open-settings"
           onClick={() => setSettingsOpen(true)}
-          className={cn(button, "w-7 justify-center px-0")}
+          className={cn(button, "w-7 justify-center px-0 text-brand-light/60")}
         >
-          <LuSettings className="w-3.5 h-3.5" />
+          <LuSettings className="w-4 h-4" />
         </button>
 
-        <div className="flex items-center ml-1">
+        <div className="flex items-center ml-1.5 mr-[3px]">
           {!isExporting ? (
             <button
               disabled={!canExport}
               type="button"
               data-testid="export"
-              className="h-7 px-4 flex items-center justify-center gap-x-1.5 rounded-[5px] text-[11.5px] font-medium text-brand-lighter bg-brand-accent hover:bg-brand-accent-two-shade disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-brand-accent transition-colors cursor-pointer"
+              className="h-[22px] px-2.5 flex items-center justify-center gap-x-1.5 rounded-[4px] text-[12px] font-semibold text-white bg-brand-accent hover:bg-brand-accent-two-shade disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-brand-accent transition-colors cursor-pointer"
               onClick={() => setExportOpen(true)}
             >
               <LuUpload className="w-3.5 h-3.5" />
@@ -534,7 +531,7 @@ const TopBar: React.FC<TopBarProps> = () => {
           ) : (
             <button
               type="button"
-              className="flex items-center gap-2 min-w-[180px] h-7 px-3 rounded-[5px] border border-brand-light/10 bg-brand-background/80 hover:bg-brand-background cursor-pointer transition-colors"
+              className="flex items-center gap-2 min-w-[180px] h-[22px] px-2.5 rounded-[4px] bg-brand-background-light hover:bg-brand-button cursor-pointer transition-colors"
               onClick={() => setExportOpen(true)}
             >
               <LuUpload className="w-3.5 h-3.5 text-brand-light/80" />

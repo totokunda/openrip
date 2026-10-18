@@ -1,6 +1,6 @@
 import React from "react";
 
-type LayoutType = "default" | "media" | "properties";
+type LayoutType = "default" | "media" | "properties" | "vertical";
 
 interface LayoutIconProps {
   type: LayoutType;
@@ -50,11 +50,14 @@ export const LayoutIcon: React.FC<LayoutIconProps> = ({ type, className }) => {
           </div>
         </>
       )}
-      {type === "properties" && (
+      {(type === "properties" || type === "vertical") && (
         <>
           <div className="grid grid-cols-3 grid-rows-3 gap-0 h-full w-full">
             <div className="col-start-3 col-span-1 row-start-1 row-span-3">
-              <div className={`${rectClass} border-l-[1.5px]`}></div>
+              <div className={`${rectClass} border-l-[1.5px] flex items-center justify-center`}>
+                {/* Vertical: the full-height column is the player, a portrait frame in it. */}
+                {type === "vertical" && <div className="w-[3px] h-[6px] border border-brand-light rounded-[1px]" />}
+              </div>
             </div>
             <div className="col-start-1 col-span-1 row-start-1 row-span-2">
               <div className={`${rectClass} border-r-[1.5px]`}></div>

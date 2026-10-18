@@ -13,12 +13,19 @@
   --font-poppins: var(--font-ui);
   --font-sans: var(--font-ui);
   --font-inter: "Inter", sans-serif;
-  --color-brand-background: #151517;
-  --color-brand-background-dark: #0b0b0d;
-  --color-brand: #222124;
-  --color-brand-background-light: #2b2a2e;
-  --color-brand-light: #e3e3e3;
-  --color-brand-lighter: #e8e8e8;
+  /* The surfaces, a neutral grey ramp measured from CapCut's editor (docs/plan/capcut-ui-spec.md
+     §2); the accent below stays OpenRip's own. */
+  --color-brand-background-dark: #141414; /* the window, top bar and gutters */
+  --color-brand-background: #262626; /* panels and dialogs */
+  --color-brand-header: #303030; /* panels' header strips, menus and popovers */
+  --color-brand: #1c1c1c; /* sunken: fields, search, segmented-control tracks */
+  --color-brand-background-light: #3b3b3b; /* raised: selected segment, buttons, cards, chips */
+  --color-brand-hover: #404040; /* a hovered menu row or list row */
+  --color-brand-button: #4f4f4f; /* secondary buttons */
+  --color-brand-hairline: #070709; /* under header strips and toolbars, between columns */
+  --color-brand-divider: #373737; /* between sections */
+  --color-brand-light: #e0e0e0;
+  --color-brand-lighter: #fafafa;
   --color-brand-accent: #ae81ce;
   --color-brand-accent-shade: #a477c4;
   --color-brand-accent-two-shade: #9a6dba;
@@ -29,7 +36,7 @@
 }
 
 body {
-  background: #000000;
+  background: var(--color-brand-background-dark);
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   /* disable scrollbar */

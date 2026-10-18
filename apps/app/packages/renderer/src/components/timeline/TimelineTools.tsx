@@ -128,4 +128,4 @@ export const ZoomToFitButton = () => {
 };
 
 /** The 16 px rule between the toolbar's groups. */
-export const ToolbarDivider = () => <div className="h-4 w-px shrink-0 bg-brand-light/15" />;
+export const ToolbarDivider = () => <div className="h-4 w-px shrink-0 bg-brand-background-light" />;
