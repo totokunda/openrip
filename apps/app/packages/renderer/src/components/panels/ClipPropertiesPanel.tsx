@@ -1,6 +1,7 @@
 import { useClipStore } from '@/lib/clip'
 import { useControlsStore } from '@/lib/control'
 import AudioProperties from '../properties/AudioProperties'
+import VoiceChangerProperties from '../properties/VoiceChangerProperties'
 import React, { useMemo, useEffect } from 'react'
 import { getMediaInfoCached } from '@/lib/media/utils'
 import DurationProperties from '../properties/DurationProperties'
@@ -60,11 +61,14 @@ const ClipPropertiesPanel: React.FC = () => {
   const setTab = useInspectorStore((s) => s.setTab);
   const setSub = useInspectorStore((s) => s.setSub);
 
+  // A video's Audio tab: its own sound, or CapCut's "Audio is separated" when that went to an
+  // audio clip.
+  const separated = useClipStore((s) => type === 'video' && !!s.assets[(clip as VideoClipProps)?.assetId]?.path.endsWith('#video'));
   const hasAudio = useMemo(() => {
     if (type === 'audio') return true;
-    if (type === 'video') return getMediaInfoCached((clip as VideoClipProps)?.assetId)?.audio !== null;
+    if (type === 'video') return separated || getMediaInfoCached((clip as VideoClipProps)?.assetId)?.audio !== null;
     return false;
-  }, [type, (clip as VideoClipProps | ImageClipProps)?.assetId]);
+  }, [type, separated, (clip as VideoClipProps | ImageClipProps)?.assetId]);
 
   const tabs = useMemo<InspectorTab[]>(() => {
     if (!clip) return [];
@@ -91,6 +95,10 @@ const ClipPropertiesPanel: React.FC = () => {
         ...(curve ? [{ id: 'curve', label: 'Curve', own: true, content: <SpeedProperties clipId={clipId} mode="curve" /> }] : []),
       ],
     });
+    // The Audio tools (CapCut's Basic and Voice changer): sub-tabs of a video's Audio tab, and
+    // an audio clip's own tabs.
+    const audioBasic: Section = { id: 'basic', label: 'Basic', content: <AudioProperties clipId={clipId} /> };
+    const voiceChanger: Section = { id: 'voice', label: 'Voice changer', content: <VoiceChangerProperties clipId={clipId} /> };
     switch (type) {
       case 'video':
       case 'image':
@@ -103,7 +111,7 @@ const ClipPropertiesPanel: React.FC = () => {
               { id: 'mask', label: 'Mask', content: <MaskPropertiesPanel clipId={clipId} /> },
             ],
           },
-          ...(hasAudio ? [{ id: 'audio', label: 'Audio', sections: [{ id: 'audio', label: 'Audio', content: <AudioProperties clipId={clipId} /> }] }] : []),
+          ...(hasAudio ? [{ id: 'audio', label: 'Audio', sections: separated ? [audioBasic] : [audioBasic, voiceChanger] }] : []),
           type === 'video' ? speed(true) : duration('Duration'),
           animation,
           { id: 'adjust', label: 'Adjust', sections: [{ id: 'adjust', label: 'Adjust', content: <AdjustProperties clipId={clipId} /> }] },
@@ -136,8 +144,10 @@ const ClipPropertiesPanel: React.FC = () => {
           duration('Duration'),
         ];
       case 'audio':
+        // CapCut's tabs for an audio clip: Basic, Voice changer, Speed.
         return [
-          { id: 'audio', label: 'Audio', sections: [{ id: 'audio', label: 'Audio', content: <AudioProperties clipId={clipId} /> }] },
+          { id: 'audio', label: 'Basic', sections: [audioBasic] },
+          { id: 'voice', label: 'Voice changer', sections: [voiceChanger] },
           speed(false),
         ];
       case 'filter':
@@ -156,7 +166,7 @@ const ClipPropertiesPanel: React.FC = () => {
       default:
         return [duration('Duration')];
     }
-  }, [clip, clipId, type, hasAudio, selectedLineId]);
+  }, [clip, clipId, type, hasAudio, separated, selectedLineId]);
 
   // A selected line or mask brings up its tab.
   useEffect(() => {
