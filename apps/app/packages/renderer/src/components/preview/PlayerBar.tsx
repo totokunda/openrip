@@ -1,16 +1,17 @@
 import React from "react";
-import { LuCheck, LuMaximize, LuPause, LuPlay, LuShrink, LuSquareDashed, LuX } from "react-icons/lu";
+import { LuX } from "react-icons/lu";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { useViewportStore } from "@/lib/viewport";
-import { usePlayerStore, type PreviewQuality } from "@/lib/player";
+import { usePlayerStore } from "@/lib/player";
 import { cn } from "@/lib/utils";
 import { formatTimecode, type TimeCodeStyle } from "@/lib/timecode";
 import { usePreference } from "@/lib/preferences";
-import { BackButton, RewindBackward, RewindForward } from "@/components/controls/Buttons";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import RatioMenu from "./RatioMenu";
-import Boxed from "./Boxed";
+import QualityMenu from "./QualityMenu";
+import ZoomPopover from "./ZoomPopover";
+import AudioMeter from "./AudioMeter";
+import { FullscreenGlyph, PauseGlyph, PlayGlyph, SafeAreaGlyph } from "./player-ui";
 
 /** "HH:MM:SS:FF", as CapCut shows time, in Settings › Edit › Time code's style (lib/timecode.ts). */
 export const timecode = (frames: number, fps: number, style?: TimeCodeStyle) => formatTimecode(frames, fps, style);
@@ -51,51 +52,18 @@ const IconButton: React.FC<{ title: string; onClick: () => void; children: React
     onClick={onClick}
     className={cn(
       "h-6 w-6 flex items-center justify-center rounded-[4px] hover:bg-brand-light/[0.08] transition-colors cursor-pointer",
-      active ? "text-brand-accent" : "text-brand-light/80 hover:text-brand-light",
+      active ? "text-brand-accent" : "text-[#cecece] hover:text-brand-lighter",
     )}
   >
     {children}
   </button>
 );
 
-const QUALITIES: { value: PreviewQuality; label: string; title: string; note: string }[] = [
-  { value: 1, label: "Full", title: "Full quality", note: "The canvas at its size on screen" },
-  { value: 0.5, label: "Half", title: "Half", note: "Smoother playback; exports aren't affected" },
-  { value: 0.25, label: "Quarter", title: "Quarter", note: "Smoothest playback; exports aren't affected" },
-];
-
-/** The preview's quality: the engine renders at this fraction of the canvas's size on screen. */
-const QualityMenu: React.FC = () => {
-  const quality = usePlayerStore((s) => s.quality);
-  const setQuality = usePlayerStore((s) => s.setQuality);
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        title="Preview quality"
-        data-testid="preview-quality"
-        className="h-6 px-1 flex items-center rounded-[4px] text-brand-light/80 hover:text-brand-light hover:bg-brand-light/[0.08] transition-colors cursor-pointer"
-      >
-        <Boxed>{QUALITIES.find((q) => q.value === quality)?.label}</Boxed>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" className="dark w-[300px] p-1 bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px]">
-        {QUALITIES.map((q) => (
-          <DropdownMenuItem key={q.value} onClick={() => setQuality(q.value)} className="dark h-[46px] rounded-[4px] items-start gap-3 py-1.5 focus:bg-brand-hover">
-            <span className="w-4 pt-0.5 text-brand-accent">{quality === q.value && <LuCheck className="w-3.5 h-3.5" />}</span>
-            <span className="flex flex-col gap-0.5">
-              <span className="text-[13px] font-semibold text-brand-lighter">{q.title}</span>
-              <span className="text-[12px] text-[#6c6c6c]">{q.note}</span>
-            </span>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-};
-
 /**
- * Under the player, as in CapCut: the time on the left (HH:MM:SS:FF), play in the middle (go
- * to start and ±5 s beside it), and safe areas, the preview's quality, zoom to fit, the
- * canvas's ratio and full screen on the right.
+ * Under the player, as CapCut's bottom bar: the time (HH:MM:SS:FF) and the stereo level meter
+ * on the left, play in the middle, and on the right the safe-area overlay (where CapCut toggles
+ * its platform overlay), the preview's quality ("Full"), the zoom popover, the canvas's ratio
+ * and full screen (⌘⇧F).
  */
 const PlayerBar: React.FC = () => {
   const setIsFullscreen = useControlsStore((s) => s.setIsFullscreen);
@@ -103,37 +71,28 @@ const PlayerBar: React.FC = () => {
   const play = useControlsStore((s) => s.play);
   const pause = useControlsStore((s) => s.pause);
   const hasClips = useClipStore((s) => s.clips.length > 0);
-  const zoomToFit = useViewportStore((s) => s.zoomToFit);
   const isAspectEditing = useViewportStore((s) => s.isAspectEditing);
   const setAspectEditing = useViewportStore((s) => s.setAspectEditing);
-  const guides = usePlayerStore((s) => s.guides);
-  const setGuides = usePlayerStore((s) => s.setGuides);
+  const safeAreas = usePlayerStore((s) => s.safeAreas);
+  const setSafeAreas = usePlayerStore((s) => s.setSafeAreas);
 
   return (
-    <div className="@container h-11 shrink-0 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-2">
-      <div className="flex items-center min-w-0 overflow-hidden">
+    <div data-testid="player-bar" className="@container h-11 shrink-0 grid grid-cols-[1fr_auto_1fr] items-center gap-2 pl-2 pr-2">
+      <div className="flex items-center gap-3 min-w-0 overflow-hidden">
         <TimeControl off={!hasClips} />
+        <AudioMeter off={!hasClips} />
       </div>
-      <div className="flex items-center gap-x-3 [&_svg]:!text-brand-light/60">
-        {/* In a narrow player (the Vertical layout) only play stays. */}
-        <div className="flex items-center gap-x-3 @max-[520px]:hidden">
-          <BackButton />
-          <RewindBackward />
-        </div>
-        <button
-          type="button"
-          data-testid="play"
-          title={isPlaying ? "Pause" : "Play"}
-          onClick={() => (isPlaying ? pause() : play())}
-          className="h-7 w-7 flex items-center justify-center rounded-[4px] text-[#cecece] hover:text-white hover:bg-brand-light/[0.08] cursor-pointer [&_svg]:!text-[#cecece]"
-        >
-          {isPlaying ? <LuPause className="w-3.5 h-3.5 fill-current" /> : <LuPlay className="w-3.5 h-3.5 fill-current" />}
-        </button>
-        <div className="@max-[520px]:hidden">
-          <RewindForward />
-        </div>
-      </div>
-      <div className="flex items-center justify-end gap-x-1 min-w-0">
+      <button
+        type="button"
+        data-testid="play"
+        title={isPlaying ? "Pause" : "Play"}
+        aria-label={isPlaying ? "Pause" : "Play"}
+        onClick={() => (isPlaying ? pause() : play())}
+        className={cn("h-7 w-7 flex items-center justify-center rounded-[4px] text-[#cecece] hover:text-white hover:bg-brand-light/[0.08] cursor-pointer", !hasClips && "opacity-40")}
+      >
+        {isPlaying ? <PauseGlyph className="w-[10px] h-[12px]" /> : <PlayGlyph className="w-[10px] h-[12px]" />}
+      </button>
+      <div className="flex items-center justify-end gap-x-[7px] min-w-0">
         {isAspectEditing && (
           <button
             type="button"
@@ -143,16 +102,14 @@ const PlayerBar: React.FC = () => {
             Done editing size <LuX className="w-3 h-3" />
           </button>
         )}
-        <IconButton title="Safe areas" onClick={() => setGuides(!guides)} active={guides} testId="safe-areas-button">
-          <LuSquareDashed className="w-3.5 h-3.5" />
+        <IconButton title="Safe areas" onClick={() => setSafeAreas(!safeAreas)} active={safeAreas} testId="safe-areas-button">
+          <SafeAreaGlyph className="w-[13px] h-[15px]" />
         </IconButton>
         <QualityMenu />
-        <IconButton title="Zoom to fit" onClick={() => zoomToFit()} testId="zoom-to-fit">
-          <LuShrink className="w-3.5 h-3.5" />
-        </IconButton>
+        <ZoomPopover />
         <RatioMenu />
-        <IconButton title="Full screen" onClick={() => setIsFullscreen(true)} testId="fullscreen">
-          <LuMaximize className="w-3.5 h-3.5" />
+        <IconButton title="Full screen (⌘⇧F)" onClick={() => setIsFullscreen(true)} testId="fullscreen">
+          <FullscreenGlyph className="w-[13px] h-[13px]" />
         </IconButton>
       </div>
     </div>

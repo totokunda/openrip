@@ -36,11 +36,11 @@ const RatioMenu: React.FC = () => {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
-        title={`Canvas ratio: ${label}`}
+        title={`Ratio: ${label}`}
         data-testid="ratio-menu"
-        className="h-6 px-1 flex items-center rounded-[4px] text-brand-light/80 hover:text-brand-light hover:bg-brand-light/[0.08] transition-colors cursor-pointer"
+        className="h-6 px-1 flex items-center rounded-[4px] text-[#cecece] hover:text-brand-lighter hover:bg-brand-light/[0.08] transition-colors cursor-pointer"
       >
-        <Boxed>{label}</Boxed>
+        <Boxed>Ratio</Boxed>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"

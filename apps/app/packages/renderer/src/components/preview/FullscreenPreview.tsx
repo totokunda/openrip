@@ -1,11 +1,6 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect } from "react-konva";
+import { engineRender, ENGINE_FRAME_CANVAS_ID, ENGINE_FRAME_EVENT } from "@app/preload";
 import { useViewportStore } from "@/lib/viewport";
 import { useClipStore } from "@/lib/clip";
 import { BASE_LONG_SIDE } from "@/lib/settings";
@@ -15,27 +10,28 @@ import ShapePreview from "./clips/ShapePreview";
 import TextPreview from "./clips/TextPreview";
 import { useControlsStore } from "@/lib/control";
 import { AnyClipProps } from "@/lib/types";
-import { SlSizeActual } from "react-icons/sl";
-import { FaCirclePause, FaCirclePlay } from "react-icons/fa6";
 import { getApplicatorsForClip } from "@/lib/applicator-utils";
 import { useWebGLHaldClut } from "./webgl-filters";
 import DrawingPreview from "./clips/DrawingPreview";
+import { setEnginePreviewSize, useEngineDraws, useEnginePreviewStore } from "@/lib/engine-preview";
+import { usePlayerStore, QUALITY_SCALE } from "@/lib/player";
+import { timecode } from "./PlayerBar";
+import { ExitFullscreenGlyph, PauseGlyph, PlayGlyph } from "./player-ui";
 
 interface FullscreenPreviewProps {
   onExit: () => void;
 }
 
-const FullscreenPreview: React.FC<FullscreenPreviewProps> = ({ onExit }) => {
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  const containerRef = useRef<HTMLDivElement>(null);
+/**
+ * The app's own drawing of the clips at the frame, fitted to `size`: what full screen shows when
+ * the engine doesn't draw the preview.
+ */
+const LegacyStage: React.FC<{ size: { width: number; height: number } }> = ({ size }) => {
   const stageRef = useRef<any>(null);
-  const [showControls, setShowControls] = useState(true);
-  const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const aspectRatio = useViewportStore((s) => s.aspectRatio);
-  const { clips, clipWithinFrame, timelines, clipDuration } = useClipStore();
+  const { clips, clipWithinFrame, timelines } = useClipStore();
   const focusFrame = useControlsStore((s) => s.focusFrame);
-  const { play, pause, isPlaying, setFocusFrame, fps } = useControlsStore();
   const haldClutInstance = useWebGLHaldClut();
 
   // Memoize applicator factory configuration
@@ -77,30 +73,6 @@ const FullscreenPreview: React.FC<FullscreenPreviewProps> = ({ onExit }) => {
 
     Promise.all(loadPromises).catch(console.error);
   }, [clips, haldClutInstance]);
-
-  const formatTime = useCallback(
-    (frames: number) => {
-      if (
-        frames === 0 ||
-        frames === undefined ||
-        frames === null ||
-        isNaN(frames) ||
-        frames === Infinity ||
-        frames === -Infinity
-      )
-        return "00:00.00";
-      const totalSeconds = frames / fps;
-      const hours = Math.floor(totalSeconds / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      const remainingSeconds = totalSeconds % 60;
-
-      if (hours > 0) {
-        return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${remainingSeconds.toFixed(2).padStart(5, "0")}`;
-      }
-      return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toFixed(2).padStart(5, "0")}`;
-    },
-    [fps],
-  );
 
   const sortClips = useCallback(
     (clips: AnyClipProps[]) => {
@@ -218,141 +190,16 @@ const FullscreenPreview: React.FC<FullscreenPreviewProps> = ({ onExit }) => {
     return { scale, position: { x, y } };
   }, [size.width, size.height, rectWidth, rectHeight]);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      setSize({ width, height });
-    });
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  // Auto-hide controls logic
-  const resetHideTimer = useCallback(() => {
-    setShowControls(true);
-    if (hideTimeoutRef.current) {
-      clearTimeout(hideTimeoutRef.current);
-    }
-    hideTimeoutRef.current = setTimeout(() => {
-      setShowControls(false);
-    }, 3000);
-  }, []);
-
-  const handleMouseMove = useCallback(() => {
-    resetHideTimer();
-  }, [resetHideTimer]);
-
-  useEffect(() => {
-    resetHideTimer();
-    return () => {
-      if (hideTimeoutRef.current) {
-        clearTimeout(hideTimeoutRef.current);
-      }
-    };
-  }, [resetHideTimer]);
-
-  // Scrubber logic
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragProgress, setDragProgress] = useState<number | null>(null);
-  const progressBarRef = useRef<HTMLDivElement>(null);
-
-  const progress =
-    isDragging && dragProgress !== null
-      ? dragProgress
-      : clipDuration > 0
-        ? focusFrame / clipDuration
-        : 0;
-
-  const handleScrubberMove = useCallback(
-    (clientX: number) => {
-      if (!progressBarRef.current) return;
-      const rect = progressBarRef.current.getBoundingClientRect();
-      const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
-      const newProgress = Math.max(0, Math.min(x / rect.width, 1));
-
-      // Update progress immediately for smooth visual feedback
-      requestAnimationFrame(() => {
-        setDragProgress(newProgress);
-      });
-
-      const newFrame = Math.round(newProgress * clipDuration);
-      setFocusFrame(Math.min(newFrame, clipDuration));
-    },
-    [clipDuration, setFocusFrame],
-  );
-
-  const handleScrubberMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (!isDragging) return;
-      handleScrubberMove(e.clientX);
-    },
-    [isDragging, handleScrubberMove],
-  );
-
-  const handleScrubberMouseUp = useCallback(() => {
-    setIsDragging(false);
-    setDragProgress(null);
-  }, []);
-
-  const handleProgressBarMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setIsDragging(true);
-      if (isPlaying) pause();
-      handleScrubberMove(e.clientX);
-    },
-    [handleScrubberMove, isPlaying, pause],
-  );
-
-  useEffect(() => {
-    if (isDragging) {
-      document.addEventListener("mousemove", handleScrubberMouseMove);
-      document.addEventListener("mouseup", handleScrubberMouseUp);
-      return () => {
-        document.removeEventListener("mousemove", handleScrubberMouseMove);
-        document.removeEventListener("mouseup", handleScrubberMouseUp);
-      };
-    }
-  }, [isDragging, handleScrubberMouseMove, handleScrubberMouseUp]);
-
-  // Handle escape key to exit fullscreen
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onExit();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onExit]);
-
   return (
-    <div
-      ref={containerRef}
-      className="fixed inset-0 z-9999 bg-black"
-      onMouseMove={handleMouseMove}
-    >
       <Stage
         ref={stageRef}
         width={size.width}
         height={size.height}
-        className="bg-black"
+        className="bg-transparent"
       >
         <Layer width={size.width} height={size.height}>
           <Group x={position.x} y={position.y} scaleX={scale} scaleY={scale}>
-            <Rect
-              x={0}
-              y={0}
-              width={rectWidth}
-              height={rectHeight}
-              fill={"#000000"}
-            />
+            <Rect x={0} y={0} width={rectWidth} height={rectHeight} fill={"#000000"} />
             {sortClips(filterClips(clips)).map((clip) => {
               const clipAtFrameNoOverlap = clipWithinFrame(clip, focusFrame);
 
@@ -421,66 +268,214 @@ const FullscreenPreview: React.FC<FullscreenPreviewProps> = ({ onExit }) => {
           </Group>
         </Layer>
       </Stage>
+  );
+};
 
-      {/* Floating control bar */}
+/** Longest side the engine renders full-screen frames at. */
+const MAX_SIDE = 3840;
+
+/**
+ * The engine's frame, fitted to `size`: a visible canvas that copies the one the preload draws
+ * the engine's frames into, each time one arrives. Paused, it asks for the frame at the playhead
+ * at its own size; playing, the engine renders at that size times the preview quality.
+ */
+const EngineStage: React.FC<{ size: { width: number; height: number } }> = ({ size }) => {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const project = useEnginePreviewStore((s) => s.project);
+  const version = useEnginePreviewStore((s) => s.version);
+  const aspect = useViewportStore((s) => s.aspectRatio);
+  const focusFrame = useControlsStore((s) => s.focusFrame);
+  const fps = useControlsStore((s) => s.fps);
+  const isPlaying = useControlsStore((s) => s.isPlaying);
+  const accurate = useControlsStore((s) => s.isAccurateSeekNeeded);
+  const playScale = usePlayerStore((s) => QUALITY_SCALE[s.quality] ?? 1);
+  const ratio = project && project.width > 0 && project.height > 0 ? project.width / project.height : aspect.width / aspect.height;
+  // The frame's box on screen, fitted and centred.
+  const box = useMemo(() => {
+    if (!size.width || !size.height || !(ratio > 0)) return { x: 0, y: 0, width: 0, height: 0 };
+    const width = Math.min(size.width, size.height * ratio);
+    const height = width / ratio;
+    return { x: (size.width - width) / 2, y: (size.height - height) / 2, width, height };
+  }, [size.width, size.height, ratio]);
+  const pixels = useCallback(
+    (k: number) => {
+      const dpr = window.devicePixelRatio || 1;
+      const [w, h] = [box.width * dpr * k, box.height * dpr * k];
+      const fit = Math.min(1, MAX_SIDE / Math.max(w, h, 1));
+      return { width: Math.max(2, Math.round(w * fit)), height: Math.max(2, Math.round(h * fit)) };
+    },
+    [box.width, box.height],
+  );
+
+  // Copy each engine frame in.
+  useEffect(() => {
+    const c = canvas.current;
+    if (!c) return;
+    const source = (c.ownerDocument.getElementById(ENGINE_FRAME_CANVAS_ID) ?? document.getElementById(ENGINE_FRAME_CANVAS_ID)) as HTMLCanvasElement | null;
+    if (!source) return;
+    const copy = () => {
+      if (source.width < 2 || source.height < 2) return;
+      if (c.width !== source.width || c.height !== source.height) [c.width, c.height] = [source.width, source.height];
+      c.getContext("2d", { alpha: false })?.drawImage(source, 0, 0);
+    };
+    copy();
+    source.addEventListener(ENGINE_FRAME_EVENT, copy);
+    return () => source.removeEventListener(ENGINE_FRAME_EVENT, copy);
+  }, []);
+
+  // Playback renders at this size from now on; a run already going starts again at it.
+  const playSize = useMemo(() => pixels(playScale), [pixels, playScale]);
+  useEffect(() => {
+    if (playSize.width < 4) return;
+    setEnginePreviewSize(playSize.width, playSize.height);
+    const c = useControlsStore.getState();
+    if (c.isPlaying) {
+      c.pause();
+      c.play();
+    }
+  }, [playSize]);
+
+  // Paused: the frame at the playhead at full-screen size.
+  useEffect(() => {
+    const px = pixels(1);
+    if (!fps || isPlaying || box.width < 4) return;
+    void engineRender((focusFrame / fps) * 1e6, px.width, px.height, !accurate);
+  }, [pixels, focusFrame, fps, isPlaying, accurate, version, box.width]);
+
+  return (
+    <canvas
+      ref={canvas}
+      data-testid="fullscreen-frame"
+      className="absolute bg-black"
+      style={{ left: box.x, top: box.y, width: box.width, height: box.height }}
+    />
+  );
+};
+
+/**
+ * Full-screen preview (⌘⇧F, or the bottom bar's button), as CapCut's: the frame fitted on a
+ * #292929 screen, and a floating 556×44 bar near the bottom with play, the time (now in the
+ * accent, then the length), a scrub track with the accent up to a white dot, and the button to
+ * leave. The bar fades after 3 s without the mouse moving. Esc or ⌘⇧F leaves.
+ */
+const FullscreenPreview: React.FC<FullscreenPreviewProps> = ({ onExit }) => {
+  const root = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const [showBar, setShowBar] = useState(true);
+  const hide = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draws = useEngineDraws();
+  const focusFrame = useControlsStore((s) => s.focusFrame);
+  const fps = useControlsStore((s) => s.fps);
+  const isPlaying = useControlsStore((s) => s.isPlaying);
+  const play = useControlsStore((s) => s.play);
+  const pause = useControlsStore((s) => s.pause);
+  const setFocusFrame = useControlsStore((s) => s.setFocusFrame);
+  const clipDuration = useClipStore((s) => s.clipDuration);
+  const track = useRef<HTMLDivElement>(null);
+  const [scrub, setScrub] = useState<number | null>(null);
+
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      setSize({ width: r.width, height: r.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // The window goes full screen with it, and leaving full screen (Esc, the green button)
+  // leaves the preview.
+  useEffect(() => {
+    const doc = root.current?.ownerDocument ?? document;
+    const target = doc.documentElement;
+    let entered = false;
+    const onChange = () => {
+      if (doc.fullscreenElement) entered = true;
+      else if (entered) onExit();
+    };
+    doc.addEventListener("fullscreenchange", onChange);
+    if (!doc.fullscreenElement) target.requestFullscreen?.().catch(() => {});
+    return () => {
+      doc.removeEventListener("fullscreenchange", onChange);
+      if (doc.fullscreenElement) doc.exitFullscreen?.().catch(() => {});
+    };
+  }, [onExit]);
+
+  const wake = useCallback(() => {
+    setShowBar(true);
+    if (hide.current) clearTimeout(hide.current);
+    hide.current = setTimeout(() => setShowBar(false), 3000);
+  }, []);
+  useEffect(() => {
+    wake();
+    return () => {
+      if (hide.current) clearTimeout(hide.current);
+    };
+  }, [wake]);
+
+  useEffect(() => {
+    const win = root.current?.ownerDocument.defaultView ?? window;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onExit();
+    };
+    win.addEventListener("keydown", onKey);
+    return () => win.removeEventListener("keydown", onKey);
+  }, [onExit]);
+
+  const progress = scrub ?? (clipDuration > 0 ? Math.min(1, focusFrame / clipDuration) : 0);
+  const seekTo = (clientX: number) => {
+    const r = track.current!.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    setScrub(f);
+    setFocusFrame(Math.min(clipDuration, Math.round(f * clipDuration)));
+  };
+
+  return (
+    <div ref={root} data-testid="fullscreen-preview" className="fixed inset-0 z-[9999] bg-[#292929]" style={{ cursor: showBar ? "default" : "none" }} onMouseMove={wake}>
+      {draws ? <EngineStage size={size} /> : <LegacyStage size={size} />}
       <div
-        className={`absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/80 to-transparent transition-opacity duration-300 ${
-          showControls ? "opacity-100" : "opacity-0"
-        }`}
+        data-testid="fullscreen-bar"
+        className={`absolute left-1/2 -translate-x-1/2 bottom-[67px] w-[556px] max-w-[calc(100%-32px)] h-11 flex items-center gap-3 pl-4 pr-3 rounded-[8px] bg-[#0a0a0c] transition-opacity duration-300 ${showBar ? "opacity-100" : "opacity-0"}`}
       >
-        <div className="px-8 pb-6 pt-12">
-          {/* Progress bar */}
-          <div
-            ref={progressBarRef}
-            className="relative w-full h-1 bg-white/20 rounded-full cursor-pointer mb-4 group"
-            onMouseDown={handleProgressBarMouseDown}
-          >
-            <div
-              className={`absolute h-full bg-blue-500 rounded-full pointer-events-none ${
-                isDragging ? "" : "transition-all"
-              }`}
-              style={{ width: `${progress * 100}%` }}
-            />
-            <div
-              className={`absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg transition-opacity ${
-                isDragging
-                  ? "opacity-100 cursor-grabbing"
-                  : "opacity-0 group-hover:opacity-100 cursor-grab"
-              }`}
-              style={{ left: `calc(${progress * 100}% - 6px)` }}
-            />
-          </div>
-
-          {/* Controls */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              {/* Play/Pause button */}
-              <button
-                onClick={() => (isPlaying ? pause() : play())}
-                className="text-white hover:text-blue-400 transition-colors cursor-pointer"
-              >
-                {isPlaying ? (
-                  <FaCirclePause className="h-8 w-8" />
-                ) : (
-                  <FaCirclePlay className="h-8 w-8" />
-                )}
-              </button>
-
-              {/* Time display */}
-              <div className="text-white text-sm">
-                {formatTime(focusFrame)} / {formatTime(clipDuration)}
-              </div>
-            </div>
-
-            {/* Exit fullscreen button */}
-            <button
-              onClick={onExit}
-              className="text-white hover:text-blue-400 transition-colors cursor-pointer"
-            >
-              <SlSizeActual className="h-4 w-4" />
-            </button>
-          </div>
+        <button
+          type="button"
+          data-testid="fullscreen-play"
+          aria-label={isPlaying ? "Pause" : "Play"}
+          onClick={() => (isPlaying ? pause() : play())}
+          className="w-5 h-5 flex items-center justify-center text-[#e6e6e6] hover:text-white cursor-pointer"
+        >
+          {isPlaying ? <PauseGlyph className="w-[10px] h-[12px]" /> : <PlayGlyph className="w-[10px] h-[12px]" />}
+        </button>
+        <span className="text-[12px] tabular-nums whitespace-nowrap">
+          <span className="text-brand-accent">{timecode(focusFrame, fps)}</span>
+          <span className="text-[#5a5a5a] px-1">/</span>
+          <span className="text-brand-lighter">{timecode(clipDuration, fps)}</span>
+        </span>
+        <div
+          ref={track}
+          data-testid="fullscreen-scrub"
+          className="relative flex-1 h-4 ml-6 flex items-center cursor-pointer"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+            if (isPlaying) pause();
+            seekTo(e.clientX);
+          }}
+          onPointerMove={(e) => {
+            if ((e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) seekTo(e.clientX);
+          }}
+          onPointerUp={() => setScrub(null)}
+        >
+          <div className="absolute inset-x-0 h-[2px] rounded-full bg-[#2c2c30]" />
+          <div className="absolute left-0 h-[2px] rounded-full bg-brand-accent" style={{ width: `${progress * 100}%` }} />
+          <div className="absolute w-[9px] h-[9px] -ml-[4.5px] rounded-full bg-white border-2 border-brand-accent" style={{ left: `${progress * 100}%` }} />
         </div>
+        <span className="w-px h-3 bg-[#5a5a5a]" />
+        <button type="button" data-testid="fullscreen-exit" aria-label="Exit full screen" onClick={onExit} className="w-5 h-5 flex items-center justify-center text-[#e6e6e6] hover:text-white cursor-pointer">
+          <ExitFullscreenGlyph className="w-[13px] h-[13px]" />
+        </button>
       </div>
     </div>
   );
