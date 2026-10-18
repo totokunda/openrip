@@ -138,7 +138,7 @@ Done (2026-10-18): the data model and the engine. The keyframe diamonds, the ins
 
 ## Transitions and animations
 
-Done (2026-10-18): the data model, the built-in lists and the engine. The Transitions panel, the transition handle on the timeline and the Animation tab's In / Out / Combo (Loop for text) grids are UI still to build on them ([transitions.md](../parity/transitions.md), [clip-animations.md](../parity/clip-animations.md)).
+Done (2026-10-18): the data model, the built-in lists and the engine ([transitions.md](../parity/transitions.md), [clip-animations.md](../parity/clip-animations.md)), and the UI on them: the Transitions tab (CapCut's grid by category; + or a card dragged onto a cut), the transition's marker on the cut and its inspector, and the Animation tab's In / Out / Combo (In / Out / Loop for text) grids of cards with the duration in the footer (`lib/transitions.ts`; docs/inventory/current-app.md §12, §13).
 
 - **On a clip** (`lib/types.ts`):
   - video and image: `transitionOut`, `animationIn`, `animationOut`, `animationCombo`;
@@ -155,17 +155,19 @@ Done (2026-10-18): the data model, the built-in lists and the engine. The Transi
 - **To the engine** (`engine/crates/v1`): the fields become the segment's animations and transition. A direction joins the engine's name ("slide_left"); the overlapping transitions are marked so. CapCut clips show their own as these fields, and a field the app changes replaces the draft's of that kind; the rest stay CapCut's, and an unedited clip comes back exactly.
 - **CapCut import:** by resource id where known (White Flash, White Fade, Blink, Pull in, Black Fade, the video Fade Out), else by English name (Mix, Black Fade, Pull in, Pull out, Fade In, Fade Out); others are listed in the import report's `unmapped_library`.
 - **Checked:** `tests/animations.test.ts` (`node --test tests/*.test.ts` in packages/renderer) checks the lists against the engine's. Then the v1 crate's tests (fields both ways, the fitting rules, splits), the engine's tests (math and frames), and the harness step `transitions`.
-- **For the panels:** the existing Animation tab still offers only the first three transitions and the typing intros. The panels should take their lists from `lib/animations.ts`, and show a draft's undrawn one by `name` as the tab does now.
+- **The panels** take their lists from `lib/animations.ts` and show a draft's undrawn one by `name` (a card of its own, or the transition's inspector), kept until replaced. A transition goes on a cut only (the selected clip's end, or the cut before it when nothing follows); `lib/transitions.ts` has the cuts, the bounds, Apply to all and the selected transition (`selectedTransitionId`, controls store). Choosing a Combo takes the In and Out off and an In or Out takes the Combo off, as CapCut does.
+- **Checked through the UI:** the harness steps `transui`, `animclip`, `animvideo`, `animtext` (README, motion-suite.mjs and anim-suite.mjs).
 
 ## Speed tools
 
-Done (2026-10-18): the data model, the store operations and the engine for CapCut's Speed tab (Normal and Curve) and the toolbar's Freeze and Reverse ([speed.md](../parity/speed.md) has CapCut's maths and the checks). The tab's UI and the two buttons are still to build on these.
+Done (2026-10-18): the data model, the store operations and the engine for CapCut's Speed tab (Standard and Curve) and the toolbar's Freeze and Reverse ([speed.md](../parity/speed.md) has CapCut's maths and the checks), and the UI on them: the Speed tab (renderer/src/components/properties/SpeedProperties.tsx) and the toolbar's transform tools menu and the clip menu's Edit › (`lib/timeline-motion.ts`).
 
 - **On a video or audio clip** (`lib/types.ts`, `SpeedProps`):
   - `speed`: constant speed (0.1–100×), or with a curve the curve's mean speed (its media over its length on the timeline).
   - `speedCurve: { preset?, points: [{x, y}] } | null`: CapCut's speed points, x the progress through the clip's media in the order it plays, y the speed (0.1–10×).
   - `reverse`: the clip plays its media backward. Its `trimStart` and `trimEnd` count in the order it plays: `trimStart` is cut off the media's end.
   - `freeze: { at }` makes a video clip a freeze frame: it holds its asset's frame at `at` seconds, without sound, as long as it's made.
+  - `changePitch`: CapCut's Change audio pitch, the sound resampled with the speed instead of time-stretched (the engine's `change_pitch`; a curve's sound always follows its speed).
 - **Helpers** (`lib/speed.ts`, pure, never writing to what they're given):
   - `CURVE_PRESETS` (name and points, in the tab's order: Custom, Montage, Hero, Bullet, Jump Cut, Flash In, Flash Out) and `presetCurve(name)`;
   - the remap: `curveAverage(points)`, `curveSpeedAt(points, q)`, `sourceProgressAt(points, q)`, `timelineProgressAt(points, p)`, `curvedLength(mediaFrames, points)`;
@@ -177,13 +179,14 @@ Done (2026-10-18): the data model, the store operations and the engine for CapCu
   - `setReverse(id, reverse)` is the Reverse button;
   - `freezeFrame(id, frame)` is the Freeze button: cut at `frame`, a 3 s still of the frame there between the halves, the rest of the track and the linked clips 3 s later; it returns the still's id and selects it.
   - Linked clips (a video and its detached audio) take a speed, curve or reverse together, and a freeze cuts and moves them too. A curved clip cut in two plays the same media at the same times.
-- **To the engine.** `convert_clip` turns `speedCurve` into a speed material the segment plays by, `reverse` into the segment's (its trims mirrored about the media's length), and `freeze` into a still material drawn from the video. On a converted CapCut clip each applies when it differs from `base`: the app's curve replaces the draft's speed, and a freeze keeps the clip's effects. `to_app_project` shows a draft's curve (with its mean as `speed`), reverse and trims.
+- **To the engine.** `convert_clip` turns `speedCurve` into a speed material the segment plays by, `reverse` into the segment's (its trims mirrored about the media's length), `freeze` into a still material drawn from the video, and `changePitch` into the segment's `change_pitch`. On a converted CapCut clip each applies when it differs from `base`: the app's curve replaces the draft's speed, and a freeze keeps the clip's effects. `to_app_project` shows a draft's curve (with its mean as `speed`), reverse and trims.
 - **What the UI should know:**
   - CapCut's curve editor draws a bezier through the points (control points at the span's middle x, at each end's y); playback runs CapCut's ramp. `curveSpeedAt` gives the ramp, for a faithful curve.
   - CapCut ignores "Change pitch" on a curve: its sound always follows the speed. The tab should grey the toggle out in Curve.
   - A new point must be at least 3 frames from its neighbours in CapCut; points' speeds are clamped to 0.1–10×, and a curve to 10× only when the clip has a second or more of media.
   - CapCut offers Curve and Reverse on video clips, and Normal speed on audio; a freeze has none. The store takes them on audio too, so a video's detached audio follows it. A reversed clip's trim handles trim where it plays.
-- **Checked:** `tests/speed.test.ts` (`node --test`, the engine's golden values), the v1 crate's tests, and the harness step `speed` (README): reversed frames and real-time reversed playback, a curve's length and frames, a freeze's frames and saved still, its silence and the sound after it in an export, each edit undone.
+- **Checked:** `tests/speed.test.ts` (`node --test`, the engine's golden values), the v1 crate's tests, and the harness step `speed` (README): reversed frames and real-time reversed playback, a curve's length and frames, a freeze's frames and saved still, its silence and the sound after it in an export, each edit undone. Through the UI: `speedui` and `freezeui` (motion-suite.mjs).
+- **The UI's limits:** the curve editor plots CapCut's ramp (`curveSpeedAt`) over the clip's media rather than CapCut's drawn bezier; a length rounds to whole frames, so a trip to 100× and back can change the media a clip spans (⌘Z gives it back exactly, and a length typed in the tab sets the exact speed for it).
 
 ## Colour and compositing
 
