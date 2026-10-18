@@ -46,7 +46,9 @@ export default async (ctx) => {
       await win.locator("[title=Mask]").first().click();
       await win.keyboard.press("2");
       await win.waitForTimeout(300);
-      await drag(win, mid.x - 70, mid.y + 60, mid.x + 70, mid.y + 200);
+      // A rectangle in the picture's lower half, inside it whatever the player's size (a mask
+      // that runs off the clip isn't made).
+      await drag(win, mid.x - 70, mid.y + p.h * 0.12, mid.x + 70, mid.y + p.h * 0.42);
       await win.waitForTimeout(500);
       await settled(win, () => win.keyboard.press("v"));
     },

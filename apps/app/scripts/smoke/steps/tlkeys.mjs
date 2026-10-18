@@ -92,7 +92,7 @@ export default async (ctx) => {
   const long = Math.max(...d2.timeline.clips.map((c) => +c.endTick)) / 1e6;
   const handle = () =>
     win.evaluate(() => {
-      const el = [...document.querySelectorAll("div")].find((e) => e.className?.includes?.("rounded-t-sm") && e.className.includes("w-3"));
+      const el = document.querySelector("[data-testid=playhead-handle]");
       const r = el?.getBoundingClientRect();
       return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
     });

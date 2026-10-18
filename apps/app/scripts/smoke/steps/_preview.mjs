@@ -145,17 +145,36 @@ export const now = async (win) => {
   return (await t.count()) ? Math.round(+(await t.getAttribute("data-time")) * 1000) / 1000 : NaN;
 };
 // Seconds to ruler x, measured by clicking the ruler at two places and reading the clock.
+// A click lands on the nearest frame, so the two clicks alone leave the map up to half a frame
+// off; the x where the frame after s1 begins is half a frame past s1, found to a quarter pixel
+// (each probe clicks away first: a click on the playhead's handle doesn't seek).
 export const rulerMap = async (win, x1 = 100, x2 = 500) => {
   const tl = await timelineRect(win);
   const y = tl.y + 12;
-  await win.mouse.click(tl.x + x1, y);
-  await win.waitForTimeout(500);
-  const s1 = await now(win);
-  await win.mouse.click(tl.x + x2, y);
-  await win.waitForTimeout(500);
-  const s2 = await now(win);
+  const at = async (x, away = true) => {
+    if (away) {
+      await win.mouse.click(tl.x + x + 40, y);
+      await win.waitForTimeout(150);
+    }
+    await win.mouse.click(tl.x + x, y);
+    await win.waitForTimeout(away ? 250 : 500);
+    return now(win);
+  };
+  const s1 = await at(x1, false);
+  const s2 = await at(x2, false);
   const pps = (x2 - x1) / (s2 - s1);
-  return { y, pps, x: (s) => tl.x + x1 + (s - s1) * pps };
+  let [lo, hi] = [x1, x1 + 2 * (pps / 24) + 2];
+  let next = await at(hi);
+  if (!(next > s1)) return { y, pps, x: (s) => tl.x + x1 + (s - s1) * pps };
+  while (hi - lo > 0.25) {
+    const mid = (lo + hi) / 2;
+    const t = await at(mid);
+    if (t > s1) [hi, next] = [mid, Math.min(next, t)];
+    else lo = mid;
+  }
+  const edge = (lo + hi) / 2;
+  const half = (s1 + next) / 2;
+  return { y, pps, x: (s) => tl.x + edge + (s - half) * pps };
 };
 // Move the playhead to `s` seconds (clicking the ruler) and wait for the engine's frame. A
 // pixel of ruler can be more than a frame: more than half a frame off (at 24 fps), it steps
