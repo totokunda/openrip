@@ -17,6 +17,7 @@
 pub mod animation;
 #[cfg(target_os = "macos")]
 pub mod caption;
+pub mod colour;
 pub mod mask;
 #[cfg(target_os = "macos")]
 pub mod transition;

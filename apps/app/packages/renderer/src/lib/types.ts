@@ -127,6 +127,8 @@ export type DraftAdjustment = {
   value?: number;
   min?: number;
   max?: number;
+  /** Several sliders in one adjustment (an HSL range's hue, saturation and lightness). */
+  values?: { key: string; name: string; value: number; min: number; max: number }[];
   drawn: boolean;
 };
 

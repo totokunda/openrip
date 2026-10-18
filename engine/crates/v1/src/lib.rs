@@ -828,8 +828,9 @@ fn attach_adjustments(id: &str, clip: &Value, materials: &mut Materials, attachm
 
 /// The Adjust tab's changes to a converted clip's own adjustments (`draftAdjustments`, by
 /// material id): one taken off the list comes off the clip; a new value for one the engine
-/// draws (a CapCut Adjust slider, on CapCut's scale, or the colour wheels' strength in
-/// percent) goes on a copy of the draft's material for this clip, in the same place.
+/// draws (a CapCut Adjust slider, on CapCut's scale, the colour wheels' strength in percent,
+/// or an HSL range's hue, saturation and lightness, −100…100) goes on a copy of the draft's
+/// material for this clip, in the same place.
 fn edit_draft_adjustments(seg: &mut Segment, clip: &Value, base: &Value, materials: &mut Materials) {
     let list = |v: &Value| v.get("draftAdjustments").and_then(Value::as_array).cloned().unwrap_or_default();
     let now = list(clip);
@@ -839,7 +840,7 @@ fn edit_draft_adjustments(seg: &mut Segment, clip: &Value, base: &Value, materia
             seg.attachments.retain(|a| a != &id);
             continue;
         };
-        if !b(&was, "drawn") || same(entry.get("value"), was.get("value")) {
+        if !b(&was, "drawn") || (same(entry.get("value"), was.get("value")) && same(entry.get("values"), was.get("values"))) {
             continue;
         }
         let value = f(entry, "value", 0.0);
@@ -851,6 +852,11 @@ fn edit_draft_adjustments(seg: &mut Segment, clip: &Value, base: &Value, materia
                 AnyMaterial::Effect(Effect { id: copy.clone(), ..e })
             }
             Some(AnyMaterial::ColorWheels(w)) => AnyMaterial::ColorWheels(ColorWheels { id: copy.clone(), intensity: (value / 100.0).clamp(0.0, 1.0), ..w }),
+            Some(AnyMaterial::Hsl(h)) => {
+                let values = entry.get("values").and_then(Value::as_array).cloned().unwrap_or_default();
+                let get = |key: &str, now: f32| values.iter().find(|v| s(v, "key") == key).map_or(now, |v| f(v, "value", now as f64).clamp(-100.0, 100.0) as f32);
+                AnyMaterial::Hsl(HslAdjust { id: copy.clone(), hue: get("hue", h.hue), saturation: get("saturation", h.saturation), lightness: get("lightness", h.lightness), ..h })
+            }
             _ => continue,
         };
         materials.remove(&copy);

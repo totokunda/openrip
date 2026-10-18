@@ -43,10 +43,11 @@
 //!       render of it: PSNR and the share of pixels far off, per draft (numbered, no names)
 //!       and overall. Drafts with media missing at the first frame are left out. --save
 //!       writes ours | CapCut's | difference x4 for each.
-//!   openrip-dev export-parity <draft-dir> <capcut-export.mp4> [--every S] [--all] [--save <dir>]
+//!   openrip-dev export-parity <draft-dir> <capcut-export.mp4> [--every S] [--from S] [--to S] [--all] [--save <dir>]
 //!       Compare our render with CapCut's export of the same draft every S seconds (default
-//!       2) at half size: PSNR overall and the worst samples (--all lists every sample; --save writes
-//!       ours | CapCut's | difference x4 for the five worst).
+//!       2) at half size, between --from and --to (default the whole draft): PSNR overall
+//!       and the worst samples (--all lists every sample; --save writes ours | CapCut's |
+//!       difference x4 for the five worst).
 //!   openrip-dev wrap-probe <draft-dir> <capcut-export.mp4>
 //!       For each text clip, sweep the line-wrap width (fraction of the canvas width, on
 //!       screen) and find which widths reproduce CapCut's exported frame: one line per clip
@@ -1105,14 +1106,16 @@ fn psnr_rgba_rgb(ours: &openrip_render::RgbaImage, theirs: &[u8]) -> f64 {
 fn export_parity(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let project = load_project(Path::new(&args[1]))?;
     let every: f64 = flag(args, "--every").map(|s| s.to_string_lossy().parse()).transpose()?.unwrap_or(2.0);
+    let from: f64 = flag(args, "--from").map(|s| s.to_string_lossy().parse()).transpose()?.unwrap_or(0.0);
     let save = flag(args, "--save");
     let (w, h) = (project.canvas.width / 2, project.canvas.height / 2);
     let duration = project.duration();
+    let to: f64 = flag(args, "--to").map(|s| s.to_string_lossy().parse()).transpose()?.unwrap_or(duration.as_secs_f64());
     let mut dec = openrip_media::VideoDecoder::open(Path::new(&args[2]), &Default::default())?;
     let mut engine = openrip_playback::PreviewEngine::new(project)?;
     let mut samples = Vec::new();
-    let mut t = every / 2.0;
-    while t < duration.as_secs_f64() - 0.05 {
+    let mut t = from + every / 2.0;
+    while t < to.min(duration.as_secs_f64() - 0.05) {
         let at = openrip_model::Micros::from_secs_f64(t);
         if let Some(frame) = dec.frame_at(at)? {
             // Render at the export's size, as CapCut did, then bring both to half the canvas

@@ -77,8 +77,12 @@ pub(crate) const TEXT_STYLE_KEYS: [&str; 20] = [
 pub(crate) const ADJUST_KEYS: [&str; 8] = ["brightness", "contrast", "hue", "saturation", "sharpness", "noise", "blur", "vignette"];
 
 /// CapCut's Adjust sliders the engine draws (`PreviewEngine::adjust_of`), by the importer's
-/// names for them. The draft's others (clarity, vignette, fade) are kept as CapCut has them.
-pub(crate) const DRAWN_ADJUST: [&str; 11] = ["brightness", "contrast", "saturation", "highlights", "shadows", "whites", "blacks", "temperature", "tint", "exposure", "sharpen"];
+/// names for them: all of its Adjust panel.
+pub(crate) const DRAWN_ADJUST: [&str; 14] =
+    ["brightness", "contrast", "saturation", "highlights", "shadows", "whites", "blacks", "temperature", "tint", "exposure", "sharpen", "clarity", "vignette", "fade"];
+
+/// CapCut's named HSL ranges, by its `hsl_color_type` 1–8.
+const HSL_RANGES: [&str; 8] = ["Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Purple", "Magenta"];
 
 /// How CapCut shows an Adjust slider's value (−1…1 in the draft): times 50, or times 100 for
 /// the one-sided sliders (0…100).
@@ -159,7 +163,7 @@ fn app_box(world: &World, center: Vec2, size: [f64; 2], rotation: f64) -> Map<St
 /// CapCut's Adjust sliders (on CapCut's scale), colour wheels, and the HSL, curves, filters
 /// and effects on the clip. The app's sliders (`v1:`) have the Adjust panel's own fields,
 /// and HSL and curves that change nothing aren't listed. The ones the engine draws can be
-/// changed (`drawn`); any can be removed.
+/// changed (`drawn`: a `value`, or for HSL several named `values`); any can be removed.
 fn draft_adjustments(project: &Project, seg: &Segment) -> Vec<Value> {
     // A curve within a level of the diagonal changes nothing.
     let identity = |c: &[CurvePoint]| c.iter().all(|p| [p.anchor, p.left, p.right].iter().all(|(x, y)| (x - y).abs() < 1.0 / 255.0));
@@ -183,8 +187,17 @@ fn draft_adjustments(project: &Project, seg: &Segment) -> Vec<Value> {
             Some(MaterialRef::ColorWheels(w)) if w.log => json!({ "kind": "log_wheels", "name": "Log wheels", "drawn": false }),
             // Their strength, as a percentage.
             Some(MaterialRef::ColorWheels(w)) => json!({ "kind": "color_wheels", "name": "Color wheels", "value": num(w.intensity * 100.0), "min": 0.0, "max": 100.0, "drawn": true }),
-            Some(MaterialRef::Hsl(h)) if h.hue != 0.0 || h.saturation != 0.0 || h.lightness != 0.0 => json!({ "kind": "hsl", "name": "HSL", "drawn": false }),
-            Some(MaterialRef::Curves(c)) if ![&c.luma, &c.red, &c.green, &c.blue].into_iter().all(|ch| identity(ch)) => json!({ "kind": "curves", "name": "Curves", "drawn": false }),
+            // One colour range: its hue, saturation and lightness on CapCut's −100…100.
+            Some(MaterialRef::Hsl(h)) if h.hue != 0.0 || h.saturation != 0.0 || h.lightness != 0.0 => {
+                let range = match h.range {
+                    1..=8 => HSL_RANGES[h.range as usize - 1].to_string(),
+                    _ => h.custom_color.map_or_else(|| "picked colour".into(), hex),
+                };
+                let slider = |key: &str, name: &str, v: f32| json!({ "key": key, "name": name, "value": num(v as f64), "min": -100.0, "max": 100.0 });
+                json!({ "kind": "hsl", "name": format!("HSL: {range}"), "drawn": true, "values": [slider("hue", "Hue", h.hue), slider("saturation", "Saturation", h.saturation), slider("lightness", "Lightness", h.lightness)] })
+            }
+            // Drawn; CapCut edits them on a curve, so they can be taken off but not set here.
+            Some(MaterialRef::Curves(c)) if ![&c.luma, &c.red, &c.green, &c.blue].into_iter().all(|ch| identity(ch)) => json!({ "kind": "curves", "name": "Curves", "drawn": true }),
             _ => continue,
         };
         entry["id"] = json!(id.0);
@@ -825,9 +838,13 @@ mod tests {
         assert_eq!(ids, ["fx", "br", "cl", "wh", "h2"]);
         assert_eq!(list[0], json!({"id": "fx", "kind": "filter", "name": "Film", "drawn": false}));
         assert_eq!(list[1], json!({"id": "br", "kind": "brightness", "name": "Brightness", "value": -10.0, "min": -50.0, "max": 50.0, "drawn": true}));
-        // Clarity is one-sided (0…100), and not drawn yet.
-        assert_eq!((list[2]["value"].as_f64(), list[2]["max"].as_f64(), list[2]["drawn"].as_bool()), (Some(2.0), Some(100.0), Some(false)));
+        // Clarity is one-sided (0…100), and drawn.
+        assert_eq!((list[2]["value"].as_f64(), list[2]["min"].as_f64(), list[2]["max"].as_f64(), list[2]["drawn"].as_bool()), (Some(2.0), Some(0.0), Some(100.0), Some(true)));
         assert_eq!((list[3]["kind"].as_str(), list[3]["value"].as_f64(), list[3]["drawn"].as_bool()), (Some("color_wheels"), Some(100.0), Some(true)));
+        // The HSL range, drawn, with its three sliders on CapCut's −100…100.
+        assert_eq!((list[4]["name"].as_str(), list[4]["drawn"].as_bool()), (Some("HSL: Orange"), Some(true)));
+        assert_eq!(list[4]["values"][0], json!({"key": "hue", "name": "Hue", "value": 10.0, "min": -100.0, "max": 100.0}));
+        assert_eq!(list[4]["values"].as_array().map(Vec::len), Some(3));
         // Unedited, everything stays as the draft had it.
         let back = import_v1_json(&doc).unwrap().project;
         assert_eq!(segment(&back, "v").attachments, segment(&adjusted(), "v").attachments);
@@ -841,18 +858,43 @@ mod tests {
         let list = clip["draftAdjustments"].as_array_mut().unwrap();
         list[1]["value"] = json!(25);
         list[3]["value"] = json!(50);
+        list[4]["values"][2]["value"] = json!(-40);
         // The filter and clarity taken off.
         list.retain(|e| e["id"] != "fx" && e["id"] != "cl");
         let back = import_v1_json(&doc).unwrap().project;
         let v = segment(&back, "v");
         // The edited ones are copies for this clip, in the draft's place.
-        assert_eq!(v.attachments, ["v-br", "v-wh", "h1", "h2", "cu"].map(MaterialId::from));
+        assert_eq!(v.attachments, ["v-br", "v-wh", "h1", "v-h2", "cu"].map(MaterialId::from));
+        let h = back.materials.hsl.iter().find(|h| h.id.0 == "v-h2").unwrap();
+        assert_eq!((h.range, h.hue, h.saturation, h.lightness), (2, 10.0, 0.0, -40.0));
         let br = back.materials.effects.iter().find(|e| e.id.0 == "v-br").unwrap();
         assert_eq!((br.params["intensity"], br.builtin.as_deref(), br.resource.as_deref()), (0.5, Some("brightness"), Some("/bundle/color")));
         assert_eq!(back.materials.color_wheels.iter().find(|w| w.id.0 == "v-wh").unwrap().intensity, 0.5);
         // The draft's own materials are unchanged.
         assert_eq!(back.materials.effects.iter().find(|e| e.id.0 == "br").unwrap().params["intensity"], -0.2);
         assert!(back.validate().is_empty(), "{:?}", back.validate());
+        // Clarity set to 60 on CapCut's scale: 0.6 in the draft's units.
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let list = clip_mut(&mut doc, "v")["draftAdjustments"].as_array_mut().unwrap();
+        list[2]["value"] = json!(60);
+        let back = import_v1_json(&doc).unwrap().project;
+        let cl = back.materials.effects.iter().find(|e| e.id.0 == "v-cl").unwrap();
+        assert_eq!((cl.params["intensity"], cl.builtin.as_deref()), (0.6, Some("clarity")));
+    }
+
+    /// Curves that bend are drawn, listed without a slider, and can be taken off the clip.
+    #[test]
+    fn bent_curves_are_drawn_and_can_be_removed() {
+        let mut p = adjusted();
+        p.materials.curves[0].luma = vec![CurvePoint { anchor: (0.0, 0.1), left: (0.0, 0.1), right: (0.33, 0.4) }, CurvePoint { anchor: (1.0, 0.9), left: (0.67, 0.6), right: (1.0, 0.9) }];
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clip = clip_mut(&mut doc, "v");
+        let list = clip["draftAdjustments"].as_array_mut().unwrap();
+        let curves = list.iter().find(|e| e["id"] == "cu").unwrap();
+        assert_eq!(curves, &json!({"id": "cu", "kind": "curves", "name": "Curves", "drawn": true}));
+        list.retain(|e| e["id"] != "cu");
+        let back = import_v1_json(&doc).unwrap().project;
+        assert!(!segment(&back, "v").attachments.contains(&MaterialId("cu".into())));
     }
 
     #[test]

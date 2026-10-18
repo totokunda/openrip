@@ -13,7 +13,8 @@ Agreed 2026-10-16. What the engine draws next is chosen from two sources: what r
 | Curved text (`text_curve`) | 3 enabled (125 carry it switched off), 1 draft | ✅ fitted to its export, provisional ([curved-text.md](../parity/curved-text.md)) |
 | Text shapes (`text_shape`) | 122, 5 drafts | Nothing to draw: they name a "Bubble" with no bundle, and CapCut's covers and export show plain text |
 | Text intros | 47, 22 drafts | ✅ Type 1, Type 2, Typewriter (40); ❌ 7 others (single uses under 2.6 s; Preview Type's 2 run under 0.4 s) |
-| Adjust sliders | 5 drafts | ✅ 9 within ±2 code values; ❌ fade, clarity, vignette; temperature/tint on fine detail |
+| Adjust sliders | 5 drafts | ✅ 9 within ±2 code values; fade, clarity, vignette as close as plain video (2026-10-17, [colour.md](../parity/colour.md)); ❌ temperature/tint on fine detail |
+| HSL, curves | 1 draft each (3 ranges; 40 clips) | ✅ (2026-10-17, [colour.md](../parity/colour.md)); ❌ log wheels (no local use) |
 | Audio clips, fades, loudness | 7–35 drafts | ✅ |
 | Speed changes, keyframes (opacity, position) | 14 and 12 uses | ✅ |
 | Stabilisation | 12, 2 drafts | ❌ |

@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use crate::grade::{Curves, Hsl};
 use crate::RgbaImage;
 
 /// One wheel's values, each -1..1: per channel, luma, and saturation.
@@ -37,10 +38,13 @@ impl Wheels {
     }
 }
 
-/// One clip's colour grade: the primary wheels, then the Adjust sliders, each -1..1
-/// (0 = off).
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+/// One clip's colour grade, in CapCut's order: HSL, curves, the primary wheels, then the
+/// Adjust sliders, each -1..1 (0 = off).
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Adjust {
+    /// CapCut's HSL ranges and tone curves (grade.rs), a pass of their own before the rest.
+    pub hsl: Hsl,
+    pub curves: Option<Arc<Curves>>,
     pub wheels: Wheels,
     pub brightness: f32,
     pub contrast: f32,
@@ -52,27 +56,51 @@ pub struct Adjust {
     pub temperature: f32,
     pub tint: f32,
     pub exposure: f32,
+    /// CapCut's Fade slider (0..1): a mix towards its faded lookup table, between temperature
+    /// and exposure.
+    pub fade: f32,
     /// CapCut's Sharpen slider (0..1), a separate pass after the others.
     pub sharpen: f32,
+    /// CapCut's Clarity and Vignette sliders (grade.rs), passes of their own after Sharpen:
+    /// clarity 0..1, vignette -1..1 (below 0 it lightens the edges).
+    pub clarity: f32,
+    pub vignette: f32,
 }
 
-/// CapCut's exposure lookup tables (17 grids of 17x17, side by side: 289x17), and a key
-/// that identifies them for the GPU cache.
+/// CapCut's exposure lookup tables (17 grids of 17x17, side by side: 289x17), its fade table
+/// (same layout) when the bundle has one, and a key that identifies them for the GPU cache.
 #[derive(Clone, Debug)]
 pub struct ExposureLuts {
     pub key: u64,
     pub darker: Arc<RgbaImage>,
     pub brighter: Arc<RgbaImage>,
+    pub fade: Option<Arc<RgbaImage>>,
 }
 
 impl Adjust {
     pub fn is_identity(&self) -> bool {
-        let e = 1e-5;
-        self.wheels.is_identity() && self.sharpen.abs() <= e && [self.brightness, self.contrast, self.saturation, self.highlights, self.shadows, self.whites, self.blacks, self.temperature, self.tint, self.exposure].iter().all(|v| v.abs() <= e)
+        self.sliders_identity() && self.colour_identity() && self.finish_identity()
     }
 
-    /// The shader's parameters (see `fs_adjust` in shaders.wgsl).
-    pub(crate) fn params(&self, has_lut: bool) -> AdjustParams {
+    /// Whether clarity and the vignette leave the picture as it is.
+    pub(crate) fn finish_identity(&self) -> bool {
+        self.clarity.abs() <= 1e-5 && self.vignette.abs() <= 1e-5
+    }
+
+    /// Whether the HSL and curves pass leaves the picture as it is.
+    pub(crate) fn colour_identity(&self) -> bool {
+        self.hsl.is_identity() && self.curves.as_ref().is_none_or(|c| c.is_identity())
+    }
+
+    /// Whether the Adjust pass and Sharpen (the wheels and sliders) leave the picture as it is.
+    pub(crate) fn sliders_identity(&self) -> bool {
+        let e = 1e-5;
+        self.wheels.is_identity() && self.sharpen.abs() <= e && [self.brightness, self.contrast, self.saturation, self.highlights, self.shadows, self.whites, self.blacks, self.temperature, self.tint, self.exposure, self.fade].iter().all(|v| v.abs() <= e)
+    }
+
+    /// The shader's parameters (see `fs_adjust` in adjust.wgsl), with the exposure tables
+    /// and the fade table there or not.
+    pub(crate) fn params(&self, has_lut: bool, has_fade: bool) -> AdjustParams {
         let on = |v: f32| (v.abs() > 1e-5) as u8 as f32;
         let c = |v: f32| v.clamp(-1.0, 1.0) as f64;
         let mut p = AdjustParams { tt_r: [1.0, 0.0, 0.0, 0.0], tt_g: [0.0, 1.0, 0.0, 0.0], tt_b: [0.0, 0.0, 1.0, 0.0], ..Default::default() };
@@ -113,6 +141,7 @@ impl Adjust {
             p.w_on = [c(w.intensity), 1.0, 0.0, 0.0];
         }
         p.on2 = [on(self.highlights), on(self.shadows), on(self.blacks).max(on(self.whites)), on(self.exposure) * has_lut as u8 as f32];
+        p.fade = [self.fade.clamp(0.0, 1.0), on(self.fade) * has_fade as u8 as f32, 0.0, 0.0];
         p
     }
 }
@@ -145,6 +174,8 @@ pub(crate) struct AdjustParams {
     w_offset: [f32; 4],
     w_sat: [f32; 4],
     w_on: [f32; 4],
+    /// Fade: amount, enabled.
+    fade: [f32; 4],
 }
 
 /// Contrast: below 0 a straight line through the pivot; above, a sigmoid through the pivot

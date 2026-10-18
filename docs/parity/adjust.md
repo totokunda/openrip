@@ -44,17 +44,13 @@ The primary colour wheels run before these, in the same pass:
 | Cover, Adjust, HSL and curves | 14.6 dB (95% of pixels off by > 32) | 17.3 dB (2.3%) |
 | Export, draft with primary colour wheels, PSNR p50 | 22.6 dB | **31.7 dB** |
 
-## Not yet
+## The rest of the bundle
+
+Clarity, vignette, fade, HSL and curves are drawn too; see [colour.md](colour.md).
 
 Not drawn yet:
-- clarity, a multi-pass pyramid filter. Its sliders are at most 0.02 in the local drafts;
-- vignette;
-- HSL and curves. In the local drafts, every curve is empty and only 3 HSL materials change anything;
-- log wheels;
-- LUT filters applied to a single clip (filter tracks are drawn; see below);
-- fade, which no local draft uses and whose table is in a bundle-specific format.
-
-All of them are in the same bundle.
+- log wheels, which no local draft uses;
+- LUT filters applied to a single clip (filter tracks are drawn; see below), which no local draft uses either.
 
 ## Filter tracks
 

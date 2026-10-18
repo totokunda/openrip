@@ -17,12 +17,13 @@ struct AdjustParams {
     w_offset: vec4<f32>, // R, G, B, saturation
     w_sat: vec4<f32>,    // saturation wheel: lift, gamma, gain; luma mix
     w_on: vec4<f32>,     // intensity, enabled
+    fade: vec4<f32>,     // fade: amount, enabled
 }
 
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var<uniform> A: AdjustParams;
 // Exposure lookup table: 17 grids of 17x17 side by side (289x17), red across, green down,
-// blue picks the grid.
+// blue picks the grid. CapCut's fade table, the same way, below it when there is one.
 @group(0) @binding(2) var lut: texture_2d<f32>;
 
 @vertex
@@ -46,21 +47,21 @@ fn contrast_up(x: f32) -> f32 {
     return y + t * t * A.b.z;
 }
 
-// Bilinear lookup in one 17x17 grid at texel coordinates.
-fn lut_grid(grid: f32, rg: vec2<f32>) -> vec3<f32> {
+// Bilinear lookup in one 17x17 grid at texel coordinates, in the table starting at row `top`.
+fn lut_grid(grid: f32, rg: vec2<f32>, top: i32) -> vec3<f32> {
     let p = vec2<f32>(grid * 17.0 + rg.x * 16.0, rg.y * 16.0);
     let b = floor(p);
     let f = p - b;
-    let i = vec2<i32>(b);
-    let j = min(i + vec2<i32>(1, 1), vec2<i32>(i32(grid) * 17 + 16, 16));
-    let top = mix(textureLoad(lut, i, 0).rgb, textureLoad(lut, vec2<i32>(j.x, i.y), 0).rgb, f.x);
-    let bottom = mix(textureLoad(lut, vec2<i32>(i.x, j.y), 0).rgb, textureLoad(lut, j, 0).rgb, f.x);
-    return mix(top, bottom, f.y);
+    let i = vec2<i32>(b) + vec2<i32>(0, top);
+    let j = min(i + vec2<i32>(1, 1), vec2<i32>(i32(grid) * 17 + 16, top + 16));
+    let upper = mix(textureLoad(lut, i, 0).rgb, textureLoad(lut, vec2<i32>(j.x, i.y), 0).rgb, f.x);
+    let lower = mix(textureLoad(lut, vec2<i32>(i.x, j.y), 0).rgb, textureLoad(lut, j, 0).rgb, f.x);
+    return mix(upper, lower, f.y);
 }
 
-fn lut3d(c: vec3<f32>) -> vec3<f32> {
+fn lut3d(c: vec3<f32>, top: i32) -> vec3<f32> {
     let blue = c.b * 16.0;
-    return mix(lut_grid(floor(blue), c.rg), lut_grid(ceil(blue), c.rg), fract(blue));
+    return mix(lut_grid(floor(blue), c.rg, top), lut_grid(ceil(blue), c.rg, top), fract(blue));
 }
 
 fn gray709(c: vec3<f32>) -> f32 {
@@ -211,8 +212,11 @@ fn fs_adjust(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     if (A.on1.x > 0.5) {
         c = clamp(vec3<f32>(dot(c, A.tt_r.xyz), dot(c, A.tt_g.xyz), dot(c, A.tt_b.xyz)), zero, one);
     }
+    if (A.fade.y > 0.5) {
+        c = clamp(mix(c, lut3d(c, 17), A.fade.x), zero, one);
+    }
     if (A.on2.w > 0.5) {
-        c = clamp(mix(c, lut3d(c), abs(A.d.z)), zero, one);
+        c = clamp(mix(c, lut3d(c, 0), abs(A.d.z)), zero, one);
     }
     return vec4<f32>(c * px.a, px.a);
 }

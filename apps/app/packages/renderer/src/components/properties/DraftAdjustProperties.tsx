@@ -8,9 +8,10 @@ import PropertiesSlider from "./PropertiesSlider";
 
 /**
  * A CapCut clip's own adjustments (`draftAdjustments`, from the engine's conversion): the
- * Adjust sliders and colour wheels the engine draws, on CapCut's scale, and the rest (HSL,
- * curves, clarity, vignette, filters and effects on the clip) by name. Each can be taken off
- * the clip; the header puts back the draft's own. The Adjust panel's sliders go on top.
+ * Adjust sliders, colour wheels and HSL ranges the engine draws, on CapCut's scale, curves
+ * by name, and the rest (filters and effects on the clip) marked as not drawn. Each can be
+ * taken off the clip; the header puts back the draft's own. The Adjust panel's sliders go on
+ * top.
  */
 const DraftAdjustProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
   const clip = useClipStore((s) => s.getClipById(clipId)) as VideoClipProps | ImageClipProps | undefined;
@@ -29,8 +30,20 @@ const DraftAdjustProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
     if (!Number.isFinite(value)) return;
     set(list.map((e) => (e.id === id ? { ...e, value: Math.max(e.min ?? -Infinity, Math.min(e.max ?? Infinity, value)) } : e)));
   };
+  // One of an adjustment's several sliders (`values`).
+  const setPart = (id: string, key: string, value: number) => {
+    if (!Number.isFinite(value)) return;
+    set(
+      list.map((e) =>
+        e.id === id ? { ...e, values: e.values?.map((v) => (v.key === key ? { ...v, value: Math.max(v.min, Math.min(v.max, value)) } : v)) } : e,
+      ),
+    );
+  };
   const remove = (id: string) => set(list.filter((e) => e.id !== id));
-  const changed = list.length !== draft.length || list.some((e, i) => e.id !== draft[i]?.id || e.value !== draft[i]?.value);
+  const sameParts = (a?: DraftAdjustment["values"], b?: DraftAdjustment["values"]) =>
+    (a?.length ?? 0) === (b?.length ?? 0) && (a ?? []).every((v, i) => v.value === b?.[i]?.value);
+  const changed =
+    list.length !== draft.length || list.some((e, i) => e.id !== draft[i]?.id || e.value !== draft[i]?.value || !sameParts(e.values, draft[i]?.values));
   const notDrawn = list.some((e) => !e.drawn);
 
   return (
@@ -82,12 +95,46 @@ const DraftAdjustProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
               </div>
             );
           }
+          if (e.drawn && e.values?.length) {
+            return (
+              <div key={e.id} className="flex flex-col gap-y-1 min-w-0" data-draft-adjustment={e.kind}>
+                <div className="flex flex-row items-center gap-x-2 min-w-0 h-6">
+                  <span className="text-brand-light text-[10.5px] font-medium truncate">{e.name}</span>
+                  <div className="flex flex-row ml-auto shrink-0">
+                    {was && !sameParts(was.values, e.values) && (
+                      <button
+                        title="Back to the draft's values"
+                        onClick={() => set(list.map((x) => (x.id === e.id ? { ...x, values: was.values } : x)))}
+                        className="text-brand-light/60 hover:text-brand-light shrink-0 p-1 rounded hover:bg-brand-light/10"
+                      >
+                        <IoRefreshOutline className="w-3 h-3" />
+                      </button>
+                    )}
+                    {removeButton}
+                  </div>
+                </div>
+                {e.values.map((v) => (
+                  <div key={v.key} data-draft-adjustment-part={v.key}>
+                    <PropertiesSlider
+                      label={v.name}
+                      value={v.value}
+                      onChange={(n) => setPart(e.id, v.key, n)}
+                      min={v.min}
+                      max={v.max}
+                      step={1}
+                      toFixed={0}
+                    />
+                  </div>
+                ))}
+              </div>
+            );
+          }
           return (
             <div key={e.id} className="flex flex-row items-center gap-x-2 min-w-0 h-7" data-draft-adjustment={e.kind}>
               <span className="text-brand-light text-[10.5px] font-medium truncate">{e.name}</span>
               {typeof e.value === "number" && <span className="text-brand-light/60 text-[10.5px]">{Math.round(e.value)}</span>}
-              <span className="text-brand-light/40 text-[10px] ml-auto shrink-0">not drawn yet</span>
-              {removeButton}
+              {!e.drawn && <span className="text-brand-light/40 text-[10px] ml-auto shrink-0">not drawn yet</span>}
+              <span className={e.drawn ? "ml-auto" : ""}>{removeButton}</span>
             </div>
           );
         })}

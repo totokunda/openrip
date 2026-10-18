@@ -601,6 +601,9 @@ impl PreviewEngine {
                 Some("tint") => &mut a.tint,
                 Some("exposure") => &mut a.exposure,
                 Some("sharpen") => &mut a.sharpen,
+                Some("fade") => &mut a.fade,
+                Some("clarity") => &mut a.clarity,
+                Some("vignette") => &mut a.vignette,
                 _ => continue,
             };
             *slot = v;
@@ -611,6 +614,8 @@ impl PreviewEngine {
             let wheel = |v: &openrip_model::WheelValue| openrip_render::Wheel { red: v.red as f32, green: v.green as f32, blue: v.blue as f32, luma: v.luma as f32, saturation: v.saturation as f32 };
             a.wheels = openrip_render::Wheels { lift: wheel(&w.lift), gamma: wheel(&w.gamma), gain: wheel(&w.gain), offset: wheel(&w.offset), intensity: w.intensity as f32 };
         }
+        a.hsl = crate::colour::hsl_of(&self.project, seg);
+        a.curves = crate::colour::curves_of(&self.project, seg);
         if a.is_identity() {
             return None;
         }
@@ -673,19 +678,20 @@ impl PreviewEngine {
         }
     }
 
-    /// Read the exposure tables from a clip's CapCut colour bundle, once per bundle.
+    /// Read the exposure and fade tables from a clip's CapCut colour bundle, once per bundle.
     fn load_exposure_luts(&mut self, seg: &Segment) {
         let bundles: Vec<String> = seg
             .attachments
             .iter()
-            .filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.builtin.as_deref() == Some("exposure")))
+            .filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && matches!(e.builtin.as_deref(), Some("exposure" | "fade"))))
             .filter_map(|e| e.resource.clone())
             .filter(|b| !self.exposure_luts.contains_key(b))
             .collect();
         for b in bundles {
             let dir = Path::new(&b).join("AmazingFeature_adjustColor").join("image");
             let read = |name: &str| load_png(&dir.join(name)).ok().filter(|i| (i.width, i.height) == (289, 17)).map(std::sync::Arc::new);
-            let luts = read("lightSensation_min.png").zip(read("lightSensation_max.png")).map(|(darker, brighter)| ExposureLuts { key: key_of(&b) & !1, darker, brighter });
+            let fade = crate::colour::fade_table(Path::new(&b)).map(std::sync::Arc::new);
+            let luts = read("lightSensation_min.png").zip(read("lightSensation_max.png")).map(|(darker, brighter)| ExposureLuts { key: key_of(&b) & !1, darker, brighter, fade });
             self.exposure_luts.insert(b, luts);
         }
     }

@@ -241,3 +241,94 @@ fn filter_layers_apply_to_what_is_below() {
     let centre = |i: usize| ((2 * 4 + 2) * 4) + i;
     assert_eq!((out.data[centre(0)], out.data[centre(1)]), (255, 0));
 }
+
+/// CapCut's HSL: the red range's lightness at −100 (scaled by 1/2.7 in CapCut's shader)
+/// takes pure red's lightness from 0.5 to 0.5 − 0.5 × 0.37: (161, 0, 0). Other hues stay.
+#[test]
+fn hsl_moves_only_the_colours_in_range() {
+    let Ok(c) = Compositor::new() else { return };
+    let img = RgbaImage { width: 4, height: 4, data: [[255u8, 0, 0, 255], [0, 0, 255, 255]].concat().repeat(8) };
+    let mut hsl = openrip_render::Hsl::default();
+    hsl.ranges[0] = [0.0, 0.0, -100.0];
+    let mut l = Layer::from_model(Source::Image(&img), [4, 4], [0.0, 0.0], [1.0, 1.0], 0.0);
+    l.adjust = Some((openrip_render::Adjust { hsl, ..Default::default() }, None));
+    let out = c.render(4, 4, [0, 0, 0], &[l]);
+    assert!((out.data[0] as i32 - 161).abs() <= 1 && out.data[1] == 0 && out.data[2] == 0, "{:?}", &out.data[..4]);
+    assert_eq!(&out.data[4..8], &[0, 0, 255, 255]);
+}
+
+/// CapCut's vignette at 1 leaves the middle of the clip's picture and blackens its corners
+/// (beyond 0.85 × 1.415 half-sizes from the middle).
+#[test]
+fn vignette_darkens_the_corners_of_the_clip() {
+    let Ok(c) = Compositor::new() else { return };
+    let img = RgbaImage { width: 64, height: 64, data: [128u8, 128, 128, 255].repeat(64 * 64) };
+    let mut l = Layer::from_model(Source::Image(&img), [64, 64], [0.0, 0.0], [1.0, 1.0], 0.0);
+    l.adjust = Some((openrip_render::Adjust { vignette: 1.0, ..Default::default() }, None));
+    let out = c.render(64, 64, [0, 0, 0], &[l]);
+    assert_eq!(px(&out, 32, 32), [128, 128, 128, 255]);
+    assert_eq!(px(&out, 0, 0), [0, 0, 0, 255]);
+    let edge = px(&out, 0, 32)[0];
+    assert!(edge > 0 && edge < 128, "{edge}");
+}
+
+/// CapCut's Clarity at 1 on a flat colour: no detail to strengthen, so the value stays, and the
+/// saturation goes up by 1.12: (200, 100, 50) becomes (200, 88, 32). On an edge, the bright
+/// side gets brighter.
+#[test]
+fn clarity_raises_saturation_and_local_contrast() {
+    let Ok(c) = Compositor::new() else { return };
+    let flat = RgbaImage { width: 32, height: 32, data: [200u8, 100, 50, 255].repeat(32 * 32) };
+    let draw = |img: &RgbaImage| {
+        let mut l = Layer::from_model(Source::Image(img), [img.width, img.height], [0.0, 0.0], [1.0, 1.0], 0.0);
+        l.adjust = Some((openrip_render::Adjust { clarity: 1.0, ..Default::default() }, None));
+        c.render(img.width, img.height, [0, 0, 0], &[l])
+    };
+    let out = draw(&flat);
+    for (v, want) in px(&out, 16, 16).iter().zip([200, 88, 32]) {
+        assert!((*v as i32 - want).abs() <= 1, "{:?}", px(&out, 16, 16));
+    }
+    let edge = image(64, 64, |x, _| grey(if x < 32 { 80 } else { 160 }));
+    let out = draw(&edge);
+    assert!(px(&out, 33, 32)[0] > 162 && px(&out, 30, 32)[0] < 78, "{:?} {:?}", px(&out, 33, 32), px(&out, 30, 32));
+    // The coarsest levels span the whole small picture, so its far sides move apart too.
+    assert!(px(&out, 63, 32)[0] >= 160 && px(&out, 0, 32)[0] <= 80);
+}
+
+/// CapCut's Fade mixes the colour towards its fade table by the slider: a table of 0.5 grey at
+/// 0.5 takes 0.2 to 0.35. Without the table, fade is left out.
+#[test]
+fn fade_mixes_towards_its_table() {
+    let Ok(c) = Compositor::new() else { return };
+    let table = std::sync::Arc::new(RgbaImage { width: 289, height: 17, data: [128u8, 128, 128, 255].repeat(289 * 17) });
+    let luts = openrip_render::ExposureLuts { key: 42, darker: table.clone(), brighter: table.clone(), fade: Some(table) };
+    let img = RgbaImage { width: 4, height: 4, data: [51u8, 51, 51, 255].repeat(16) };
+    let mut l = Layer::from_model(Source::Image(&img), [4, 4], [0.0, 0.0], [1.0, 1.0], 0.0);
+    l.adjust = Some((openrip_render::Adjust { fade: 0.5, ..Default::default() }, Some(&luts)));
+    let out = c.render(4, 4, [0, 0, 0], &[l.clone()]);
+    assert!((out.data[0] as i32 - 90).abs() <= 1, "{}", out.data[0]);
+    l.adjust = Some((openrip_render::Adjust { fade: 0.5, ..Default::default() }, None));
+    assert_eq!(c.render(4, 4, [0, 0, 0], &[l]).data[0], 51);
+}
+
+/// CapCut's curves: a flat luma curve at 0.5 lifts a 0.2 grey to 0.5 on every channel. A red
+/// curve doubling red raises red, and the luma step then takes back from every channel what
+/// that added to luma: (0.4, 0.2, 0.2) − 0.0428 = (91, 40, 40).
+#[test]
+fn curves_follow_capcuts_luma_and_channel_rules() {
+    let Ok(c) = Compositor::new() else { return };
+    let img = RgbaImage { width: 4, height: 4, data: [51u8, 51, 51, 255].repeat(16) };
+    let point = |x: f32, y: f32, left: [f32; 2], right: [f32; 2]| openrip_render::CurvePoint { anchor: [x, y], left, right };
+    let draw = |curves: openrip_render::Curves| {
+        let mut l = Layer::from_model(Source::Image(&img), [4, 4], [0.0, 0.0], [1.0, 1.0], 0.0);
+        l.adjust = Some((openrip_render::Adjust { curves: Some(std::sync::Arc::new(curves)), ..Default::default() }, None));
+        c.render(4, 4, [0, 0, 0], &[l]).data[..3].to_vec()
+    };
+    let flat = vec![point(0.0, 0.5, [0.0, 0.5], [0.33, 0.5]), point(1.0, 0.5, [0.67, 0.5], [1.0, 0.5])];
+    for v in draw(openrip_render::Curves { luma: flat, ..Default::default() }) {
+        assert!((v as i32 - 128).abs() <= 1, "{v}");
+    }
+    let double = vec![point(0.0, 0.0, [0.0, 0.0], [0.25, 0.5]), point(0.5, 1.0, [0.25, 0.5], [0.75, 1.0])];
+    let out = draw(openrip_render::Curves { red: double, ..Default::default() });
+    assert!((out[0] as i32 - 91).abs() <= 1 && (out[1] as i32 - 40).abs() <= 1 && out[1] == out[2], "{out:?}");
+}

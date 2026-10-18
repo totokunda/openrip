@@ -15,10 +15,12 @@
 //! GPU with the frame's own matrix and range.
 
 pub mod adjust;
+pub mod grade;
 pub mod shape;
 pub mod text;
 
 pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
+pub use grade::{CurvePoint, Curves, Hsl};
 
 /// A 3D colour lookup table (CapCut's filters): `size`³ RGB entries, red fastest, then
 /// green, then blue; `key` identifies it for the GPU cache.
@@ -314,6 +316,8 @@ pub struct Compositor {
     blur: wgpu::RenderPipeline,
     matte: wgpu::RenderPipeline,
     appfx: AppFx,
+    /// CapCut's colour features around the Adjust pass (grade.rs).
+    grade: grade::GradeFx,
     /// Exposure lookup tables on the GPU, by key, and a stand-in for clips without one.
     luts: std::sync::Mutex<std::collections::HashMap<u64, wgpu::Texture>>,
     no_lut: wgpu::Texture,
@@ -535,6 +539,7 @@ impl Compositor {
                 })
             },
             adjust: adjust_pipeline("fs_adjust"),
+            grade: grade::GradeFx::new(&device, &yuv_pipeline_layout),
             luts: Default::default(),
             no_lut: device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("no lut"),
@@ -664,29 +669,59 @@ impl Compositor {
         pass.draw(0..3, 0..1);
     }
 
-    /// Apply a clip's colour grade to `src`: the Adjust pass, then Sharpen when set. Returns
-    /// the result (a pooled texture) and any intermediate to recycle.
-    fn grade(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, adjust: &Adjust, luts: Option<&ExposureLuts>) -> (wgpu::Texture, Option<wgpu::Texture>) {
-        let out = self.texture(src.width(), src.height(), CANVAS, wgpu::TextureUsages::empty());
-        self.adjust_pass(enc, &self.adjust, src, &out, adjust, luts);
-        if adjust.sharpen.abs() <= 1e-5 {
-            return (out, None);
+    /// Apply a clip's colour grade to `src` in CapCut's order: HSL and curves, the Adjust
+    /// pass, Sharpen, clarity, then the vignette, each only when set. Returns the result (a
+    /// pooled texture, or `src` itself if nothing changed it) and the intermediates to
+    /// recycle.
+    fn grade(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, adjust: &Adjust, luts: Option<&ExposureLuts>) -> (wgpu::Texture, Vec<wgpu::Texture>) {
+        let (w, h) = (src.width(), src.height());
+        let mut middle = Vec::new();
+        let mut out: Option<wgpu::Texture> = None;
+        if !adjust.colour_identity() {
+            let next = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+            self.colour_pass(enc, src, &next, adjust.curves.as_deref().filter(|c| !c.is_identity()), &adjust.hsl);
+            out = Some(next);
         }
-        let sharp = self.texture(src.width(), src.height(), CANVAS, wgpu::TextureUsages::empty());
-        self.adjust_pass(enc, &self.sharpen_luma, &out, &sharp, adjust, luts);
-        (sharp, Some(out))
+        if !adjust.sliders_identity() {
+            let next = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+            self.adjust_pass(enc, &self.adjust, out.as_ref().unwrap_or(src), &next, adjust, luts);
+            middle.extend(out.replace(next));
+            if adjust.sharpen.abs() > 1e-5 {
+                let next = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+                self.adjust_pass(enc, &self.sharpen_luma, out.as_ref().unwrap_or(src), &next, adjust, luts);
+                middle.extend(out.replace(next));
+            }
+        }
+        if adjust.clarity.abs() > 1e-5 {
+            let next = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+            self.clarity_pass(enc, out.as_ref().unwrap_or(src), &next, adjust.clarity, &mut middle);
+            middle.extend(out.replace(next));
+        }
+        if adjust.vignette.abs() > 1e-5 {
+            let next = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+            self.vignette_pass(enc, out.as_ref().unwrap_or(src), &next, adjust.vignette);
+            middle.extend(out.replace(next));
+        }
+        (out.unwrap_or_else(|| src.clone()), middle)
     }
 
     /// Run one of the grade pipelines from `src` into `dst` (same size).
     fn adjust_pass(&self, enc: &mut wgpu::CommandEncoder, pipeline: &wgpu::RenderPipeline, src: &wgpu::Texture, dst: &wgpu::Texture, adjust: &Adjust, luts: Option<&ExposureLuts>) {
-        // The table for the slider's direction, uploaded once per key.
-        let lut = luts.filter(|_| adjust.exposure.abs() > 1e-5).map(|l| {
+        // The table for the exposure slider's direction, with the fade table below it if the
+        // bundle has one, uploaded once per key.
+        let lut = luts.filter(|_| adjust.exposure.abs() > 1e-5 || adjust.fade.abs() > 1e-5).map(|l| {
             let key = l.key ^ (adjust.exposure > 0.0) as u64;
             let mut cache = self.luts.lock().unwrap();
             cache
                 .entry(key)
                 .or_insert_with(|| {
                     let img = if adjust.exposure > 0.0 { &l.brighter } else { &l.darker };
+                    let fade = l.fade.as_deref().filter(|f| (f.width, f.height) == (img.width, img.height));
+                    let data = match fade {
+                        Some(f) => [img.data.as_slice(), f.data.as_slice()].concat(),
+                        None => img.data.clone(),
+                    };
+                    let img = RgbaImage { width: img.width, height: img.height * (1 + fade.is_some() as u32), data };
                     let tex = self.device.create_texture(&wgpu::TextureDescriptor {
                         label: Some("exposure lut"),
                         size: wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },
@@ -708,8 +743,8 @@ impl Compositor {
                 .clone()
         });
         // Tables of the wrong shape are ignored rather than read out of bounds.
-        let lut = lut.filter(|t| t.width() == 289 && t.height() == 17);
-        let params = adjust.params(lut.is_some());
+        let lut = lut.filter(|t| t.width() == 289 && (t.height() == 17 || t.height() == 34));
+        let params = adjust.params(lut.is_some(), lut.as_ref().is_some_and(|t| t.height() == 34));
         let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::bytes_of(&params), usage: wgpu::BufferUsages::UNIFORM });
         let src_view = src.create_view(&Default::default());
         let lut_view = lut.as_ref().unwrap_or(&self.no_lut).create_view(&Default::default());
@@ -1050,9 +1085,9 @@ impl Compositor {
                 }
             };
             // Adjust sliders on the clip's own pixels, before placement.
-            let stage = match layer.adjust.filter(|(a, _)| !a.is_identity()) {
+            let stage = match layer.adjust.as_ref().filter(|(a, _)| !a.is_identity()) {
                 Some((a, luts)) => {
-                    let (out, middle) = self.grade(enc, &stage, &a, luts);
+                    let (out, middle) = self.grade(enc, &stage, a, *luts);
                     scratch.extend(middle);
                     if matches!(layer.source, Source::Cached(..)) {
                         keep.push(stage);
@@ -1063,7 +1098,7 @@ impl Compositor {
                 }
                 None => stage,
             };
-            let adjusted = layer.adjust.is_some_and(|(a, _)| !a.is_identity());
+            let adjusted = layer.adjust.as_ref().is_some_and(|(a, _)| !a.is_identity());
             // Cut-outs and masks, before placement.
             let (mut stage, mut adjusted) = (stage, adjusted);
             for m in &layer.mattes {
