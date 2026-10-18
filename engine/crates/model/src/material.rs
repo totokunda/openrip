@@ -630,8 +630,8 @@ impl Loudness {
     }
 }
 
-/// A clip's animations: an intro, an outro and a loop (at most one of each in CapCut), or a
-/// caption style.
+/// A clip's animations: an intro, an outro and a loop or combo (at most one of each in
+/// CapCut), or a caption style.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Animations {
     pub id: MaterialId,
@@ -641,7 +641,8 @@ pub struct Animations {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Animation {
     pub kind: AnimationKind,
-    /// Clip-local time the animation starts, and how long it runs.
+    /// Clip-local time the animation starts, and how long it runs. An Out animation ends
+    /// with its clip whatever its start (CapCut writes 0 there).
     pub start: Micros,
     pub duration: Micros,
     /// Built-in OpenRip animation this maps to, if any (e.g. "type_1").
@@ -660,7 +661,10 @@ pub struct Animation {
 pub enum AnimationKind {
     In,
     Out,
+    /// Repeats over the clip, once per its duration (CapCut's text and sticker loops).
     Loop,
+    /// Runs once over the whole clip (a video or photo's combo; CapCut's type "group").
+    Combo,
     /// Applies for the whole clip (CapCut's caption styles).
     Caption,
     #[serde(other)]

@@ -146,6 +146,12 @@ enum Pixels {
     Shape(Vec<(std::sync::Arc<RgbaImage>, u64, bool)>, [f64; 2]),
     /// A sticker's picture (the GIF's current frame) and its cache key.
     Sticker(std::sync::Arc<RgbaImage>, u64),
+    /// A transition's clip begins: what follows draws into a group of its own over this
+    /// colour (or clear), up to `End`.
+    Begin(Option<[u8; 3]>),
+    End,
+    /// The transition's groups put together.
+    Mix(openrip_render::Mix),
 }
 
 /// The media file a segment plays.
@@ -534,32 +540,48 @@ impl PreviewEngine {
         }
         let mut report = FrameReport::default();
         let mut out = Vec::new();
-        let trace = std::env::var_os("OPENRIP_TRACE").is_some();
         let active = self.active(t);
         if !self.scrubbing && !self.measure_only {
             self.load_stills_beside(&active);
         }
         for seg in active {
             self.load_exposure_luts(&seg);
-            let t0 = std::time::Instant::now();
-            let got = self.pixels(&seg, t, w, h);
-            if trace && t0.elapsed().as_millis() >= 10 {
-                eprintln!("[preview] t={:.3}s segment {} took {:.1} ms", t.as_secs_f64(), seg.id, t0.elapsed().as_secs_f64() * 1e3);
-            }
-            match got {
-                Ok(Some(p)) => out.push((seg.clone(), p)),
-                Ok(None) => {}
-                Err((path, why)) => {
-                    self.failed.insert(path.clone(), why.clone());
-                    report.missing.push((path, why));
-                }
-            }
-            // A transition at the cut before or after this clip works on the canvas over it.
-            if let Some((tr, p)) = crate::transition::transition_at(&self.project, &seg, t).map(|(tr, p)| (tr.clone(), p)) {
-                for step in crate::transition::steps(&tr, p) {
-                    if let Some(px) = self.step_pixels(step, w) {
-                        out.push((seg.clone(), px));
+            // A transition at the cut before or after this clip, and what it draws now.
+            let cut = crate::transition::transition_at(&self.project, &seg, t).map(|c| (crate::transition::steps(c.transition, c.progress), c.outgoing.clone(), c.incoming.clone()));
+            let (steps, clips) = match cut {
+                Some((steps, outgoing, incoming)) => (steps, Some((outgoing, incoming))),
+                None => (Vec::new(), None),
+            };
+            let mix = steps.iter().find_map(|s| match s {
+                crate::transition::Step::Mix(m) => Some(*m),
+                _ => None,
+            });
+            match (mix, clips) {
+                // A transition that mixes the clips draws each into a group of its own, the
+                // other one at this time too (on past its end, or ahead of its start). With
+                // nothing under them they carry the canvas's black, as CapCut's main track
+                // carries its canvas.
+                (Some(m), Some((outgoing, incoming))) => {
+                    let backdrop = out.is_empty().then_some([0u8, 0, 0]);
+                    for (clip, drawn) in [(&outgoing, m.outgoing.is_some()), (&incoming, m.incoming.is_some())] {
+                        if !drawn {
+                            continue;
+                        }
+                        if clip.id != seg.id {
+                            self.load_exposure_luts(clip);
+                        }
+                        out.push((clip.clone(), Pixels::Begin(backdrop)));
+                        self.draw(clip, t, w, h, &mut out, &mut report);
+                        out.push((clip.clone(), Pixels::End));
                     }
+                    out.push((seg.clone(), Pixels::Mix(mix_pixels(&m, w, h))));
+                }
+                _ => self.draw(&seg, t, w, h, &mut out, &mut report),
+            }
+            // Any other transition works on the canvas over the clip.
+            for step in steps {
+                if let Some(px) = self.step_pixels(step, w) {
+                    out.push((seg.clone(), px));
                 }
             }
         }
@@ -579,9 +601,28 @@ impl PreviewEngine {
         (out, report)
     }
 
+    /// Draw a segment at `t` into `out`, noting media that failed to load.
+    fn draw(&mut self, seg: &Segment, t: Micros, w: u32, h: u32, out: &mut Vec<(Segment, Pixels)>, report: &mut FrameReport) {
+        let t0 = std::time::Instant::now();
+        let got = self.pixels(seg, t, w, h);
+        if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 10 {
+            eprintln!("[preview] t={:.3}s segment {} took {:.1} ms", t.as_secs_f64(), seg.id, t0.elapsed().as_secs_f64() * 1e3);
+        }
+        match got {
+            Ok(Some(p)) => out.push((seg.clone(), p)),
+            Ok(None) => {}
+            Err((path, why)) => {
+                self.failed.insert(path.clone(), why.clone());
+                report.missing.push((path, why));
+            }
+        }
+    }
+
     fn step_pixels(&mut self, step: crate::transition::Step, w: u32) -> Option<Pixels> {
         use crate::transition::Step;
         Some(match step {
+            // Drawn with the clips (see `gather`).
+            Step::Mix(_) => return None,
             Step::Wash(c, amount) => Pixels::Wash(std::sync::Arc::new(RgbaImage { width: 4, height: 4, data: c.repeat(16) }), key_of(("wash", c)), amount),
             Step::Blur(px) => Pixels::Blur(px * w as f32 / self.project.canvas.width.max(1) as f32),
             Step::Frame(path) => {
@@ -1036,7 +1077,7 @@ impl PreviewEngine {
         let orientation = d.decoder.info().rotation;
         let before = d.decoder.stats();
         let t0 = std::time::Instant::now();
-        let at = seg.source_time(t).unwrap_or(Micros::ZERO);
+        let at = media_time(seg, t, media.duration);
         // Dragging the playhead: the exact frame only if it's at most three pictures ahead of
         // the last one decoded; else a decoded frame within half a second, else the GOP's
         // keyframe (one decode instead of every picture from the keyframe on).
@@ -1200,13 +1241,27 @@ impl PreviewEngine {
         }
     }
 
+    /// How a clip's animations move it at clip-local time `local` (none when it has none).
+    fn motion_of(&self, seg: &Segment, local: Micros) -> Option<crate::animation::Motion> {
+        let mut items = seg.attachments.iter().filter_map(|id| self.project.materials.animations.iter().find(|m| &m.id == id)).flat_map(|m| m.items.iter()).peekable();
+        items.peek()?;
+        crate::animation::motion_at(items, seg.target.duration, local)
+    }
+
     fn layers<'a>(&'a self, pixels: &'a [(Segment, Pixels)], t: Micros, w: u32, h: u32) -> Vec<Layer<'a>> {
         pixels
             .iter()
             .flat_map(|(seg, p)| {
                 let local = seg.local_time(t);
                 let tr = &seg.transform;
-                let (pos, scale, rot) = (tr.position.sample(local), tr.scale.sample(local), tr.rotation.sample(local));
+                let (mut pos, mut scale, mut rot) = (tr.position.sample(local), tr.scale.sample(local), tr.rotation.sample(local));
+                // Its animations on top of the clip's own (keyframed) transform.
+                let motion = if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Text(..)) { self.motion_of(seg, local) } else { None };
+                if let Some(m) = motion {
+                    pos = openrip_model::Vec2::new(pos.x + m.offset[0], pos.y + m.offset[1]);
+                    scale = openrip_model::Vec2::new(scale.x * m.scale, scale.y * m.scale);
+                    rot += m.rotation;
+                }
                 // Flips are on screen axes: fold them into the scale signs.
                 let scale = [scale.x * if tr.flip_h { -1.0 } else { 1.0 }, scale.y * if tr.flip_v { -1.0 } else { 1.0 }];
                 let mut layer = match p {
@@ -1293,22 +1348,32 @@ impl PreviewEngine {
                             app_filters: None,
                         }
                     }
-                    Pixels::Text(img, key, at) => Layer {
-                        source: Source::Cached(*key, img),
-                        center: *at,
-                        size: [img.width as f64, img.height as f64],
-                        rotation: rot,
-                        flip_h: tr.flip_h,
-                        flip_v: tr.flip_v,
-                        opacity: 1.0,
-                        adjust: None,
-                        mattes: Vec::new(),
-                        multiply: false,
-                        app_filters: None,
-                    },
+                    Pixels::Text(img, key, at) => {
+                        // An animation moves and scales the text's picture.
+                        let (k, shift) = motion.map_or((1.0, [0.0, 0.0]), |m| (m.scale, [m.offset[0] * w as f64 / 2.0, -m.offset[1] * h as f64 / 2.0]));
+                        Layer {
+                            source: Source::Cached(*key, img),
+                            center: [at[0] + shift[0], at[1] + shift[1]],
+                            size: [img.width as f64 * k, img.height as f64 * k],
+                            rotation: rot,
+                            flip_h: tr.flip_h,
+                            flip_v: tr.flip_v,
+                            opacity: 1.0,
+                            adjust: None,
+                            mattes: Vec::new(),
+                            multiply: false,
+                            app_filters: None,
+                        }
+                    }
+                    Pixels::Begin(colour) => Layer::pass(Source::BeginGroup(*colour)),
+                    Pixels::End => Layer::pass(Source::EndGroup),
+                    Pixels::Mix(m) => Layer::pass(Source::Mix(*m)),
                 };
-                if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_)) {
+                if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_) | Pixels::Begin(_) | Pixels::End | Pixels::Mix(_)) {
                     layer.opacity *= seg.opacity.sample(local);
+                }
+                if let Some(m) = motion {
+                    layer.opacity *= m.alpha;
                 }
                 if matches!(p, Pixels::Image(..) | Pixels::Video(..)) {
                     // The scale along the stored picture's vertical axis (sideways video swaps).
@@ -1320,6 +1385,41 @@ impl PreviewEngine {
                 vec![layer]
             })
             .collect()
+    }
+}
+
+/// The media time a video clip shows at `t`: its `source_time` inside the clip. Outside it
+/// (the other clip of a transition that mixes them, drawn on past its end or ahead of its
+/// start) its media carries on at its speed, up to the media's own ends.
+fn media_time(seg: &Segment, t: Micros, duration: Micros) -> Micros {
+    let Some(source) = seg.source.filter(|_| !seg.target.contains(t) && duration.0 > 0) else { return seg.source_time(t).unwrap_or(Micros::ZERO) };
+    let offset = (seg.local_time(t).0 as f64 * seg.speed).round() as i64;
+    let at = if seg.reverse { source.end().0 - 1 - offset } else { source.start.0 + offset };
+    Micros(at.clamp(0, duration.0 - 1))
+}
+
+/// A transition's mix in output pixels: each clip's move, scale and turn about the canvas
+/// centre as the map from an output pixel to its group's.
+fn mix_pixels(m: &crate::transition::Mix, w: u32, h: u32) -> openrip_render::Mix {
+    use crate::transition::Mask;
+    let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
+    let shot = |s: &crate::transition::Shot| {
+        let (sin, cos) = (s.rotation as f64).to_radians().sin_cos();
+        let k = 1.0 / (s.scale as f64).max(1e-6);
+        let (ox, oy) = (cx + s.offset[0] as f64 * w as f64, cy + s.offset[1] as f64 * h as f64);
+        // Undo the move, the turn (clockwise on screen, y down), then the scale.
+        let u = [cos * k, sin * k, cx - (cos * ox + sin * oy) * k];
+        let v = [-sin * k, cos * k, cy - (-sin * ox + cos * oy) * k];
+        openrip_render::Shot { inverse: [u.map(|x| x as f32), v.map(|x| x as f32)], alpha: s.alpha, zoom_blur: s.zoom_blur, mirror: s.mirror }
+    };
+    openrip_render::Mix {
+        outgoing: m.outgoing.as_ref().map(shot),
+        incoming: m.incoming.as_ref().map(shot),
+        mask: match m.mask {
+            Mask::All => openrip_render::MixMask::All,
+            Mask::Edge { toward, at, feather } => openrip_render::MixMask::Edge { toward, at, feather },
+            Mask::Circle { radius, feather } => openrip_render::MixMask::Circle { radius, feather },
+        },
     }
 }
 
