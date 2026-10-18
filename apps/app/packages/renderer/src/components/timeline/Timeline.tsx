@@ -151,7 +151,7 @@ const Timeline: React.FC<
         x={timelineX}
         y={timelineY! + 32}
         cornerRadius={4}
-        width={timelineWidth! - timelineX + 8}
+        width={Math.max(0, timelineWidth! - timelineX + 8)}
         height={renderedTimelineHeight}
         fill={"rgba(11, 11, 13, 0.25)"}
         onContextMenu={(e) => {
@@ -278,7 +278,7 @@ const Timeline: React.FC<
           x={timelineX}
           y={timelineY! + 32}
           cornerRadius={0}
-          width={timelineWidth! - timelineX + 8}
+          width={Math.max(0, timelineWidth! - timelineX + 8)}
           height={timelineHeight - 8}
           fill={"rgba(11, 11, 13, 0.60)"}
         />
@@ -290,7 +290,7 @@ const Timeline: React.FC<
           id={`locked-${timelineId}`}
           x={timelineX}
           y={timelineY! + 32}
-          width={timelineWidth! - timelineX + 8}
+          width={Math.max(0, timelineWidth! - timelineX + 8)}
           height={timelineHeight - 8}
           fill={"rgba(11, 11, 13, 0.45)"}
           listening={false}
