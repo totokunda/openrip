@@ -14,21 +14,9 @@
 // - A voiceover: started and stopped through the preload, its level reported while recording,
 //   the file in the project's media, placed with `placeVoiceover`; the export has its 440 Hz tone
 //   where it was placed.
-import { execFileSync, spawnSync } from "node:child_process";
 import path from "node:path";
-import { createRequire } from "node:module";
-import { settled } from "./_preview.mjs";
 import { checks, savedProject } from "./_anim.mjs";
-
-/** Run `fn` (a page function) as one user action: a key press first starts a new history step. */
-const act = async (win, fn, arg) => {
-  await win.keyboard.press("Shift");
-  let out;
-  await settled(win, async () => {
-    out = await win.evaluate(fn, arg);
-  });
-  return out;
-};
+import { act, band, channelDifference, exporter, integrated as loudnessOf, pcm, residual, side, spectralShape } from "./_audio.mjs";
 
 const clipOf = (win) =>
   win.evaluate(async () => {
@@ -41,61 +29,16 @@ const clipOf = (win) =>
   });
 
 export default async (ctx) => {
-  const { app, win, udDir, outDir, shot, fs } = ctx;
+  const { win, udDir, shot, fs } = ctx;
   const { check, report } = checks();
   const clip = await clipOf(win);
   if (!clip) throw new Error("no video clip");
   const { fps } = clip;
-  const ffmpeg = createRequire(path.resolve("../../package.json"))("ffmpeg-static");
-  await app.evaluate(({ ipcMain }) => {
-    ipcMain.removeHandler("files:reveal-in-folder");
-    ipcMain.handle("files:reveal-in-folder", async (_e, p) => ({ success: true, data: { path: p } }));
-  });
-  const exportAs = async (name) => {
-    const file = path.join(outDir, `${name}.mp4`);
-    fs.rmSync(file, { force: true });
-    await win.getByText("Export", { exact: true }).first().click();
-    await win.waitForTimeout(1000);
-    const dialog = win.getByRole("dialog");
-    await dialog.locator('input[placeholder="My export"]').fill(name);
-    await dialog.locator('input[placeholder="/path/to/export"]').fill(outDir);
-    await dialog.getByRole("button", { name: "Export", exact: true }).click();
-    // Done when ffmpeg reads the file whole (the dialog may still say the last export completed).
-    const whole = () => spawnSync(ffmpeg, ["-v", "error", "-i", file, "-t", "0.1", "-f", "null", "-"]).status === 0;
-    for (let i = 0; i < 240 && !(fs.existsSync(file) && (await win.getByText("Export completed").count()) && whole()); i++) await win.waitForTimeout(500);
-    await win.keyboard.press("Escape");
-    await win.waitForTimeout(500);
-    if (!fs.existsSync(file) || !whole()) throw new Error(`no export ${name}`);
-    return file;
-  };
-  const RATE = 16000;
-  /** Interleaved stereo from `from` s for `seconds`. */
-  const pcm = (src, from, seconds) =>
-    new Float32Array(new Uint8Array(execFileSync(ffmpeg, ["-v", "error", "-ss", String(from), "-t", String(seconds), "-i", src, "-vn", "-ac", "2", "-ar", String(RATE), "-f", "f32le", "-"], { maxBuffer: 1 << 27 })).buffer);
-  const side = (x, c) => x.filter((_, i) => i % 2 === c);
-  const rms = (x) => Math.sqrt(x.reduce((a, v) => a + v * v, 0) / Math.max(1, x.length));
-  /** Energy in [lo, hi) Hz of mono `x`, summed over 60 frequencies across the band (a slow DFT). */
-  const band = (x, lo, hi) => {
-    let e = 0;
-    for (let f = lo; f < hi; f += (hi - lo) / 60) {
-      let re = 0, im = 0;
-      for (let i = 0; i < x.length; i++) {
-        const w = (2 * Math.PI * f * i) / RATE;
-        re += x[i] * Math.cos(w);
-        im += x[i] * Math.sin(w);
-      }
-      e += re * re + im * im;
-    }
-    return e;
-  };
+  const exportAs = await exporter(ctx);
   const begin = clip.start / fps;
   const seconds = Math.min(6, (clip.end - clip.start) / fps - 0.5);
-  /** The export's integrated loudness over the clip, by ffmpeg's ebur128 (its summary, on stderr). */
-  const integrated = (file) => {
-    const err = spawnSync(ffmpeg, ["-hide_banner", "-nostats", "-ss", String(begin), "-t", String(seconds), "-i", file, "-vn", "-af", "ebur128", "-f", "null", "-"], { encoding: "utf8" }).stderr ?? "";
-    const all = [...err.matchAll(/I:\s+(-?[\d.]+) LUFS/g)];
-    return all.length ? Number(all[all.length - 1][1]) : NaN;
-  };
+  /** The export's integrated loudness over the clip. */
+  const integrated = (file) => loudnessOf(file, begin, seconds);
 
   // ---- as imported ----
   const plain = await exportAs("audio-plain");
@@ -129,8 +72,8 @@ export default async (ctx) => {
   }, clip.id);
   const filled = await exportAs("audio-left");
   const p2 = pcm(filled, begin + 0.25, seconds);
-  const lr0 = rms(side(p0, 0).map((v, i) => v - side(p0, 1)[i])) / rms(p0);
-  const lr2 = rms(side(p2, 0).map((v, i) => v - side(p2, 1)[i])) / rms(p2);
+  const lr0 = channelDifference(p0);
+  const lr2 = channelDifference(p2);
   check(`fill left: both channels the same (L−R ${lr2.toExponential(1)} of the level, ${lr0.toExponential(1)} before)`, lr2 < 0.01 && (lr2 < lr0 * 0.2 || lr0 < 0.01));
 
   // ---- a voice effect ----
@@ -142,12 +85,7 @@ export default async (ctx) => {
   }, clip.id);
   const phone = await exportAs("audio-telephone");
   const p3 = pcm(phone, begin + 0.25, seconds);
-  const shape = (x) => {
-    const m = side(x, 0).slice(0, RATE * 2);
-    const mid = band(m, 800, 2000);
-    return { low: band(m, 60, 200) / mid, high: band(m, 5000, 7000) / mid };
-  };
-  const [s2, s3] = [shape(p2), shape(p3)];
+  const [s2, s3] = [spectralShape(p2), spectralShape(p3)];
   check(`telephone: lows and highs cut against the middle (lows ×${(s3.low / s2.low).toFixed(3)}, highs ×${(s3.high / s2.high).toFixed(3)})`, s3.low < s2.low * 0.1 && s3.high < s2.high * 0.1);
   await shot("a1-audio-tools");
   const saved = (await savedProject(win, udDir)).timeline.clips.find((c) => c.clipId === clip.id);
@@ -162,12 +100,8 @@ export default async (ctx) => {
   }, clip.id);
   const dry = await exportAs("audio-strength0");
   const p4 = pcm(dry, begin + 0.25, seconds);
-  let num = 0, den = 0;
-  for (let i = 0; i < Math.min(p2.length, p4.length); i++) {
-    num += (p4[i] - p2[i]) ** 2;
-    den += p2[i] ** 2;
-  }
-  check(`strength 0: the clip as it was (difference ${(10 * Math.log10(num / den)).toFixed(1)} dB)`, num / den < 0.01);
+  const off = residual(p2, p4);
+  check(`strength 0: the clip as it was (difference ${(10 * Math.log10(off)).toFixed(1)} dB)`, off < 0.01);
 
   // ---- voiceover, from the stand-in microphone ----
   const status = await win.evaluate(() => window[btoa("voiceoverStatus")]());
