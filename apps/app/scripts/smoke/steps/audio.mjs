@@ -14,8 +14,11 @@
 // - A voiceover: started and stopped through the preload, its level reported while recording,
 //   the file in the project's media, placed with `placeVoiceover`; the export has its 440 Hz tone
 //   where it was placed.
+// - A converted draft's own voice filter (a "draft" entry) shows in the Voice changer as a tile
+//   of its own, picked; a preset picked there replaces it.
 import path from "node:path";
-import { checks, savedProject } from "./_anim.mjs";
+import { settled, tab } from "./_preview.mjs";
+import { checks, focus, savedProject } from "./_anim.mjs";
 import { act, band, channelDifference, exporter, integrated as loudnessOf, pcm, residual, side, spectralShape } from "./_audio.mjs";
 
 const clipOf = (win) =>
@@ -136,5 +139,27 @@ export default async (ctx) => {
     return band(x, 430, 450) / Math.max(1e-12, band(x, 600, 620));
   };
   check(`the export has the voiceover's tone where it was placed (×${(tone(vo) / tone(dry)).toFixed(1)})`, tone(vo) > tone(dry) * 5);
+
+  // ---- a converted draft's own voice filter, in the Voice changer ----
+  await act(win, async (id) => {
+    const { useClipStore } = await import("/src/lib/clip.ts");
+    const fx = await import("/src/lib/audio-effects.ts");
+    const s = useClipStore.getState();
+    s.updateClip(id, fx.setAudioEffects(s.clips.find((x) => x.clipId === id), [{ type: "draft", id: "draft-filter", name: "Cartoon" }]));
+  }, clip.id);
+  const doc = await savedProject(win, udDir);
+  await focus(ctx, doc, doc.timeline.clips.find((c) => c.clipId === clip.id), begin + 2);
+  await tab(win, "Audio");
+  await win.locator("[data-testid=inspector] [role=tab]", { hasText: /^Voice changer$/ }).click();
+  await win.waitForTimeout(400);
+  const draftTile = win.locator("[data-testid=voice-draft]");
+  check(
+    `a draft's voice filter shows as its own tile, picked, with no sliders ("${(await draftTile.innerText().catch(() => "")).replace(/\s+/g, " ")}")`,
+    (await draftTile.getAttribute("aria-pressed")) === "true" && /Cartoon/.test(await draftTile.innerText()) && (await win.locator("[data-testid=voice-params]").count()) === 0,
+  );
+  await shot("a2-draft-filter");
+  await settled(win, () => win.locator("[data-testid=voice-deep]").click());
+  const picked = (await savedProject(win, udDir)).timeline.clips.find((c) => c.clipId === clip.id)?.audioEffects ?? [];
+  check(`picking a preset replaces it (${JSON.stringify(picked)})`, picked.length === 1 && picked[0].name === "Deep" && (await win.locator("[data-testid=voice-draft]").count()) === 0);
   return report();
 };
