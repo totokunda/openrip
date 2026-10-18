@@ -43,8 +43,9 @@ export default async (ctx) => {
   await win.locator("[data-testid=assets-section-shapes]").click();
   await settled(win, () => win.locator("[data-testid=shape-rectangle]").click());
   let doc = await savedProject(win, udDir);
-  const rects = clipsWhere(doc, (c) => c.type === "shape" && c.shapeType === "rectangle");
-  check("Shapes adds a rectangle", clipsWhere(doc, (c) => c.type === "shape").length === shapes0 + 1 && rects.length === 1, `${rects.length} rectangle(s)`);
+  const known = new Set(clipsWhere(before, (c) => c.type === "shape").map((c) => c.clipId));
+  const rects = clipsWhere(doc, (c) => c.type === "shape" && c.shapeType === "rectangle" && !known.has(c.clipId));
+  check("Shapes adds a rectangle", clipsWhere(doc, (c) => c.type === "shape").length === shapes0 + 1 && rects.length === 1, `${rects.length} new rectangle(s)`);
   check("the rectangle starts at the playhead", rects[0] && Math.abs(+rects[0].startTick / 1e6 - 1) < 0.05, rects[0]?.startTick);
   await shot("ct2-shape");
 
