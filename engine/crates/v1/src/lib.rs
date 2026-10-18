@@ -499,15 +499,22 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
             materials.masks.push(m);
         }
     }
-    if ty == "text" && (differs("animationIn") || differs("captionStyle")) {
-        edit_animations(&mut seg, clip, materials, differs("animationIn"), differs("captionStyle"));
+    // The Animation tab's fields the app changed replace the draft's animations of their kind.
+    let fields: &[(&str, AnimationKind)] = match ty {
+        "text" => &[("animationIn", AnimationKind::In), ("animationOut", AnimationKind::Out), ("animationLoop", AnimationKind::Loop), ("captionStyle", AnimationKind::Caption)],
+        "video" | "image" => &[("animationIn", AnimationKind::In), ("animationOut", AnimationKind::Out), ("animationCombo", AnimationKind::Combo)],
+        _ => &[],
+    };
+    let edited: Vec<AnimationKind> = fields.iter().filter(|(k, _)| differs(k)).map(|(_, kind)| kind.clone()).collect();
+    if !edited.is_empty() {
+        edit_animations(&mut seg, clip, materials, &edited);
     }
-    if ty == "text" {
+    if !fields.is_empty() {
         fit_animations(&mut seg, Micros::from_secs_f64(f(clip, "spokenFrom", 0.0)), materials);
     }
     if matches!(ty, "video" | "image") && differs("transitionOut") {
         seg.attachments.retain(|id| !materials.transitions.iter().any(|m| &m.id == id));
-        if let Some(t) = app_transition(&seg.id, clip) {
+        if let Some(t) = app_transition(&seg.id, clip, seg.target.duration) {
             materials.transitions.retain(|m| m.id != t.id);
             seg.attachments.push(t.id.clone());
             materials.transitions.push(t);
@@ -757,15 +764,21 @@ fn convert_clip(
         attach_fade(&id, clip, materials, &mut attachments);
     }
 
-    if ty == "text" {
-        if let Some(a) = app_animation_in(clip, target.duration) {
-            let mid = MaterialId(format!("{id}-animations"));
-            materials.animations.push(Animations { id: mid.clone(), items: vec![a] });
-            attachments.push(mid);
-        }
+    // The Animation tab's animations: a text's In, Out and Loop; a video or photo's In, Out
+    // and Combo.
+    let kinds: &[AnimationKind] = match ty {
+        "text" => &[AnimationKind::In, AnimationKind::Out, AnimationKind::Loop],
+        "video" | "image" => &[AnimationKind::In, AnimationKind::Out, AnimationKind::Combo],
+        _ => &[],
+    };
+    let items: Vec<Animation> = kinds.iter().filter_map(|k| app_animation(clip, k.clone(), target.duration)).collect();
+    if !items.is_empty() {
+        let mid = MaterialId(format!("{id}-animations"));
+        materials.animations.push(Animations { id: mid.clone(), items });
+        attachments.push(mid);
     }
     if matches!(ty, "video" | "image") {
-        if let Some(t) = app_transition(&id, clip) {
+        if let Some(t) = app_transition(&id, clip, target.duration) {
             attachments.push(t.id.clone());
             materials.transitions.push(t);
         }
@@ -912,13 +925,31 @@ fn same(a: Option<&Value>, b: Option<&Value>) -> bool {
     }
 }
 
-/// The Animation tab's In animation, if it's one the engine draws, within the clip's
-/// `length`: a clip trimmed shorter than its animation ends it sooner, as CapCut does.
-fn app_animation_in(clip: &Value, length: Micros) -> Option<Animation> {
-    let a = clip.get("animationIn").filter(|a| a.is_object())?;
-    let ty = s(a, "type");
-    let duration = Micros::from_secs_f64(f(a, "duration", 0.5).max(0.0)).min(length);
-    (app::BUILTIN_IN.contains(&ty.as_str()) && duration.0 > 0).then(|| Animation { kind: AnimationKind::In, start: Micros::ZERO, duration, builtin: Some(ty), library: None, resource: None })
+/// One of the Animation tab's animations, of `kind`, if it's one the engine draws, within
+/// the clip's `length`: an In from the start; an Out up to the end, after the In (they don't
+/// overlap); a Combo over the whole clip; a Loop repeating at most once per clip. A clip
+/// trimmed shorter than its animation ends it sooner, as CapCut does.
+fn app_animation(clip: &Value, kind: AnimationKind, length: Micros) -> Option<Animation> {
+    let (field, known): (&str, &[&str]) = match kind {
+        AnimationKind::In => ("animationIn", &app::BUILTIN_IN),
+        AnimationKind::Out => ("animationOut", &app::BUILTIN_OUT),
+        AnimationKind::Combo => ("animationCombo", &app::BUILTIN_COMBO),
+        AnimationKind::Loop => ("animationLoop", &app::BUILTIN_LOOP),
+        _ => return None,
+    };
+    let a = clip.get(field).filter(|a| a.is_object())?;
+    let builtin = app::engine_builtin(&s(a, "type"), a.get("params"), known)?;
+    let given = Micros::from_secs_f64(f(a, "duration", 0.5).max(0.0));
+    let (start, duration) = match kind {
+        AnimationKind::Out => {
+            let room = length - app_animation(clip, AnimationKind::In, length).map_or(Micros::ZERO, |a| a.duration);
+            let d = given.min(room);
+            (length - d, d)
+        }
+        AnimationKind::Combo => (Micros::ZERO, length),
+        _ => (Micros::ZERO, given.min(length)),
+    };
+    (duration.0 > 0).then(|| Animation { kind, start, duration, builtin: Some(builtin), library: None, resource: None })
 }
 
 /// The Animation tab's caption style, over the whole clip.
@@ -927,15 +958,17 @@ fn app_caption_style(clip: &Value, duration: Micros) -> Option<Animation> {
     app::BUILTIN_CAPTION.contains(&ty.as_str()).then(|| Animation { kind: AnimationKind::Caption, start: Micros::ZERO, duration, builtin: Some(ty), library: None, resource: None })
 }
 
-/// The Animation tab's transition into the next clip, if it's one the engine draws.
-fn app_transition(id: &str, clip: &Value) -> Option<Transition> {
+/// The Animation tab's transition into the next clip, if it's one the engine draws, at most
+/// as long as the clip.
+fn app_transition(id: &str, clip: &Value, length: Micros) -> Option<Transition> {
     let t = clip.get("transitionOut").filter(|t| t.is_object())?;
     let ty = s(t, "type");
-    let duration = Micros::from_secs_f64(f(t, "duration", 0.5).max(0.0));
+    let duration = Micros::from_secs_f64(f(t, "duration", 0.5).max(0.0)).min(length);
     let resource = Some(s(t, "resource")).filter(|r| !r.is_empty());
     // Blink draws CapCut's own image sequence.
-    let drawable = app::BUILTIN_TRANSITION.contains(&ty.as_str()) && (ty != "blink" || resource.is_some());
-    (drawable && duration.0 > 0).then(|| Transition { id: MaterialId(format!("{id}-transition")), name: s(t, "name"), duration, overlap: false, builtin: Some(ty), library: None, resource })
+    let builtin = app::engine_builtin(&ty, t.get("params"), &app::BUILTIN_TRANSITION).filter(|_| ty != "blink" || resource.is_some())?;
+    let overlap = app::OVERLAPPING.contains(&ty.as_str());
+    (duration.0 > 0).then(|| Transition { id: MaterialId(format!("{id}-transition")), name: s(t, "name"), duration, overlap, builtin: Some(builtin), library: None, resource })
 }
 
 /// A segment's animations: all its animation materials' items.
@@ -955,31 +988,37 @@ fn set_animations(seg: &mut Segment, items: Vec<Animation>, materials: &mut Mate
     }
 }
 
-/// Replace a converted clip's In animation and/or caption style with the app's.
-fn edit_animations(seg: &mut Segment, clip: &Value, materials: &mut Materials, replace_in: bool, replace_caption: bool) {
+/// Replace a converted clip's animations of the `kinds` the app changed (its caption style
+/// for `Caption`) with the app's.
+fn edit_animations(seg: &mut Segment, clip: &Value, materials: &mut Materials, kinds: &[AnimationKind]) {
     let mut items = attached_animations(seg, materials);
-    items.retain(|a| !(replace_in && a.kind == AnimationKind::In) && !(replace_caption && a.kind == AnimationKind::Caption));
-    if replace_in {
-        items.extend(app_animation_in(clip, seg.target.duration));
-    }
-    if replace_caption {
-        items.extend(app_caption_style(clip, seg.target.duration));
+    items.retain(|a| !kinds.contains(&a.kind));
+    for kind in kinds {
+        match kind {
+            AnimationKind::Caption => items.extend(app_caption_style(clip, seg.target.duration)),
+            k => items.extend(app_animation(clip, k.clone(), seg.target.duration)),
+        }
     }
     set_animations(seg, items, materials);
 }
 
-/// A converted text's animations after a trim or split in the app: its In animation ends by
-/// the clip's end, and its caption covers the clip and keeps time with the speech, starting
-/// `from` into it (what a split or a trim cut off its start, the app's `spokenFrom`). Left as
-/// they are when they fit.
+/// A converted clip's animations after a trim or split in the app: an In, Combo or Loop
+/// animation ends by the clip's end (a combo kept by both halves of a split spans each), an
+/// Out one is no longer than the clip, and a caption covers the clip and keeps time with the
+/// speech, starting `from` into it (what a split or a trim cut off its start, the app's
+/// `spokenFrom`). Left as they are when they fit.
 fn fit_animations(seg: &mut Segment, from: Micros, materials: &mut Materials) {
     let mut items = attached_animations(seg, materials);
     let length = seg.target.duration;
     let mut changed = false;
     for a in &mut items {
         match a.kind {
-            AnimationKind::In if a.start.0 + a.duration.0 > length.0 => {
+            AnimationKind::In | AnimationKind::Combo | AnimationKind::Loop if a.start.0 + a.duration.0 > length.0 => {
                 a.duration = Micros((length.0 - a.start.0).max(0));
+                changed = true;
+            }
+            AnimationKind::Out if a.duration.0 > length.0 => {
+                a.duration = length;
                 changed = true;
             }
             // CapCut's own often ends a µs before its clip.

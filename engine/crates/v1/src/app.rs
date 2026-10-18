@@ -90,11 +90,54 @@ pub(crate) fn capcut_scale(name: &str) -> f64 {
     if matches!(name, "sharpen" | "clarity" | "vignette" | "fade") { 100.0 } else { 50.0 }
 }
 
-/// The text animations and transitions the engine draws itself (`playback/src/animation.rs`,
-/// `caption.rs`, `transition.rs`), by the names the app's Animation tab uses.
-pub(crate) const BUILTIN_IN: [&str; 3] = ["type_1", "type_2", "typewriter"];
+/// The animations and transitions the engine draws itself (`playback/src/animation.rs`,
+/// `caption.rs`, `transition.rs`), by the types the app uses (lib/animations.ts lists them
+/// for its panels). A direction is a parameter in the app and part of the engine's name: the
+/// app's slide to the left is the engine's "slide_left".
+pub(crate) const BUILTIN_IN: [&str; 11] = ["type_1", "type_2", "typewriter", "fade_in", "zoom_in", "zoom_out", "slide", "rotate", "spin", "bounce", "shake"];
+pub(crate) const BUILTIN_OUT: [&str; 8] = ["fade_out", "zoom_in", "zoom_out", "slide", "rotate", "spin", "bounce", "shake"];
+pub(crate) const BUILTIN_COMBO: [&str; 4] = ["swing", "shake", "pulse", "spin"];
+pub(crate) const BUILTIN_LOOP: [&str; 5] = ["pulse", "swing", "shake", "float", "blink"];
 pub(crate) const BUILTIN_CAPTION: [&str; 2] = ["caption_word_color", "caption_one_word"];
-pub(crate) const BUILTIN_TRANSITION: [&str; 3] = ["white_flash", "white_fade", "blink"];
+pub(crate) const BUILTIN_TRANSITION: [&str; 13] = ["white_flash", "white_fade", "blink", "mix", "black_fade", "slide", "push", "wipe", "circle", "pull_in", "pull_out", "blur", "spin"];
+/// Types that take a direction ("left", "right", "up" or "down"; left when none is given).
+const DIRECTED: [&str; 3] = ["slide", "push", "wipe"];
+/// Transitions that need both clips at once (CapCut's overlapping ones).
+pub(crate) const OVERLAPPING: [&str; 5] = ["mix", "slide", "push", "wipe", "circle"];
+
+/// The app's type and parameters for an engine built-in it draws ("slide_left" is a slide
+/// with `{"direction": "left"}`), or "" and none for one only the source app draws.
+pub(crate) fn app_type(builtin: &Option<String>, known: &[&str]) -> (String, Option<Value>) {
+    let Some(b) = builtin.as_deref() else { return (String::new(), None) };
+    if let Some((ty, dir)) = b.rsplit_once('_').filter(|(ty, dir)| DIRECTED.contains(ty) && ["left", "right", "up", "down"].contains(dir)) {
+        if known.contains(&ty) {
+            return (ty.to_string(), Some(json!({ "direction": dir })));
+        }
+    }
+    (builtin_or_empty(builtin, known), None)
+}
+
+/// The engine built-in for the app's type and parameters, if the engine draws it.
+pub(crate) fn engine_builtin(ty: &str, params: Option<&Value>, known: &[&str]) -> Option<String> {
+    if !known.contains(&ty) {
+        return None;
+    }
+    if !DIRECTED.contains(&ty) {
+        return Some(ty.to_string());
+    }
+    let dir = params.and_then(|p| p.get("direction")).and_then(Value::as_str).filter(|d| ["left", "right", "up", "down"].contains(d)).unwrap_or("left");
+    Some(format!("{ty}_{dir}"))
+}
+
+/// An animation as the app's field: its type (with parameters), name and duration.
+fn app_animation(a: &Animation, known: &[&str]) -> Value {
+    let (ty, params) = app_type(&a.builtin, known);
+    let mut v = json!({ "type": ty, "name": a.library.as_ref().map(|l| l.name.clone()).unwrap_or_default(), "duration": num(a.duration.as_secs_f64()) });
+    if let Some(p) = params {
+        v["params"] = p;
+    }
+    v
+}
 
 /// A clip's animations (all its animation materials' items).
 fn animations<'a>(project: &'a Project, seg: &Segment) -> Vec<&'a Animation> {
@@ -360,9 +403,20 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                 clip.insert(
                     "transitionOut".into(),
                     tr.map_or(Value::Null, |t| {
-                        json!({ "type": builtin_or_empty(&t.builtin, &BUILTIN_TRANSITION), "name": t.name, "duration": num(t.duration.as_secs_f64()), "resource": t.resource })
+                        let (ty, params) = app_type(&t.builtin, &BUILTIN_TRANSITION);
+                        let mut v = json!({ "type": ty, "name": t.name, "duration": num(t.duration.as_secs_f64()), "resource": t.resource });
+                        if let Some(p) = params {
+                            v["params"] = p;
+                        }
+                        v
                     }),
                 );
+                // The Animation tab: In, Out and Combo.
+                let anims = animations(project, seg);
+                let of = |kind: AnimationKind, known: &[&str]| anims.iter().find(|a| a.kind == kind && a.duration.0 > 0).map_or(Value::Null, |a| app_animation(a, known));
+                clip.insert("animationIn".into(), of(AnimationKind::In, &BUILTIN_IN));
+                clip.insert("animationOut".into(), of(AnimationKind::Out, &BUILTIN_OUT));
+                clip.insert("animationCombo".into(), of(AnimationKind::Combo, &BUILTIN_COMBO));
             }
             if ty != "audio" {
                 let (mw, mh) = (m.width.max(1) as f64, m.height.max(1) as f64);
@@ -425,13 +479,10 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
             // The Animation tab: the In animation, and for captions that follow the speech,
             // their style.
             let anims = animations(project, seg);
-            let anim_in = anims.iter().find(|a| a.kind == AnimationKind::In && a.duration.0 > 0);
-            clip.insert(
-                "animationIn".into(),
-                anim_in.map_or(Value::Null, |a| {
-                    json!({ "type": builtin_or_empty(&a.builtin, &BUILTIN_IN), "name": a.library.as_ref().map(|l| l.name.clone()).unwrap_or_default(), "duration": num(a.duration.as_secs_f64()) })
-                }),
-            );
+            let of = |kind: AnimationKind, known: &[&str]| anims.iter().find(|a| a.kind == kind && a.duration.0 > 0).map_or(Value::Null, |a| app_animation(a, known));
+            clip.insert("animationIn".into(), of(AnimationKind::In, &BUILTIN_IN));
+            clip.insert("animationOut".into(), of(AnimationKind::Out, &BUILTIN_OUT));
+            clip.insert("animationLoop".into(), of(AnimationKind::Loop, &BUILTIN_LOOP));
             let caption = anims.iter().find(|a| a.kind == AnimationKind::Caption);
             clip.insert("captionStyle".into(), json!(caption.map_or("none".to_string(), |a| builtin_or_empty(&a.builtin, &BUILTIN_CAPTION))));
             clip.insert("spokenWords".into(), json!(!t.words.is_empty()));
@@ -480,7 +531,10 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
 
     // What the engine needs to draw it as it was, and the app's fields as written, so an
     // import can tell what the app changed.
-    let base_keys = ["startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color", "animationIn", "captionStyle", "transitionOut", "keyframes"];
+    let base_keys = [
+        "startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color", "animationIn", "animationOut", "animationCombo",
+        "animationLoop", "captionStyle", "transitionOut", "keyframes",
+    ];
     let base: Map<String, Value> = base_keys
         .iter()
         .chain(TEXT_STYLE_KEYS.iter())
@@ -701,7 +755,8 @@ mod tests {
 
     /// `clip` split at `cut` seconds as the app splits it (`splitClip`): the right half gets
     /// `id`, starts at the cut and further into its media, and loses the In animation; the
-    /// left half loses the transition; a caption's right half starts that far into its speech.
+    /// left half loses the Out animation and the transition; a caption's right half starts
+    /// that far into its speech.
     fn split(doc: &mut Value, clip: &str, id: &str, cut: f64) {
         let clips = doc["timeline"]["clips"].as_array_mut().unwrap();
         let left = clips.iter_mut().find(|c| c["clipId"] == clip).unwrap();
@@ -710,11 +765,12 @@ mod tests {
         let tick = |s: f64| json!(((s * 1e6) as i64).to_string());
         left["endTick"] = tick(cut);
         left["transitionOut"] = Value::Null;
+        left["animationOut"] = Value::Null;
         right["clipId"] = json!(id);
         right["startTick"] = tick(cut);
         right["trimStartTick"] = tick(right["trimStartTick"].as_str().unwrap().parse::<f64>().unwrap() / 1e6 + cut - start);
+        right["animationIn"] = Value::Null;
         if right["type"] == "text" {
-            right["animationIn"] = Value::Null;
             right["spokenFrom"] = json!(cut - start);
         }
         clips.push(right);
@@ -736,6 +792,110 @@ mod tests {
         assert_eq!((transition("v"), transition("v2")), (None, Some(MaterialId("tr".into()))));
         assert_eq!(segment(&back, "v2").target, TimeRange::new(Micros(2_500_000), Micros(2_000_000)));
         assert_eq!(segment(&back, "v2").source.unwrap().start, Micros(3_000_000));
+    }
+
+    /// The project with In, Out and Combo animations and a push on the video, and Out and
+    /// Loop animations on the caption.
+    fn moving() -> Project {
+        let mut p = project();
+        let a = |kind: AnimationKind, builtin: &str, duration: i64| Animation { kind, start: Micros(0), duration: Micros(duration), builtin: Some(builtin.into()), library: None, resource: None };
+        p.materials.animations.push(Animations {
+            id: MaterialId("va".into()),
+            items: vec![a(AnimationKind::In, "zoom_in", 500_000), a(AnimationKind::Out, "slide_down", 1_000_000), a(AnimationKind::Combo, "swing", 4_000_000)],
+        });
+        p.materials.animations.push(Animations { id: MaterialId("ca".into()), items: vec![a(AnimationKind::Out, "fade_out", 400_000), a(AnimationKind::Loop, "pulse", 1_000_000)] });
+        p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: "Push".into(), duration: Micros(500_000), overlap: true, builtin: Some("push_left".into()), library: None, resource: None });
+        for t in &mut p.tracks {
+            for s in &mut t.segments {
+                let ids: &[&str] = if s.id == "c" { &["ca"] } else { &["va", "tr"] };
+                s.attachments.extend(ids.iter().map(|id| MaterialId((*id).into())));
+            }
+        }
+        p
+    }
+
+    #[test]
+    fn clip_animations_show_with_their_parameters_and_survive_unedited() {
+        let p = moving();
+        let doc = to_app_project(&p, &mut |_| None);
+        let clips = doc["timeline"]["clips"].as_array().unwrap();
+        let v = clips.iter().find(|c| c["clipId"] == "v").unwrap();
+        assert_eq!(v["animationIn"], json!({"type": "zoom_in", "name": "", "duration": 0.5}));
+        assert_eq!(v["animationOut"], json!({"type": "slide", "name": "", "duration": 1.0, "params": {"direction": "down"}}));
+        assert_eq!(v["animationCombo"], json!({"type": "swing", "name": "", "duration": 4.0}));
+        assert_eq!((v["transitionOut"]["type"].as_str(), &v["transitionOut"]["params"]), (Some("push"), &json!({"direction": "left"})));
+        let c = clips.iter().find(|c| c["clipId"] == "c").unwrap();
+        assert_eq!(c["animationOut"], json!({"type": "fade_out", "name": "", "duration": 0.4}));
+        assert_eq!(c["animationLoop"], json!({"type": "pulse", "name": "", "duration": 1.0}));
+        let back = import_v1_json(&doc).unwrap().project;
+        for id in ["v", "c"] {
+            assert_eq!(segment(&back, id).attachments, segment(&p, id).attachments);
+            assert_eq!(animations(&back, segment(&back, id)), animations(&p, segment(&p, id)));
+        }
+    }
+
+    #[test]
+    fn the_apps_own_animations_and_transitions_become_the_engines() {
+        let mut doc = to_app_project(&project(), &mut |_| None);
+        for clip in doc["timeline"]["clips"].as_array_mut().unwrap() {
+            clip.as_object_mut().unwrap().remove("engine");
+            if clip["type"] == "text" {
+                clip["animationOut"] = json!({"type": "zoom_in", "duration": 0.4});
+                clip["animationLoop"] = json!({"type": "float", "duration": 0.8});
+            } else {
+                clip["animationIn"] = json!({"type": "zoom_out", "duration": 3});
+                clip["animationOut"] = json!({"type": "slide", "params": {"direction": "up"}, "duration": 3});
+                clip["animationCombo"] = json!({"type": "pulse", "duration": 1});
+                clip["transitionOut"] = json!({"type": "wipe", "params": {"direction": "down"}, "duration": 9});
+            }
+        }
+        let back = import_v1_json(&doc).unwrap().project;
+        let of = |media: bool| back.tracks.iter().flat_map(|t| &t.segments).find(|s| back.materials.media.iter().any(|m| m.id == s.material) == media).unwrap();
+        let summary = |seg: &Segment| animations(&back, seg).iter().map(|a| (a.kind.clone(), a.builtin.clone().unwrap(), a.start, a.duration)).collect::<Vec<_>>();
+        // The 4 s video: the In as given; the Out in what's left after it, up to the end; the
+        // combo over the whole clip.
+        assert_eq!(
+            summary(of(true)),
+            vec![
+                (AnimationKind::In, "zoom_out".to_string(), Micros(0), Micros(3_000_000)),
+                (AnimationKind::Out, "slide_up".to_string(), Micros(3_000_000), Micros(1_000_000)),
+                (AnimationKind::Combo, "pulse".to_string(), Micros(0), Micros(4_000_000)),
+            ]
+        );
+        // The transition at most as long as the clip.
+        let tr = back.materials.transitions.iter().find(|t| of(true).attachments.contains(&t.id)).unwrap();
+        assert_eq!((tr.builtin.as_deref(), tr.duration, tr.overlap), (Some("wipe_down"), Micros(4_000_000), true));
+        // The 2 s caption.
+        assert_eq!(summary(of(false)), vec![(AnimationKind::Out, "zoom_in".to_string(), Micros(1_600_000), Micros(400_000)), (AnimationKind::Loop, "float".to_string(), Micros(0), Micros(800_000))]);
+        // A direction left out is left; a type the engine doesn't draw, or one for another
+        // kind, isn't drawn.
+        for clip in doc["timeline"]["clips"].as_array_mut().unwrap() {
+            if clip["type"] != "text" {
+                clip["animationIn"] = json!({"type": "slide", "duration": 1});
+                clip["animationOut"] = json!({"type": "swing", "duration": 1});
+                clip["animationCombo"] = json!({"type": "", "name": "Rock", "duration": 1});
+            }
+        }
+        let back = import_v1_json(&doc).unwrap().project;
+        let video = back.tracks.iter().flat_map(|t| &t.segments).find(|s| back.materials.media.iter().any(|m| m.id == s.material)).unwrap();
+        assert_eq!(animations(&back, video).iter().map(|a| a.builtin.as_deref().unwrap()).collect::<Vec<_>>(), vec!["slide_left"]);
+    }
+
+    #[test]
+    fn a_split_keeps_in_on_the_left_out_on_the_right_and_the_combo_on_both() {
+        let mut doc = to_app_project(&moving(), &mut |_| None);
+        split(&mut doc, "v", "v2", 2.5);
+        split(&mut doc, "c", "c2", 1.0);
+        let back = import_v1_json(&doc).unwrap().project;
+        let kinds = |id: &str| animations(&back, segment(&back, id)).iter().map(|a| (a.kind.clone(), a.duration)).collect::<Vec<_>>();
+        // Each 2 s half: the combo spans it.
+        assert_eq!(kinds("v"), vec![(AnimationKind::In, Micros(500_000)), (AnimationKind::Combo, Micros(2_000_000))]);
+        assert_eq!(kinds("v2"), vec![(AnimationKind::Out, Micros(1_000_000)), (AnimationKind::Combo, Micros(2_000_000))]);
+        let transition = |id: &str| segment(&back, id).attachments.iter().find(|m| back.materials.transitions.iter().any(|t| &t.id == *m)).cloned();
+        assert_eq!((transition("v"), transition("v2")), (None, Some(MaterialId("tr".into()))));
+        // The caption's loop stays on both halves, its Out on the right one.
+        assert_eq!(kinds("c"), vec![(AnimationKind::Loop, Micros(1_000_000))]);
+        assert_eq!(kinds("c2"), vec![(AnimationKind::Out, Micros(400_000)), (AnimationKind::Loop, Micros(1_000_000))]);
     }
 
     #[test]
