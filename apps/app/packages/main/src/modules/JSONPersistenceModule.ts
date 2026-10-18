@@ -10,6 +10,31 @@ type JsonResponse<T> =
   | { success: true; data: T }
   | { success: false; error: string };
 
+// Writes to one project file, in the order they were asked for.
+const projectWrites = new Map<string, Promise<void>>();
+
+/**
+ * Write a project file whole or not at all: to a temporary file beside it, then renamed over
+ * it, one write per file at a time. Two saves writing the same file at once could otherwise
+ * interleave and leave one's text followed by the other's tail, and a crash mid-write could
+ * leave half a file.
+ */
+const writeProjectFile = (filePath: string, text: string): Promise<void> => {
+  const run = async () => {
+    const tmp = `${filePath}.${process.pid}-${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(tmp, text, "utf8");
+      await fs.rename(tmp, filePath);
+    } catch (e) {
+      await fs.rm(tmp, { force: true }).catch(() => {});
+      throw e;
+    }
+  };
+  const next = (projectWrites.get(filePath) ?? Promise.resolve()).then(run, run);
+  projectWrites.set(filePath, next.catch(() => {}));
+  return next;
+};
+
 export interface ProjectJsonV1 {
   version: string;
   meta: {
@@ -185,11 +210,7 @@ export async function createProject(
       ? baseDoc.meta.id
       : `project-${id}`;
 
-  await fs.writeFile(
-    filePath,
-    JSON.stringify(baseDoc, null, 2),
-    "utf8",
-  );
+  await writeProjectFile(filePath, JSON.stringify(baseDoc, null, 2));
 
   return {
     id,
@@ -846,11 +867,7 @@ export class JSONPersistenceModule implements AppModule {
           baseDoc.meta.lastModified = Date.now();
           const filePath = this.getProjectPath(id);
 
-          await fs.writeFile(
-            filePath,
-            JSON.stringify(baseDoc, null, 2),
-            "utf8",
-          );
+          await writeProjectFile(filePath, JSON.stringify(baseDoc, null, 2));
 
           return { success: true, data: { path: filePath } };
         } catch (error) {
