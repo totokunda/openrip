@@ -78,7 +78,11 @@ export default async (ctx) => {
   // project is saved.
   await win.mouse.click(map.x(0.5), map.y);
   await win.waitForTimeout(400);
-  const details = (await win.locator("[data-testid=inspector]").innerText()).replace(/\s+/g, " ");
+  // It opens on Project (Global edits), as CapCut's does; Details is the other tab.
+  await shot("i-project-tab");
+  await win.locator("[data-testid=project-tab-details]").click();
+  await win.waitForTimeout(300);
+  const details =(await win.locator("[data-testid=inspector]").innerText()).replace(/\s+/g, " ");
   check("the project's details say where it's saved", /Path: .*project-\d+\.json/.test(details), details.slice(0, 120));
   await shot("i-project-details");
   await win.locator("[data-testid=ratio-menu]").click();
