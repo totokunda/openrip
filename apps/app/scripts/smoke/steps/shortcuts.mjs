@@ -117,6 +117,8 @@ export default async (ctx) => {
   await win.waitForSelector("[data-testid=shortcuts-window]", { state: "detached" });
   await settle();
   const p2 = await prefsOf(win);
+  // A click on the ruler drops the selection (the undone split's half may still be in it).
+  await seek(win, ctx.map, 3);
   await win.evaluate(() => document.activeElement?.blur?.());
   await win.keyboard.press("Meta+k");
   await win.waitForTimeout(1200);
