@@ -1,7 +1,7 @@
 // The canvas tools with no tool row on the player (after import timeline): the player's
-// header holds only its name and its menu; the zoom popover; Stickers ▸ Shapes adding a star at
-// the playhead; Stickers ▸ Draw's pen drawing a clip, with the tool chip and Esc; T and V; and
-// the Mask tab's picker starting a rectangle mask dragged on the clip.
+// header holds only its name and its menu; the zoom popover; Stickers ▸ Shapes adding a
+// rectangle at the playhead; no freehand drawing (CapCut has none: no Draw section, D does
+// nothing); T and V; and the Mask tab's picker starting a rectangle mask dragged on the clip.
 import { drag, previewRect, rulerMap, seek, settled, tab } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject, select } from "./_anim.mjs";
 
@@ -35,31 +35,27 @@ export default async (ctx) => {
   await win.keyboard.press("Escape");
   await win.waitForTimeout(200);
 
-  // Stickers ▸ Shapes: a star at the playhead.
+  // Stickers ▸ Shapes: a rectangle at the playhead.
   const before = await savedProject(win, udDir);
   const shapes0 = clipsWhere(before, (c) => c.type === "shape").length;
   await win.locator("[data-testid=assets-tab-stickers]").click();
+  check("no Draw section in the Stickers tab", (await win.locator("[data-testid=assets-section-draw]").count()) === 0);
   await win.locator("[data-testid=assets-section-shapes]").click();
-  await settled(win, () => win.locator("[data-testid=shape-star]").click());
+  await settled(win, () => win.locator("[data-testid=shape-rectangle]").click());
   let doc = await savedProject(win, udDir);
-  const stars = clipsWhere(doc, (c) => c.type === "shape" && c.shapeType === "star");
-  check("Shapes adds a star", clipsWhere(doc, (c) => c.type === "shape").length === shapes0 + 1 && stars.length === 1, `${stars.length} star(s)`);
-  check("the star starts at the playhead", stars[0] && Math.abs(+stars[0].startTick / 1e6 - 1) < 0.05, stars[0]?.startTick);
+  const rects = clipsWhere(doc, (c) => c.type === "shape" && c.shapeType === "rectangle");
+  check("Shapes adds a rectangle", clipsWhere(doc, (c) => c.type === "shape").length === shapes0 + 1 && rects.length === 1, `${rects.length} rectangle(s)`);
+  check("the rectangle starts at the playhead", rects[0] && Math.abs(+rects[0].startTick / 1e6 - 1) < 0.05, rects[0]?.startTick);
   await shot("ct2-shape");
 
-  // Stickers ▸ Draw: the pen, the chip, a stroke, Esc.
-  await win.locator("[data-testid=assets-section-draw]").click();
-  await win.locator("[data-testid=draw-brush]").click();
-  check("Pen turns the draw tool on", (await chipTool()) === "draw", await chipTool());
+  // No freehand drawing: D turns nothing on.
   const p = await previewRect(win);
-  const draws0 = clipsWhere(doc, (c) => c.type === "draw").length;
-  await settled(win, () => drag(win, p.x + p.w * 0.3, p.y + p.h * 0.3, p.x + p.w * 0.6, p.y + p.h * 0.5));
-  await shot("ct3-draw");
-  await win.keyboard.press("Escape");
+  await win.evaluate(() => document.activeElement?.blur?.());
+  await win.keyboard.press("d");
   await win.waitForTimeout(200);
-  check("Esc stops drawing", (await chipTool()) === null, await chipTool());
+  check("D turns no tool on", (await chipTool()) === null, await chipTool());
   doc = await savedProject(win, udDir);
-  check("the stroke is a drawing clip", clipsWhere(doc, (c) => c.type === "draw").length >= Math.max(1, draws0), String(clipsWhere(doc, (c) => c.type === "draw").length));
+  check("there are no drawing clips", clipsWhere(doc, (c) => c.type === "draw").length === 0, String(clipsWhere(doc, (c) => c.type === "draw").length));
 
   // T and V still pick text and select.
   await win.keyboard.press("t");

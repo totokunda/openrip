@@ -72,8 +72,8 @@ const clickTab = async (win, name) => {
   return true;
 };
 // Where the panels that steps name by their old tab ("Transform", "Mask") are now: inside the
-// clip's first tab (Video, Image, Text, Shape), under a sub-tab.
-const NESTED = { Transform: ["Text", "Shape", "Video", "Image"], Mask: ["Video", "Image"], Basic: ["Text", "Shape", "Video", "Image"] };
+// clip's first tab (Video, Image, Text), under a sub-tab (a shape's Shapes tab has none).
+const NESTED = { Transform: ["Text", "Video", "Image"], Mask: ["Video", "Image"], Basic: ["Text", "Video", "Image"] };
 // Click an inspector tab ("Text", "Animation", "Adjust", …). A tab with sub-tabs opens on its
 // first ("Basic"), where its main panel is; "Transform" and "Mask" find their sub-tab
 // (a video's transform is in Video ▸ Basic) and "Duration" is a video's Speed.
