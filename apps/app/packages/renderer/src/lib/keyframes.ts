@@ -20,6 +20,8 @@ import type {
   KeyframeProperty,
   KeyframeValue,
 } from "./types";
+import { COLOR_PROPERTIES, colorPropertyPatch, colorPropertyValue } from "./color.ts";
+import { CHROMA_PROPERTIES, setChroma } from "./compositing.ts";
 
 /** Keys closer than this (in frames) are at the same frame. */
 const SAME_FRAME = 1e-6;
@@ -48,9 +50,9 @@ export const TEXT_PROPERTIES = [
 export const keyframeableProperties = (clip: AnyClipProps): KeyframeProperty[] => {
   switch (clip.type) {
     case "video":
-      return ["position", "scale", "rotation", "opacity", "volume", ...ADJUST_PROPERTIES];
+      return ["position", "scale", "rotation", "opacity", "volume", ...ADJUST_PROPERTIES, ...COLOR_PROPERTIES, ...CHROMA_PROPERTIES];
     case "image":
-      return ["position", "scale", "rotation", "opacity", ...ADJUST_PROPERTIES];
+      return ["position", "scale", "rotation", "opacity", ...ADJUST_PROPERTIES, ...COLOR_PROPERTIES, ...CHROMA_PROPERTIES];
     case "audio":
       return ["volume"];
     case "text":
@@ -522,6 +524,9 @@ export const propertyValue = (clip: AnyClipProps, property: KeyframeProperty): K
     return part ? entry.values?.find((v) => v.key === part)?.value : entry.value;
   }
   if ((ADJUST_PROPERTIES as readonly string[]).includes(property)) return c[property] ?? 0;
+  // The colour tools and the chroma key (lib/color.ts, lib/compositing.ts).
+  if (/^(adjust|hsl|wheels|lut):/.test(property)) return colorPropertyValue(clip, property);
+  if (property.startsWith("chroma:")) return c.chroma?.[property.slice(7)] ?? 0;
   return c[property];
 };
 
@@ -558,6 +563,8 @@ const fieldPatch = (clip: AnyClipProps, property: KeyframeProperty, value: Keyfr
       ),
     } as Partial<AnyClipProps>;
   }
+  if (/^(adjust|hsl|wheels|lut):/.test(property)) return colorPropertyPatch(clip, property, Number(value));
+  if (property.startsWith("chroma:")) return setChroma(clip, property.slice(7) as any, Number(value));
   return { [property]: value } as Partial<AnyClipProps>;
 };
 

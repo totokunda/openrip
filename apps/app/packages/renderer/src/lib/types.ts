@@ -26,6 +26,12 @@ export type TimelineType =
 export type ViewTool = "pointer" | "hand" | "mask" | "draw" | "shape" | "text";
 export type ShapeTool = "rectangle" | "ellipse" | "polygon" | "line" | "star";
 
+/**
+ * The app's first Adjust sliders, on its own scales (−100…100; blur, sharpness, noise and
+ * vignette 0…100), drawn as its old WebGL filters drew them (the engine's `v1:` effects).
+ * Legacy: kept so older projects look the same; new edits go in `color` (ClipColor) on
+ * CapCut's scale. lib/color.ts converts them (`migrateLegacyAdjustments`).
+ */
 export interface MediaAdjustments {
   // Color Correction
   brightness?: number; // isFilter
@@ -70,7 +76,11 @@ export interface ClipTransform {
  * - a text's "color" (#rrggbb), "fontSize", "stroke", "strokeWidth", "strokeOpacity",
  *   "shadowColor", "shadowOpacity", "shadowBlur", "backgroundColor", "backgroundOpacity";
  * - "draft:<id>": one of a converted clip's own adjustments (`draftAdjustments`) on CapCut's
- *   scale, or "draft:<id>:hue" (":saturation", ":lightness") for an HSL range.
+ *   scale, or "draft:<id>:hue" (":saturation", ":lightness") for an HSL range;
+ * - the colour tools (`color`): "adjust:<slider>" on CapCut's scale, "hsl:<range>:hue"
+ *   (":saturation", ":lightness", −100…100), "wheels:intensity" and "lut:intensity" (0–100);
+ * - the chroma key's "chroma:intensity", "chroma:shadow", "chroma:edgeSmooth" and
+ *   "chroma:spill" (0–100), as CapCut keyframes them.
  */
 export type KeyframeProperty =
   | "position"
@@ -97,7 +107,12 @@ export type KeyframeProperty =
   | "shadowBlur"
   | "backgroundColor"
   | "backgroundOpacity"
-  | `draft:${string}`;
+  | `draft:${string}`
+  | `adjust:${AdjustSlider}`
+  | `hsl:${HslRange}:${HslPart}`
+  | "wheels:intensity"
+  | "lut:intensity"
+  | `chroma:${ChromaSlider}`;
 
 /** A keyframe's value: a number, one per component (position, scale), or a colour. */
 export type KeyframeValue = number | number[] | string;
@@ -284,9 +299,115 @@ export type SpeedProps = {
   speedCurve?: SpeedCurve | null;
 };
 
+/**
+ * CapCut's Adjust › Basic sliders (the engine draws all of them): on CapCut's scale, −50…50,
+ * except sharpen, clarity, vignette and fade, 0…100 (a vignette below 0 lightens the edges).
+ * 0 is off.
+ */
+export type AdjustSlider =
+  | "exposure"
+  | "brightness"
+  | "contrast"
+  | "saturation"
+  | "temperature"
+  | "tint"
+  | "highlights"
+  | "shadows"
+  | "whites"
+  | "blacks"
+  | "sharpen"
+  | "clarity"
+  | "vignette"
+  | "fade";
+
+/** CapCut's named HSL ranges, in its order. */
+export type HslRange = "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "magenta";
+export type HslPart = "hue" | "saturation" | "lightness";
+/** One range's shifts, −100…100 each. */
+export type HslShift = Partial<Record<HslPart, number>>;
+
+export type CurveChannel = "luma" | "red" | "green" | "blue";
+/** A curve point: input and output level, 0–1. */
+export type CurvePointXY = [number, number];
+
+/** One colour wheel, CapCut's values (−1…1): per channel, luma and saturation. */
+export type ColorWheel = { red?: number; green?: number; blue?: number; luma?: number; saturation?: number };
+
+/** A LUT on the clip: a `.cube` file or a Hald CLUT image, its strength 0–100. */
+export type ClipLut = { path: string; name?: string; intensity?: number };
+
+/**
+ * A video or photo's colour tools, as CapCut's Adjust tab (docs/plan/app-engine-integration.md,
+ * "Colour and compositing"). Each part is optional and neutral when missing:
+ * - `adjust`: the Basic sliders (AdjustSlider);
+ * - `hsl`: the eight ranges' hue, saturation and lightness;
+ * - `curves`: points per channel, sorted or not, the ends included (a curve needs two); the
+ *   engine draws the smooth curve CapCut draws through them;
+ * - `wheels`: the primary wheels (lift, gamma, gain, offset) and their strength, 0–100
+ *   (100 when missing);
+ * - `lut`: a LUT, drawn first.
+ * The engine draws them in CapCut's order: LUT, HSL, curves, wheels, sliders. On a clip
+ * converted from a CapCut draft they go on top of the draft's own (`draftAdjustments`): a
+ * slider or HSL range set in both draws this one.
+ */
+export type ClipColor = {
+  adjust?: Partial<Record<AdjustSlider, number>>;
+  hsl?: Partial<Record<HslRange, HslShift>>;
+  curves?: Partial<Record<CurveChannel, CurvePointXY[]>>;
+  wheels?: { lift?: ColorWheel; gamma?: ColorWheel; gain?: ColorWheel; offset?: ColorWheel; intensity?: number };
+  lut?: ClipLut | null;
+};
+
+/**
+ * How a clip is put over the layers below it (CapCut's Blend › Mode; lib/compositing.ts
+ * lists them with CapCut's names): "normal" is CapCut's Default.
+ */
+export type BlendModeId =
+  | "normal"
+  | "darken"
+  | "screen"
+  | "overlay"
+  | "multiply"
+  | "lighten"
+  | "color_burn"
+  | "color_dodge"
+  | "linear_burn"
+  | "soft_light"
+  | "hard_light";
+
+export type ChromaSlider = "intensity" | "shadow" | "edgeSmooth" | "spill";
+
+/**
+ * CapCut's chroma key (Remove BG › Chroma key): the picked colour (#rrggbb) and its sliders,
+ * 0–100. Intensity 0 keys nothing; shadow keeps the colour's darker shades; edgeSmooth
+ * softens the edge; spill takes the colour's cast off what's left.
+ */
+export type ClipChromaKey = { color: string } & Record<ChromaSlider, number>;
+
+/**
+ * What fills the canvas around a clip on the main track (CapCut's Canvas): a colour
+ * (#rrggbb), the clip itself blurred (`blur`, CapCut's levels 0.0625, 0.375, 0.75, 1), or an
+ * image (`image`, a path or file URL) covering the canvas. Ignored on other tracks, as in
+ * CapCut.
+ */
+export type ClipCanvas = { type: "color" | "blur" | "image"; color?: string; blur?: number; image?: string };
+
+/** Mirrored on screen, about the clip's middle (CapCut's Mirror). */
+export type ClipFlip = { horizontal?: boolean; vertical?: boolean };
+
+/** A video or photo's colour and compositing fields (all optional; missing is neutral). */
+export type ClipLook = {
+  color?: ClipColor | null;
+  blendMode?: BlendModeId;
+  chroma?: ClipChromaKey | null;
+  canvas?: ClipCanvas | null;
+  flip?: ClipFlip;
+};
+
 export type VideoClipProps = ClipProps &
   MediaAdjustments &
-  SpeedProps & {
+  SpeedProps &
+  ClipLook & {
 
     assetId: string;
     assetIdHistory: string[];
@@ -309,7 +430,8 @@ export type VideoClipProps = ClipProps &
   };
 
 export type ImageClipProps = ClipProps &
-  MediaAdjustments & {
+  MediaAdjustments &
+  ClipLook & {
     assetId: string;
     assetIdHistory: string[];
     type: "image";
@@ -356,6 +478,8 @@ export type StarClipProps = ShapeClipProps & {
 
 export type TextClipProps = ClipProps & {
   type: "text";
+  /** How the text is put over what's under it (CapCut's Blend › Mode). */
+  blendMode?: BlendModeId;
   text?: string;
   fontSize?: number;
   fontWeight?: number;
