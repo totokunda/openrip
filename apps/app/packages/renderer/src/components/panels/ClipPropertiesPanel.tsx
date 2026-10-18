@@ -41,7 +41,7 @@ interface InspectorTab {
 }
 
 const stack = (...parts: React.ReactNode[]) => (
-  <div className="min-w-0 divide-y divide-brand-light/[0.06]">{parts}</div>
+  <div className="min-w-0 divide-y divide-brand-divider">{parts}</div>
 );
 
 const ClipPropertiesPanel: React.FC = () => {
@@ -154,15 +154,16 @@ const ClipPropertiesPanel: React.FC = () => {
   if (!current) return null;
   const section = current.sections.find((s) => s.id === subs[current.id]) ?? current.sections[0];
 
+  // CapCut's tabs: 13 px semibold labels on the header strip, the selected one in the accent.
   const trigger =
-    "relative h-9 px-3 shrink-0 whitespace-nowrap rounded-none bg-transparent text-[11.5px] text-brand-light/55 hover:text-brand-light data-[state=active]:text-brand-light data-[state=active]:bg-transparent after:absolute after:left-3 after:right-3 after:bottom-0 after:h-[2px] after:rounded-full after:bg-transparent data-[state=active]:after:bg-brand-accent";
+    "h-full px-[13px] first:pl-[11px] shrink-0 whitespace-nowrap rounded-none bg-transparent text-[13px] font-semibold text-brand-light hover:text-brand-lighter data-[state=active]:text-brand-accent data-[state=active]:bg-transparent";
 
   return (
     <Tabs value={current.id} onValueChange={(v) => setTab(v)} className="h-full w-full min-w-0 flex flex-col overflow-hidden">
       <TabsList
         data-testid="inspector-tabs"
         style={{ scrollbarWidth: 'none' }}
-        className="w-full justify-start shrink-0 h-9 p-0 px-1 gap-0 rounded-none bg-transparent border-b border-brand-light/[0.06] overflow-x-auto [&::-webkit-scrollbar]:hidden"
+        className="w-full justify-start shrink-0 h-[42px] p-0 gap-0 rounded-none bg-brand-header border-b-[0.5px] border-brand-hairline overflow-x-auto [&::-webkit-scrollbar]:hidden"
       >
         {tabs.map((t) => (
           <TabsTrigger key={t.id} value={t.id} className={trigger}>
@@ -174,21 +175,24 @@ const ClipPropertiesPanel: React.FC = () => {
         <TabsContent key={t.id} value={t.id} className="flex-1 min-h-0 m-0 flex flex-col">
           {t.id === current.id && (
             <Tabs value={section.id} onValueChange={(v) => setSub(t.id, v)} className="flex-1 min-h-0 flex flex-col">
+              {/* Sub-tabs: CapCut's segmented control, its segments sharing the width. */}
               {t.sections.length > 1 && (
-                <TabsList className="shrink-0 mx-4 mt-3 mb-1 h-7 p-0.5 gap-0.5 rounded-[6px] bg-brand-background-dark/70 justify-start w-fit">
-                  {t.sections.map((s) => (
-                    <TabsTrigger
-                      key={s.id}
-                      value={s.id}
-                      className={cn(
-                        "h-6 px-3 rounded-[5px] text-[11px] text-brand-light/55 hover:text-brand-light",
-                        "data-[state=active]:bg-brand-background-light data-[state=active]:text-brand-light",
-                      )}
-                    >
-                      {s.label}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
+                <div className="shrink-0 px-3 pt-[13px] pb-[11px] border-b border-brand-divider">
+                  <TabsList className="flex w-full h-6 p-0 gap-0 rounded-[4px] bg-brand">
+                    {t.sections.map((s) => (
+                      <TabsTrigger
+                        key={s.id}
+                        value={s.id}
+                        className={cn(
+                          "flex-1 !w-auto h-6 rounded-[4px] text-[12px] font-normal text-[#cccccc] hover:text-brand-lighter",
+                          "data-[state=active]:bg-brand-background-light data-[state=active]:text-brand-lighter",
+                        )}
+                      >
+                        {s.label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </div>
               )}
               <ScrollArea className="flex-1 min-h-0">
                 {t.sections.map((s) => (

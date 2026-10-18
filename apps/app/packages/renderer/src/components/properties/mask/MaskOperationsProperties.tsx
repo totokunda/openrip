@@ -95,7 +95,7 @@ const MaskOperationsProperties: React.FC<MaskOperationsPropertiesProps> = ({
 
   if (!mask) {
     return (
-      <div className="p-4 px-5">
+      <div className="px-3 py-3.5">
         <p className="text-brand-light/50 text-[11px]">No mask selected</p>
       </div>
     );
@@ -103,8 +103,8 @@ const MaskOperationsProperties: React.FC<MaskOperationsPropertiesProps> = ({
 
   return (
     <div className="flex flex-col gap-y-2 min-w-0">
-      <div className="p-4 flex flex-col gap-y-5 px-5 min-w-0">
-        <h4 className="text-brand-light text-[12px] font-medium text-start">
+      <div className="px-3 py-3.5 flex flex-col gap-y-4 min-w-0">
+        <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start">
           Rendering
         </h4>
         <div className="flex flex-col gap-y-2">

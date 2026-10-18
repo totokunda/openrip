@@ -19,7 +19,7 @@ const TextStrokeSection: React.FC<TextStrokeSectionProps> = ({ clipId }) => {
   const strokeOpacity = clip?.strokeOpacity ?? 100;
 
   return (
-    <div className="flex flex-col gap-y-4 p-4 px-5 border-t border-brand-light/5">
+    <div className="flex flex-col gap-y-4 px-3 py-3.5 border-t border-brand-light/5">
       <div className="flex flex-row items-center gap-x-3">
         <Checkbox
           checked={strokeEnabled}

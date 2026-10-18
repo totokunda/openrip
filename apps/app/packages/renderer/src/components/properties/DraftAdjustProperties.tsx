@@ -47,9 +47,9 @@ const DraftAdjustProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
   const notDrawn = list.some((e) => !e.drawn);
 
   return (
-    <div className="p-4 px-5 min-w-0">
+    <div className="px-3 py-3.5 min-w-0">
       <div className="flex flex-row items-center justify-between mb-4">
-        <h4 className="text-brand-light text-[12px] font-medium text-start">From the CapCut draft</h4>
+        <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start">From the CapCut draft</h4>
         {changed && (
           <span title="Put back the draft's adjustments" onClick={() => set(draft)} className="text-brand-light text-sm cursor-pointer">
             <IoRefreshOutline />

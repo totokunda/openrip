@@ -4,6 +4,7 @@ import { useState } from "react";
 import React from "react";
 import { IoRefreshOutline, IoLockClosed, IoLockOpen } from "react-icons/io5";
 import Input from "./Input";
+import PropertyRow from "./PropertyRow";
 
 interface LayoutPropertiesProps {
   clipId: string;
@@ -172,9 +173,9 @@ const LayoutProperties: React.FC<LayoutPropertiesProps> = ({ clipId }) => {
 
   return (
     <div className="flex flex-col gap-y-2 min-w-0">
-      <div className="p-4 flex flex-col gap-y-4 px-5 min-w-0">
+      <div className="px-3 py-3 flex flex-col gap-y-1 min-w-0">
         <div className="flex flex-row items-center justify-between">
-          <h4 className="text-brand-light text-[12px] font-medium text-start">
+          <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start">
             Layout
           </h4>
           <span
@@ -188,30 +189,27 @@ const LayoutProperties: React.FC<LayoutPropertiesProps> = ({ clipId }) => {
           </span>
         </div>
 
-        <div className="flex flex-col gap-y-3">
+        <div className="flex flex-col">
           {hasWidthHeight && (
-            <div className="flex flex-row gap-x-2">
+            <PropertyRow label="Size">
             <Input
-              label="Size"
               value={clip?.transform?.width.toFixed(0).toString() ?? "0"}
               onChange={handleWidthChange}
               startLogo="W"
             />
             <Input
-              emptyLabel
               value={clip?.transform?.height.toFixed(0).toString() ?? "0"}
               onChange={handleHeightChange}
               startLogo="H"
             />
-          </div>)}
+          </PropertyRow>)}
 
           {hasScale && (
-            <div className="flex flex-col ">
-              <div className="flex flex-row items-center justify-between">
-                <span className="text-brand-light text-[10px] text-start">
-                  Scale
-                </span>
+            <PropertyRow
+              label="Scale"
+              end={
                 <button
+                  title={scaleLocked ? "Unlock the scale's sides" : "Lock the scale's sides"}
                   onClick={() => setScaleLocked(!scaleLocked)}
                   className="text-brand-light/70 hover:text-brand-light transition-colors cursor-pointer"
                 >
@@ -221,8 +219,8 @@ const LayoutProperties: React.FC<LayoutPropertiesProps> = ({ clipId }) => {
                     <IoLockOpen className="h-3 w-3" />
                   )}
                 </button>
-              </div>
-              <div className="flex flex-row gap-x-2">
+              }
+            >
                 <Input
                   value={
                     getEffectiveScaleX().toFixed(2).toString() ?? "1.00"
@@ -243,8 +241,7 @@ const LayoutProperties: React.FC<LayoutPropertiesProps> = ({ clipId }) => {
                   step={0.1}
                   min={0.1}
                 />
-              </div>
-            </div>
+            </PropertyRow>
           )}
           {hasSides && (
             <div className="flex flex-row gap-x-2">

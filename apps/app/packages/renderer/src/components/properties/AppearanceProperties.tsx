@@ -51,9 +51,9 @@ const AppearanceProperties: React.FC<AppearancePropertiesProps> = ({
 
   return (
     <div className="flex flex-col gap-y-2 min-w-0">
-      <div className="p-4 px-5 min-w-0">
+      <div className="px-3 py-3.5 min-w-0">
         <div className="flex flex-row items-center justify-between mb-4">
-          <h4 className="text-brand-light text-[12px] font-medium text-start">
+          <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start">
             Appearance
           </h4>
           <span
@@ -115,7 +115,7 @@ const AppearanceProperties: React.FC<AppearancePropertiesProps> = ({
 
           {canUpdateColor && (
             <div className="flex flex-col gap-y-3 ">
-              <h4 className="text-brand-light text-[12px] font-medium text-start">
+              <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start">
                 Color
               </h4>
               <ColorInput

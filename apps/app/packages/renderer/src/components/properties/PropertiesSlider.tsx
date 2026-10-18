@@ -17,10 +17,10 @@ const Slider = React.forwardRef<
     )}
     {...props}
   >
-    <SliderPrimitive.Track className="relative h-0.5 group-hover/slider:h-1 w-full   grow overflow-hidden transition-all duration-200 rounded-full bg-brand-light/10">
-      <SliderPrimitive.Range className="absolute h-full bg-brand-light" />
+    <SliderPrimitive.Track className="relative h-0.5 w-full grow overflow-hidden rounded-full bg-brand-hover">
+      <SliderPrimitive.Range className="absolute h-full bg-brand-lighter" />
     </SliderPrimitive.Track>
-    <SliderPrimitive.Thumb className="block h-4 w-2 rounded-b rounded-t-xs bg-brand-light shadow transition-colors focus-visible:outline-none  disabled:pointer-events-none disabled:opacity-50" />
+    <SliderPrimitive.Thumb className="block h-3 w-2 rounded-[2px] bg-white shadow transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent disabled:pointer-events-none disabled:opacity-50" />
   </SliderPrimitive.Root>
 ));
 Slider.displayName = SliderPrimitive.Root.displayName;
@@ -125,7 +125,7 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
     <div className="flex flex-col items-start w-full min-w-0">
       <label
         className={cn(
-          "text-brand-light  text-[10.5px] font-medium ",
+          "text-brand-light text-[12px] mb-1",
           labelClass,
         )}
       >
@@ -143,7 +143,7 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
         <div className="flex flex-row items-center">
           <input
             className={cn(
-              "w-15 h-6 px-1.5 text-center text-brand-light text-[11px] font-normal items-center border border-brand-light/10 p-1 rounded-l bg-brand",
+              "w-[54px] h-[22px] px-1.5 text-center text-brand-lighter text-[12px] tabular-nums font-normal items-center p-1 rounded-[4px] bg-brand",
               inputClass,
               disabled && "opacity-50 cursor-not-allowed",
             )}
@@ -162,7 +162,7 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
           />
           <div
             className={cn(
-              "flex flex-col items-center justify-center divide-y divide-brand-light/10 bg-brand  h-6 rounded-r",
+              "ml-0.5 w-4 flex flex-col items-center justify-center bg-brand-background-light h-[22px] rounded-[3px]",
               buttonClass,
               disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
             )}

@@ -45,8 +45,8 @@ const FilterProperties: React.FC<FilterPropertiesProps> = ({ clipId }) => {
   const title = fromDraft ? (DRAFT_KINDS[clip?.draftKind ?? ""] ?? "CapCut") : "Filter";
 
   return (
-    <div className="flex flex-col gap-y-2 min-w-0 p-4 px-5 border-b border-brand-light/5">
-      <h4 className="text-brand-light text-[12px] font-medium text-start mb-4">
+    <div className="flex flex-col gap-y-2 min-w-0 px-3 py-3.5 border-b border-brand-light/5">
+      <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start mb-4">
         {title}
       </h4>
       {fromDraft && clip?.name && (

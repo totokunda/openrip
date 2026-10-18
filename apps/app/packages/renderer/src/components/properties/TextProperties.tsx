@@ -166,7 +166,7 @@ const TextProperties: React.FC<TextPropertiesProps> = ({ clipId }) => {
 
   return (
     <div className="flex flex-col gap-y-2 min-w-0">
-      <div className="p-4 flex flex-col gap-y-5 px-5 min-w-0">
+      <div className="px-3 py-3.5 flex flex-col gap-y-4 min-w-0">
         <h3 className="text-brand-light text-xs font-medium text-start">
           Basic
         </h3>
@@ -176,7 +176,7 @@ const TextProperties: React.FC<TextPropertiesProps> = ({ clipId }) => {
           onChange={(e) => updateClip(clipId, { text: e.target.value })}
         />
         <div className="flex flex-row gap-x-2 w-full items-center">
-          <h4 className="text-brand-light text-[10.5px] text-start w-1/3">
+          <h4 className="text-brand-light text-[12px] text-start w-[112px] shrink-0">
             Font Family
           </h4>
           <Combobox
@@ -197,7 +197,7 @@ const TextProperties: React.FC<TextPropertiesProps> = ({ clipId }) => {
           toFixed={0}
         />
         <div className="flex flex-row gap-x-2 items-center">
-          <h4 className="text-brand-light text-[10.5px] text-start w-1/3">
+          <h4 className="text-brand-light text-[12px] text-start w-[112px] shrink-0">
             Style
           </h4>
           <div className="flex flex-row bg-brand divide-x divide-brand-light/10 rounded w-full">
@@ -234,7 +234,7 @@ const TextProperties: React.FC<TextPropertiesProps> = ({ clipId }) => {
           </div>
         </div>
         <div className="flex flex-row gap-x-2 items-center">
-          <h4 className="text-brand-light text-[10.5px] text-start w-1/3">
+          <h4 className="text-brand-light text-[12px] text-start w-[112px] shrink-0">
             Align
           </h4>
           <ButtonList
@@ -244,7 +244,7 @@ const TextProperties: React.FC<TextPropertiesProps> = ({ clipId }) => {
           />
         </div>
         <div className="flex flex-row gap-x-2 items-center">
-          <h4 className="text-brand-light text-[10.5px] text-start w-1/3">
+          <h4 className="text-brand-light text-[12px] text-start w-[112px] shrink-0">
             Vertical Align
           </h4>
           <ButtonList
@@ -254,7 +254,7 @@ const TextProperties: React.FC<TextPropertiesProps> = ({ clipId }) => {
           />
         </div>
         <div className="flex flex-row gap-x-2 items-center">
-          <h4 className="text-brand-light text-[10.5px] text-start w-1/3">
+          <h4 className="text-brand-light text-[12px] text-start w-[112px] shrink-0">
             Text Transform
           </h4>
           <ButtonList

@@ -26,7 +26,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       defaultSize={defaultSize}
       order={order}
       data-testid="inspector"
-      className="bg-brand-background rounded-md flex flex-col min-w-0 overflow-hidden"
+      className="bg-brand-background rounded-lg flex flex-col min-w-0 overflow-hidden"
     >
       {hasSelection ? <ClipPropertiesPanel /> : <EmptyPropertiesPanel />}
     </ResizablePanel>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import React from "react";
 import { IoRefreshOutline } from "react-icons/io5";
 import Input from "./Input";
+import PropertyRow from "./PropertyRow";
 import {
   PiAlignLeft,
   PiAlignRight,
@@ -125,9 +126,9 @@ const PositionProperties: React.FC<PositionPropertiesProps> = ({ clipId }) => {
 
   return (
     <div className="flex flex-col gap-y-2 min-w-0">
-      <div className="p-4 flex flex-col gap-y-4 px-5 min-w-0">
+      <div className="px-3 py-3 flex flex-col gap-y-1 min-w-0">
         <div className="flex flex-row items-center justify-between ">
-          <h4 className="text-brand-light text-[12px] font-medium text-start">
+          <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start">
             Position
           </h4>
           <span
@@ -140,83 +141,81 @@ const PositionProperties: React.FC<PositionPropertiesProps> = ({ clipId }) => {
             />
           </span>
         </div>
-        <div className="flex flex-col gap-y-2">
-          <span className="text-brand-light text-[10.5px] font-medium text-start">
-            Alignment
-          </span>
-          <div className="flex flex-row gap-x-2 w-full ">
-            <div className="flex flex-row divide-x divide-brand-light/10 h-6 w-1/2 cursor-pointer rounded bg-brand">
-              <button
-                onClick={() => handleAlign("left")}
-                className="flex flex-row items-center justify-center w-full hover:bg-brand-light/10 transition-all duration-200 cursor-pointer rounded-l"
-              >
-                <PiAlignLeft className="text-brand-light h-4 w-4" />
-              </button>
-
-              <button
-                onClick={() => handleAlign("center-h")}
-                className="flex flex-row items-center justify-center w-full hover:bg-brand-light/10 transition-all duration-200 cursor-pointer "
-              >
-                <PiAlignCenterHorizontal className="text-brand-light h-4 w-4" />
-              </button>
-              <button
-                onClick={() => handleAlign("right")}
-                className="flex flex-row items-center justify-center w-full hover:bg-brand-light/10 transition-all duration-200 cursor-pointer rounded-r"
-              >
-                <PiAlignRight className="text-brand-light h-4 w-4" />
-              </button>
-            </div>
-            <div className="flex flex-row divide-x divide-brand-light/10 h-6 w-1/2 cursor-pointer rounded bg-brand">
-              <button
-                onClick={() => handleAlign("top")}
-                className="flex flex-row items-center justify-center w-full hover:bg-brand-light/10 transition-all duration-200 cursor-pointer rounded-l"
-              >
-                <PiAlignTop className="text-brand-light h-4 w-4" />
-              </button>
-              <button
-                onClick={() => handleAlign("center-v")}
-                className="flex flex-row items-center justify-center w-full hover:bg-brand-light/10 transition-all duration-200 cursor-pointer"
-              >
-                <PiAlignCenterVertical className="text-brand-light h-4 w-4" />
-              </button>
-              <button
-                onClick={() => handleAlign("bottom")}
-                className="flex flex-row items-center justify-center w-full hover:bg-brand-light/10 transition-all duration-200 cursor-pointer rounded-r"
-              >
-                <PiAlignBottom className="text-brand-light h-4 w-4" />
-              </button>
-            </div>
+        <div className="flex flex-col">
+          <PropertyRow label="Position">
+            <Input
+              value={clip?.transform?.x.toFixed(0).toString() ?? "0"}
+              onChange={(value) =>
+                updateClip(clipId, {
+                  transform: { ...clip?.transform!, x: Number(value) },
+                })
+              }
+              startLogo="X"
+            />
+            <Input
+              value={clip?.transform?.y.toFixed(0).toString() ?? "0"}
+              onChange={(value) =>
+                updateClip(clipId, {
+                  transform: { ...clip?.transform!, y: Number(value) },
+                })
+              }
+              startLogo="Y"
+            />
+          </PropertyRow>
+          <PropertyRow label="Rotation">
+            <Input
+              value={clip?.transform?.rotation.toFixed(0).toString() ?? "0"}
+              onChange={(value) => handleRotationChange(Number(value))}
+              startLogo="R"
+            />
+          </PropertyRow>
+          {/* Alignment on the canvas: one group of six, as CapCut's. */}
+          <div className="mt-1 h-[22px] w-fit flex flex-row items-center rounded-[4px] bg-brand-background-light">
+            <button
+              title="Align left"
+              onClick={() => handleAlign("left")}
+              className="h-full w-7 flex items-center justify-center hover:bg-brand-button transition-colors cursor-pointer first:rounded-l-[4px] last:rounded-r-[4px]"
+            >
+              <PiAlignLeft className="text-brand-light h-4 w-4" />
+            </button>
+            <button
+              title="Centre horizontally"
+              onClick={() => handleAlign("center-h")}
+              className="h-full w-7 flex items-center justify-center hover:bg-brand-button transition-colors cursor-pointer first:rounded-l-[4px] last:rounded-r-[4px]"
+            >
+              <PiAlignCenterHorizontal className="text-brand-light h-4 w-4" />
+            </button>
+            <button
+              title="Align right"
+              onClick={() => handleAlign("right")}
+              className="h-full w-7 flex items-center justify-center hover:bg-brand-button transition-colors cursor-pointer first:rounded-l-[4px] last:rounded-r-[4px]"
+            >
+              <PiAlignRight className="text-brand-light h-4 w-4" />
+            </button>
+            <span className="w-px h-3 bg-brand-hover" />
+            <button
+              title="Align top"
+              onClick={() => handleAlign("top")}
+              className="h-full w-7 flex items-center justify-center hover:bg-brand-button transition-colors cursor-pointer first:rounded-l-[4px] last:rounded-r-[4px]"
+            >
+              <PiAlignTop className="text-brand-light h-4 w-4" />
+            </button>
+            <button
+              title="Centre vertically"
+              onClick={() => handleAlign("center-v")}
+              className="h-full w-7 flex items-center justify-center hover:bg-brand-button transition-colors cursor-pointer first:rounded-l-[4px] last:rounded-r-[4px]"
+            >
+              <PiAlignCenterVertical className="text-brand-light h-4 w-4" />
+            </button>
+            <button
+              title="Align bottom"
+              onClick={() => handleAlign("bottom")}
+              className="h-full w-7 flex items-center justify-center hover:bg-brand-button transition-colors cursor-pointer first:rounded-l-[4px] last:rounded-r-[4px]"
+            >
+              <PiAlignBottom className="text-brand-light h-4 w-4" />
+            </button>
           </div>
         </div>
-
-        <div className="flex flex-row gap-x-2">
-          <Input
-            label="Position"
-            value={clip?.transform?.x.toFixed(0).toString() ?? "0"}
-            onChange={(value) =>
-              updateClip(clipId, {
-                transform: { ...clip?.transform!, x: Number(value) },
-              })
-            }
-            startLogo="X"
-          />
-          <Input
-            emptyLabel
-            value={clip?.transform?.y.toFixed(0).toString() ?? "0"}
-            onChange={(value) =>
-              updateClip(clipId, {
-                transform: { ...clip?.transform!, y: Number(value) },
-              })
-            }
-            startLogo="Y"
-          />
-        </div>
-        <Input
-          label="Rotation"
-          value={clip?.transform?.rotation.toFixed(0).toString() ?? "0"}
-          onChange={(value) => handleRotationChange(Number(value))}
-          startLogo="R"
-        />
       </div>
     </div>
   );

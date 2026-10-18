@@ -120,7 +120,7 @@ const Row: React.FC<{
   onChange: (value: string) => void;
 }> = ({ label, value, options, onChange }) => (
   <div className="flex flex-row gap-x-2 items-center">
-    <h4 className="text-brand-light text-[10.5px] text-start w-1/3 shrink-0">
+    <h4 className="text-brand-light text-[12px] text-start w-[112px] shrink-0">
       {label}
     </h4>
     <Select value={value} onValueChange={onChange}>
@@ -146,8 +146,8 @@ const Section: React.FC<{ title: string; note?: string; children: React.ReactNod
   note,
   children,
 }) => (
-  <div className="flex flex-col gap-y-3 min-w-0 p-4 px-5 border-b border-brand-light/5">
-    <h4 className="text-brand-light text-[12px] font-medium text-start mb-1">{title}</h4>
+  <div className="flex flex-col gap-y-3 min-w-0 px-3 py-3.5 border-b border-brand-light/5">
+    <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start mb-1">{title}</h4>
     {children}
     {note && <p className="text-brand-light/50 text-[10px] text-start">{note}</p>}
   </div>

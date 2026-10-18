@@ -87,7 +87,7 @@ const Input: React.FC<InputProps<string>> = ({
       {(label || description || emptyLabel) && (
         <div className="flex items-center gap-1.5 w-full text-start mb-0.5">
           {(label || emptyLabel) && (
-            <label className={cn("text-brand-light text-[10.5px] font-medium", {
+            <label className={cn("text-brand-light text-[12px]", {
               "text-transparent": emptyLabel,
             })}>
               {emptyLabel ? "Empty" : label}
@@ -116,17 +116,15 @@ const Input: React.FC<InputProps<string>> = ({
     
       <div className="relative w-full flex flex-row items-center min-w-0">
         {startLogo && (
-          <span className="text-brand-light/50 font-medium text-[11px] absolute left-2 top-1/2 -translate-y-1/2">
+          <span className="text-[#949494] text-[12px] absolute left-2 top-1/2 -translate-y-1/2">
             {startLogo}
           </span>
         )}
         <input
           className={cn(
-            `w-full h-6 px-1.5 text-brand-light text-[11px] font-normal items-center border border-brand-light/10 p-1  bg-brand ${className}`,
+            `w-full h-[22px] px-1.5 text-brand-lighter text-[12px] tabular-nums font-normal items-center p-1 rounded-[4px] bg-brand ${className}`,
             {
               "pl-6": startLogo,
-              "rounded-l": canStep,
-              rounded: !canStep,
             },
           )}
           value={tempValue}
@@ -135,7 +133,7 @@ const Input: React.FC<InputProps<string>> = ({
           onKeyDown={handleKeyDown}
         />
         {canStep && (
-          <div className={cn("flex flex-col items-center w-6 justify-center divide-y divide-brand-light/10 bg-brand  h-6 cursor-pointer rounded-r", stepClassName)}>
+          <div className={cn("ml-0.5 flex flex-col items-center w-4 justify-center bg-brand-background-light h-[22px] cursor-pointer rounded-[3px]", stepClassName)}>
             <button
               className="w-full h-full px-1 hover:bg-brand-light/10 transition-all duration-200 flex items-center justify-center rounded-tr"
               onClick={() => {

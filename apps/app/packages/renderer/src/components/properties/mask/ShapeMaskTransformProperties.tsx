@@ -126,7 +126,7 @@ const ShapeMaskTransformProperties: React.FC<
 
   if (!mask || !shapeBounds) {
     return (
-      <div className="p-4 px-5">
+      <div className="px-3 py-3.5">
         <p className="text-brand-light/50 text-[11px]">
           No shape mask selected
         </p>
@@ -136,9 +136,9 @@ const ShapeMaskTransformProperties: React.FC<
 
   return (
     <div className="flex flex-col gap-y-2 min-w-0">
-      <div className="p-4 flex flex-col gap-y-4 px-5 min-w-0">
+      <div className="px-3 py-3.5 flex flex-col gap-y-3 min-w-0">
         <div className="flex flex-row items-center justify-between">
-          <h4 className="text-brand-light text-[12px] font-medium text-start">
+          <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start">
             Transform
           </h4>
           <span

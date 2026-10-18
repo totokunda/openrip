@@ -113,9 +113,9 @@ const LineProperties: React.FC<LinePropertiesProps> = ({ clipId }) => {
 
   return (
     <div className="flex flex-col gap-y-2 min-w-0">
-      <div className="p-4 flex flex-col gap-y-4 px-5 min-w-0">
+      <div className="px-3 py-3.5 flex flex-col gap-y-3 min-w-0">
         <div className="flex flex-row items-center justify-between">
-          <h4 className="text-brand-light text-[12px] font-medium text-start">
+          <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start">
             Line
           </h4>
           <span
