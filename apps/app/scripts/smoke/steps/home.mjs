@@ -14,7 +14,11 @@ export default async ({ win, shot }) => {
   check("projects listed, the open one marked", (await cards.count()) > 0 && (await active.count()) === 1, `${await cards.count()} cards`);
   const n = await cards.count();
   const cover = await active.locator("img").count();
+  // The sizes are in the Custom size card's menu.
+  await win.locator("[data-testid=home-sizes]").click();
+  await win.waitForTimeout(300);
   const presets = await win.locator("[data-testid^=new-project-]").count();
+  await win.keyboard.press("Escape");
   check("new-project sizes offered", presets >= 4, `${presets} sizes`);
   await openEditor(win);
   return `${n} projects; open one has a cover: ${cover > 0}\n  ` + report();

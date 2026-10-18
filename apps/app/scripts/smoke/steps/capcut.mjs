@@ -23,13 +23,14 @@ export default async ({ win, shot }) => {
   const want = process.env.CAPCUT_DRAFT || "";
   await openCapCutDialog(win);
   await shot("c1-capcut-dialog");
-  const cards = win.getByRole("dialog").locator("button[title]");
+  const cards = win.locator("[data-testid=capcut-draft]");
   const n = await cards.count();
-  // The card named exactly that, else the first whose text contains it.
+  // The card named exactly that, else the first whose name contains it (cards show long
+  // names cut in the middle, so this reads the full name from data-name).
   let picked = null;
   for (let i = 0; i < n; i++) {
-    const t = await cards.nth(i).innerText();
-    if (t.split("\n")[0].trim() === want) { picked = cards.nth(i); break; }
+    const t = (await cards.nth(i).getAttribute("data-name")) ?? "";
+    if (t === want) { picked = cards.nth(i); break; }
     if (!picked && t.includes(want)) picked = cards.nth(i);
   }
   if (!picked) throw new Error(`no draft matching "${want}" among ${n}`);

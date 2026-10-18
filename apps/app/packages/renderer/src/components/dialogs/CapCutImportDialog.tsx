@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { LuFolderOpen, LuLoader, LuSearch } from "react-icons/lu";
+import { LuClapperboard, LuFolderOpen, LuLoader, LuSearch } from "react-icons/lu";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,9 +12,17 @@ const formatDuration = (us: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
+/** A long name cut in the middle, as the home screen's project cards show it. */
+const middle = (name: string, max: number) => {
+  if (name.length <= max) return name;
+  const head = Math.ceil((max - 1) / 2);
+  return `${name.slice(0, head)}…${name.slice(name.length - (max - 1 - head))}`;
+};
+
 /**
- * Open a CapCut draft as a new project: CapCut's drafts on this Mac with their covers, or a
- * draft folder picked by hand. The draft itself is only read.
+ * Open a CapCut draft as a new project: CapCut's drafts on this Mac with their covers, laid
+ * out like the home screen's project grid, or a draft folder picked by hand. The draft itself
+ * is only read.
  */
 export const CapCutImportDialog: React.FC<{
   open: boolean;
@@ -64,66 +72,90 @@ export const CapCutImportDialog: React.FC<{
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="w-full max-w-2xl dark p-0 h-[560px] gap-0 flex flex-col font-poppins">
-        <DialogTitle className="text-brand-light text-xs font-medium px-5 pt-4">Open a CapCut project</DialogTitle>
-        <p className="px-5 pt-1 text-[10px] text-brand-light/60">
-          Makes a new OpenRip project from a CapCut draft. Clips can be moved, trimmed and retyped; captions, effects and animations are drawn as CapCut draws them. The draft isn't changed.
-        </p>
-        <div className="relative mx-5 mt-3">
-          <LuSearch className="w-3.5 h-3.5 text-brand-light/60 absolute left-2 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search drafts..."
-            className="w-full h-8 rounded-[6px] pl-7 px-2 text-[11px] bg-brand-light/5 border border-brand-light/10 text-brand-light/90 placeholder:text-brand-light/40 focus:outline-none focus:border-brand-light/30"
-          />
+      <DialogContent
+        data-testid="capcut-dialog"
+        className="w-full max-w-[728px] dark p-0 h-[580px] gap-0 flex flex-col bg-[#262626] border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_16px_48px_rgba(0,0,0,0.55)] sm:rounded-[12px] overflow-hidden"
+      >
+        <div className="px-6 pt-5 pr-12">
+          <DialogTitle className="text-[15px] font-semibold text-[#e0e0e0]">Open a CapCut project</DialogTitle>
+          <p className="pt-1.5 text-[12px] leading-[18px] text-[#8a8a8a]">
+            Makes a new OpenRip project from a CapCut draft. Clips can be moved, trimmed and retyped; captions, effects and animations are drawn as CapCut draws them. The draft isn't changed.
+          </p>
         </div>
-        <ScrollArea className="flex-1 min-h-0 mt-3">
-          <div className="grid grid-cols-4 gap-3 px-5 pb-4">
-            {drafts === null && <div className="col-span-4 text-[11px] text-brand-light/60 flex items-center gap-2"><LuLoader className="w-3.5 h-3.5 animate-spin" /> Looking for CapCut drafts…</div>}
+        <div className="px-6 pt-4 pb-3 flex items-center justify-between gap-3">
+          <span className="text-[13px] font-semibold text-[#e0e0e0]">
+            Drafts{drafts && drafts.length > 0 ? <span className="ml-1.5 font-normal text-[#7a7a7a] tabular-nums">{drafts.length}</span> : null}
+          </span>
+          <div className="relative">
+            <LuSearch className="w-3.5 h-3.5 text-[#7a7a7a] absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search drafts"
+              data-testid="capcut-search"
+              className="w-[220px] h-[26px] rounded-[4px] pl-7 pr-2 text-[12px] bg-[#141414] border-[0.5px] border-[#3a3a3a] text-brand-light placeholder:text-brand-light/35 focus:outline-none focus:border-[#5a5a5a]"
+            />
+          </div>
+        </div>
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="grid grid-cols-[repeat(auto-fill,124px)] justify-between gap-x-4 gap-y-5 px-6 pb-5">
+            {drafts === null && (
+              <div className="col-span-full h-40 text-[12px] text-[#8a8a8a] flex items-center justify-center gap-2">
+                <LuLoader className="w-3.5 h-3.5 animate-spin" /> Looking for CapCut drafts…
+              </div>
+            )}
             {drafts !== null && shown.length === 0 && (
-              <div className="col-span-4 text-[11px] text-brand-light/60">{drafts.length === 0 ? "No CapCut drafts found on this Mac. Choose a draft folder instead." : "No matching drafts."}</div>
+              <div className="col-span-full h-40 text-[12px] text-[#8a8a8a] flex items-center justify-center text-center">
+                {drafts.length === 0 ? "No CapCut drafts found on this Mac. Choose a draft folder instead." : "No matching drafts."}
+              </div>
             )}
             {shown.map((d) => (
               <button
                 key={d.folder}
                 type="button"
+                data-testid="capcut-draft"
+                data-name={d.name}
                 disabled={!!busy}
                 onClick={() => void importFrom(d.folder)}
                 title={d.folder}
                 className={cn(
-                  "group flex flex-col text-left rounded-[8px] border border-brand-light/10 bg-brand-light/5 overflow-hidden transition-colors",
-                  busy ? "cursor-wait" : "hover:border-brand-light/30 hover:bg-brand-light/10 cursor-pointer",
+                  "group w-[124px] flex flex-col gap-1.5 text-left min-w-0 focus-visible:outline-none",
+                  busy ? "cursor-wait" : "cursor-pointer",
                   busy && busy !== d.folder && "opacity-50",
                 )}
               >
-                <div className="relative w-full aspect-[9/12] bg-black/40 flex items-center justify-center overflow-hidden">
-                  {d.cover ? <img src={`app://user-data${encodeURI(d.cover)}`} alt="" className="w-full h-full object-contain" loading="lazy" /> : null}
+                <div className="relative w-[124px] h-[123px] rounded-[6px] overflow-hidden bg-[#1a1a1a] flex items-center justify-center text-brand-light/25 transition-[filter] group-hover:brightness-125 group-focus-visible:ring-2 group-focus-visible:ring-brand-accent">
+                  {d.cover ? <img src={`app://user-data${encodeURI(d.cover)}`} alt="" className="w-full h-full object-cover" loading="lazy" draggable={false} /> : <LuClapperboard className="w-6 h-6" />}
                   {busy === d.folder && (
                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                       <LuLoader className="w-5 h-5 text-brand-light animate-spin" />
                     </div>
                   )}
                 </div>
-                <div className="px-2 py-1.5">
-                  <div className="text-[11px] text-brand-light truncate">{d.name}</div>
-                  <div className="text-[10px] text-brand-light/50">
-                    {formatDuration(d.durationUs)} · {d.modifiedMs ? new Date(d.modifiedMs).toLocaleDateString() : ""}
-                  </div>
+                <div className="flex flex-col min-w-0 gap-0.5">
+                  <span className="text-[13px] text-[#cccccc] whitespace-nowrap" title={d.name}>
+                    {middle(d.name, 19)}
+                  </span>
+                  <span className="text-[11.5px] text-[#7a7a7a] tabular-nums whitespace-nowrap">
+                    {formatDuration(d.durationUs)}
+                    {d.modifiedMs ? ` | ${new Date(d.modifiedMs).toLocaleDateString()}` : ""}
+                  </span>
                 </div>
               </button>
             ))}
           </div>
         </ScrollArea>
-        <div className="border-t border-brand-light/10 px-5 py-3 flex items-center">
+        <div className="border-t-[0.5px] border-[#3a3a3a] px-6 h-[60px] flex items-center justify-between">
+          <span className="text-[11.5px] text-[#7a7a7a]">Drafts are read from CapCut's projects folder.</span>
           <button
             type="button"
             disabled={!!busy}
             onClick={() => void pick()}
-            className="flex items-center gap-2 text-[11px] text-brand-light/80 hover:text-brand-light disabled:opacity-50"
+            data-testid="capcut-pick"
+            className="h-8 px-3.5 flex items-center gap-2 rounded-[6px] text-[13px] font-medium text-[#e0e0e0] bg-[#3a3a3a] hover:bg-[#444444] disabled:opacity-50 cursor-pointer"
           >
-            <LuFolderOpen className="w-3.5 h-3.5" />
+            <LuFolderOpen className="w-4 h-4" />
             Choose a draft folder…
           </button>
         </div>

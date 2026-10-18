@@ -6,6 +6,9 @@ import {
   LuFolderOpen,
   LuHouse,
   LuChevronDown,
+  LuChevronRight,
+  LuClapperboard,
+  LuCheck,
   LuLayoutGrid,
   LuLayoutTemplate,
   LuList,
@@ -33,6 +36,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -46,7 +50,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 /**
@@ -63,6 +66,17 @@ const menu = "dark p-1 bg-brand-header border-[0.5px] border-black shadow-[0_0_0
 const menuRow = "dark h-8 px-2.5 gap-2.5 rounded-[4px] text-[13px] cursor-pointer focus:bg-brand-hover";
 
 const VIEW_KEY = "openrip:home-view";
+
+// CapCut's home colour roles (docs/plan/capcut-ui-spec.md §4.15), on OpenRip's lavender
+// instead of CapCut's cyan: a page barely off black with the accent's hue, cards a step
+// lighter, a bright banner with near-black type, and a dark saturated tint of the accent for
+// the wide first card.
+const PAGE_BG = "linear-gradient(180deg, #110d15 0%, #0b0a0d 40%, #090909 100%)";
+const BANNER_BG =
+  "radial-gradient(120% 170% at 50% -30%, rgba(255,255,255,0.30), rgba(255,255,255,0) 55%), linear-gradient(100deg, #c9a8e4 0%, #ba93dd 52%, #a77ecc 100%)";
+const BANNER_TEXT = "#0d0b10";
+const CARD_BG = "bg-[#16141a] hover:bg-[#1c1a21]";
+const FEATURE_BG = "linear-gradient(135deg, #3a2a50 0%, #2c2140 100%)";
 
 /** "Edited 5 min ago", "Edited yesterday", "Edited 12 Oct". */
 const editedLabel = (ms?: number) => {
@@ -300,11 +314,11 @@ const NavItem: React.FC<{ icon: IconType; label: string; active: boolean; onClic
     aria-pressed={active}
     onClick={onClick}
     className={cn(
-      "w-full h-8 flex items-center gap-3 px-2.5 rounded-[6px] text-[13px] transition-colors cursor-pointer",
-      active ? "bg-[#221b29] text-brand-light" : "text-[#cccccc] hover:text-brand-light hover:bg-white/[0.04]",
+      "w-full h-8 flex items-center gap-3 px-2.5 rounded-[6px] text-[13px] font-medium transition-colors cursor-pointer",
+      active ? "bg-[#1f1925] text-[#e0e0e0]" : "text-[#cccccc] hover:text-brand-light hover:bg-white/[0.04]",
     )}
   >
-    <Icon className="w-3.5 h-3.5" />
+    <Icon className="w-4 h-4" />
     {label}
   </button>
 );
@@ -323,16 +337,100 @@ const QuickStart: React.FC<{ icon: IconType; title: string; note: string; onClic
     data-testid={testId}
     onClick={onClick}
     disabled={busy}
-    className="w-[188px] h-[136px] shrink-0 flex flex-col justify-between p-3 rounded-[8px] bg-white/[0.035] hover:bg-white/[0.06] transition-colors text-left cursor-pointer disabled:cursor-wait"
+    className={cn(
+      "w-full min-w-0 h-[134px] flex flex-col justify-between p-4 rounded-[8px] transition-colors text-left cursor-pointer disabled:cursor-wait",
+      CARD_BG,
+    )}
   >
-    <span className="h-9 w-9 rounded-[6px] bg-white/[0.06] flex items-center justify-center text-brand-light">
-      {busy ? <LuLoader className="w-4 h-4 animate-spin" /> : <Icon className="w-4 h-4" />}
+    <span className="h-10 w-10 rounded-[8px] bg-white/[0.07] flex items-center justify-center text-brand-light">
+      {busy ? <LuLoader className="w-[18px] h-[18px] animate-spin" /> : <Icon className="w-[18px] h-[18px]" />}
     </span>
     <span className="flex flex-col min-w-0 gap-0.5">
-      <span className="text-[14px] font-semibold text-brand-lighter truncate">{title}</span>
-      <span className="text-[12px] text-[#949494] line-clamp-2">{note}</span>
+      <span className="text-[15px] font-semibold text-brand-lighter truncate">{title}</span>
+      <span className="text-[13px] leading-[18px] text-[#9a9a9a] line-clamp-2">{note}</span>
     </span>
   </button>
+);
+
+/**
+ * The wide first card, where CapCut has its assistant: carry on with the last project, or,
+ * with none yet, start one from your files. Its field-like row is the card's action.
+ */
+const FeatureCard: React.FC<{ last: ProjectSettings | null; busy: boolean; onContinue: () => void; onStart: () => void }> = ({
+  last,
+  busy,
+  onContinue,
+  onStart,
+}) => (
+  <button
+    type="button"
+    data-testid={last ? "home-continue" : "home-start"}
+    onClick={last ? onContinue : onStart}
+    disabled={busy}
+    className="w-full min-w-0 h-[134px] flex flex-col justify-between p-4 rounded-[8px] text-left cursor-pointer disabled:cursor-wait transition-[filter] hover:brightness-110"
+    style={{ background: FEATURE_BG }}
+  >
+    <span className="flex items-center gap-2 text-[15px] font-semibold text-[#d9c4ee]">
+      <LuClapperboard className="w-[18px] h-[18px]" />
+      {last ? "Continue editing" : "Start editing"}
+    </span>
+    <span className="text-[21px] font-bold italic text-brand-lighter truncate" title={last?.name}>
+      {last ? middle(last.name, 34) : "What will you make today?"}
+    </span>
+    <span className="h-10 flex items-center gap-2 pl-3 pr-1.5 rounded-[8px] bg-white/[0.08] text-[13px] text-brand-light/60">
+      <span className="flex-1 truncate">
+        {last ? `${editedLabel(last.lastModified)} · ${sizeLabel(last.sizeBytes)} | ${lengthLabel(last.durationUs)}` : "Import media to start a new project"}
+      </span>
+      <span className="h-7 w-7 rounded-full bg-white/15 flex items-center justify-center text-brand-lighter">
+        {busy ? <LuLoader className="w-3.5 h-3.5 animate-spin" /> : last ? <LuChevronRight className="w-4 h-4" /> : <LuPlus className="w-4 h-4" />}
+      </span>
+    </span>
+  </button>
+);
+
+/** "Custom size": the canvas presets, each a new project at that size. */
+const SizeCard: React.FC<{ creating: string | null; onCreate: (p: (typeof ASPECT_PRESETS)[number]) => void }> = ({ creating, onCreate }) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger
+      data-testid="home-sizes"
+      disabled={!!creating}
+      className={cn("w-full min-w-0 h-[134px] flex flex-col justify-between p-4 rounded-[8px] transition-colors text-left cursor-pointer disabled:cursor-wait", CARD_BG)}
+    >
+      <span className="h-10 w-10 rounded-[8px] bg-white/[0.07] flex items-center justify-center text-brand-light">
+        <RatioFrame width={16} height={9} size={18} />
+      </span>
+      <span className="flex flex-col min-w-0 gap-0.5">
+        <span className="flex items-center gap-1 text-[15px] font-semibold text-brand-lighter">
+          Custom size <LuChevronDown className="w-3.5 h-3.5 opacity-60" />
+        </span>
+        <span className="text-[13px] leading-[18px] text-[#9a9a9a] line-clamp-2">16:9, 9:16, 1:1 and more</span>
+      </span>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="start" className={cn(menu, "w-52")}>
+      {ASPECT_PRESETS.map((p) => (
+        <DropdownMenuItem
+          key={p.id}
+          data-testid={`new-project-${p.id}`}
+          className={menuRow}
+          disabled={!!creating}
+          onClick={() => onCreate(p)}
+        >
+          <span className="w-5 flex items-center justify-center text-brand-light/80">
+            {creating === p.id ? <LuLoader className="w-3.5 h-3.5 animate-spin" /> : <RatioFrame width={p.width} height={p.height} size={15} />}
+          </span>
+          <span className="flex-1">{p.name}</span>
+          <span className="text-brand-light/45 tabular-nums">{p.id}</span>
+        </DropdownMenuItem>
+      ))}
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
+
+/** The banner's "+": a near-black tile, as CapCut's. */
+const PlusTile: React.FC<{ size: number; busy: boolean }> = ({ size, busy }) => (
+  <span className="rounded-[6px] flex items-center justify-center text-white shrink-0" style={{ width: size, height: size, background: BANNER_TEXT }}>
+    {busy ? <LuLoader className="w-4 h-4 animate-spin" /> : <LuPlus className="w-[18px] h-[18px] stroke-[3]" />}
+  </span>
 );
 
 const HomeScreen: React.FC = () => {
@@ -355,6 +453,8 @@ const HomeScreen: React.FC = () => {
   const [capcutOpen, setCapcutOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toDelete, setToDelete] = useState<ProjectSettings | null>(null);
+  // Scrolled past the banner: CapCut keeps a slimmer one pinned at the top.
+  const [compact, setCompact] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const refreshed = useRef(false);
 
@@ -463,14 +563,14 @@ const HomeScreen: React.FC = () => {
           <LuSearch className="w-3.5 h-3.5" />
         </button>
       )}
-      {section === "home" && (
-        <DropdownMenu>
-          <DropdownMenuTrigger title="View" data-testid="home-view" className={tool}>
-            {view === "grid" ? <LuLayoutGrid className="w-3.5 h-3.5" /> : <LuList className="w-3.5 h-3.5" />}
-            <LuChevronDown className="w-3 h-3 opacity-70" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className={cn(menu, "w-32")}>
-            {([
+      <DropdownMenu>
+        <DropdownMenuTrigger title="View and sort" data-testid="home-view" className={tool}>
+          {view === "grid" || section !== "home" ? <LuLayoutGrid className="w-3.5 h-3.5" /> : <LuList className="w-3.5 h-3.5" />}
+          <LuChevronDown className="w-3 h-3 opacity-70" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className={cn(menu, "w-40")}>
+          {section === "home" &&
+            ([
               ["grid", LuLayoutGrid, "Grid"],
               ["list", LuList, "List"],
             ] as const).map(([v, Icon, label]) => (
@@ -478,19 +578,20 @@ const HomeScreen: React.FC = () => {
                 <Icon className="w-4 h-4" /> {label}
               </DropdownMenuItem>
             ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-      <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
-        <SelectTrigger size="sm" className="w-[118px] !h-6 px-2 text-[12px] bg-[#29292d] border-transparent rounded-[4px] text-brand-light/85">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent className="dark bg-brand-header text-brand-light">
-          <SelectItem value="edited" className="text-[12px]">Last edited</SelectItem>
-          <SelectItem value="created" className="text-[12px]">Newest first</SelectItem>
-          <SelectItem value="name" className="text-[12px]">Name</SelectItem>
-        </SelectContent>
-      </Select>
+          {section === "home" && <DropdownMenuSeparator className="bg-brand-hover mx-1" />}
+          <DropdownMenuLabel className="px-2.5 py-1 text-[11px] font-normal text-[#7a7a7a]">Sort by</DropdownMenuLabel>
+          {([
+            ["edited", "Last edited"],
+            ["created", "Newest first"],
+            ["name", "Name"],
+          ] as const).map(([key, label]) => (
+            <DropdownMenuItem key={key} data-testid={`home-sort-${key}`} className={cn(menuRow, sort === key && "text-brand-accent")} onClick={() => setSort(key)}>
+              <span className="w-4 flex items-center">{sort === key && <LuCheck className="w-3.5 h-3.5" />}</span>
+              {label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 
@@ -504,10 +605,22 @@ const HomeScreen: React.FC = () => {
     <div
       data-testid="home"
       className="w-full h-screen flex text-brand-light select-none"
-      style={{ background: "linear-gradient(180deg, #16101b 0%, #0c0b0d 45%, #090909 100%)" }}
+      style={{ background: PAGE_BG }}
     >
       <aside className="w-[216px] shrink-0 flex flex-col gap-3 px-5 pt-5">
-        <div className="h-8 px-2.5 flex items-center text-[15px] font-semibold tracking-tight mb-2">OpenRip</div>
+        {/* Where CapCut has its account card: OpenRip has no accounts, so it says what it is. */}
+        <div className="flex items-center gap-2.5 p-3 rounded-[8px] bg-[#121115] mb-3 text-left">
+          <span
+            className="h-9 w-9 rounded-full flex items-center justify-center shrink-0"
+            style={{ background: "linear-gradient(135deg, #c9a8e4 0%, #a77ecc 100%)", color: BANNER_TEXT }}
+          >
+            <LuClapperboard className="w-[18px] h-[18px]" />
+          </span>
+          <span className="flex flex-col min-w-0">
+            <span className="text-[14px] font-semibold text-brand-lighter">OpenRip</span>
+            <span className="text-[12px] text-[#8a8a8a] truncate">Video editor</span>
+          </span>
+        </div>
         <NavItem icon={LuHouse} label="Home" active={section === "home"} onClick={() => setSection("home")} testId="home-nav-home" />
         <NavItem icon={LuLayoutTemplate} label="Templates" active={section === "templates"} onClick={() => setSection("templates")} testId="home-nav-templates" />
         <div className="h-px bg-white/[0.06] my-1" />
@@ -519,64 +632,75 @@ const HomeScreen: React.FC = () => {
         <header className="h-11 shrink-0 flex items-center justify-end px-4 [&_button]:!w-6 [&_button]:!h-6 [&_button]:!border-0 [&_button]:!bg-transparent [&_button:hover]:!bg-white/[0.06]">
           <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
         </header>
-        <main className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-          <div className="pl-6 pr-[60px] pb-16 flex flex-col gap-7">
+        <main
+          className="flex-1 min-h-0 overflow-y-auto custom-scrollbar"
+          onScroll={(e) => {
+            // Hysteresis, so the pinned banner doesn't flicker at the edge.
+            const top = e.currentTarget.scrollTop;
+            setCompact((was) => (was ? top > 96 : top > 128));
+          }}
+        >
+          <div className="pl-6 pr-[60px] pb-16">
+            {section === "home" && (
+              // The banner pinned at the top once the full one has scrolled away (CapCut's
+              // 87 px bar). It takes no room: the page scrolls under it.
+              <div
+                className={cn(
+                  "sticky top-0 z-20 h-[87px] -mb-[87px] transition-opacity duration-150",
+                  compact ? "opacity-100" : "opacity-0 pointer-events-none",
+                )}
+                aria-hidden={!compact}
+              >
+                <button
+                  type="button"
+                  tabIndex={compact ? 0 : -1}
+                  disabled={!!creating}
+                  onClick={() => void create("default")}
+                  className="w-full h-full rounded-[8px] flex items-center justify-center gap-3 cursor-pointer disabled:cursor-wait shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+                  style={{ background: BANNER_BG }}
+                >
+                  <PlusTile size={26} busy={creating === "default"} />
+                  <span className="text-[23px] font-bold tracking-[-0.01em]" style={{ color: BANNER_TEXT }}>
+                    Create project
+                  </span>
+                </button>
+              </div>
+            )}
+            <div className="flex flex-col gap-7">
             {section === "home" && (
               <>
-                <section className="flex flex-col gap-3">
-                  <div
-                    className="relative h-[143px] rounded-[8px] overflow-hidden flex flex-col items-center justify-center gap-3"
-                    style={{ background: "linear-gradient(110deg, #6e4d8d 0%, #9a73bd 50%, #c3a3dc 100%)" }}
+                <section className="flex flex-col gap-5">
+                  <button
+                    type="button"
+                    data-testid="new-project"
+                    disabled={!!creating}
+                    onClick={() => void create("default")}
+                    title="A new project, sized by the first clip you add"
+                    className="w-full h-[143px] rounded-[8px] overflow-hidden flex items-center justify-center gap-3.5 cursor-pointer disabled:cursor-wait transition-[filter] hover:brightness-[1.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                    style={{ background: BANNER_BG }}
                   >
-                    <button
-                      type="button"
-                      data-testid="new-project"
-                      disabled={!!creating}
-                      onClick={() => void create("default")}
-                      className="flex items-center gap-3 text-[26px] font-bold text-white cursor-pointer disabled:cursor-wait"
-                    >
-                      <span className="h-7 w-7 rounded-[5px] bg-[#1b1320] text-white flex items-center justify-center">
-                        {creating === "default" ? <LuLoader className="w-4 h-4 animate-spin" /> : <LuPlus className="w-4 h-4 stroke-[3]" />}
-                      </span>
+                    <PlusTile size={36} busy={creating === "default"} />
+                    <span className="text-[28px] font-bold tracking-[-0.01em]" style={{ color: BANNER_TEXT }}>
                       Create project
-                    </button>
-                    {/* Or at a size: one click each. */}
-                    <div className="flex items-center gap-1.5">
-                      {ASPECT_PRESETS.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          data-testid={`new-project-${p.id}`}
-                          title={`New ${p.name.toLowerCase()} project (${p.id})`}
-                          disabled={!!creating}
-                          onClick={() => void create(p.id, { width: p.width, height: p.height, id: p.id })}
-                          className="h-6 pl-1.5 pr-2 flex items-center gap-1.5 rounded-full bg-black/20 hover:bg-black/35 text-white/90 hover:text-white text-[12px] tabular-nums transition-colors cursor-pointer disabled:cursor-wait"
-                        >
-                          <span className="w-4 flex items-center justify-center">
-                            {creating === p.id ? <LuLoader className="w-3 h-3 animate-spin" /> : <RatioFrame width={p.width} height={p.height} size={13} />}
-                          </span>
-                          {p.id}
-                        </button>
-                      ))}
-                    </div>
-                    <span className="absolute bottom-2 text-[11px] text-white/65">
-                      Sized by the first clip you add, or pick a size.
                     </span>
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    <QuickStart icon={LuFolderInput} title="Open a CapCut project" note="Its draft is read, never changed" onClick={() => setCapcutOpen(true)} testId="home-open-capcut" />
-                    <QuickStart icon={LuUpload} title="Import media" note="A new project, starting with your files" onClick={() => void create("import", undefined, true)} testId="home-import" busy={creating === "import"} />
-                    {last && (
-                      <QuickStart icon={LuPlay} title={`Continue ${last.name}`} note={editedLabel(last.lastModified)} onClick={() => openProject(last.id)} testId="home-continue" />
-                    )}
+                  </button>
+                  <div className="grid gap-5" style={{ gridTemplateColumns: "minmax(0,2fr) repeat(4, minmax(0,1fr))" }}>
+                    <FeatureCard
+                      last={last}
+                      busy={creating === "import"}
+                      onContinue={() => last && openProject(last.id)}
+                      onStart={() => void create("import", undefined, true)}
+                    />
+                    <QuickStart icon={LuFolderInput} title="CapCut project" note="Open a draft; it's only read, never changed" onClick={() => setCapcutOpen(true)} testId="home-open-capcut" />
+                    <QuickStart icon={LuUpload} title="Import media" note="Start a new project from your files" onClick={() => void create("import", undefined, true)} testId="home-import" busy={creating === "import"} />
+                    <SizeCard creating={creating} onCreate={(p) => void create(p.id, { width: p.width, height: p.height, id: p.id })} />
+                    <QuickStart icon={LuLibrary} title="Library" note="Every project and its file" onClick={() => setSection("library")} testId="home-library-card" />
                   </div>
                 </section>
 
                 <section className="flex flex-col gap-4">
                   <div className="flex items-center justify-between gap-4">
-                    <h2 className="text-[16px] font-bold text-brand-light">
-                      Projects <span className="text-[#7a7a7a] font-normal tabular-nums ml-1 text-[13px]">{projects.length}</span>
-                    </h2>
+                    <h2 className="text-[16px] font-bold text-brand-light">Projects</h2>
                     {toolbar}
                   </div>
                   {shown.length === 0 ? empty : list(shown)}
@@ -613,6 +737,7 @@ const HomeScreen: React.FC = () => {
                 {shown.length === 0 ? empty : list(shown, true)}
               </section>
             )}
+            </div>
           </div>
         </main>
       </div>
