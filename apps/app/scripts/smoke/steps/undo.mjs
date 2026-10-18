@@ -31,7 +31,7 @@ export default async (ctx) => {
     slider: async () => {
       await pick("video", 0, 6);
       await openTab(win, "Adjust");
-      const t = await thumb(win, "Brightness");
+      const t = await thumb(win, "Brilliance");
       await settled(win, () => drag(win, t.x, t.y, t.x + 60, t.y));
     },
     volume: async () => {

@@ -69,7 +69,7 @@ export default async (ctx) => {
         "video slider": async () => {
           await pick(video);
           await openTab(win, "Adjust");
-          const t = await thumb(win, "Brightness");
+          const t = await thumb(win, "Brilliance");
           await settled(win, () => drag(win, t.x, t.y, t.x + 50, t.y));
         },
         // The caption moved later by about a second, off the playhead.

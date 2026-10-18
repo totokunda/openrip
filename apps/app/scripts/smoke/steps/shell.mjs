@@ -34,7 +34,7 @@ export default async (ctx) => {
   await openTab(win, "Transform");
   await shot("i-text-transform");
   await select(ctx, await doc(), (await clipOf("video")).clipId, 6);
-  check("a video's tabs: Video, (Audio,) Speed, Animation, Adjust", /^Video,(Audio,)?Speed,Animation,Adjust,Basic,Mask$/.test(await tabs()), await tabs());
+  check("a video's tabs: Video, (Audio,) Speed, Animation, Adjust", /^Video,(Audio,)?Speed,Animation,Adjust,Basic,Remove BG,Mask$/.test(await tabs()), await tabs());
   await openTab(win, "Mask");
   await shot("i-video-mask");
   await openTab(win, "Adjust");
