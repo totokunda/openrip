@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
 import { SNAP_PX, snapPoints, snapToPoints } from "@/lib/timeline-edit";
+import { projectBeatPoints } from "@/lib/audio-tools";
 import { cn } from "@/lib/utils";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 
@@ -91,7 +92,7 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
     if (!controls.snapping || skip) return nearest;
     const { clips, markers } = useClipStore.getState();
     const [startFrame, endFrame] = timelineDuration;
-    const points = snapPoints(clips, { playhead: -Infinity, markers, exclude: new Set() });
+    const points = snapPoints(clips, { playhead: -Infinity, markers, exclude: new Set(), beats: projectBeatPoints(clips) });
     const hit = snapToPoints([frame], points, (SNAP_PX * Math.max(1, endFrame - startFrame)) / Math.max(1, stageWidth));
     return hit ? hit.point : nearest;
   };

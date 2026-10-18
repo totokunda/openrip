@@ -53,6 +53,8 @@ import MaskKeyframes from "./MaskKeyframes";
 import ClipKeyframes from "./ClipKeyframes";
 import MotionMarks from "./MotionMarks";
 import { freezeTarget } from "@/lib/timeline-motion";
+import BeatMarkers from "./BeatMarkers";
+import { projectBeatPoints, soundMenuItems } from "@/lib/audio-tools";
 import { useViewportStore } from "@/lib/viewport";
 import { useContextMenuStore, ContextMenuItem } from "@/lib/context-menu";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -805,7 +807,7 @@ const TimelineClip: React.FC<
       if (chosenGap && controls.snapping && !e.evt.metaKey) {
         const [gLo, gHi] = chosenGap;
         const moving = new Set([currentClipId, ...(controls.linkage ? linkedClips(stateNow.clips, currentClip) : []).map((c) => c.clipId)]);
-        const points = snapPoints(stateNow.clips, { playhead: controls.focusFrame, markers: stateNow.markers, exclude: moving });
+        const points = snapPoints(stateNow.clips, { playhead: controls.focusFrame, markers: stateNow.markers, exclude: moving, beats: projectBeatPoints(stateNow.clips, moving) });
         const start = frameOfPx(validatedLeft);
         const hit = snapToPoints([start, start + clipLen], points, (SNAP_PX * visibleFrames) / timelineWidth);
         if (hit) {
@@ -1289,6 +1291,8 @@ const TimelineClip: React.FC<
             id: "clip-actions",
             items: [...clipActions],
           },
+          // Beats and loudness on a clip with sound (lib/audio-tools.ts).
+          { id: "audio", items: soundMenuItems(clip) },
           {
             id: "other",
             items: [...otherCommands],
@@ -1346,7 +1350,8 @@ const TimelineClip: React.FC<
       if (controls.snapping && !e.metaKey) {
         const [tStart, tEnd] = controls.timelineDuration;
         const moving = new Set([clipId, ...(controls.linkage ? linkedClips(state.clips, clip) : []).map((c) => c.clipId)]);
-        const points = snapPoints(state.clips, { playhead: controls.focusFrame, markers: state.markers, exclude: moving });
+        // A trimmed edge snaps to beats too, its own clip's included (they stay put in a trim).
+        const points = snapPoints(state.clips, { playhead: controls.focusFrame, markers: state.markers, exclude: moving, beats: projectBeatPoints(state.clips) });
         const hit = snapToPoints([targetFrame], points, (SNAP_PX * Math.max(1, tEnd - tStart)) / Math.max(1, timelineWidth));
         if (hit) {
           targetFrame = hit.point;
@@ -1856,6 +1861,9 @@ const TimelineClip: React.FC<
               cornerRadius={safeCornerRadius}
               fill={clipType === "audio" ? "#1A2138" : "#FFFFFF"}
             />
+          )}
+          {!assetMode && currentClip && (currentClip as AudioClipProps).beats && (
+            <BeatMarkers clip={currentClip} width={clipWidth} height={timelineHeight} />
           )}
           {/* Lightweight dim overlay for asset selection (replaces slow blur cache) */}
           {assetMode && (

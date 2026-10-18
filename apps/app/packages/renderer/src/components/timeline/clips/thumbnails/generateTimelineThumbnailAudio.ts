@@ -105,8 +105,9 @@ export const generateTimelineThumbnailAudio = async (
   const segDurationSec = Math.max(1e-6, segEndSec - segStartSec);
   const barDurationSec = segDurationSec / barCount;
 
-  // Sound taken from a video keeps the video's family; music is its own blue.
-  const fromVideo = getAssetById(currentClip.assetId)?.type === "video";
+  // Sound taken from a video keeps the video's family; music is its own blue. A video's sound
+  // detached or added from Audio › Extracted is its file's `#audio` half.
+  const fromVideo = asset.type === "video" || asset.path.endsWith("#audio");
   const color = fromVideo ? TIMELINE_COLORS.fromVideoWave : TIMELINE_COLORS.musicWave;
   const volumeDb = Number((currentClip as any)?.volume ?? 0);
   const fadeInSec = Math.max(0, Number((currentClip as any)?.fadeIn ?? 0));

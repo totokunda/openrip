@@ -1,5 +1,4 @@
 import { FiMinusCircle, FiPlusCircle } from "react-icons/fi";
-import { LuMic } from "react-icons/lu";
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -31,6 +30,8 @@ import {
   TransformToolsMenu,
   ZoomToFitButton,
 } from "@/components/timeline/TimelineTools";
+import { VoiceoverButton, VoiceoverPanel } from "@/components/voiceover/VoiceoverPanel";
+import { BeatButton } from "@/components/timeline/BeatTools";
 
 const TimelineZoom = () => {
   const {
@@ -185,19 +186,6 @@ const Tool: React.FC<{ title?: string; id: string; children: React.ReactNode }> 
   <div title={title} data-testid={`tool-${id}`} className="h-7 w-7 flex items-center justify-center [&>div]:h-full [&>div]:w-full [&>div]:py-0">
     {children}
   </div>
-);
-
-/** A CapCut tool OpenRip doesn't have yet: in its place, named, and disabled. */
-const NotYet: React.FC<{ title: string; id: string; icon: React.ComponentType<{ className?: string }> }> = ({ title, id, icon: Icon }) => (
-  <button
-    type="button"
-    disabled
-    title={`${title} isn't here yet`}
-    data-testid={`tool-${id}`}
-    className="h-7 w-7 flex items-center justify-center text-brand-light opacity-25 cursor-not-allowed"
-  >
-    <Icon className="h-4 w-4" />
-  </button>
 );
 
 const Controls = () => {
@@ -516,9 +504,11 @@ const Controls = () => {
           <Tool title="Crop" id="crop"><CropButton /></Tool>
           <TransformToolsMenu />
           <Tool title="Detach audio" id="detach"><SeparateButton /></Tool>
+          <BeatButton />
         </div>
         <div className="flex items-center gap-x-2">
-          <NotYet title="Recording a voiceover" id="voiceover" icon={LuMic} />
+          <VoiceoverButton />
+          <VoiceoverPanel />
           <MagnetToggle />
           <SnappingToggle />
           <LinkageToggle />
