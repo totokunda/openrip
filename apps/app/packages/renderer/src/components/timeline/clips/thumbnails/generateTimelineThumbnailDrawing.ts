@@ -1,3 +1,5 @@
+import { TIMELINE_COLORS } from "@/lib/timeline-colors";
+
 export const generateTimelineThumbnailDrawing = async (
   clipType: string,
   imageCanvas: HTMLCanvasElement,
@@ -8,7 +10,7 @@ export const generateTimelineThumbnailDrawing = async (
   const ctx = imageCanvas.getContext("2d");
   if (ctx) {
     ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
-    ctx.fillStyle = "#9B59B6";
+    ctx.fillStyle = TIMELINE_COLORS.drawing;
     ctx.fillRect(0, 0, imageCanvas.width, imageCanvas.height);
   }
   clipRef.current?.getLayer()?.batchDraw();

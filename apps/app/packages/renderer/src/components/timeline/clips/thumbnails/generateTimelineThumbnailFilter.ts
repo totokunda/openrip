@@ -1,11 +1,12 @@
-// CapCut's colours for its bar kinds (a draft's effect, sticker or adjustment comes in as a
-// filter clip with its kind); filters and the app's own are the filter colour.
+// The bar kinds' colours (a draft's effect, sticker or adjustment comes in as a filter clip
+// with its kind); filters and the app's own are the filter colour.
 const KIND_COLOURS: Record<string, string> = {
-  filter: "#464186",
-  effect: "#6e4c7f",
-  sticker: "#cc9641",
-  adjustment: "#a58744",
+  filter: TIMELINE_COLORS.filter,
+  effect: TIMELINE_COLORS.effect,
+  sticker: TIMELINE_COLORS.sticker,
+  adjustment: TIMELINE_COLORS.adjustment,
 };
+import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 
 export const generateTimelineThumbnailFilter = async (
   clipType: string,

@@ -3,6 +3,7 @@ import { useClipStore } from "@/lib/clip";
 import { getAudioIterator } from "@/lib/media/audio";
 import { useControlsStore } from "@/lib/control";
 import { getMediaInfo } from "@/lib/media/utils";
+import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 
 // Per-clip cancellation for progressive waveform rendering
 const audioRenderSeqByClipId = new Map<string, number>();
@@ -104,9 +105,9 @@ export const generateTimelineThumbnailAudio = async (
   const segDurationSec = Math.max(1e-6, segEndSec - segStartSec);
   const barDurationSec = segDurationSec / barCount;
 
-  // CapCut's audio: extracted from a video it keeps the video's teal, music is blue.
+  // Sound taken from a video keeps the video's family; music is its own blue.
   const fromVideo = getAssetById(currentClip.assetId)?.type === "video";
-  const color = fromVideo ? "#33757d" : "#4a6aa0";
+  const color = fromVideo ? TIMELINE_COLORS.fromVideoWave : TIMELINE_COLORS.musicWave;
   const volumeDb = Number((currentClip as any)?.volume ?? 0);
   const fadeInSec = Math.max(0, Number((currentClip as any)?.fadeIn ?? 0));
   const fadeOutSec = Math.max(0, Number((currentClip as any)?.fadeOut ?? 0));
@@ -169,8 +170,8 @@ export const generateTimelineThumbnailAudio = async (
   bgctx.imageSmoothingQuality = "high";
 
   const backgroundGradient = bgctx.createLinearGradient(0, 0, 0, bgCanvas.height);
-  backgroundGradient.addColorStop(0, fromVideo ? "#1d4950" : "#182f55");
-  backgroundGradient.addColorStop(1, fromVideo ? "#1d4950" : "#182f55");
+  backgroundGradient.addColorStop(0, fromVideo ? TIMELINE_COLORS.fromVideoBg : TIMELINE_COLORS.music);
+  backgroundGradient.addColorStop(1, fromVideo ? TIMELINE_COLORS.fromVideoBg : TIMELINE_COLORS.music);
   bgctx.fillStyle = backgroundGradient;
   bgctx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
 

@@ -145,6 +145,8 @@ CapCut's accent is cyan **#57becb** (hover/pressed variants not sampled; the tex
 
 ### 2.3 Timeline clip colours
 
+These are CapCut's measured colours. OpenRip keeps the system (a hue per clip kind, every body at about the same darkness, the label chip a tint of the body) but draws its own hues, a family around its lavender accent (decided 2026-10-18): video #322c4c, sound from a video #2c2846 with a #7a6cc0 waveform, music #22305a with #5a78c4, text #8a4560, filter #483f8e, effect #7a4886, sticker #c08a3e, adjustment #9c8848. They live in `renderer/src/lib/timeline-colors.ts`.
+
 Best reference: `31-dialogs/038-linkage-settings.png`, which shows one swatch per clip type, plus the timelines in `005-attributes-layout.png` and `030-marker-edit-popover.png`. Each clip has a body colour and a label chip that is the body with about 8–10% white over it.
 
 | Clip type | Body | Label chip | Notes |

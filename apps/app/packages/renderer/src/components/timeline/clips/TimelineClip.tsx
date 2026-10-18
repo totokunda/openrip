@@ -82,6 +82,7 @@ import {
 import { Html } from "react-konva-utils";
 import { cn } from "@/lib/utils";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
+import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 
 /**
  * text rx/RxText
@@ -1543,7 +1544,7 @@ const TimelineClip: React.FC<
                 asset.path,
                 width,
                 height,
-                { color: "#7791C4", mediaInfo: mediaInfo },
+                { color: TIMELINE_COLORS.musicWave, mediaInfo: mediaInfo },
               );
               if (!waveform) return null;
               return waveform;
@@ -1565,9 +1566,9 @@ const TimelineClip: React.FC<
               if (!ctx) return null;
               // Set background color based on clip type (matching timeline thumbnails)
               let bg = "#E3E3E3";
-              if (child.type === "draw") bg = "#9B59B6";
-              if (child.type === "filter") bg = "#00BFFF";
-              if (child.type === "shape") bg = "#894c30";
+              if (child.type === "draw") bg = TIMELINE_COLORS.drawing;
+              if (child.type === "filter") bg = TIMELINE_COLORS.filter;
+              if (child.type === "shape") bg = TIMELINE_COLORS.shape;
               ctx.fillStyle = bg;
               ctx.fillRect(0, 0, canvas.width, canvas.height);
               // Prepare the icon SVG
@@ -1759,7 +1760,7 @@ const TimelineClip: React.FC<
                           y={baseY + cfg.dy}
                           width={cardW}
                           height={cardH}
-                          fill={"#1A2138"}
+                          fill={TIMELINE_COLORS.video}
                           crop={{
                             x: cropX,
                             y: cropY,

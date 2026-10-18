@@ -6,6 +6,7 @@ import { useControlsStore } from "@/lib/control";
 import { MediaInfo, VideoClipProps } from "@/lib/types";
 import { getClipWidth } from "@/lib/clip";
 import { useClipStore } from "@/lib/clip";
+import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 const THUMBNAIL_TILE_SIZE = 36;
 
 export const generateTimelineThumbnailVideo = async (
@@ -203,7 +204,7 @@ export const generateTimelineThumbnailVideo = async (
     // Always paint a background so we never show transparent/white gaps.
     // We intentionally "overfill" the entire canvas; the Konva clip will cut it.
     ctx.clearRect(0, 0, targetWidth, targetHeight);
-    ctx.fillStyle = "#1e4c51"; // CapCut's video colour, under the thumbnails
+    ctx.fillStyle = TIMELINE_COLORS.video; // under the thumbnails
     ctx.fillRect(0, 0, targetWidth, targetHeight);
 
     // When resizing from the left for video, truncate from the left by
