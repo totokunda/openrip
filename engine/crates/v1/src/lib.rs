@@ -1266,7 +1266,10 @@ fn fit_animations(seg: &mut Segment, from: Micros, materials: &mut Materials) {
 /// the mask was drawn (the mask's own `transform`), so they become fractions of the clip's box
 /// at that scale. A rectangle turns about its top-left corner, the other shapes about their
 /// centre. Each keyframe travels to the next of the same shape by its `ease` (as the clip
-/// keyframes', `keys.rs`; linear without one), else holds.
+/// keyframes', `keys.rs`; linear without one), else holds. Besides the app's own shapes the
+/// inspector offers CapCut's: `linear` (Split) and `mirror` (Filmstrip) as CapCut draws them,
+/// a `heart` as a polygon of its outline, and a rectangle's `cornerRadius` (0–100, CapCut's
+/// Round corners). A key's own `featherAmount` keyframes the feather with the place.
 ///
 /// Each side shows the clip or a colour, as the app's WebGL canvas leaves it: the colour
 /// times its opacity, at the opacity squared (it blends the alpha too). Only the first mask
@@ -1320,7 +1323,7 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
                 if strokes.is_empty() {
                     continue;
                 }
-                keys.push(MaskKey { at, shape: MaskShape::Brush { strokes }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, ease: Easing::Linear });
+                keys.push(MaskKey { at, shape: MaskShape::Brush { strokes }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, feather: key_feather(data), ease: Easing::Linear });
                 eases.push(ease);
                 continue;
             }
@@ -1332,7 +1335,7 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
                     continue;
                 };
                 let points: Vec<[f32; 2]> = pts.iter().filter_map(Value::as_f64).collect::<Vec<_>>().chunks_exact(2).map(|p| [(p[0] / bw) as f32, (p[1] / bh) as f32]).collect();
-                keys.push(MaskKey { at, shape: MaskShape::Polygon { points }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, ease: Easing::Linear });
+                keys.push(MaskKey { at, shape: MaskShape::Polygon { points }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, feather: key_feather(data), ease: Easing::Linear });
                 eases.push(ease);
                 continue;
             }
@@ -1341,7 +1344,7 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
             let rotation = f(b, "rotation", 0.0);
             let (x, y) = (f(b, "x", 0.0), f(b, "y", 0.0));
             let shape_type = s(b, "shapeType");
-            let (cx, cy) = if matches!(shape_type.as_str(), "ellipse" | "polygon" | "star") {
+            let (cx, cy) = if matches!(shape_type.as_str(), "ellipse" | "polygon" | "star" | "heart" | "linear" | "mirror") {
                 (x + w / 2.0, y + h / 2.0)
             } else {
                 let (sn, cs) = rotation.to_radians().sin_cos();
@@ -1351,7 +1354,10 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
                 "ellipse" => MaskShape::Ellipse,
                 "polygon" => MaskShape::Triangle,
                 "star" => MaskShape::Star,
-                _ => MaskShape::Rectangle { round_corner: 0.0 },
+                "linear" => MaskShape::Linear,
+                "mirror" => MaskShape::Mirror,
+                "heart" => MaskShape::Polygon { points: heart_points(cx, cy, w, h, rotation).into_iter().map(|[px, py]| [(px / bw) as f32, (py / bh) as f32]).collect() },
+                _ => MaskShape::Rectangle { round_corner: (f(b, "cornerRadius", 0.0) / 100.0).clamp(0.0, 1.0) as f32 },
             };
             keys.push(MaskKey {
                 at,
@@ -1359,6 +1365,7 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
                 center: [(cx / bw * 2.0 - 1.0) as f32, (1.0 - cy / bh * 2.0) as f32],
                 size: [(w / bw) as f32, (h / bh) as f32],
                 rotation: rotation as f32,
+                feather: key_feather(data),
                 ease: Easing::Linear,
             });
             eases.push(ease);
@@ -1388,6 +1395,31 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
         });
     }
     out
+}
+
+/// A mask key's own feather (`featherAmount`, 0–100), when it has one.
+fn key_feather(data: &Value) -> Option<f32> {
+    data.get("featherAmount").and_then(Value::as_f64).map(|v| (v / 100.0).clamp(0.0, 1.0) as f32)
+}
+
+/// The app's heart mask: the classic heart curve (x = 16 sin³t, y = 13 cos t − 5 cos 2t −
+/// 2 cos 3t − cos 4t) across the box's width and 0.9 of its height (as CapCut's heart fills
+/// its box), about the box's centre `cx`, `cy`, turned clockwise by `rotation` degrees; 64
+/// points in world units, y down. `lib/mask-shapes.ts` draws the same outline on the canvas.
+fn heart_points(cx: f64, cy: f64, w: f64, h: f64, rotation: f64) -> Vec<[f64; 2]> {
+    const N: usize = 64;
+    // The curve's extent: x in ±16, y from −17 (the point) to about 11.92 (the lobes).
+    let (top, bottom) = (11.9233, -17.0);
+    let (sn, cs) = rotation.to_radians().sin_cos();
+    (0..N)
+        .map(|i| {
+            let t = i as f64 / N as f64 * std::f64::consts::TAU;
+            let x = 16.0 * t.sin().powi(3);
+            let y = 13.0 * t.cos() - 5.0 * (2.0 * t).cos() - 2.0 * (3.0 * t).cos() - (4.0 * t).cos();
+            let (dx, dy) = (x / 32.0 * w, -(y - (top + bottom) / 2.0) / (top - bottom) * 0.9 * h);
+            [cx + cs * dx - sn * dy, cy + sn * dx + cs * dy]
+        })
+        .collect()
 }
 
 /// A colour from `#rrggbb` with an opacity in percent.
@@ -1842,6 +1874,38 @@ mod tests {
         let lasso = &project.materials.masks[1];
         assert_eq!(lasso.shape, MaskShape::Polygon { points: vec![[0.0, 0.0], [0.5, 0.0], [0.0, 0.5]] });
         assert_eq!((lasso.inside, lasso.outside), (MaskPaint::Clip, MaskPaint::Clip));
+    }
+
+    /// The inspector's CapCut shapes: Split and Filmstrip as CapCut's linear and mirror, a
+    /// heart as its outline, a rectangle's round corners, and a feather keyed with the place.
+    #[test]
+    fn the_inspectors_mask_shapes_and_keyed_feather() {
+        let mut d = doc();
+        let clip = &mut d["timeline"]["clips"][0];
+        let mask = |id: &str, bounds: Value| json!({"id": id, "tool": "shape", "featherAmount": 10, "transform": {"x": 0, "y": 0, "width": 1066.6666666666667, "height": 600, "scaleX": 1, "scaleY": 1}, "keyframes": {"0": {"shapeBounds": bounds}}});
+        clip["masks"] = json!([
+            mask("a", json!({"x": 433.3333333333333, "y": 250, "width": 200, "height": 100, "rotation": 30, "shapeType": "linear"})),
+            mask("b", json!({"x": 433.3333333333333, "y": 250, "width": 200, "height": 100, "shapeType": "mirror"})),
+            mask("c", json!({"x": 433.3333333333333, "y": 200, "width": 200, "height": 200, "shapeType": "heart"})),
+            {"id": "d", "tool": "shape", "featherAmount": 10, "transform": {"x": 0, "y": 0, "width": 1066.6666666666667, "height": 600, "scaleX": 1, "scaleY": 1},
+             "keyframes": {"0": {"shapeBounds": {"x": 0, "y": 0, "width": 200, "height": 100, "cornerRadius": 40, "shapeType": "rectangle"}, "featherAmount": 0},
+                           "24": {"shapeBounds": {"x": 0, "y": 0, "width": 200, "height": 100, "cornerRadius": 80, "shapeType": "rectangle"}, "featherAmount": 50}}},
+        ]);
+        let Imported { project, .. } = import_v1_json(&d).unwrap();
+        let m = |id: &str| project.materials.masks.iter().find(|m| m.id.0 == format!("v1-mask{id}")).unwrap();
+        // Centred in the picture, turned as given.
+        let (a, b) = (m("0"), m("1"));
+        assert_eq!((a.shape.clone(), a.rotation, b.shape.clone()), (MaskShape::Linear, 30.0, MaskShape::Mirror));
+        assert!(a.center[0].abs() < 1e-5 && a.center[1].abs() < 1e-5 && (b.size[1] - 1.0 / 6.0).abs() < 1e-5, "{a:?} {b:?}");
+        // The heart spans the box's width and 0.9 of its height, about its centre.
+        let MaskShape::Polygon { points } = &m("2").shape else { panic!("a heart polygon") };
+        let xs = points.iter().map(|p| p[0]).fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        let ys = points.iter().map(|p| p[1]).fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)));
+        assert!(points.len() == 64 && ((xs.1 - xs.0) - 0.1875).abs() < 0.002 && ((ys.1 - ys.0) - 0.3).abs() < 0.003, "{xs:?} {ys:?}");
+        // Round corners and the feather travel from key to key.
+        let r = m("3");
+        assert_eq!((r.keys[0].shape.clone(), r.keys[1].shape.clone()), (MaskShape::Rectangle { round_corner: 0.4 }, MaskShape::Rectangle { round_corner: 0.8 }));
+        assert_eq!((r.feather, r.keys[0].feather, r.keys[1].feather), (0.1, Some(0.0), Some(0.5)));
     }
 
     #[test]

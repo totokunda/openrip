@@ -16,13 +16,16 @@ struct Pose {
     center: [f64; 2],
     size: [f64; 2],
     rotation: f64,
+    /// A key's own feather (the app's masks keyframe it with the place), else the mask's.
+    feather: f64,
 }
 
 fn pose(m: &Mask, at: Micros) -> Pose {
-    let own = |k: &MaskKey| Pose { shape: k.shape.clone(), center: k.center.map(f64::from), size: k.size.map(f64::from), rotation: k.rotation as f64 };
+    let feather_of = |k: &MaskKey| k.feather.unwrap_or(m.feather);
+    let own = |k: &MaskKey| Pose { shape: k.shape.clone(), center: k.center.map(f64::from), size: k.size.map(f64::from), rotation: k.rotation as f64, feather: feather_of(k) as f64 };
     let keys = &m.keys;
     let Some(first) = keys.first() else {
-        return Pose { shape: m.shape.clone(), center: m.center.map(f64::from), size: m.size.map(f64::from), rotation: m.rotation as f64 };
+        return Pose { shape: m.shape.clone(), center: m.center.map(f64::from), size: m.size.map(f64::from), rotation: m.rotation as f64, feather: m.feather as f64 };
     };
     if at <= first.at {
         return own(first);
@@ -48,6 +51,7 @@ fn pose(m: &Mask, at: Micros) -> Pose {
         center: [mix(a.center[0], b.center[0]), mix(a.center[1], b.center[1])],
         size: [mix(a.size[0], b.size[0]), mix(a.size[1], b.size[1])],
         rotation: mix(a.rotation, b.rotation),
+        feather: mix(feather_of(a), feather_of(b)),
     }
 }
 
@@ -84,14 +88,14 @@ impl Field {
 /// A key for everything that changes the coverage at `at`.
 pub fn coverage_key(m: &Mask, at: Micros) -> String {
     let p = pose(m, at);
-    format!("{:?}{:?}{:?}{}{}{}", p.shape, p.center, p.size, p.rotation, m.feather, m.invert)
+    format!("{:?}{:?}{:?}{}{}{}", p.shape, p.center, p.size, p.rotation, p.feather, m.invert)
 }
 
 /// Coverage of `mask` at `at` over an upright picture of `w`×`h` pixels, or `None` for a
 /// shape not drawn yet (or a picture shape without its `field`).
 pub fn coverage(mask: &Mask, at: Micros, w: u32, h: u32, field: Option<&Field>) -> Option<Vec<u8>> {
     let p = pose(mask, at);
-    let feather = mask.feather.max(0.0) as f64;
+    let feather = p.feather.max(0.0);
     let mut out = match &p.shape {
         MaskShape::Rectangle { round_corner } => rectangle(&p, *round_corner as f64, feather, w, h),
         MaskShape::Circle => circle(&p, feather, w, h),
@@ -479,7 +483,7 @@ mod tests {
     }
 
     fn mkey(at: i64, shape: MaskShape, center: [f32; 2], size: [f32; 2], ease: Easing) -> MaskKey {
-        MaskKey { at: Micros(at), shape, center, size, rotation: 0.0, ease }
+        MaskKey { at: Micros(at), shape, center, size, rotation: 0.0, feather: None, ease }
     }
 
     #[test]
@@ -560,6 +564,24 @@ mod tests {
             // The middle stays, far outside stays clear.
             assert_eq!((soft[50 * 100 + 50], soft[0]), (255, 0), "{shape:?}");
         }
+    }
+
+    /// A key's own feather travels with its place; keys without one take the mask's.
+    #[test]
+    fn a_keyed_feather_travels() {
+        let mut m = rect([0.0, 0.0], [0.6, 0.6]);
+        m.feather = 0.3;
+        let mut a = mkey(0, MaskShape::Ellipse, [0.0, 0.0], [0.6, 0.6], Easing::Linear);
+        a.feather = Some(0.0);
+        let mut b = mkey(1_000_000, MaskShape::Ellipse, [0.0, 0.0], [0.6, 0.6], Easing::Linear);
+        b.feather = Some(0.02);
+        m.keys = vec![a, b];
+        assert_eq!((pose(&m, Micros::ZERO).feather, pose(&m, Micros(2_000_000)).feather as f32), (0.0, 0.02));
+        assert!((pose(&m, Micros(500_000)).feather - 0.01).abs() < 1e-6);
+        let hard = coverage(&m, Micros::ZERO, 100, 100, None).unwrap();
+        assert!(hard.iter().all(|&v| v == 0 || v == 255));
+        m.keys[1].feather = None;
+        assert!((pose(&m, Micros(1_000_000)).feather - 0.3).abs() < 1e-6);
     }
 
     /// The brush paints round-ended strokes; an eraser takes away what's under it.

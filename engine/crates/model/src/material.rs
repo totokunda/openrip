@@ -549,6 +549,9 @@ pub struct MaskKey {
     pub size: [f32; 2],
     #[serde(default)]
     pub rotation: f32,
+    /// The feather at this pose (the mask's own when missing); it travels with the place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feather: Option<f32>,
     /// How the pose travels to the next key's.
     #[serde(default)]
     pub ease: crate::animated::Easing,
