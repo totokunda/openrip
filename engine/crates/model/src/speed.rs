@@ -314,6 +314,22 @@ mod tests {
     }
 
     #[test]
+    fn golden_values_the_apps_helpers_match() {
+        // The same numbers are in apps/app/packages/renderer/tests/speed.test.ts (lib/speed.ts):
+        // mean speed, source at 0.3, timeline at 0.3, speed at 0.37.
+        let golden: [(&str, [f64; 4]); 3] = [
+            ("Montage", [1.45342499301867711, 0.44255656986443681, 0.26614476850243873, 0.50193013741898818]),
+            ("Jump Cut", [0.67761802765745571, 0.26563638870313877, 0.33880900293588645, 0.6]),
+            ("Flash In", [1.84692946551563608, 0.6209925725413048, 0.10655362522945955, 1.0]),
+        ];
+        for (name, [avg, src, tl, v]) in golden {
+            let r = Remap::new(CURVE_PRESETS.iter().find(|p| p.name == name).unwrap().points).unwrap();
+            assert!((r.average() - avg).abs() < 1e-12 && (r.source_at(0.3) - src).abs() < 1e-12, "{name}");
+            assert!((r.timeline_at(0.3) - tl).abs() < 1e-12 && (r.speed_at(0.37) - v).abs() < 1e-12, "{name}");
+        }
+    }
+
+    #[test]
     fn the_two_directions_agree() {
         for preset in CURVE_PRESETS {
             let r = Remap::new(preset.points).unwrap();

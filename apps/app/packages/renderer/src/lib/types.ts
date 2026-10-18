@@ -256,8 +256,37 @@ export type DraftAdjustment = {
   drawn: boolean;
 };
 
+/** A point of a speed curve: `x` the progress through the clip's media (0 at its in-point, 1 at
+ * its out-point, in the order it plays), `y` the speed there (0.1–10). CapCut's speed points. */
+export type SpeedPoint = { x: number; y: number };
+
+/**
+ * A clip's speed curve (CapCut's Speed ▸ Curve): its points, and the preset they came from
+ * ("Montage", "Hero", …; see lib/speed.ts), if any. The clip's `speed` is then the curve's
+ * mean speed (its media length over its length on the timeline).
+ */
+export type SpeedCurve = { preset?: string; points: SpeedPoint[] };
+
+/**
+ * A freeze frame (CapCut's Freeze): the clip holds one frame of its asset, `at` seconds into
+ * it, for its whole length, without sound.
+ */
+export type FreezeFrame = { at: number };
+
+/**
+ * The speed tools' fields on a video or audio clip (lib/speed.ts). A reversed clip plays its
+ * media backward; its `trimStart` and `trimEnd` count in the order it plays, `trimStart` from
+ * the media's end.
+ */
+export type SpeedProps = {
+  speed?: number;
+  reverse?: boolean;
+  speedCurve?: SpeedCurve | null;
+};
+
 export type VideoClipProps = ClipProps &
-  MediaAdjustments & {
+  MediaAdjustments &
+  SpeedProps & {
 
     assetId: string;
     assetIdHistory: string[];
@@ -269,13 +298,14 @@ export type VideoClipProps = ClipProps &
     volume?: number;
     fadeIn?: number;
     fadeOut?: number;
-    speed?: number;
     masks: MaskClipProps[];
     transitionOut?: ClipTransition | null;
     animationIn?: ClipAnimation | null;
     animationOut?: ClipAnimation | null;
     animationCombo?: ClipAnimation | null;
     draftAdjustments?: DraftAdjustment[];
+    /** Set on a freeze-frame clip (`freezeFrame` in lib/speed.ts). */
+    freeze?: FreezeFrame | null;
   };
 
 export type ImageClipProps = ClipProps &
@@ -295,14 +325,14 @@ export type ImageClipProps = ClipProps &
     draftAdjustments?: DraftAdjustment[];
   };
 
-export type AudioClipProps = ClipProps & {
-  assetId: string;
-  type: "audio";
-  volume?: number;
-  fadeIn?: number;
-  fadeOut?: number;
-  speed?: number;
-};
+export type AudioClipProps = ClipProps &
+  SpeedProps & {
+    assetId: string;
+    type: "audio";
+    volume?: number;
+    fadeIn?: number;
+    fadeOut?: number;
+  };
 
 export type ShapeClipProps = ClipProps & {
   type: "shape";

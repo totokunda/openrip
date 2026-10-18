@@ -13,6 +13,7 @@ import {
   ClipType,
   Asset,
   TextClipProps,
+  SpeedCurve,
 } from "./types";
 import { v4 as uuidv4 } from "uuid";
 import { useControlsStore } from "./control";
@@ -22,6 +23,7 @@ import { getMediaInfo, getMediaInfoCached } from "./media/utils";
 import { getLowercaseExtension } from "@app/preload";
 import { remapMaskWithClipTransformProportional } from "./mask/clipTransformUtils";
 import { scaleKeyframes, shiftKeyframes, splitKeyframes } from "./keyframes";
+import { freezeFrame as freezeAt, reversePatch, speedPatch, splitCurveFields } from "./speed";
 import {
   mainTrackOf,
   isTrackLocked,
@@ -70,6 +72,19 @@ interface ClipStore {
     newFrame: number,
   ) => void;
   separateClip: (clipId: string) => void;
+  /**
+   * The Speed tab's Curve: a video or audio clip plays by `curve` (a preset's or custom points;
+   * null goes back to a constant speed, the curve's mean). Linked clips take it too.
+   */
+  setSpeedCurve: (clipId: string, curve: SpeedCurve | null) => void;
+  /** CapCut's Reverse: the clip (and its linked clips) plays its media backward, or forward again. */
+  setReverse: (clipId: string, reverse: boolean) => void;
+  /**
+   * CapCut's Freeze: the video clip is cut at timeline frame `frame` and a 3 s still of the frame
+   * there goes between the halves, the rest of its track (and its linked clips) moving later.
+   * Returns the still's clip id, or null where there's nothing to freeze.
+   */
+  freezeFrame: (clipId: string, frame: number) => string | null;
   isValidResize: (
     clipId: string,
     side: "left" | "right",
@@ -495,6 +510,14 @@ const splitClipAt = (clip: AnyClipProps, cutFrame: number): [AnyClipProps, AnyCl
     trimEnd: safeOldTrimEnd,
   };
 
+  // A curved clip: each half gets its part of the curve, at the speed and trims that play the
+  // media it showed (lib/speed.ts), as CapCut cuts one.
+  const curved = splitCurveFields(clip, cutRel);
+  if (curved) {
+    Object.assign(newClip1, curved[0]);
+    Object.assign(newClip2, curved[1]);
+  }
+
   // Each half keeps the keys on its side, and one at the cut so the motion carries on
   // (the right half's moved to its start), as CapCut splits a keyframed clip.
   if (clip.keyframes) {
@@ -638,14 +661,16 @@ const splitClipAt = (clip: AnyClipProps, cutFrame: number): [AnyClipProps, AnyCl
 const clampEdgeDelta = (clip: AnyClipProps, side: "left" | "right", delta: number) => {
   const start = clip.startFrame ?? 0;
   const end = Math.max(clip.endFrame ?? 0, start + 1);
+  // A freeze frame holds its still as long as it's made: it has no media to run out of.
+  const bounded = (trim: number | undefined) => isFinite(trim ?? 0) && !(clip as VideoClipProps).freeze;
   if (side === "right") {
     let d = Math.max(delta, start + 1 - end);
-    if (isFinite(clip.trimEnd ?? 0)) d = Math.min(d, -(clip.trimEnd ?? 0));
+    if (bounded(clip.trimEnd)) d = Math.min(d, -(clip.trimEnd ?? 0));
     return d;
   }
   let d = Math.min(delta, end - 1 - start);
   d = Math.max(d, -start);
-  if (isFinite(clip.trimStart ?? 0)) d = Math.max(d, -(clip.trimStart ?? 0));
+  if (bounded(clip.trimStart)) d = Math.max(d, -(clip.trimStart ?? 0));
   return d;
 };
 
@@ -1344,33 +1369,22 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       }
       const current = state.clips[index];
 
-      // Prepare update payload and handle speed-induced duration rescale
+      // A new speed (lib/speed.ts `speedPatch`): the clip keeps its in-point and plays the same
+      // media, so its end moves; its trims scale and its keys stay on the media. A constant
+      // speed drops a curve (CapCut's Normal tab).
       let nextUpdate: Partial<AnyClipProps> = { ...clipToUpdate };
-      if (Object.prototype.hasOwnProperty.call(clipToUpdate, "speed")) {
-        const oldSpeed = Math.max(
-          0.1,
-          Number((current as VideoClipProps).speed || 1),
-        );
-        const newSpeedRaw = Number((clipToUpdate as any).speed);
-        const newSpeed = Math.max(
-          0.1,
-          Math.min(5, Number.isFinite(newSpeedRaw) ? newSpeedRaw : 1),
-        );
-
-        // Anchor at left edge: keep startFrame, adjust endFrame to preserve source coverage
-        const start = Math.max(0, Number(current.startFrame || 0));
-        const end = Math.max(start + 1, Number(current.endFrame || start + 1));
-        const oldDuration = Math.max(1, end - start);
-        const newDuration = Math.max(
-          1,
-          Math.round(oldDuration * (oldSpeed / newSpeed)),
-        );
-        nextUpdate.endFrame = start + newDuration;
-        (nextUpdate as VideoClipProps).speed = newSpeed as any;
-        // Keys stay on the media: their frames scale with the clip.
-        if (!Object.prototype.hasOwnProperty.call(clipToUpdate, "keyframes")) {
-          nextUpdate.keyframes = scaleKeyframes(current.keyframes, oldSpeed / newSpeed);
-        }
+      const speedChange = (Object.prototype.hasOwnProperty.call(clipToUpdate, "speed") || Object.prototype.hasOwnProperty.call(clipToUpdate, "speedCurve")) && (current.type === "video" || current.type === "audio");
+      const speedArgs = () => {
+        const u = clipToUpdate as Partial<VideoClipProps>;
+        if (Object.prototype.hasOwnProperty.call(u, "speedCurve")) return { curve: u.speedCurve ?? null };
+        const raw = Number(u.speed);
+        return { speed: Math.max(0.1, Math.min(100, Number.isFinite(raw) ? raw : 1)) };
+      };
+      if (speedChange) {
+        const patch = speedPatch(current, speedArgs());
+        // Keys the caller set itself stay as given.
+        if (Object.prototype.hasOwnProperty.call(clipToUpdate, "keyframes")) delete patch.keyframes;
+        nextUpdate = { ...nextUpdate, ...patch } as Partial<AnyClipProps>;
       }
 
       const updatedClip = { ...current, ...nextUpdate } as AnyClipProps;
@@ -1378,7 +1392,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       newClips[index] = updatedClip;
 
       // Timing and track changes leave a locked track alone, and don't go onto one.
-      const timingKeys = ["startFrame", "endFrame", "trimStart", "trimEnd", "timelineId", "speed"] as const;
+      const timingKeys = ["startFrame", "endFrame", "trimStart", "trimEnd", "timelineId", "speed", "speedCurve", "reverse"] as const;
       const retimed = timingKeys.some((k) => Object.prototype.hasOwnProperty.call(nextUpdate, k) && (nextUpdate as any)[k] !== (current as any)[k]);
       if (retimed && (isClipLocked(state.clips, state.timelines, current, linkage()) || isTrackLocked(state.timelines, updatedClip.timelineId))) {
         return {};
@@ -1387,17 +1401,18 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       const deltaEnd = (updatedClip.endFrame ?? 0) - (current.endFrame ?? 0);
 
       // Linked clips keep time with it: they move as it moves (on their own tracks) and take
-      // its speed.
+      // its speed or curve.
       if (current.type !== "group") {
-        const speedChanged = (nextUpdate as VideoClipProps).speed !== undefined && (nextUpdate as VideoClipProps).speed !== (current as VideoClipProps).speed;
+        const speedChanged =
+          speedChange &&
+          ((nextUpdate as VideoClipProps).speed !== (current as VideoClipProps).speed || JSON.stringify((nextUpdate as VideoClipProps).speedCurve ?? null) !== JSON.stringify((current as VideoClipProps).speedCurve ?? null));
         for (const partner of partners(state.clips, current)) {
           const i = newClips.findIndex((c) => c.clipId === partner.clipId);
           if (speedChanged && (partner.type === "video" || partner.type === "audio")) {
-            const speed = (nextUpdate as VideoClipProps).speed as number;
+            const patch = speedPatch(partner, speedArgs());
             const start = partner.startFrame + deltaStart;
-            const length = Math.max(1, Math.round(Math.max(1, partner.endFrame - partner.startFrame) * (Math.max(0.1, Number(partner.speed || 1)) / speed)));
-            const keyframes = scaleKeyframes(partner.keyframes, Math.max(0.1, Number(partner.speed || 1)) / speed);
-            newClips[i] = { ...partner, speed, startFrame: start, endFrame: start + length, keyframes } as AnyClipProps;
+            const length = (patch.endFrame ?? partner.endFrame) - partner.startFrame;
+            newClips[i] = { ...partner, ...patch, startFrame: start, endFrame: start + length } as AnyClipProps;
           } else if (deltaStart !== 0 || deltaEnd !== 0) {
             newClips[i] = { ...partner, startFrame: partner.startFrame + deltaStart, endFrame: partner.endFrame + deltaEnd };
           }
@@ -1453,6 +1468,40 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       get()._updateZoomLevel(resolvedClips, clipDuration);
       return { clips: resolvedClips, clipDuration, assets: prunedAssets };
     }),
+  setSpeedCurve: (clipId, curve) => {
+    const clip = get().clips.find((c) => c.clipId === clipId);
+    if (!clip || (clip.type !== "video" && clip.type !== "audio") || (clip as VideoClipProps).freeze) return;
+    // Through updateClip: it applies the curve to the clip and its linked clips (speedPatch).
+    get().updateClip(clipId, { speedCurve: curve && curve.points.length >= 2 ? curve : null } as Partial<AnyClipProps>);
+  },
+  setReverse: (clipId, reverse) =>
+    set((state) => {
+      const clip = state.clips.find((c) => c.clipId === clipId);
+      if (!clip || (clip.type !== "video" && clip.type !== "audio") || (clip as VideoClipProps).freeze) return {};
+      if (isClipLocked(state.clips, state.timelines, clip, linkage())) return {};
+      const targets = [clip, ...partners(state.clips, clip).filter((c) => c.type === "video" || c.type === "audio")];
+      const changed = new Map(targets.map((c) => [c.clipId, reversePatch(c, reverse)] as const).filter(([, p]) => Object.keys(p).length > 0));
+      if (changed.size === 0) return {};
+      return { clips: state.clips.map((c) => (changed.has(c.clipId) ? ({ ...c, ...changed.get(c.clipId) } as AnyClipProps) : c)) };
+    }),
+  freezeFrame: (clipId, frame) => {
+    let made: string | null = null;
+    set((state) => {
+      const clip = state.clips.find((c) => c.clipId === clipId);
+      if (!clip || clip.type !== "video" || isClipLocked(state.clips, state.timelines, clip, linkage())) return {};
+      const fps = useControlsStore.getState().fps || 30;
+      const media = get().getAssetById(clip.assetId)?.duration;
+      const done = freezeAt(state.clips, clipId, frame, fps, splitClipAt, uuidv4, partners(state.clips, clip), media);
+      if (!done) return {};
+      made = done.freezeId;
+      const resolvedClips = resolveOverlaps(done.clips);
+      const clipDuration = calculateTotalClipDuration(resolvedClips);
+      get()._updateZoomLevel(resolvedClips, clipDuration);
+      return { clips: resolvedClips, clipDuration, assets: pruneAssetsForClips(state.assets, resolvedClips) };
+    });
+    if (made) useControlsStore.getState().setSelectedClipIds([made]);
+    return made;
+  },
   separateClip: (clipId) =>
     set((state) => {
       const clip = state.clips.find((c) => c.clipId === clipId);
