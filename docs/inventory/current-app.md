@@ -93,7 +93,10 @@ This document covers OpenRip **0.1.2** (`apps/app/package.json`) on `main` as of
 | video, image | `exposure` | number | — | **no UI, never read** | none | types.ts:33 |
 | video, audio | `volume` | **dB** | undefined → 0 | −60…+20, step 1 | gain (§7) | renderer/src/components/properties/AudioProperties.tsx:60-68 |
 | video, audio | `fadeIn`, `fadeOut` | **seconds** | 0 | 0…asset duration, step 0.1 | §7 | AudioProperties.tsx:69-86 |
-| video, audio | `speed` | multiplier | 1.0 (set on drop) | 0.1…5, step 0.1, clamped | §2.6, §7 | renderer/src/components/properties/DurationProperties.tsx:36-45; TimelineEditor.tsx:874 |
+| video, audio | `speed` | multiplier | 1.0 (set on drop) | the panel 0.1…5, step 0.1; the store 0.1…100 (CapCut's); with a curve, the curve's mean speed | §2.6, §7 | renderer/src/components/properties/DurationProperties.tsx:36-45; TimelineEditor.tsx:874; lib/speed.ts `speedPatch` |
+| video, audio | `speedCurve` | `{ preset?, points: [{x, y}] }` or null | none | x 0…1 (media progress as played), y 0.1…10 | the engine's remap (docs/parity/speed.md) | types.ts `SpeedCurve`; lib/speed.ts |
+| video, audio | `reverse` | boolean | false | — (trims then count from the media's end) | the engine plays it backward | types.ts `SpeedProps`; lib/speed.ts `reversePatch` |
+| video | `freeze` | `{ at }` (s into the asset) or null | none | — | a still of that frame, no sound | types.ts `FreezeFrame`; lib/speed.ts `freezeFrame` |
 | image | duration | — | `fps × defaultClipLength` (5 s) | unbounded (trims ±∞) | — | TimelineEditor.tsx:726-731; renderer/src/lib/control.ts:244 |
 | audio | `assetId`, `volume`, `fadeIn`, `fadeOut`, `speed` | as above | — | — | Audio-only track | types.ts:132-139 |
 | shape | `shapeType` (`rectangle\|ellipse\|polygon\|line\|star`), `fill`/`stroke` (hex, created `#E3E3E3`), `fillOpacity`/`strokeOpacity` (0–100 %, unset→100), `strokeWidth` (world units, created 1), `sides` (polygon, 3–12, created 3), `points` (star, unset→5, effective 4–12) | | | | full table §6.1 | types.ts:141-159; Preview.tsx:1900-1918; AppearanceProperties.tsx:116-149; LayoutProperties.tsx:43-54 |
@@ -211,7 +214,7 @@ Refs: `renderer/src/lib/applicator-utils.ts:11,22-124,143-165`, `components/prev
 | `trimEnd` | ≤0. Negative "give" at the tail. Right-resize adds the end delta and is refused if the result would be > 0, so a clip cannot extend past the source end. | `lib/clip.ts:1104-1123,1069-1077` |
 | Unbounded clips | Image, filter, text, shape and draw clips are created with `trimStart=+∞` and `trimEnd=−∞`, so they have no extension limit. On save, non-finite values are written as 0. On load, every type except audio, video and group is forced back to ±∞. | `TimelineEditor.tsx:727-736`, `Preview.tsx:1724-1725`, `json-persistence.ts:260-267,683-690` |
 | Default durations | Video and audio: `round(durationSec * fps)` (the drag ghost uses `ceil` via `convertFrameRange`). Image and filter: `fps * defaultClipLength` (default 5 s). Text, shape and draw: `3 * DEFAULT_FPS` = 72 frames whatever the project fps, clamped to `totalTimelineFrames - 1`. | `TimelineEditor.tsx:717-739,320-341`, `lib/control.ts:244`, `Preview.tsx:1703,1781-1790,1887` |
-| Speed | Video and audio only, clamped to [0.1, 5]. A speed change keeps `startFrame` and sets `end = start + round(oldDur * oldSpeed/newSpeed)`. Trims are not rescaled. | `lib/clip.ts:899-922`, `components/properties/DurationProperties.tsx:32-45`, `clips/VideoPreview.tsx:244-247` |
+| Speed | Video and audio only, clamped to [0.1, 100] (the panel to 5). A speed change keeps `startFrame` and sets `end = start + round(oldDur * oldSpeed/newSpeed)`; since 2026-10-18 the trims scale by oldSpeed/newSpeed so the in-point stays (they didn't), keys stay on the media, a constant speed drops a curve, and linked clips take it. Curves, reverse and freeze: `lib/speed.ts`, docs/plan/app-engine-integration.md ("Speed tools"). | `lib/clip.ts:899-922`, `components/properties/DurationProperties.tsx:32-45`, `clips/VideoPreview.tsx:244-247` |
 | Preview source frame | `L = max(0, f - start + trimStart)`, `srcIdx = floor((L*speed / projectFps) * clipFps + 1e-4) + round(mediaInfo.startFrame/projectFps*clipFps)`. `clipFps` is the stream's `averagePacketRate`. | `clips/VideoPreview.tsx:1346-1373,27-57` |
 | Export source frame | `srcIdx = trimStart + srcStartFrame + floor((f - start)*speed)`, in project-fps units. The iterator is called with `speed:1` and target `srcIdx/projectFps`. It yields the latest decoded frame with `ts < target` (strictly less), otherwise the next frame, and holds the last frame past the end. **This differs from preview whenever `speed≠1` and `trimStart>0`**, because here `trimStart` is not multiplied by speed. | `exporter.ts:706-763`, `renderer/src/lib/media/video.ts:151-224` |
 | Split | Left part: `end = cut`, `trimEnd += cut - oldEnd`. Right part: `start = cut`, `trimStart += cut - oldStart`. Infinite trims are first treated as 0, so a split image or text clip gets finite trims until the project is reloaded. Mask keyframes are partitioned at `cut - start + trimStart`. | `lib/clip.ts:1579-1625` |
@@ -603,7 +606,7 @@ Colors are stored as hex `#RRGGBB`. Opacity is stored separately as 0-100. When 
 | `TimelineProps.muted` | track | bool | false | track header | types.ts:86; clip.ts:545-565 |
 
 - There is **no per-clip mute**.
-- Changing speed pauses playback and re-lengthens the clip from the left edge: `endFrame = start + round(oldDur·oldSpeed/newSpeed)`. Trims are left untouched (renderer/src/lib/clip.ts:899-922).
+- Changing speed pauses playback and re-lengthens the clip from the left edge: `endFrame = start + round(oldDur·oldSpeed/newSpeed)`. The trims scale with it so the in-point stays (since 2026-10-18; `speedPatch` in renderer/src/lib/speed.ts).
 
 ### 7.2 Decode pipeline (preview + timeline waveform)
 

@@ -280,7 +280,7 @@ The UI shows Intensity and Shadow (plus newer edge controls) `[known]`.
 | Smooth slow-mo | Frame blending (classical) or optical flow (CapCut uses an ML interpolation model) | `[bundle]` |
 | Speed on multiple clips | Speed ramping can't be applied to several clips at once | `[bundle]` |
 
-**Engine implication.** Each segment's time-remap is a monotonic function (constant, piecewise-cubic curve, or reverse) mapping target time to source time. Its integral defines the segment duration. Audio needs a time-stretcher (WSOLA or a phase vocoder) with an optional pitch shift, driven by the same function. Slow-motion gap filling is pluggable: nearest frame, frame blend, or optical flow.
+**Engine implication.** Each segment's time-remap is a monotonic function (constant, piecewise-cubic curve, or reverse) mapping target time to source time. Its integral defines the segment duration. Audio needs a time-stretcher (WSOLA or a phase vocoder) with an optional pitch shift for constant speeds; CapCut plays a curve varispeed, the pitch following the speed (done: [speed.md](../parity/speed.md), with CapCut's remap). Slow-motion gap filling is pluggable: nearest frame, frame blend, or optical flow.
 
 ---
 

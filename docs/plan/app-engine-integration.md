@@ -157,6 +157,34 @@ Done (2026-10-18): the data model, the built-in lists and the engine. The Transi
 - **Checked:** `tests/animations.test.ts` (`node --test tests/*.test.ts` in packages/renderer) checks the lists against the engine's. Then the v1 crate's tests (fields both ways, the fitting rules, splits), the engine's tests (math and frames), and the harness step `transitions`.
 - **For the panels:** the existing Animation tab still offers only the first three transitions and the typing intros. The panels should take their lists from `lib/animations.ts`, and show a draft's undrawn one by `name` as the tab does now.
 
+## Speed tools
+
+Done (2026-10-18): the data model, the store operations and the engine for CapCut's Speed tab (Normal and Curve) and the toolbar's Freeze and Reverse ([speed.md](../parity/speed.md) has CapCut's maths and the checks). The tab's UI and the two buttons are still to build on these.
+
+- **On a video or audio clip** (`lib/types.ts`, `SpeedProps`):
+  - `speed`: constant speed (0.1–100×), or with a curve the curve's mean speed (its media over its length on the timeline).
+  - `speedCurve: { preset?, points: [{x, y}] } | null`: CapCut's speed points, x the progress through the clip's media in the order it plays, y the speed (0.1–10×).
+  - `reverse`: the clip plays its media backward. Its `trimStart` and `trimEnd` count in the order it plays: `trimStart` is cut off the media's end.
+  - `freeze: { at }` makes a video clip a freeze frame: it holds its asset's frame at `at` seconds, without sound, as long as it's made.
+- **Helpers** (`lib/speed.ts`, pure, never writing to what they're given):
+  - `CURVE_PRESETS` (name and points, in the tab's order: Custom, Montage, Hero, Bullet, Jump Cut, Flash In, Flash Out) and `presetCurve(name)`;
+  - the remap: `curveAverage(points)`, `curveSpeedAt(points, q)`, `sourceProgressAt(points, q)`, `timelineProgressAt(points, p)`, `curvedLength(mediaFrames, points)`;
+  - `sourceTimeAt(clip, localFrame, fps, mediaSeconds?)`: the asset time a clip shows (speed, curve, reverse, freeze), e.g. for the tab's "Duration: 4.0 s → 2.2 s" and a curve editor's playhead;
+  - `speedPatch(clip, { speed } | { curve })`, `reversePatch(clip, reverse)`: the patches the store applies; `splitSpeedCurve(curve, p)` and `splitCurveFields(clip, cut)` (CapCut's cut of a curved clip); `retimeKeyframes`; `freezeFrame(...)`, the freeze as a function of the clips.
+- **The store** (`lib/clip.ts`), each one undo step:
+  - `updateClip(id, { speed })` is the Normal tab: the clip keeps its in-point and media, its end moves, its trims scale, keys stay on the media, and a curve is dropped;
+  - `setSpeedCurve(id, curve | null)` is the Curve tab (a preset, or the editor's points as they're dragged);
+  - `setReverse(id, reverse)` is the Reverse button;
+  - `freezeFrame(id, frame)` is the Freeze button: cut at `frame`, a 3 s still of the frame there between the halves, the rest of the track and the linked clips 3 s later; it returns the still's id and selects it.
+  - Linked clips (a video and its detached audio) take a speed, curve or reverse together, and a freeze cuts and moves them too. A curved clip cut in two plays the same media at the same times.
+- **To the engine.** `convert_clip` turns `speedCurve` into a speed material the segment plays by, `reverse` into the segment's (its trims mirrored about the media's length), and `freeze` into a still material drawn from the video. On a converted CapCut clip each applies when it differs from `base`: the app's curve replaces the draft's speed, and a freeze keeps the clip's effects. `to_app_project` shows a draft's curve (with its mean as `speed`), reverse and trims.
+- **What the UI should know:**
+  - CapCut's curve editor draws a bezier through the points (control points at the span's middle x, at each end's y); playback runs CapCut's ramp. `curveSpeedAt` gives the ramp, for a faithful curve.
+  - CapCut ignores "Change pitch" on a curve: its sound always follows the speed. The tab should grey the toggle out in Curve.
+  - A new point must be at least 3 frames from its neighbours in CapCut; points' speeds are clamped to 0.1–10×, and a curve to 10× only when the clip has a second or more of media.
+  - CapCut offers Curve and Reverse on video clips, and Normal speed on audio; a freeze has none. The store takes them on audio too, so a video's detached audio follows it. A reversed clip's trim handles trim where it plays.
+- **Checked:** `tests/speed.test.ts` (`node --test`, the engine's golden values), the v1 crate's tests, and the harness step `speed` (README): reversed frames and real-time reversed playback, a curve's length and frames, a freeze's frames and saved still, its silence and the sound after it in an export, each edit undone.
+
 ## Speed on large projects
 
 Done (2026-10-17), measured in the app on the largest local drafts (222, 211 and 120 clips; one has 101 photos and 113 captions). The draft with 222 clips:

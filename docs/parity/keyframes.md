@@ -151,4 +151,4 @@ Clips keep keys of their own in `keyframes` (`lib/types.ts`). Values are in the 
 
 - **Keyframe graphs** (`keyframe_graph_list`, `graphID`): presets of normalised graph points, each with its own handles, applied to a span. CapCut evaluates them through the same bezier, point to point. No local draft uses one.
 - **Exact handle times.** CapCut rounds a handle's time to whole µs inside its evaluator; OpenRip keeps the fraction. The difference is under 1 µs.
-- **Reversed clips and speed curves.** Keys are mapped through the clip's constant speed and its forward media time.
+- **Reversed clips.** Keys stay at their times on the timeline when a clip is reversed in the app (CapCut's behaviour is unchecked), and a draft's keys on a reversed clip are read in its forward media time. Speed curves are done: CapCut's keys on a curved clip are placed by the curve's inverse, and the app's move with their media through a curve change ([speed.md](speed.md)).
