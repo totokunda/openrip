@@ -649,9 +649,10 @@ Colors are stored as hex `#RRGGBB`. Opacity is stored separately as 0-100. When 
 - **Applies to** video clips only.
 - **New track.** An `audio` track (54 px) is inserted directly below the source track (:984-994).
 - **New assets.** Two assets: `<url>#video` and `<url>#audio` (:997-1015).
-- **Clip changes.** The original clip is repointed to `#video`. A full copy of it (transform, masks, adjustments, volume, fades, speed, trims) becomes `type:"audio"` with a new id, on the new track (:1016-1031).
-- **No link field** connects the two halves. The `#video` half is silent in preview and export.
-- **Entry points.** The context menu "Detach Audio" is disabled for `#video` clips (renderer/src/components/timeline/clips/TimelineClip.tsx:1193-1197). The toolbar `SeparateButton` checks that audio exists but not that the clip is already detached (renderer/src/components/controls/Buttons.tsx:349-382).
+- **Clip changes.** The original clip is repointed to `#video`. A full copy of it (transform, masks, adjustments, volume, fades, speed, trims) becomes `type:"audio"` with a new id, on the new track. A converted CapCut clip's `engine` payload stays with the video only.
+- **Linked.** Both halves get the same new `linkId` (renderer/src/lib/types.ts `ClipProps.linkId`), CapCut's link: they move, trim, split and delete together while linkage is on, until unlinked (§12, Links). The `#video` half is silent in preview and export.
+- **Engine.** The engine's copy of the project reads both halves from the file itself, the `#…` taken off the path, and plays the `#video` half silent (`withOriginalMedia`, renderer/src/lib/engine-preview.ts). Before, the fragment stayed in the path and the engine drew nothing for a detached video.
+- **Entry points.** ⇧⌘S (CapCut's Extract audio) on a selected video; the context menu "Detach Audio" is disabled for `#video` clips (renderer/src/components/timeline/clips/TimelineClip.tsx). The toolbar `SeparateButton` checks that audio exists but not that the clip is already detached (renderer/src/components/controls/Buttons.tsx).
 
 ### 7.7 Waveforms
 
@@ -1038,6 +1039,7 @@ type ProjectFile = {
   settings: { fps: number;                // default 24 (JPM:62-69)
               aspectRatio?: { width: number; height: number; id: string };  // from viewport store (JP:349)
               defaultClipLength: number;  // seconds (JP:350; used as fps*len in TimelineEditor.tsx:322,728)
+              mainTrackMagnet?: boolean;  // the main track magnet (clip store `magnet`); a CapCut draft's config.maintrack_adsorb
               [k: string]: unknown };
   editorState: { duration: number;        // frames = clipStore.clipDuration
                  zoomLevel: number; scrollX: 0; scrollY: 0;   // scroll is always 0 and never read
@@ -1045,13 +1047,16 @@ type ProjectFile = {
                  snapGuideX: number | null;
                  position: {x,y}; scale: number; tool: ViewTool; shape: ShapeTool;
                  viewportSize: {width,height}; contentBounds: {x,y,width,height} | null;
-                 timelineWindow: [startFrame, endFrame] };  // controls.timelineDuration (JP:352-371)
+                 timelineWindow: [startFrame, endFrame];   // controls.timelineDuration (JP:352-371)
+                 snapping?: boolean; linkage?: boolean };   // Auto snapping and linkage (controls store); default true
   assets: Record<assetId, { id; type: "video"|"image"|"audio"; path: string /*file:// URL*/;
                             width?; height?; duration: number; thumbnail? }>;   // renderer/src/lib/types.ts:93-101
   timeline: {
     tracks: TimelineProps[];   // verbatim: {type, timelineId, timelineWidth, timelineY, timelineHeight,
-                               //  timelinePadding, muted, hidden} — UI pixel geometry is persisted (types.ts:79-88)
-    clips: Array<ClipJson>;
+                               //  timelinePadding, muted, hidden, locked?} — UI pixel geometry is persisted (types.ts)
+    clips: Array<ClipJson>;    // a clip may carry linkId (§7.6, §12 Links)
+    markers?: Array<{ id: string; frame: number; color: string; note: string }>;  // frames, like the playhead;
+                               //  kept by JPM; a CapCut draft's time_marks.mark_items on import
   };
   inputControls: { selectedRangeByInputId:{}, selectedInputClipIdByInputId:{}, totalTimelineFramesByInputId:{},
                    timelineDurationByInputId:{}, fpsByInputId:{}, focusFrameByInputId:{},
@@ -1085,6 +1090,7 @@ type ClipJson = Omit<AnyClipProps, "startFrame"|"endFrame"|"trimStart"|"trimEnd"
 - **Assets.** Every asset is probed with `getMediaInfo`, and loading waits for all probes (JP:760-767).
 - **Derived values.** `clipDuration = max(max endFrame, editorState.duration)`, and `totalTimelineFrames = max(timelineWindow[1], clipDuration)` (JP:769-844).
 - **Viewport.** It is restored **only if `editorState` has at least one key** (JP:794-810).
+- **Magnet.** `settings.mainTrackMagnet` (true when missing), but only over a main track already gapless from 0 (`isMainTrackPacked`, renderer/src/lib/timeline-edit.ts): opening a project never moves its clips. Markers come back in time order; snapping and linkage default to on.
 
 **Main-process normalization.** `ensureProjectJson` fills in missing `meta`, `settings.fps`, `editorState`, `assets`, `timeline` and `inputControls`, and keeps any other `settings` keys (JPM:36-117). It runs on save, load and list. A file that fails to parse returns `{success:false}` on load and is skipped by list (JPM:897-905,1033-1039).
 
@@ -1097,9 +1103,9 @@ type ClipJson = Omit<AnyClipProps, "startFrame"|"endFrame"|"trimStart"|"trimEnd"
 
 | Source store | Fields watched | Cite |
 |---|---|---|
-| `useClipStore` | A JSON signature of each clip's `{clipId,type,timelineId,groupId,hidden,assetId,startFrame,endFrame,trimStart,trimEnd,transform,originalTransform,children}`, each track's `{timelineId,hidden,timelineY,muted}`, and each asset's `[id,type,path]`. The first emission only sets the baseline | JP:421-479,917-945 |
+| `useClipStore` | A JSON signature of each clip's `{clipId,type,timelineId,groupId,hidden,assetId,startFrame,endFrame,trimStart,trimEnd,transform,originalTransform,children}`, each track's `{timelineId,hidden,timelineY,muted,locked}`, and each asset's `[id,type,path]`; also any new `clips`, `markers` or `magnet` | JP:421-479,917-945 |
 | `useViewportStore` | `aspectRatio, scale, position, tool, shape, viewportSize, contentBounds` compared with `_.isEqual` | JP:960-973 |
-| `useControlsStore` | `fps`, `timelineDuration` (by reference), `zoomLevel`, `focusFrame`. Playback changes `focusFrame` every rAF step (renderer/src/lib/control.ts:28-37), so a save lands 500 ms after playback stops | JP:981-991 |
+| `useControlsStore` | `fps`, `timelineDuration` (by reference), `zoomLevel`, `focusFrame`, `snapping`, `linkage`. Playback changes `focusFrame` every rAF step (renderer/src/lib/control.ts:28-37), so a save lands 500 ms after playback stops | JP:981-991 |
 | `useProjectsStore` | Any change to the `projects` array reference (create, rename, delete, cover update) | JP:1267-1273 |
 
 - **Debounce.** A trailing 500 ms `setTimeout` with a generation counter (JP:856-909).
@@ -1149,26 +1155,33 @@ There is no persisted window state. The window opens fullscreen on macOS and Lin
 - prunes unreferenced assets with `pruneAssetsForClips` (clip.ts:162-209);
 - re-baselines timeline zoom with `_updateZoomLevel` (clip.ts:593-668).
 
-**Undo/redo does not exist.** There is no history store, no undo library, no handler and no app menu (main/src/modules/WindowManager.ts:96,117 only hides the menu bar).
+Every edit the store makes then follows the timeline's rules (`withTimelineRules`/`followRules` in clip.ts, the rules in renderer/src/lib/timeline-edit.ts): a track the edit left empty goes (the main track stays while anything is on the timeline; a track added empty stays until it's used), and with the magnet on the main track closes up. States put back by undo or loaded from a file come in through `setState` and are left as they were. Before, an effect in TimelineEditor removed every empty track after each clip change, as a second change.
+
+**Undo/redo** exists since 2026-10-17 (renderer/src/lib/history.ts; docs/plan/app-engine-integration.md). Each edit below is one step; markers, track locks and the magnet are in what it keeps.
 
 | Op | Entry points | Exact rules |
 |---|---|---|
-| **Split** | Split button (renderer/src/components/controls/Buttons.tsx:224-273); clip menu "Split at Playhead" (renderer/src/components/timeline/clips/TimelineClip.tsx:1187-1192). **No shortcut.** | Always cuts at `focusFrame`. The button splits every selected clip and is disabled if the playhead is at 0, at or past `clipDuration`, on a group, or outside the clip. `splitClip` needs `start < cut < end` (clip.ts:1553-1562). **Infinite trims become 0 first** (:1581-1586). Left half: `endFrame=cut`, `trimEnd += cut−oldEnd` (:1590-1596). Right half: `startFrame=cut`, `trimStart += cut−oldStart` (:1599-1605). Masks split at `cutLocal = cut − start + trimStart`: keyframes `<cutLocal` go left, the rest go right, and indices are unchanged. Image clips copy keyframe 0 to both halves (:1608-1716). Both halves get new uuids and are selected. |
+| **Split** | ⌘B and the Split button (`splitAtPlayhead`); ⇧⌘B splits every track; clip menu "Split at Playhead" | Always cuts at `focusFrame`: the selected clips under the playhead, or with none selected the main track's clip there, as CapCut does. Clips on locked tracks are left; a clip's linked clips are cut with it, the left halves linked to each other and the right halves. `splitClip` needs `start < cut < end` (clip.ts:1553-1562). **Infinite trims become 0 first** (:1581-1586). Left half: `endFrame=cut`, `trimEnd += cut−oldEnd` (:1590-1596). Right half: `startFrame=cut`, `trimStart += cut−oldStart` (:1599-1605). Masks split at `cutLocal = cut − start + trimStart`: keyframes `<cutLocal` go left, the rest go right, and indices are unchanged. Image clips copy keyframe 0 to both halves (:1608-1716). Both halves get new uuids and are selected. |
 | **Merge** | `mergeClips` (clip.ts:1724-1767). **No UI**: `MergeButton` is never rendered (Buttons.tsx:301-329). | Needs ≥2 clips whose sorted `end == next.start`. The result is the first clip with `[min,max]`. Track, type and asset are not checked. |
 | **Group** | Mod+G (renderer/src/components/controls/Controls.tsx:395-404); clip menu | Needs ≥2 non-group clips. The group gets `[min start, max end]`. `children` is one id list per source track, top→bottom by `timelineY`, each sorted by start (clip.ts:1276-1302). Children get `groupId` and `hidden:true` but **keep their own `timelineId` and frames** (:1306-1313). The group goes on the top-most `media` track that is free over the span, otherwise on a new 72 px media track (:1222-1274). |
 | **Group move / resize** | drag | Groups **cannot be resized** (clip.ts:1099-1101). Moving one shifts every child by the same delta. If the group changes track, the children's `timelineId` changes to the group's track (clip.ts:928-959). |
 | **Ungroup** | Mod+Shift+G (Controls.tsx:372-394); clip menu | The bottom children list goes first and prefers the group's track when its type matches and it is free. The other lists search upward for a free track of the right type, otherwise a new track is inserted at the group's index (clip.ts:1437-1484). Children are un-hidden, `groupId` is removed, and the group is deleted (:1509-1536). |
-| **Copy / Cut / Paste** | Mod+C/X/V (Controls.tsx:341-367); clip menu; track menu "Paste at Playhead" (renderer/src/components/timeline/Timeline.tsx:150-191) | The clipboard is in memory (`clipboard: AnyClipProps[]`, shallow copies). It is not the OS clipboard (clip.ts:801,1769-1777). Paste places clips at `focusFrame`, keeping their relative offsets. Target track: the explicit one (no type check), else the first track of the matching type, else a new one. Pasted clips get **new uuids and `trimStart=trimEnd=0`** (:1826-1871). |
-| **Delete** | Delete/Backspace (Controls.tsx:289-338); Trash button; menu | **Not a ripple delete.** Deleting a group removes the group and all its children. Deleting a child removes it from `children`, and if ≤1 child remains the group is ungrouped (clip.ts:829-889). Key priority: the selected mask (mask tool) > the selected draw line > the clips. |
+| **Copy / Cut / Paste** | Mod+C/X/V (Controls.tsx); clip menu; track menu "Paste at Playhead" (renderer/src/components/timeline/Timeline.tsx) | The clipboard is in memory (`clipboard: AnyClipProps[]`, shallow copies). It is not the OS clipboard. Paste places clips at `focusFrame`, keeping their relative offsets. Target track: the explicit one (no type check) unless locked, else the first unlocked track of the matching type, else a new one; onto the main track with the magnet on, in at the clip boundary nearest the playhead. Pasted clips get **new uuids and `trimStart=trimEnd=0`**; copies of linked clips are linked to each other, not to the originals. The timeline's zoom range follows the longer project, as after an add (it didn't). Cut skips locked tracks and takes linked clips along. |
+| **Delete** | Delete/Backspace (Controls.tsx); Trash button; menu | **A ripple delete on the main track with the magnet on**: the clips after close up (followRules). Overlay tracks, and the main track with the magnet off, keep the gap, as in CapCut. A clip's linked clips go with it; clips on locked tracks stay. Deleting a group removes the group and all its children. Deleting a child removes it from `children`, and if ≤1 child remains the group is ungrouped. Key priority: the selected mask (mask tool) > the selected draw line > a marker selected on the ruler (no clips selected) > the clips. |
+| **Magnetic main track** | toolbar Main track magnet, P (`magnet` in the clip store, saved as `settings.mainTrackMagnet`; on for a new project) | The main track is the lowest video track (`mainTrackOf`). With the magnet on its clips run end to end from 0 in time order (`packMainTrack`): a clip dropped, dragged or pasted onto it goes in before the clip under the pointer when in its first half, else after it, the rest making room (shown during the drag: its clips move aside, `mainPreview`); a clip deleted, trimmed or dragged off closes up. A left edge trimmed stays where the clip before ends and the clip after moves up; trimmed outwards, the clip grows and pushes the rest. What a moved clip carries moves with it: a group's children, and its linked clips while linkage is on (not on locked tracks). Turning the magnet on closes the track up. A locked main track isn't changed, and CapCut doesn't change the magnet then. The main track stays the lowest video track: a video dropped below it goes onto it (magnet on) or onto a new track just above it; a group made of its clips stays on it; a video track can't be dragged below it; it can't be deleted while another video track exists. |
+| **Delete left / right** | Q / W; toolbar buttons (`trimToPlayhead`) | CapCut's: the part of the selected clips before (Q) or after (W) the playhead goes; with none selected, the main track's clip under the playhead. Linked clips are trimmed with it. With the magnet on the main track closes up, and after Q the playhead goes to where the clip now starts. |
+| **Links** | ⇧⌘S / Detach Audio make one (§7.6); clip menu Link (two clips or more) and Unlink; toolbar Linkage, ` (controls `linkage`, saved in `editorState`) | Clips sharing a `linkId` move (on their own tracks) and take a speed change together; a trim moves the same edge of each by the same amount, only as far as all of them can; a split cuts all of them; a delete or cut takes all of them. A clip whose linked clip is on a locked track can't be edited. With linkage off each clip is edited alone and the links stay. |
+| **Markers** | M (at the playhead), toolbar Add marker; tags under the ruler (renderer/src/components/timeline/Markers.tsx); ⌥← / ⌥→ | `{id, frame, color, note}` in the clip store, saved as `timeline.markers`. A new one gets the accent colour and CapCut's name, "Marker 01", "Marker 02"…; M on an existing one selects it. Drawn as CapCut's tag (10 px, pointed below, hanging from the ruler's foot; a white edge when selected). A click goes to it and selects it (Delete removes it); a drag moves it, snapping like a clip; a double-click or its menu's Edit marker opens CapCut's box above the ruler: name and time (HH:MM:SS:FF) fields, saved on Done or Enter, five colours (CapCut's hues, the accent in place of its cyan, which comes last), Delete and Done. Its menu also has Delete marker and Delete all markers in timeline. CapCut drafts' timeline markers are imported with their colours (main/src/modules/CapCutImportModule.ts). |
 | **Separate (detach) audio** | `SeparateButton` (Buttons.tsx:349-381); menu "Detach Audio" | §7.6. |
-| **Timeline snapping** | clip drag (TimelineClip.tsx:743-817); edge resize (:1277-1391) | `SNAP_THRESHOLD_PX = 6` screen px. A drag snaps to the edges of clips on **other** tracks only. A resize snaps to the edges of all other clips. There is no playhead or marker snapping. |
+| **Timeline snapping** | clip drag and edge resize (TimelineClip.tsx); marker drag; toolbar Auto snapping, N (controls `snapping`, saved in `editorState`) | `SNAP_PX = 6` screen px (renderer/src/lib/timeline-edit.ts). Either edge of a dragged clip, or a dragged edge, snaps to the playhead, the markers and the edges of every clip on every track, except the clip's own linked clips; the dashed guide line shows while snapped. Held ⌘ skips it. A drag onto the main track with the magnet on goes in between clips instead. |
+| **Playhead** | its handle (renderer/src/components/timeline/Scrubber.tsx); ruler clicks; ← / →, ↑ / ↓, Home / End | Dragged, the handle sits on the frame under the pointer, or on a marker or clip edge within reach (snapping, N; held ⌘ skips it); let go, it stays on that frame. Before, letting go moved it to the ruler's minor tick grid, which on a long timeline zoomed in is two frames or more apart. |
 | **Canvas snapping** | `updateGuidesAndMaybeSnap` (renderer/src/components/preview/clips/ImagePreview.tsx:242-290; also VideoPreview.tsx:364, TextPreview.tsx:144, ShapePreview.tsx:121) | 4 screen px / viewport scale. The bbox centre snaps to the canvas centre and to the 25 % / 75 % lines; the bbox edges snap to the canvas edges. Disabled while rotating. |
-| **Move between tracks** | Konva drag (TimelineClip.tsx:527-1081) | Targets the nearest track centre that passes `isValidTimelineForClip` (clip.ts:211-224). Within 16 px of the dashed line between tracks, a new track is created. The drop position is used if it is free; otherwise the clip snaps into the containing or nearest free gap in the visible window (:953-1033). |
-| **Library drop** | dnd-kit (renderer/src/components/timeline/TimelineEditor.tsx:661-926) | Length: video/audio `round(duration·fps)`; image/filter `fps·defaultClipLength`. The clip is pushed right past overlaps (:832-858). The **first image or video sets the project aspect ratio** to the media's reduced W:H (:774-799). |
-| **Resize / trim** | edge handles; Start/End inputs (renderer/src/components/properties/DurationProperties.tsx:47-57) | Right edge: `newEnd ≥ start+1`; rejected if `Δ + trimEnd > 0`; otherwise `trimEnd += Δ`. Left edge: `newStart ≤ end−1`; rejected if `Δ + trimStart < 0`; otherwise `trimStart += Δ` (clip.ts:1105-1151). Minimum length is 1 frame. Unbounded (±∞) clips have no limit. Neighbours are not checked; `resolveOverlaps` pushes them instead. |
+| **Move between tracks** | Konva drag (TimelineClip.tsx) | Targets the nearest track centre that passes `isValidTimelineForClip` and isn't locked. Within 16 px of the dashed line between tracks, a new track is created (never a video track under the main track). The drop position is used if it is free; otherwise the clip snaps into the containing or nearest free gap in the visible window. Onto the main track with the magnet on, see Magnetic main track. Its linked clips move by the same amount on their own tracks. |
+| **Library drop** | dnd-kit (renderer/src/components/timeline/TimelineEditor.tsx) | Length: video/audio `round(duration·fps)`; image/filter `fps·defaultClipLength`. The clip is pushed right past overlaps; onto the main track with the magnet on it goes in between clips (Magnetic main track). Not onto a locked track. The **first image or video sets the project aspect ratio** to the media's reduced W:H. |
+| **Resize / trim** | edge handles; Start/End inputs (renderer/src/components/properties/DurationProperties.tsx) | An edge goes as far as the clip's media allows (`clampEdgeDelta` in clip.ts): a right edge keeps `end ≥ start+1` and `trimEnd ≤ 0`, a left edge `start ≤ end−1`, `start ≥ 0` and `trimStart ≥ 0`; the trim follows the edge. Before, an edge past the media was refused (the clip stopped at the last accepted mouse move). Unbounded (±∞) clips have no limit. Linked clips take the same change. The Start/End inputs still refuse a value past the media (`isValidResize`). Neighbours are not checked; `resolveOverlaps` pushes them, and with the magnet on the main track closes up. A drag follows the pointer from where it began, so the main track closing up under a left edge doesn't move the mark. A press on a handle no longer reorders the store's clips (`moveClipToEnd`, gone: it was an invisible change undo recorded); the clip is raised in Konva instead. |
 | **Speed change** | Duration panel | `end = start + round(oldDur·oldSpeed/newSpeed)`. Trims are **not** rescaled (clip.ts:901-922). |
 | **`resolveOverlaps`** | after almost every edit (clip.ts:260-302) | Hidden clips (group children) are passed through. Visible clips are sorted by `startFrame` **across all tracks**. Each clip is compared **only with the previous resolved clip**: if both are on the same track and `start < prev.end`, the clip shifts to `[prev.end, prev.end+dur)`. It cascades and never trims. |
-| **Tracks** | `TimelineProps` (types.ts:79-88) | There is **no add/remove track UI**. Tracks are created by drop, drag to a dashed line, group, ungroup, paste, detach, and canvas text/shape creation (always a new track at the top) or draw (reuses the first `draw` track). `addTimeline(t, i)` inserts **after** `i`, so −1 means top (clip.ts:757-779). `timelineY` is the running sum of heights (:315-340). Empty tracks are deleted whenever clips change (TimelineEditor.tsx:429-438). Mute/hide toggles: mute on media and audio tracks, hide on non-audio tracks, shown only when the sidebar is expanded (renderer/src/components/timeline/TimelineSidebar.tsx:101-138). |
+| **Tracks** | `TimelineProps` (types.ts); track headers (renderer/src/components/timeline/TimelineSidebar.tsx, controls in TrackControls.tsx) | Tracks are created by drop, drag to a dashed line, group, ungroup, paste, detach, and canvas text/shape creation (always a new track at the top) or draw (reuses the first `draw` track), and by the headers' + (Video, Audio, Text or Filter track: audio at the bottom, the rest on top). `addTimeline(t, i)` inserts **after** `i`, so −1 means top. `timelineY` is the running sum of heights. A track an edit empties is removed in that edit (followRules); one added empty stays. Track heights are CapCut's rows for the kind plus the 8 px gap (`trackHeightFor`; docs/plan/capcut-ui-spec.md §4.11): the main track 76 px, overlay video 52, audio 50, the rest 24; tracks are laid out again on every change and on load. Headers (open by default at CapCut's 123 px; the rail folds them to the kinds) show CapCut's columns, 24 px apart: kind, lock, hide (not audio), mute and a "…" menu (video and audio tracks); right-click on a header or a track's row opens the menu (Lock/Unlock track, Delete track). A header dragged up or down moves its track (`moveTrack`). Delete takes the track's clips (their linked clips elsewhere are unlinked); not a locked track, nor the main track while another video track exists. A locked track (`locked`, saved) is dimmed; its clips can't be selected, dragged, trimmed, split, deleted or moved onto, and its clips leave the selection when it's locked. |
 | **FPS change** | `setFpsWithRescale` (renderer/src/lib/control.ts:210-243) → `rescaleForFpsChange` (clip.ts:2026-2050) | `startFrame`, `endFrame`, `trimStart` and `trimEnd` become `round(f/old·new)`. Non-finite or **negative** values are left unchanged (clip.ts:150-160), so **`trimEnd` (≤0) is never rescaled**. The window, `totalTimelineFrames` and `focusFrame` are scaled too. Mask keyframe indices and speed are not. The only caller is SettingsModal. |
 | **Timeline zoom / pan** | slider and ± buttons (Controls.tsx:22-208); wheel/ruler (TimelineEditor.tsx:1024-1105) | Integer levels 1..10. The window width at level i is `round(T·(5/T)^((i−1)/9))`, with `T = totalTimelineFrames`, anchored at `focusFrame`. Baseline `T = max(5, round(maxEnd·5/3))`, so the content fills 60 % at level 1 (clip.ts:593-668). The wheel only pans (Shift ×3); there is no wheel zoom. Playback follow jumps a page at a time. Ticks are frame-based at levels 8–10 (renderer/src/lib/zoom.ts:29-36). |
 | **Selection** | click / Shift+click (control.ts:281-300) | Shift toggles. There is no marquee and no select-all. The properties panel shows the **last** selected clip. |
@@ -1192,11 +1205,25 @@ There is no persisted window state. The window opens fullscreen on macOS and Lin
 
 **Transport:** go to start, ±5 s (`fps·5` frames), and play/pause, which restarts from 0 when at the end (Buttons.tsx:23-101; control.ts:302-316). Time is shown as `MM:SS.ss`. `ExtendTimelineButton` and `ReduceTimelineButton` exist but are never rendered.
 
-**Keyboard shortcuts.** The `document` keydown handler is in Controls.tsx:255-535. It is ignored while focus is in an input, textarea or contentEditable. "Mod" means ⌘ or Ctrl.
+**Timeline toolbar** (Controls.tsx): Undo, Redo, Split, Delete left, Delete right, Delete, Add marker, Crop, Detach audio on the left, in CapCut's order; Main track magnet, Auto snapping and Linkage (toggles: on, the glyph in the accent on a dark 24×23 chip), a divider, Zoom to fit and the zoom slider on the right. The timeline's buttons and toggles are standalone components in renderer/src/components/timeline/TimelineTools.tsx, each tooltip naming its shortcut.
+
+**Keyboard shortcuts.** The `document` keydown handler is in Controls.tsx; it passes keys to the timeline's handler (`handleTimelineKey`, renderer/src/lib/timeline-shortcuts.ts) first. It is ignored while focus is in an input, textarea or contentEditable. "Mod" means ⌘ or Ctrl. The Shortcuts menu lists them from renderer/src/lib/shortcuts.ts.
 
 | Keys | Action | Cite |
 |---|---|---|
-| Delete / Backspace | delete selected mask (mask tool) > selected draw line > selected clips | Controls.tsx:289-338 |
+| Mod+Z / Mod+Shift+Z, Mod+Y | undo / redo | Controls.tsx; lib/history.ts |
+| Delete / Backspace | delete selected mask (mask tool) > selected draw line > selected marker > selected clips | Controls.tsx |
+| Space | play / pause | timeline-shortcuts.ts |
+| Mod+B / Mod+Shift+B | split at the playhead (selected clips, else the main track's) / every track | timeline-shortcuts.ts |
+| Q / W | delete left / right of the playhead | timeline-shortcuts.ts |
+| M; Alt+← / Alt+→ | add marker at the playhead; previous / next marker | timeline-shortcuts.ts |
+| P / N / ` | main track magnet / auto snapping / linkage | timeline-shortcuts.ts |
+| ← / →, Shift+← / Shift+→ | a frame back / forward; 10 frames | timeline-shortcuts.ts |
+| ↑ / ↓; Home / End | previous / next edit (a clip's start or end); start / end | timeline-shortcuts.ts |
+| [ / ] | select the clips left (starting before) / right (ending after) of the playhead | timeline-shortcuts.ts |
+| Mod+A | select every clip not on a locked track | timeline-shortcuts.ts |
+| Mod+Shift+S | extract the selected video's audio | timeline-shortcuts.ts |
+| Mod+= / Mod+−; Shift+Z | timeline zoom in / out; zoom timeline to fit | timeline-shortcuts.ts |
 | Delete / Backspace on a selected mask keyframe | delete the keyframe (capture phase) | renderer/src/components/timeline/clips/MaskKeyframes.tsx:516-541 |
 | Mod+C / Mod+X / Mod+V | copy / cut / paste at playhead | Controls.tsx:341-367 |
 | Mod+G / Mod+Shift+G | group / ungroup | Controls.tsx:370-406 |
@@ -1204,15 +1231,17 @@ There is no persisted window state. The window opens fullscreen on macOS and Lin
 | 1–5 (shape tool) | rect / ellipse / polygon / line / star | Controls.tsx:431-457 |
 | 1–3 (mask tool) | lasso / shape / draw | Controls.tsx:460-477 |
 | 1–3 (draw tool) | brush / highlighter / eraser | Controls.tsx:480-496 |
-| V H D T M S | pointer / hand / draw / text / mask / shape | Controls.tsx:499-530 |
+| V H D T S | pointer / hand / draw / text / shape (M is now Add marker, as in CapCut; the mask tool is in the preview's toolbar) | Controls.tsx |
 | Escape | close context menu; exit fullscreen; leave text edit | GlobalContextMenu.tsx:68-70; FullscreenPreview.tsx:327; TextPreview.tsx:788-797 |
 | Text-edit keys (Mod+A/C/X/V, Home, End, arrows, Delete, Backspace, Enter) | in-canvas text editor, entered by double-click | TextPreview.tsx:698-1092 |
 
-Shortcuts that do **not** exist: Space to play, frame-step keys, J/K/L, a split key, select-all, undo, redo.
+Shortcuts that do **not** exist: J/K/L, CapCut's select/split modes (A/B), enable/disable clip (V is the pointer tool), freeze frame.
 
 **Context menus** (dispatch: renderer/src/components/GlobalContextMenu.tsx:352-421):
-- **Clip** (TimelineClip.tsx:1101-1240): Copy, Cut, Paste, Delete, Split at Playhead, Detach Audio, Export as Image/Video/Audio (ClipExportModal), Group…/Ungroup.
-- **Track background:** Paste at Playhead.
+- **Clip** (TimelineClip.tsx): Copy, Cut, Paste, Delete, Split at Playhead, Detach Audio, Link / Unlink, Export as Image/Video/Audio (ClipExportModal), Group…/Ungroup. None on a locked track.
+- **Track background:** Paste at Playhead, Lock/Unlock track, Delete track.
+- **Track header** (right-click or "…"): Lock/Unlock track, Delete track.
+- **Marker** (right-click its flag): Edit marker, Delete marker, Delete all markers in timeline.
 - **Selected DOM text:** Copy.
 
 **Topbar** (renderer/src/components/bars/Topbar.tsx):
