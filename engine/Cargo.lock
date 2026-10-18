@@ -1214,6 +1214,7 @@ dependencies = [
  "openrip-render",
  "openrip-v1",
  "png",
+ "realfft",
  "serde_json",
 ]
 

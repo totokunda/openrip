@@ -57,6 +57,21 @@
 //!       For each text clip, sweep the line-wrap width (fraction of the canvas width, on
 //!       screen) and find which widths reproduce CapCut's exported frame: one line per clip
 //!       with the clip's CapCut fields, for fitting CapCut's wrapping rule.
+//!   openrip-dev app-roundtrip <projects-root> [--audio]
+//!       Convert each draft to the app's project and back, and compare four frames of the
+//!       two (PSNR); --audio compares their mixes too (the first 20 s).
+//!   openrip-dev audio-parity <project.json | draft-dir> <capcut-export> [--from S] [--to S] [--window S] [--all]
+//!       Compare our mix with the sound of CapCut's export (an MP4, or the WAV it exports):
+//!       the lag that lines them up, correlation, level (ours against CapCut's) and the
+//!       per-band distance (the level difference per frame and band, 20 bands 150–8000 Hz,
+//!       the overall level difference removed), overall and per window (default 1 s; the five
+//!       least alike, or --all).
+//!   openrip-dev loudness-scan <projects-root>
+//!       Our EBU R128 loudness and peak of every clip range CapCut measured for "Normalize
+//!       loudness", against CapCut's values (numbered drafts, no names).
+//!   openrip-dev beat-scan <projects-root>
+//!       Our beat detection on every library song with CapCut's beats file at hand, against
+//!       CapCut's beats: F-measure at 70 ms, tempo, offset and bar starts.
 //!   openrip-dev thumbs-bench <media-file> [--count N] [--height H]
 //!       Timeline thumbnails across the whole file (default 40 at 64 px): the quick pass
 //!       (one keyframe per GOP), the exact pass, and the exact pass again from the disk cache.
@@ -68,6 +83,8 @@ use std::time::Instant;
 
 use openrip_capcut::{import_draft_dir, ImportError, Imported};
 use openrip_model::Project;
+
+mod audio;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -85,7 +102,10 @@ fn main() -> ExitCode {
         Some("playthrough") if args.len() >= 2 => playthrough(&args).map_err(|e| e.to_string()),
         Some("pipeline-bench") if args.len() >= 2 => pipeline_bench(&args).map_err(|e| e.to_string()),
         Some("cover-parity") if args.len() >= 2 => cover_parity(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
-        Some("app-roundtrip") if args.len() >= 2 => app_roundtrip(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("app-roundtrip") if args.len() >= 2 => app_roundtrip(Path::new(&args[1]), args.iter().any(|a| a == "--audio")).map_err(|e| e.to_string()),
+        Some("audio-parity") if args.len() >= 3 => load_project(Path::new(&args[1])).and_then(|p| audio::parity(&args, p)).map_err(|e| e.to_string()),
+        Some("loudness-scan") if args.len() >= 2 => audio::loudness_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("beat-scan") if args.len() >= 2 => audio::beat_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("seek-bench") if args.len() >= 2 => seek_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("still-bench") if args.len() >= 2 => still_bench(&args).map_err(|e| e.to_string()),
         Some("export-parity") if args.len() >= 3 => export_parity(&args).map_err(|e| e.to_string()),
@@ -998,10 +1018,11 @@ fn still_bench(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Every draft under `root` converted to the app's project format and back: the round trip
 /// must draw the same frames (at 0, ¼, ½ and ¾ of the draft) as the draft itself.
-fn app_roundtrip(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn app_roundtrip(root: &Path, with_audio: bool) -> Result<(), Box<dyn std::error::Error>> {
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)?.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.join("draft_info.json").exists()).collect();
     dirs.sort();
     let (mut worst, mut compared, mut skipped) = (f64::INFINITY, 0, 0);
+    let mut worst_audio = 0f32;
     for (i, dir) in dirs.iter().enumerate() {
         let Ok(Imported { project, .. }) = import_draft_dir(dir) else { continue };
         let mut original = openrip_playback::PreviewEngine::new(project.clone())?;
@@ -1045,12 +1066,25 @@ fn app_roundtrip(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
             skipped += 1;
             continue;
         }
+        // The sound too (its first 20 s): the largest difference between the two mixes.
+        if with_audio {
+            let n = (end.min(20_000_000) as f64 * openrip_audio::RATE as f64 / 1e6) as usize;
+            let (a, b) = (audio::mix(project.clone(), 0, n)?, audio::mix(back.project.clone(), 0, n)?);
+            let diff = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
+            if diff > 0.0 {
+                println!("  draft #{i:02}: mixes differ by up to {diff:.2e}");
+            }
+            worst_audio = worst_audio.max(diff);
+        }
         compared += 1;
         worst = worst.min(low);
         let note = if back.report.warnings.is_empty() && back.report.problems.is_empty() { String::new() } else { format!("  warnings {:?} problems {:?}", back.report.warnings, back.report.problems) };
         println!("draft #{i:02}: {} segments, converted in {convert_ms:.0} ms, worst frame {low:5.1} dB{note}", project.tracks.iter().map(|t| t.segments.len()).sum::<usize>());
     }
     println!("{compared} drafts compared ({skipped} with media missing); worst {worst:.1} dB");
+    if with_audio {
+        println!("mixes: largest difference {worst_audio:.2e}");
+    }
     Ok(())
 }
 
