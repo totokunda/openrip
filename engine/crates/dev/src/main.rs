@@ -75,6 +75,9 @@
 //!   openrip-dev thumbs-bench <media-file> [--count N] [--height H]
 //!       Timeline thumbnails across the whole file (default 40 at 64 px): the quick pass
 //!       (one keyframe per GOP), the exact pass, and the exact pass again from the disk cache.
+//!   openrip-dev fonts [<family> [--weight N] [--italic]]
+//!       The installed font families the engine draws text in (and how long finding them
+//!       took), or the faces it picks for one family at a weight and slant.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -112,6 +115,7 @@ fn main() -> ExitCode {
         Some("wrap-probe") if args.len() >= 3 => wrap_probe(Path::new(&args[1]), Path::new(&args[2])).map_err(|e| e.to_string()),
         Some("thumbs-bench") if args.len() >= 2 => thumbs_bench(&args).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("fonts") => fonts_cmd(&args),
         Some("decode-bench") if args.len() >= 2 => decode_bench(Path::new(&args[1]), args.iter().any(|a| a == "--sw"), args.iter().any(|a| a == "--ffmpeg-hw")).map_err(|e| e.to_string()),
         _ => {
             eprintln!("usage:\n  openrip-dev capcut-import <draft-dir> [--out project.json]\n  openrip-dev capcut-scan <projects-root>\n  openrip-dev v1-import <project-N.json> [--out project.json]\n  openrip-dev v1-scan <projects-json-dir>\n  openrip-dev probe <media-file>\n  openrip-dev decode-bench <media-file> [--sw]");
@@ -125,6 +129,33 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `fonts`: the installed families, or one family's faces at a weight and slant.
+fn fonts_cmd(args: &[String]) -> Result<(), String> {
+    use openrip_render::fonts;
+    let t0 = Instant::now();
+    let faces = fonts::system_faces().len();
+    let scanned = t0.elapsed();
+    match args.get(1).filter(|a| !a.starts_with("--")) {
+        None => {
+            let families = fonts::families();
+            for f in &families {
+                println!("{}  {:?}{}", f.name, f.weights, if f.italic { " italic" } else { "" });
+            }
+            println!("{} families, {faces} faces, found in {:.0} ms", families.len(), scanned.as_secs_f64() * 1e3);
+        }
+        Some(family) => {
+            let weight = flag(args, "--weight").and_then(|w| w.to_string_lossy().parse().ok()).unwrap_or(400);
+            let italic = args.iter().any(|a| a == "--italic");
+            let r = fonts::resolve(family, weight, italic).ok_or_else(|| format!("no font family named {family}"))?;
+            for f in &r.faces {
+                println!("{} #{}  weight {}{}", f.source, f.index, f.weight, if f.italic { " italic" } else { "" });
+            }
+            println!("synthetic bold: {}, synthetic italic: {}", r.synthetic_bold, r.synthetic_italic);
+        }
+    }
+    Ok(())
 }
 
 fn flag(args: &[String], name: &str) -> Option<PathBuf> {

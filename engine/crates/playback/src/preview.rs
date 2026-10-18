@@ -12,6 +12,7 @@ pub use openrip_media::load_png;
 use openrip_media::{open_video, Decoder, DecoderOptions, MediaError, ReverseReader, VideoFrame};
 use openrip_model::{Animation, CanvasFillKind, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_platform::assets;
+use openrip_render::fonts;
 use openrip_render::text::{self, Align, Font, TextStyle};
 use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source, Surface, Uploader};
 
@@ -367,6 +368,9 @@ pub struct PreviewEngine {
     prepared: HashMap<u64, (std::sync::Arc<text::PreparedText>, u64)>,
     /// Font files found for family names (see `font_file_for`).
     font_files: HashMap<String, String>,
+    /// The font book's faces by family, bold, italic and whether installed fonts count, with
+    /// the book's generation they were found in (see `resolve_font`).
+    resolved_fonts: HashMap<(String, bool, bool, bool), (u64, Option<fonts::Resolved>)>,
     /// Text-style textures (premultiplied) by path; `None` if unreadable.
     textures: HashMap<String, Option<std::sync::Arc<RgbaImage>>>,
     /// Decoded stickers.
@@ -410,6 +414,7 @@ impl PreviewEngine {
             textures: HashMap::new(),
             stickers: Default::default(),
             font_files: HashMap::new(),
+            resolved_fonts: HashMap::new(),
             prepared: HashMap::new(),
             prefetch: Prefetcher::new(uploader),
             compositor,
@@ -1018,6 +1023,22 @@ impl PreviewEngine {
         }
     }
 
+    /// The font book's faces for `family` (bold is CSS weight 700): registered ones, then with
+    /// `installed` the system's. Found again when fonts have been registered since.
+    fn resolve_font(&mut self, family: &str, bold: bool, italic: bool, installed: bool) -> Option<fonts::Resolved> {
+        let generation = fonts::generation();
+        let key = (family.to_string(), bold, italic, installed);
+        match self.resolved_fonts.get(&key) {
+            Some((g, r)) if *g == generation => r.clone(),
+            _ => {
+                let weight = if bold { 700 } else { 400 };
+                let r = if installed { fonts::resolve(family, weight, italic) } else { fonts::resolve_registered(family, weight, italic) };
+                self.resolved_fonts.insert(key, (generation, r.clone()));
+                r
+            }
+        }
+    }
+
     /// Read the exposure and fade tables from a clip's CapCut colour bundle, once per bundle.
     fn load_exposure_luts(&mut self, seg: &Segment) {
         let bundles: Vec<String> = seg
@@ -1040,21 +1061,44 @@ impl PreviewEngine {
         if let Some(text) = self.project.materials.texts.iter().find(|m| m.id == seg.material) {
             let text = seg.text_at(text, seg.local_time(t));
             let Some(run) = text.runs.first() else { return Ok(None) };
-            let path = if !run.font.path.is_empty() && assets::exists(Path::new(&run.font.path)) {
-                run.font.path.clone()
+            let capcut = run.size_unit == SizeUnit::CapCut;
+            // The run's own font file; else the family's faces from the font book at its weight
+            // and slant, bold or italic synthesised only where the family has no such face (for
+            // the app's own text the app's bundled fonts, then the installed ones; for CapCut's,
+            // a bundled font the app picked for it); else a fallback file. `path` names what's
+            // drawn with, for the caches.
+            let (path, faces, synthetic_bold, synthetic_italic) = if !run.font.path.is_empty() && assets::exists(Path::new(&run.font.path)) {
+                (run.font.path.clone(), None, run.bold, run.italic)
+            } else if let Some(r) = self.resolve_font(&run.font.name, run.bold, run.italic, !capcut) {
+                (r.key(), Some(r.faces.clone()), run.bold && r.synthetic_bold, run.italic && r.synthetic_italic)
             } else {
                 // CapCut's text falls back to CapCut's font, the app's own to a system font.
-                let capcut = run.size_unit == SizeUnit::CapCut;
                 let name = run.font.name.clone();
                 let key = if capcut { name.clone() } else { format!("app:{name}") };
-                self.font_files.entry(key).or_insert_with(|| font_file_for(&name, capcut)).clone()
+                (self.font_files.entry(key).or_insert_with(|| font_file_for(&name, capcut)).clone(), None, run.bold, run.italic)
             };
             if let Some(why) = self.failed.get(&path) {
                 return Err((path.clone(), why.clone()));
             }
             if !self.fonts.contains_key(&path) {
-                let font = Font::from_file(Path::new(&path)).map_err(|e| (path.clone(), e.to_string()))?;
-                self.fonts.insert(path.clone(), font);
+                let font = match &faces {
+                    // The first face draws, the others what it has no glyph for.
+                    Some(faces) => {
+                        let load = |f: &fonts::FontFace| Font::from_file_at(Path::new(&f.source), f.index);
+                        let main = load(&faces[0]).map_err(|e| (faces[0].source.clone(), e.to_string()));
+                        main.map(|m| m.with_fallbacks(faces[1..].iter().filter_map(|f| load(f).ok()).collect()))
+                    }
+                    None => Font::from_file(Path::new(&path)).map_err(|e| (path.clone(), e.to_string())),
+                };
+                match font {
+                    Ok(font) => {
+                        self.fonts.insert(path.clone(), font);
+                    }
+                    Err(e) => {
+                        self.failed.insert(path.clone(), e.1.clone());
+                        return Err(e);
+                    }
+                }
             }
             let local = seg.local_time(t);
             let (pos, scale) = (seg.transform.position.sample(local), seg.transform.scale.sample(local));
@@ -1142,9 +1186,10 @@ impl PreviewEngine {
                 max_width: text.layout.max_width.or(text.layout.frame.map(|fr| fr.width)).map(|f| f * w as f32 * scale.x.abs() as f32),
                 // CapCut's synthetic styles: bold widens the glyphs by `bold_width` (0.008 in
                 // every local draft) in the stroke's unit, italic shears them by
-                // `italic_degree` (always 10); both match CapCut (session 5).
-                bold: if run.bold { 0.008 * em } else { 0.0 },
-                italic: if run.italic { 10.0 } else { 0.0 },
+                // `italic_degree` (always 10); both match CapCut (session 5). Not where the
+                // font has a bold or italic face of its own.
+                bold: if synthetic_bold { 0.008 * em } else { 0.0 },
+                italic: if synthetic_italic { 10.0 } else { 0.0 },
                 effect: effect.as_ref(),
                 curve: text.layout.curve,
                 char_colors: char_colors.as_deref(),

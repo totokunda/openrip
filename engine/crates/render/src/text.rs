@@ -14,23 +14,69 @@ use swash::zeno::{Angle, Cap, Format, Join, Stroke, Transform, Vector};
 
 use crate::RgbaImage;
 
-/// A font file loaded in memory.
+/// A font file loaded in memory: one face of it, and optionally faces that draw the
+/// characters it has no glyph for (the other files of a web font split by script).
 #[derive(Clone)]
 pub struct Font {
     data: Arc<Vec<u8>>,
     offset: u32,
     key: swash::CacheKey,
+    /// Tried in order for a character this face doesn't have.
+    fallbacks: Arc<Vec<Font>>,
 }
 
 impl Font {
     pub fn from_file(path: &Path) -> std::io::Result<Font> {
-        Font::from_bytes(openrip_platform::assets::read(path)?).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a font"))
+        Font::from_file_at(path, 0)
+    }
+
+    /// Face `index` of a font file (a collection's, `.ttc`, holds several).
+    pub fn from_file_at(path: &Path, index: u32) -> std::io::Result<Font> {
+        Font::from_bytes_at(openrip_platform::assets::read(path)?, index).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a font"))
     }
 
     pub fn from_bytes(data: Vec<u8>) -> Option<Font> {
-        let font = swash::FontRef::from_index(&data, 0)?;
+        Font::from_bytes_at(data, 0)
+    }
+
+    /// Face `index` of a TrueType or OpenType font, a collection of them, or a web font
+    /// (WOFF2, decoded here: the app's bundled fonts come as WOFF2 files).
+    pub fn from_bytes_at(data: Vec<u8>, index: u32) -> Option<Font> {
+        let data = if data.starts_with(b"wOF2") { wuff::decompress_woff2(&data).ok()? } else { data };
+        let font = swash::FontRef::from_index(&data, index as usize)?;
         let (offset, key) = (font.offset, font.key);
-        Some(Font { data: Arc::new(data), offset, key })
+        Some(Font { data: Arc::new(data), offset, key, fallbacks: Arc::new(Vec::new()) })
+    }
+
+    /// This face, with `fallbacks` drawing the characters it has no glyph for (each character
+    /// from the first that has it), as a browser picks among a font's `unicode-range` files.
+    pub fn with_fallbacks(mut self, fallbacks: Vec<Font>) -> Font {
+        self.fallbacks = Arc::new(fallbacks);
+        self
+    }
+
+    /// The face itself (0) and its fallbacks (1…).
+    fn face(&self, i: usize) -> &Font {
+        if i == 0 { self } else { &self.fallbacks[i - 1] }
+    }
+
+    fn face_count(&self) -> usize {
+        1 + self.fallbacks.len()
+    }
+
+    /// Which face draws `c`: the first with a glyph for it, else this one (its missing-glyph
+    /// box, as before fallbacks).
+    fn face_for(&self, c: char) -> usize {
+        if self.fallbacks.is_empty() || self.as_ref().charmap().map(c) != 0 {
+            return 0;
+        }
+        self.fallbacks.iter().position(|f| f.as_ref().charmap().map(c) != 0).map_or(0, |i| i + 1)
+    }
+
+    /// Whether the face has a glyph for every character of `text` but spaces and line breaks.
+    pub fn covers(&self, text: &str) -> bool {
+        let map = self.as_ref().charmap();
+        text.chars().filter(|c| !c.is_whitespace()).all(|c| map.map(c) != 0)
     }
 
     /// Height of the font's line box (ascent + descent) in em.
@@ -333,6 +379,8 @@ fn sample_repeat(img: &RgbaImage, x: f32, y: f32) -> [f32; 4] {
 
 struct Placed {
     glyph: u16,
+    /// Which of the font's faces the glyph is from (0 unless it has fallbacks).
+    face: usize,
     x: f32,
     baseline: f32,
     advance: f32,
@@ -378,24 +426,28 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
     let mut lines = Vec::new();
     let mut line_start = 0; // characters before this line
     for line in text.split('\n') {
-        // CapCut's text engine doesn't kern; a browser canvas does.
-        let mut shaper = ctx.builder(font).size(style.size).features(&[("kern", style.kerning as u16)]).build();
-        shaper.add_str(line);
         let mut clusters = Vec::new();
-        shaper.shape_with(|cluster| {
-            let at = (cluster.source.start as usize).min(line.len());
-            let mut c = Cluster { glyphs: Vec::new(), advance: 0.0, char_index: line_start + line[..at].chars().count(), ch: line[at..].chars().next().unwrap_or(' ') };
-            for g in cluster.glyphs {
-                c.glyphs.push((g.id, c.advance + g.x, g.advance));
-                c.advance += g.advance + spacing;
-            }
-            clusters.push(c);
-        });
+        // Each run of characters one face draws is shaped with that face (one run unless the
+        // font has fallbacks).
+        for (face, run) in face_runs(style.font, line) {
+            // CapCut's text engine doesn't kern; a browser canvas does.
+            let mut shaper = ctx.builder(style.font.face(face).as_ref()).size(style.size).features(&[("kern", style.kerning as u16)]).build();
+            shaper.add_str(&line[run.clone()]);
+            shaper.shape_with(|cluster| {
+                let at = (run.start + cluster.source.start as usize).min(line.len());
+                let mut c = Cluster { glyphs: Vec::new(), advance: 0.0, char_index: line_start + line[..at].chars().count(), ch: line[at..].chars().next().unwrap_or(' ') };
+                for g in cluster.glyphs {
+                    c.glyphs.push((g.id, face, c.advance + g.x, g.advance));
+                    c.advance += g.advance + spacing;
+                }
+                clusters.push(c);
+            });
+        }
         for row in wrap(&clusters, style.max_width) {
             let mut pen = 0.0f32;
             let mut glyphs = Vec::new();
             for c in row {
-                glyphs.extend(c.glyphs.iter().map(|&(id, x, adv)| (id, pen + x, c.char_index, adv)));
+                glyphs.extend(c.glyphs.iter().map(|&(id, face, x, adv)| (id, face, pen + x, c.char_index, adv)));
                 pen += c.advance;
             }
             let width = if glyphs.is_empty() { 0.0 } else { pen - spacing };
@@ -415,15 +467,32 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
         };
         let baseline = baseline0 + i as f32 * advance_y;
         boxes.push([x0, w, i as f32 * advance_y, line_box]);
-        glyphs.extend(line.into_iter().map(|(glyph, x, char_index, advance)| Placed { glyph, x: x0 + x, baseline, advance, line: i, char_index }));
+        glyphs.extend(line.into_iter().map(|(glyph, face, x, char_index, advance)| Placed { glyph, face, x: x0 + x, baseline, advance, line: i, char_index }));
     }
     TextLayout { glyphs, width, height, size: style.size, lines: boxes }
 }
 
-/// A shaped cluster: its glyphs (id, x from the cluster's start) and advance, letter
-/// spacing included.
+/// A line split into runs of characters one face of `font` draws: (face, byte range). Spaces
+/// stay with the run they're in, so a word is never split from its space.
+fn face_runs(font: &Font, line: &str) -> Vec<(usize, std::ops::Range<usize>)> {
+    let mut runs: Vec<(usize, std::ops::Range<usize>)> = Vec::new();
+    for (at, c) in line.char_indices() {
+        let face = match runs.last() {
+            Some((f, _)) if c.is_whitespace() => *f,
+            _ => font.face_for(c),
+        };
+        match runs.last_mut() {
+            Some((f, r)) if *f == face => r.end = at + c.len_utf8(),
+            _ => runs.push((face, at..at + c.len_utf8())),
+        }
+    }
+    runs
+}
+
+/// A shaped cluster: its glyphs (id, face, x from the cluster's start, advance) and advance,
+/// letter spacing included.
 struct Cluster {
-    glyphs: Vec<(u16, f32, f32)>,
+    glyphs: Vec<(u16, usize, f32, f32)>,
     advance: f32,
     char_index: usize,
     ch: char,
@@ -559,8 +628,8 @@ impl TextLayout {
         let mut tinted = (style.char_colors.is_some() || style.gradient.is_some()).then(|| vec![[0f32; 4]; (w * h) as usize]);
         let mut outline = style.stroke.map(|_| vec![0f32; (w * h) as usize]);
         let mut more: Vec<Vec<f32>> = style.more_strokes.iter().map(|_| vec![0f32; (w * h) as usize]).collect();
-        let mut ctx = ScaleContext::new();
-        let mut scaler = ctx.builder(style.font.as_ref()).size(self.size).hint(false).build();
+        let mut ctxs: Vec<ScaleContext> = (0..style.font.face_count()).map(|_| ScaleContext::new()).collect();
+        let mut scalers = scalers(&mut ctxs, style.font, self.size);
         let draw = |cov: &mut [f32], img: &swash::scale::image::Image, x: f32, y: f32, alpha: f32| {
             let (gx, gy) = (x.floor() as i32 + img.placement.left, y.floor() as i32 - img.placement.top);
             for row in 0..img.placement.height as i32 {
@@ -611,17 +680,18 @@ impl TextLayout {
                 pen.join(Join::Round).cap(Cap::Round);
                 Render::new(&[GlyphSource::Outline]).format(Format::Alpha).embolden(style.bold).transform(shear).style(pen).offset(offset).render(scaler, g.glyph)
             };
+            let scaler = &mut scalers[g.face];
             if let Some(cov) = outline.as_mut() {
-                if let Some(img) = outlined(&mut scaler, stroke) {
+                if let Some(img) = outlined(scaler, stroke) {
                     draw(cov, &img, x, y, alpha);
                 }
             }
             for (cov, &(_, width)) in more.iter_mut().zip(style.more_strokes) {
-                if let Some(img) = outlined(&mut scaler, width) {
+                if let Some(img) = outlined(scaler, width) {
                     draw(cov, &img, x, y, alpha);
                 }
             }
-            if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).embolden(style.bold).transform(shear).offset(offset).render(&mut scaler, g.glyph) {
+            if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).embolden(style.bold).transform(shear).offset(offset).render(scaler, g.glyph) {
                 match tinted.as_mut() {
                     None => draw(&mut fill, &img, x, y, alpha),
                     Some(tinted) => {
@@ -770,8 +840,8 @@ impl TextLayout {
         let [pad_x, pad_y] = glow_pad(style.glow.as_ref(), pad, self.width, self.height);
         let (w, h) = ((self.width.ceil() as i32 + 2 * pad_x + 1) as u32, (self.height.ceil() as i32 + 2 * pad_y + 1) as u32);
         let (left, top) = (pad_x as f32 + origin[0], pad_y as f32 + origin[1]);
-        let mut ctx = ScaleContext::new();
-        let mut scaler = ctx.builder(style.font.as_ref()).size(self.size).hint(false).build();
+        let mut ctxs: Vec<ScaleContext> = (0..style.font.face_count()).map(|_| ScaleContext::new()).collect();
+        let mut scalers = scalers(&mut ctxs, style.font, self.size);
         let shear = (style.italic != 0.0).then(|| Transform::skew(Angle::from_degrees(style.italic), Angle::ZERO));
         let mut base = vec![[0f32; 4]; (w * h) as usize];
         if let Some((c, cov)) = self.background(style, left, top, w, h) {
@@ -795,7 +865,7 @@ impl TextLayout {
                     }
                     r.render(scaler, g.glyph)
                 };
-                let Some(fill) = render(&mut scaler, None) else { continue };
+                let Some(fill) = render(&mut scalers[g.face], None) else { continue };
                 // Paint is mapped onto a square of 0.6 em centred on the glyph, in every
                 // layer: fitted against CapCut's exports (narrow letters get full-size
                 // pieces, so it isn't the glyph's box; the box with the outline is too big).
@@ -1028,6 +1098,11 @@ fn distance_to(inside: &[bool], w: usize, h: usize) -> Vec<f32> {
     d.into_iter().map(|v| v.sqrt() as f32).collect()
 }
 
+/// A glyph scaler for each of `font`'s faces (see [`Font::with_fallbacks`]), at `size` px.
+fn scalers<'a>(ctxs: &'a mut [ScaleContext], font: &'a Font, size: f32) -> Vec<swash::scale::Scaler<'a>> {
+    ctxs.iter_mut().enumerate().map(|(i, ctx)| ctx.builder(font.face(i).as_ref()).size(size).hint(false).build()).collect()
+}
+
 /// Side of the square a text style's paint is mapped onto, in em (see `prepare_effect`).
 const PAINT_BOX: f32 = 0.6;
 
@@ -1225,5 +1300,34 @@ mod tests {
         assert!((d[3 * w] - (8.0f32).sqrt()).abs() < 1e-5);
         // No inside pixel at all: every distance is large.
         assert!(distance_to(&[false; 4], 2, 2).iter().all(|&v| v > 4.0));
+    }
+
+    /// One of the app's bundled web fonts (WOFF2), where the app's packages are installed.
+    fn web_font(file: &str) -> Option<Font> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../apps/app/node_modules/@fontsource/poppins/files").join(file);
+        Font::from_file(&path).ok()
+    }
+
+    #[test]
+    fn web_fonts_split_by_script_draw_each_character_from_the_file_that_has_it() {
+        let (Some(latin), Some(ext)) = (web_font("poppins-latin-400-normal.woff2"), web_font("poppins-latin-ext-400-normal.woff2")) else { return };
+        // Decoded from WOFF2: a real face, with Latin but not "ő" (in the latin-ext file).
+        assert!(latin.covers("Hello") && !latin.covers("ő") && ext.covers("ő"));
+        fn style(font: &Font) -> TextStyle<'_> {
+            #[rustfmt::skip]
+            let s = TextStyle { font, size: 40.0, color: [255; 4], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: true, stroke: None, more_strokes: &[], gradient: None, glow: None, background: None, shadow: None, max_width: None, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None };
+            s
+        }
+        let alone = layout("Hő Ha", &style(&latin));
+        let both_font = latin.clone().with_fallbacks(vec![ext]);
+        let both = layout("Hő Ha", &style(&both_font));
+        // Alone, "ő" is the missing glyph; with the fallback it's the latin-ext file's, and
+        // only it comes from there (the space after it stays with it).
+        assert_eq!(alone.glyphs[1].glyph, 0);
+        assert!(both.glyphs[1].glyph != 0 && both.glyphs[1].face == 1);
+        assert!(both.glyphs.iter().enumerate().all(|(i, g)| (g.face == 1) == (i == 1 || i == 2)), "{:?}", both.glyphs.iter().map(|g| g.face).collect::<Vec<_>>());
+        // Both draw: the fallback's glyph has ink.
+        let img = both.rasterize(&style(&both_font), [0.0, 0.0]).image;
+        assert!(img.data.chunks(4).filter(|p| p[3] > 128).count() > 100);
     }
 }

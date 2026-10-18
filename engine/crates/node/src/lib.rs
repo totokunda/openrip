@@ -613,3 +613,45 @@ pub fn stop_recording() -> Result<Option<Recording>> {
 pub fn use_tone_input() {
     openrip_core::set_audio_input(std::sync::Arc::new(openrip_core::ToneInput));
 }
+
+// Fonts for text.
+
+/// A font face for text, as CSS describes it (`@font-face`).
+#[napi(object)]
+pub struct FontFace {
+    pub family: String,
+    /// CSS weight (400 regular, 700 bold).
+    pub weight: u32,
+    pub italic: bool,
+    /// The font file (TrueType, OpenType or WOFF2).
+    pub path: String,
+    /// Its CSS `unicode-range`, for a web font split into one file per script.
+    pub unicode_range: Option<String>,
+}
+
+/// Draw the app's text in these faces from now on (the app's bundled web fonts), each read
+/// when text first uses it.
+#[napi]
+pub fn register_fonts(faces: Vec<FontFace>) {
+    openrip_core::register_fonts(faces.iter().map(|f| openrip_core::font_face(&f.family, f.weight.min(1000) as u16, f.italic, &f.path, f.unicode_range.as_deref())).collect());
+}
+
+/// A family text can be drawn in.
+#[napi(object)]
+pub struct FontFamily {
+    pub name: String,
+    /// The weights it has faces for, ascending.
+    pub weights: Vec<u32>,
+    pub italic: bool,
+    /// Registered by the app (its bundled fonts) rather than installed on the system.
+    pub bundled: bool,
+}
+
+/// The families text can be drawn in: the app's registered ones, then the installed ones.
+#[napi]
+pub fn font_families() -> Vec<FontFamily> {
+    openrip_core::font_families()
+        .into_iter()
+        .map(|f| FontFamily { name: f.name, weights: f.weights.into_iter().map(u32::from).collect(), italic: f.italic, bundled: f.registered })
+        .collect()
+}

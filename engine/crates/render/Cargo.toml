@@ -13,6 +13,8 @@ pollster = "0.4"
 bytemuck = { version = "1", features = ["derive"] }
 thiserror.workspace = true
 swash = "0.2"
+# WOFF2 web fonts (the app's bundled fonts), decoded in pure Rust for every target.
+wuff = { version = "0.2", default-features = false, features = ["brotli"] }
 openrip-frame.workspace = true
 openrip-platform.workspace = true
 

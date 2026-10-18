@@ -202,3 +202,33 @@ export function recordingLevel(): { peak: number; rms: number } | null
 export function stopRecording(): { path: string; durationUs: number; rate: number; channels: number } | null
 /** For automated tests: record from a stand-in microphone that hears a steady 440 Hz tone. */
 export function useToneInput(): void
+
+// Fonts for text.
+
+/** A font face for text, as CSS describes it (@font-face). */
+export interface FontFace {
+  family: string
+  /** CSS weight (400 regular, 700 bold). */
+  weight: number
+  italic: boolean
+  /** The font file (TrueType, OpenType or WOFF2). */
+  path: string
+  /** Its CSS unicode-range, for a web font split into one file per script. */
+  unicodeRange?: string
+}
+
+/** Draw the app's text in these faces from now on (the app's bundled web fonts), each read when text first uses it. */
+export function registerFonts(faces: FontFace[]): void
+
+/** A family text can be drawn in. */
+export interface FontFamily {
+  name: string
+  /** The weights it has faces for, ascending. */
+  weights: number[]
+  italic: boolean
+  /** Registered by the app (its bundled fonts) rather than installed on the system. */
+  bundled: boolean
+}
+
+/** The families text can be drawn in: the app's registered ones, then the installed ones. The first call reads the system's font folders. */
+export function fontFamilies(): FontFamily[]

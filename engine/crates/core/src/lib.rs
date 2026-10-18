@@ -14,10 +14,13 @@
 //!   voiceover recording from the microphone (behind the audio input seam).
 //! - [`export_project`]: render and encode a project, with progress and cancel.
 //! - [`capcut_to_app`]: a CapCut draft converted to the app's project document.
+//! - [`register_fonts`] / [`font_families`]: the client's fonts (the app's bundled web
+//!   fonts) for text, and the families text can be drawn in.
 
 mod audio;
 mod capcut;
 mod export;
+mod fonts;
 mod project;
 mod session;
 mod thumbs;
@@ -29,6 +32,7 @@ use openrip_playback::PreviewError;
 pub use audio::{measure_loudness, set_audio_input, Level, Loudness, Recorder, Recording, ToneInput};
 pub use capcut::{capcut_to_app, AppProjectFromDraft};
 pub use export::{codec_named, export_project, Codec, ExportControl, ExportOptions, ExportProgress, ExportResult};
+pub use fonts::{font_face, font_families, register_fonts, FontFace, FontFamily};
 pub use openrip_model::{Micros, Project};
 pub use project::{load_project, parse_project_json, ProjectInfo, Source, TextBlock};
 pub use session::{DisplayFrame, FrameHandle, FrameJob, Image, RenderedFrame, Renderer, Session, Surface};
