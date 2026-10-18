@@ -37,8 +37,6 @@ import MaskPreview from "./clips/MaskPreview";
 import { useControlsStore } from "@/lib/control";
 import {
   AnyClipProps,
-  PolygonClipProps,
-  ShapeClipProps,
   TextClipProps,
   DrawingClipProps,
   DrawingLine,
@@ -68,6 +66,7 @@ import {
   mergePolygons,
 } from "@/lib/polygon";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
+import { shapeClip, shapeSize } from "@/lib/shape-presets";
 
 // The applicators of a clip with none over it: one array, so clip previews keep their props.
 const NO_APPLICATORS: ReturnType<typeof getApplicatorsForClip> = [];
@@ -1891,71 +1890,15 @@ const Preview: React.FC<PreviewProps> = () => {
         // Calculate shape dimensions using start and current end position
         const x = Math.min(shapeStart.x, worldEndX);
         const y = Math.min(shapeStart.y, worldEndY);
-        let width = Math.abs(worldEndX - shapeStart.x);
-        let height = Math.abs(worldEndY - shapeStart.y);
-        if (shape === "star") {
-          const size = Math.max(width, height);
-          width = size;
-          height = size;
-        } else if (shape === "polygon") {
-          const ratio = 1.1543665517482078;
-          if (width / (height || 1) >= ratio) {
-            height = width / ratio;
-          } else {
-            width = height * ratio;
-          }
-        }
+        const { width, height } = shapeSize(shape, Math.abs(worldEndX - shapeStart.x), Math.abs(worldEndY - shapeStart.y));
 
         // Only create shape if it has meaningful size
         if (width > 5 && height > 5) {
-          // Find or create shape timeline
-          let shapeTimeline = {
-            timelineId: uuidv4(),
-            type: "shape" as const,
-            timelineY: 0,
-            timelineHeight: 40,
-            timelineWidth: 0,
-            muted: false,
-            hidden: false,
-          };
-
-          addTimeline(shapeTimeline, -1);
-
-          // Create shape clip with 3-second duration (72 frames at 24fps)
-          const clipDuration = 3 * DEFAULT_FPS;
-          const newClip: ShapeClipProps = {
-            clipId: uuidv4(),
-            type: "shape" as const,
-            timelineId: shapeTimeline.timelineId,
-            startFrame: focusFrame,
-            endFrame: Math.min(
-              focusFrame + clipDuration,
-              totalTimelineFrames - 1,
-            ),
-            trimEnd: -Infinity,
-            trimStart: Infinity,
-            shapeType: shape,
-            fill: "#E3E3E3",
-            stroke: "#E3E3E3",
-            strokeWidth: 1,
-            transform: {
-              x,
-              y,
-              width,
-              height,
-              scaleX: 1,
-              scaleY: 1,
-              rotation: 0,
-              cornerRadius: 0,
-              opacity: 100,
-            },
-          };
-
-          if (shape === "polygon") {
-            (newClip as PolygonClipProps).sides = 3;
-          }
-
-          addClip(newClip);
+          const timelineId = uuidv4();
+          addTimeline({ timelineId, type: "shape", timelineY: 0, timelineHeight: 40, timelineWidth: 0, muted: false, hidden: false }, -1);
+          addClip(
+            shapeClip(shape, { x, y, width, height }, { clipId: uuidv4(), timelineId, startFrame: focusFrame, fps: DEFAULT_FPS, totalFrames: totalTimelineFrames }),
+          );
         }
 
         // Reset shape creation state

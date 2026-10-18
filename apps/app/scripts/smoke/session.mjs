@@ -57,11 +57,12 @@ for (const step of steps) {
     console.log(`STEP ${step}: ok`, r ?? "");
   } catch (e) {
     console.log(`STEP ${step}: FAILED`, e.message.split("\n")[0]);
-    await shot(`fail-${step}`);
+    // The window may be gone (the app crashed): keep going to write the logs.
+    await shot(`fail-${step}`).catch(() => {});
     break;
   }
 }
 fs.writeFileSync(`${outDir}/logs.txt`, logs.join("\n"));
 const noise = /sandbox_extension|Security Warning|unsafe-eval|deprecated|viewport store not ready/;
 console.log("LOGS:\n" + logs.filter((l) => !noise.test(l)).slice(0, 400).join("\n"));
-await app.close();
+await app.close().catch(() => {});

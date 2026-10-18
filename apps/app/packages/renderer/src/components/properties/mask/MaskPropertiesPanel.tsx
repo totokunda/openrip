@@ -7,6 +7,7 @@ import LassoMaskTransformProperties from "./LassoMaskTransformProperties";
 import MaskOperationsProperties from "./MaskOperationsProperties";
 import { cn } from "@/lib/utils";
 import { LuX } from "react-icons/lu";
+import AddMaskTools from "./AddMaskTools";
 
 interface MaskPropertiesPanelProps {
   clipId: string;
@@ -94,12 +95,10 @@ const MaskPropertiesPanel: React.FC<MaskPropertiesPanelProps> = ({
 
   if (!mask || clip?.masks.length === 0 || activeMasks.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-9 gap-y-1">
-        <p className="text-brand-light/90 font-medium text-[13px] text-center">
+      <div className="flex flex-col gap-y-6 p-4">
+        <AddMaskTools />
+        <p className="text-brand-light/50 text-[12px] text-center">
           No masks currently active in this clip.
-        </p>
-        <p className="text-brand-light/60 text-[12px] text-center">
-          Use the mask tool to create one.
         </p>
       </div>
     );
@@ -111,6 +110,7 @@ const MaskPropertiesPanel: React.FC<MaskPropertiesPanelProps> = ({
 
   return (
     <div className="flex flex-col gap-y-2">
+      <AddMaskTools className="px-4 pt-4" />
       {activeMasks.length > 0 && (
         <div className="flex flex-row gap-x-2 items-center justify-start px-4 pt-4 flex-wrap gap-y-2">
           {activeMasks.map((m: MaskClipProps, idx: number) => (

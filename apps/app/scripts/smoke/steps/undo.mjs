@@ -42,9 +42,9 @@ export default async (ctx) => {
     },
     mask: async () => {
       await pick("video", 0, 6);
-      // The preview's Mask tool (M is CapCut's Add marker).
-      await win.locator("[title=Mask]").first().click();
-      await win.keyboard.press("2");
+      // The Mask tab's rectangle (the player has no tool row).
+      await openTab(win, "Mask");
+      await win.locator("[data-testid=add-mask-rectangle]").click();
       await win.waitForTimeout(300);
       // A rectangle in the picture's lower half, inside it whatever the player's size (a mask
       // that runs off the clip isn't made).

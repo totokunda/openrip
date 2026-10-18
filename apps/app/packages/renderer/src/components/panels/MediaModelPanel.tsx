@@ -24,6 +24,7 @@ import MediaMenu from "@/components/menus/MediaMenu";
 import FilterMenu from "../menus/FilterMenu";
 import TextMenu from "../menus/TextMenu";
 import TransitionMenu from "../menus/TransitionMenu";
+import CanvasToolsMenu from "../menus/CanvasToolsMenu";
 import PendingMenu, { type Pending } from "../menus/PendingMenu";
 
 interface MediaModelPanelProps {
@@ -66,7 +67,11 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
     { id: "styles", label: "Add text" },
     { id: "animations", label: "Animations" },
   ],
-  stickers: [{ id: "stickers", label: "Stickers" }],
+  stickers: [
+    { id: "stickers", label: "Stickers" },
+    { id: "draw", label: "Draw" },
+    { id: "shapes", label: "Shapes" },
+  ],
   effects: [{ id: "effects", label: "Video effects" }],
   transitions: [{ id: "transitions", label: "Transitions" }],
   captions: [{ id: "captions", label: "Captions" }],
@@ -182,6 +187,8 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
         return <TextMenu part={sub === "animations" ? "animations" : "styles"} />;
       case "transitions":
         return <TransitionMenu />;
+      case "stickers":
+        return sub === "draw" || sub === "shapes" ? <CanvasToolsMenu part={sub} /> : <PendingMenu section="stickers" />;
       default:
         return <PendingMenu section={section as Pending} />;
     }

@@ -26,7 +26,7 @@ This document covers OpenRip **0.1.2** (`apps/app/package.json`) on `main` as of
 | `renderer/src/lib/` | `types.ts`, `clip.ts`, `control.ts`, `clipOrdering.ts`, `applicator-utils.ts`, `prepareExportClips.ts`, `viewport.ts`, `polygon.ts`, `eraser-utils.ts`, `drawing.ts`, `projects.ts`; `middlewares/json-persistence.ts` (also "JP"); `mask/{index,keyframeUtils,transformUtils,clipTransformUtils}.ts` |
 | `renderer/src/lib/media/` | `utils.ts`, `audio.ts`, `audio-decoder.worker.ts` (also "worker" in §7), `video.ts`, `video-decoder.ts`, `video-decoder.worker.ts` (also "worker" in §8–9), `cache.ts`, `canvas.ts`, `image.ts`, `timeline.ts` |
 | `renderer/src/components/preview/` | `Preview.tsx`, `FullscreenPreview.tsx`; `mask/{base,shape,lasso,crop,useWebGLMask}.ts`; `webgl-filters/*.ts` (`WebGLFilterBase`, `useWebGLFilters`, `hald-clut`, `brightness`, `contrast`, `hue-saturation`, `blur`, `sharpness`, `noise`, `vignette`, `useWebGLHaldClut`) |
-| `renderer/src/components/preview/clips/` | `VideoPreview`, `ImagePreview`, `AudioPreview`, `TextPreview`, `ShapePreview`, `DrawingPreview`, `MaskPreview`, `LassoMaskPreview`, `ShapeMaskPreview`, `DrawMaskPreview`, `FloatingBar` (`.tsx`); `apply/{base,filter}.ts`; `custom/{DrawingLine,RoundedRegularPolygon,ApplicatorFilter}.tsx` |
+| `renderer/src/components/preview/clips/` | `VideoPreview`, `ImagePreview`, `AudioPreview`, `TextPreview`, `ShapePreview`, `DrawingPreview`, `MaskPreview`, `LassoMaskPreview`, `ShapeMaskPreview`, `DrawMaskPreview` (`.tsx`); `apply/{base,filter}.ts`; `custom/{DrawingLine,RoundedRegularPolygon,ApplicatorFilter}.tsx` |
 | `renderer/src/components/properties/` | `AppearanceProperties`, `AudioProperties`, `ColorCorrectionProperties`, `EffectsProperties`, `FilterProperties`, `DurationProperties`, `LayoutProperties`, `PositionProperties`, `TextProperties`, `TextStrokeSection`, `TextShadowSection`, `TextBackgroundSection`, `LineProperties`, `ColorInput`, `Combobox`, `Input` (`.tsx`); `mask/*.tsx` |
 | `renderer/src/components/` (other) | `GlobalContextMenu.tsx`, `App.tsx`, `bars/Topbar.tsx`, `controls/{Controls,Buttons}.tsx`, `dialogs/{ExportModal,ClipExportModal,MediaDialog,SettingsModal}.tsx`, `menus/{MediaMenu,FilterMenu}.tsx`, `media/Item.tsx`, `timeline/{TimelineEditor,Timeline,TimelineSidebar,Scrubber}.tsx`, `timeline/clips/{TimelineClip,MaskKeyframes}.tsx`, `timeline/clips/thumbnails/generateTimelineThumbnail*.ts` |
 | `export-renderer/src/` | `export.ts` (`KonvaExportRenderer`), `exporter.ts`, `ffmpegEncoder.ts`, `blit.ts`, `prepare.ts`; `masks/apply.ts`; `webgl-filters/{apply,hald-clut-singleton}.ts`; `applicators/utils.ts` |
@@ -361,7 +361,7 @@ Transient tool state (not persisted): `useMaskStore` `{ tool: "lasso", shape: "r
 | Shape: polygon | Same; aspect forced to w/h = 1.1543665517482078 (=2/√3) | Upward equilateral triangle, fixed 3 sides | Preview.tsx:872-895, 1401-1407 |
 | Shape: star | Same; forced square | 5 points, inner radius = 0.5 × outer | Preview.tsx:862-871, 1397-1400 |
 | Shape overlap handling | AABB containment only (ignores rotation/shape type) | Existing contained shapes removed unless larger; new shape not added if it sits inside a larger existing shape | Preview.tsx:1447-1572 |
-| Draw (brush) | Key `3` in mask mode only; FloatingBar popover has only Lasso/Shape buttons but shows a 1–100 brush-size slider when `tool==="draw"` | **Stub**: strokes drawn as a 40%-opacity blue Konva line, never committed to a mask | Controls.tsx:472-475; FloatingBar.tsx:444-466, 534-556; Preview.tsx:686-700, 936-963, 2245-2261 |
+| Draw (brush) | Key `3` in mask mode, or Brush in the Mask tab's picker (AddMaskTools.tsx) | **Stub**: strokes drawn as a 40%-opacity blue Konva line, never committed to a mask | Controls.tsx:472-475; Preview.tsx:686-700, 936-963, 2245-2261 |
 
 Shape kinds have **no** sides/points/corner-radius parameters: triangle and 5-point star are hard-coded in shader and overlay (shape.ts:35, 128-166; ShapeMaskPreview.tsx:552-567). Overlay transformer: star/polygon corner anchors only, rect/ellipse 8 anchors, rotation snaps every 45° (ShapeMaskPreview.tsx:607-632).
 
@@ -516,7 +516,7 @@ Colors are stored as hex `#RRGGBB`. Opacity is stored separately as 0-100. When 
 
 | Prop | Type / units | Creation (`Preview.tsx:1888-1918`) | Fallback (`ShapePreview.tsx:159-168`, `export.ts:651-655`) | UI | Notes |
 |---|---|---|---|---|---|
-| `shapeType` | `rectangle\|ellipse\|polygon\|line\|star` | `viewport.shape` | rectangle | Floating bar menu (`FloatingBar.tsx:591-656`) offers rectangle, ellipse, polygon and star. Keys 1-5 in shape mode select rectangle, ellipse, polygon, **line**, star (`Controls.tsx:429-456`). `line` is reachable only through key `4` | Fixed after creation |
+| `shapeType` | `rectangle\|ellipse\|polygon\|line\|star` | `viewport.shape` | rectangle | The Stickers tab's Shapes section (`CanvasToolsMenu.tsx`, `lib/shape-presets.ts`) adds any of the five at the playhead. Keys 1-5 in shape mode select rectangle, ellipse, polygon, line, star (`Controls.tsx:429-456`) | Fixed after creation |
 | `fill` / `fillOpacity` | hex / 0-100 | `#E3E3E3` / unset | `#3b82f6` / 100 | ColorInput (`AppearanceProperties.tsx:121-129`) | Converted to `rgba(r,g,b,op/100)` by `hexToRgba`, which assumes 6-digit hex (`ShapePreview.tsx:693-709`, `export.ts:1053-1059`) |
 | `stroke` / `strokeOpacity` | hex / 0-100 | `#E3E3E3` / unset | `#1e40af` / 100 | ColorInput (`:130-138`) | Same `rgba` conversion |
 | `strokeWidth` | world px | 1 | 2 | Input, step 1, min 0 (`:139-149`) | Konva stroke, centered. It scales with the node's scale (`strokeScaleEnabled` default) |
@@ -549,11 +549,11 @@ Colors are stored as hex `#RRGGBB`. Opacity is stored separately as 0-100. When 
 
 ### 6.2 Freehand drawing (`DrawingClipProps`, `types.ts:205-228`)
 
-**Drawing tools.** The store is `renderer/src/lib/drawing.ts:29-62`. The tool UI is in `FloatingBar.tsx:230-401`. Keys: `D` selects the draw tool, then `1`/`2`/`3` select brush, highlighter and eraser (`Controls.tsx:479-495`, `:509-513`).
+**Drawing tools.** The store is `renderer/src/lib/drawing.ts:29-62`. The tool UI is the Stickers tab's Draw section (`CanvasToolsMenu.tsx`). Keys: `D` selects the draw tool, then `1`/`2`/`3` select brush, highlighter and eraser (`Controls.tsx:479-495`, `:509-513`).
 
 | Tool | Default size (world px) | Size UI | Stored stroke / opacity | Tension | Cap / join | Composite |
 |---|---|---|---|---|---|---|
-| brush | 8 | slider 1-30, typed value clamped 1-20 (`FloatingBar.tsx:293-355`) | `color` (default `#FF0000`) / `opacity` (default 100) from the brush ColorInput (`:380-391`) | `smoothing`: slider 0-100 → 0-1, default 0.5 (`:357-379`) | round / round | source-over |
+| brush | 8 | slider 1-30 (`CanvasToolsMenu.tsx`) | `color` (default `#FF0000`) / `opacity` (default 100) from the pen's ColorInput | `smoothing`: slider 0-100 → 0-1, default 0.5 | round / round | source-over |
 | highlighter | 20 | 1-50 | **forced** `#FFFF00` / **50** (`Preview.tsx:775-781`) | 0 | square / bevel | `multiply`: computed in `DrawingLine.tsx:61-67` and applied **only in export** (§6.3) |
 | eraser | 10 | 1-100 | not stored; geometric erase | n/a | n/a | n/a |
 
@@ -1211,7 +1211,7 @@ Every edit the store makes then follows the timeline's rules (`withTimelineRules
 
 **Left panel** (renderer/src/components/panels/MediaModelPanel.tsx): a row of tabs, Media, Audio, Text, Stickers, Effects, Transitions, Captions, Filters, Adjustment, Templates (`SidebarSection`, types.ts), on the header strip (icon over a 12 px label, the selected one in the accent, scroll buttons when they don't fit), each with a 120 px column of filled sections beside its library (Media: Import > Media, Library; Text: Add text, Animations; Filters keeps its categories column). Media is the media library: with nothing imported, a dashed drop zone that imports on a click; then Import (files or a folder), Record (not yet), and search, grid or list, sort and filter on the right; the media under "All" as 120×80 cards (the name cut in the middle, the length top-right, "Added" while a clip uses it). Filters is the LUT packs. Text adds a text at the playhead (3 s, centred, on a new top track, selected on its Text tab) in one of eight styles made of the text panel's own settings (renderer/src/lib/text-presets.ts), and gives the selected text one of the Animation tab's In animations. Transitions gives the selected video or photo one of the Animation tab's transitions (`applyTransition`, AnimationProperties.tsx) and shows the Animation tab. Audio, Stickers, Effects, Captions, Adjustment, Templates and Media's Library say what's coming and what to use meanwhile (renderer/src/components/menus/PendingMenu.tsx).
 
-**Player** (renderer/src/components/panels/PreviewPanel.tsx): a header with its name and the project's, the canvas tools and the zoom menu (FloatingBar) and a menu (safe-area guides, zoom to fit, full screen); the canvas (Preview); and a 44 px bar under it (renderer/src/components/preview/PlayerBar.tsx) with the time as `HH:MM:SS:FF / HH:MM:SS:FF` (the current one in the accent), play (go to start and ±5 s beside it, hidden when the player is narrow), and safe areas, the preview's quality (a boxed "Full", two-line menu: Full, Half, Quarter), zoom to fit, the ratio (boxed; Custom and the presets with their shapes; RatioMenu.tsx) and full screen. The guides are the action- and title-safe boxes (SafeAreaGuides.tsx).
+**Player** (renderer/src/components/panels/PreviewPanel.tsx): a header with its name and the project's and a menu (safe-area guides, the canvas's zoom: fit, 50, 100 and 200 %, and full screen), with no tool row, as CapCut's has none; the canvas (Preview); and a 44 px bar under it (renderer/src/components/preview/PlayerBar.tsx) with the time as `HH:MM:SS:FF / HH:MM:SS:FF` (the current one in the accent), play (go to start and ±5 s beside it, hidden when the player is narrow), and safe areas, the preview's quality (a boxed "Full", two-line menu: Full, Half, Quarter), zoom to fit, the ratio (boxed; Custom and the presets with their shapes; RatioMenu.tsx) and full screen. The guides are the action- and title-safe boxes (SafeAreaGuides.tsx).
 
 **Inspector** (renderer/src/components/panels/ClipPropertiesPanel.tsx): the selected clip's tabs, grouped as CapCut groups them, each a set of the existing property panels; the tab stays from one clip to the next (renderer/src/lib/inspector.ts). Its tabs are 13 px semibold labels on the header strip, the selected one in the accent; sub-tabs are a 24 px segmented control. Rows have a 112 px label column and 22 px fields (PropertyRow; Input and PropertiesSlider restyled: sunken fields, raised steppers, a 2 px white-filled slider). With nothing selected it shows the project's Details (name, path, how media are kept, media used; ratio, resolution, frame rate, length, clips) and Modify, which opens the project settings.
 
@@ -1230,12 +1230,12 @@ A selected mask opens Video ▸ Mask; a selected line opens Line.
 
 **Ruler, playhead and clip colours** (renderer/src/components/timeline/TimelineEditor.tsx, Scrubber.tsx, clips/thumbnails/): CapCut's 18 px ruler (10.5 px major ticks #727272 with their MM:SS label beside them in #6c6c6c, 5.5 px minor ticks #404040). Time 0 sits 50 px into the timeline (`TIME_ZERO_X`, renderer/src/lib/timeline-geometry.ts), leaving CapCut's Cover column; every track uses it, whatever padding a project saved. The main track's Cover tile is drawn there, dimmed and letting clicks through (no cover editor yet). The playhead is a hollow white 10×14 shield over a 1 px line. Clips take CapCut's colours: video #1e4c51 under its thumbnails, audio #182f55 (#1d4950 with a teal waveform when it comes from a video), text #924e3c, a draft's filter, effect, sticker and adjustment bars #464186, #6e4c7f, #cc9641 and #a58744 (the app's shapes and drawings keep theirs); text and filter labels sit on a chip of the clip's colour with 9% white, in #e0e0e0.
 
-**Tools:** chosen in the player's header (FloatingBar, renderer/src/components/preview/clips/FloatingBar.tsx).
-- `ViewTool`: pointer, hand, mask, draw, shape, text
-- shape sub-tools: rect, ellipse, polygon, line, star
-- mask sub-tools: lasso, shape, draw (stub)
-- draw sub-tools: brush, highlighter, eraser
-- preview zoom: 0.1–4 (viewport.ts:48-49), with Fit, 50, 100 and 200 %
+**Tools:** there is no tool row. Text comes from the Text tab (Add text, or T then a click); drawing (pen, highlighter, eraser, with size, smoothing and colour) and shapes (added at the playhead, or S then a drag) from the Stickers tab's Draw and Shapes sections (renderer/src/components/menus/CanvasToolsMenu.tsx, renderer/src/lib/shape-presets.ts); masks from the Mask tab's picker (renderer/src/components/properties/mask/AddMaskTools.tsx). While one is on, a chip at the top of the canvas says what a drag does, with Done; Esc or V goes back to selecting (renderer/src/components/preview/ToolChip.tsx).
+- `ViewTool`: pointer, hand, mask, draw, shape, text (keys V, H, D, S, T)
+- shape sub-tools: rect, ellipse, polygon, line, star (keys 1–5 after S)
+- mask sub-tools: lasso, shape, draw
+- draw sub-tools: brush, highlighter, eraser (keys 1–3 after D)
+- preview zoom: 0.1–4 (viewport.ts:48-49), with Fit, 50, 100 and 200 % in the player's menu
 
 **Transport:** under the player: go to start, ±5 s (`fps·5` frames), and play/pause, which restarts from 0 when at the end (Buttons.tsx:23-101; control.ts:302-316). Time is shown as `HH:MM:SS:FF`. `ExtendTimelineButton` and `ReduceTimelineButton` exist but are never rendered.
 
