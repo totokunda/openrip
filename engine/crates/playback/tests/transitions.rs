@@ -12,15 +12,22 @@ use openrip_playback::PreviewEngine;
 const W: u32 = 64;
 const H: u32 = 36;
 
-/// A flat-colour PNG still at the canvas size.
+/// A flat-colour PNG still at the canvas size. Tests run in parallel and share the file, so
+/// it's written under a name of its own and renamed into place: a test never reads it half
+/// written.
 fn still(name: &str, rgb: [u8; 3]) -> PathBuf {
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
-    let file = std::fs::File::create(&path).unwrap();
-    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), W, H);
-    enc.set_color(png::ColorType::Rgba);
-    enc.set_depth(png::BitDepth::Eight);
-    let data: Vec<u8> = [rgb[0], rgb[1], rgb[2], 255].repeat((W * H) as usize);
-    enc.write_header().unwrap().write_image_data(&data).unwrap();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let path = dir.join(name);
+    let part = dir.join(format!("{name}.{:?}.part", std::thread::current().id()));
+    {
+        let file = std::fs::File::create(&part).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), W, H);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let data: Vec<u8> = [rgb[0], rgb[1], rgb[2], 255].repeat((W * H) as usize);
+        enc.write_header().unwrap().write_image_data(&data).unwrap();
+    }
+    std::fs::rename(&part, &path).unwrap();
     path
 }
 
