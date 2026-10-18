@@ -1,7 +1,6 @@
 import React from "react";
 import type { IconType } from "react-icons";
-import { LuFilm, LuLayoutTemplate, LuMusic, LuSlidersHorizontal, LuSparkles, LuSticker } from "react-icons/lu";
-import { useSidebarStore } from "@/lib/sidebar";
+import { LuFilm, LuLayoutTemplate, LuSlidersHorizontal, LuSparkles, LuSticker } from "react-icons/lu";
 import { useInspectorStore } from "@/lib/inspector";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
@@ -10,14 +9,9 @@ import { useClipStore } from "@/lib/clip";
  * The left panel's tabs that have nothing to offer yet: what's coming, and what to use
  * meanwhile. Nothing here is a placeholder posing as content.
  */
-export type Pending = "audio" | "stickers" | "effects" | "adjustment" | "templates" | "library";
+export type Pending = "stickers" | "effects" | "adjustment" | "templates" | "library";
 
 const COPY: Record<Pending, { icon: IconType; title: string; body: string }> = {
-  audio: {
-    icon: LuMusic,
-    title: "Music and sound effects are coming",
-    body: "A library of openly licensed tracks and sounds will live here. Until then, import audio files in Media and drag them to the timeline.",
-  },
   stickers: {
     icon: LuSticker,
     title: "Stickers are coming",
@@ -47,7 +41,6 @@ const COPY: Record<Pending, { icon: IconType; title: string; body: string }> = {
 
 const PendingMenu: React.FC<{ section: Pending }> = ({ section }) => {
   const { icon: Icon, title, body } = COPY[section];
-  const openSection = useSidebarStore((s) => s.openSection);
   const lastSelected = useControlsStore((s) => s.selectedClipIds[s.selectedClipIds.length - 1]);
   const selectedType = useClipStore((s) => s.getClipById(lastSelected)?.type);
   const canAdjust = selectedType === "video" || selectedType === "image";
@@ -57,15 +50,6 @@ const PendingMenu: React.FC<{ section: Pending }> = ({ section }) => {
       <Icon className="w-6 h-6 text-brand-light/35" />
       <h3 className="text-[12px] font-medium text-brand-light/85">{title}</h3>
       <p className="text-[11px] leading-relaxed text-brand-light/50 max-w-[260px]">{body}</p>
-      {section === "audio" && (
-        <button
-          type="button"
-          onClick={() => openSection("media")}
-          className="mt-1 h-7 px-3 rounded-[6px] text-[11px] text-brand-light/85 bg-brand hover:bg-brand-background-light transition-colors"
-        >
-          Go to Media
-        </button>
-      )}
       {(section === "adjustment" || section === "effects") && (
         <button
           type="button"

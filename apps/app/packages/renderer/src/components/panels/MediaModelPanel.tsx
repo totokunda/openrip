@@ -27,6 +27,7 @@ import FilterMenu from "../menus/FilterMenu";
 import TextMenu from "../menus/TextMenu";
 import TransitionMenu from "../menus/TransitionMenu";
 import CanvasToolsMenu from "../menus/CanvasToolsMenu";
+import AudioMenu, { type AudioSection } from "../menus/AudioMenu";
 import PendingMenu, { type Pending } from "../menus/PendingMenu";
 import CaptionsMenu from "../menus/CaptionsMenu";
 import { PRESET_CATEGORIES } from "../menus/TextMenu";
@@ -64,6 +65,8 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
     { id: "library", label: "Library" },
   ],
   audio: [
+    { id: "extracted", label: "Extracted" },
+    { id: "voiceovers", label: "Voiceovers" },
     { id: "music", label: "Music" },
     { id: "sounds", label: "Sound effects" },
   ],
@@ -203,6 +206,8 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
         return <TransitionMenu category={sub || undefined} />;
       case "stickers":
         return sub === "draw" || sub === "shapes" ? <CanvasToolsMenu part={sub} /> : <PendingMenu section="stickers" />;
+      case "audio":
+        return <AudioMenu section={sub as AudioSection} />;
       default:
         return <PendingMenu section={section as Pending} />;
     }
