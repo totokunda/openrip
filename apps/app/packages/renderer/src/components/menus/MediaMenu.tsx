@@ -4,14 +4,13 @@ import {
   LuChevronDown,
   LuArrowUpDown,
   LuLoader,
-  LuFolder,
   LuUpload,
-  LuMic,
+  LuPlus,
+  LuVideo,
   LuSearch,
   LuLayoutGrid,
   LuList,
 } from "react-icons/lu";
-import { LuCloudUpload } from "react-icons/lu";
 import { toast } from "sonner";
 import { TbFileUpload, TbFolderUp } from "react-icons/tb";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -56,6 +55,13 @@ import { useShellStore } from "@/lib/shell";
 
 /** The library's grid or list, kept between sessions. */
 const LAYOUT_KEY = "openrip:media-layout";
+
+// The toolbar's icon buttons and its menus, as CapCut draws them.
+const toolIcon =
+  "h-6 w-6 shrink-0 rounded-[4px] text-[#d4d4d4] flex items-center justify-center transition-colors hover:bg-[#3f3f3f] cursor-pointer";
+const menuSurface = "dark p-1 bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] text-brand-light";
+const menuRow = "dark h-8 px-2.5 gap-2.5 rounded-[4px] text-[13px] cursor-pointer focus:bg-brand-hover";
+const menuCheck = "dark h-8 rounded-[4px] text-[13px] focus:bg-brand-hover";
 
 function isSupported(p: string) {
   try {
@@ -763,6 +769,8 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [importOnOpen]);
 
+  const empty = !isMediaListLoading && items.length === 0;
+  const [searching, setSearching] = useState(false);
   const heading =
     selectedTypes.size === 0
       ? "All"
@@ -770,45 +778,58 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
 
   return (
     <div ref={panelRef} className="h-full w-full flex flex-col">
-      <div className="shrink-0 flex flex-row items-center gap-1.5 px-3 pt-3 pb-2">
+      {!empty && (
+      <div className="shrink-0 flex flex-row items-center gap-1.5 px-3 pt-3 pb-1">
+        {searching ? (
+          <div className="relative flex-1 min-w-0">
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setSearch("");
+                  setSearching(false);
+                }
+              }}
+              onBlur={() => !search && setSearching(false)}
+              placeholder="Search media"
+              data-testid="media-search"
+              className="w-full h-6 rounded-[4px] px-2 text-[12px] bg-[#121212] text-brand-light placeholder:text-brand-light/35 border border-[#515151]"
+            />
+          </div>
+        ) : (
+          <>
         <DropdownMenu>
           <div
             ref={uploadBarRef}
-            className="h-8 shrink-0 bg-brand flex flex-row items-center text-brand-lighter text-[12px] rounded-[6px] transition-colors cursor-pointer"
+            className="h-6 shrink-0 bg-brand-background-light border border-dashed border-brand-button flex flex-row items-center text-brand-lighter text-[12px] font-medium rounded-[4px] transition-colors cursor-pointer"
           >
             <span
               data-testid="media-import"
               onClick={() => handleUpload(false)}
-              className="h-full pl-2.5 pr-2 flex flex-row gap-x-1.5 rounded-l-[6px] items-center justify-center hover:bg-brand-light/10"
+              className="h-full pl-1.5 pr-1.5 flex flex-row gap-x-1.5 rounded-l-[4px] items-center justify-center hover:bg-brand-button"
             >
               {isUploading ? (
-                <LuLoader className="w-4 h-4 animate-spin text-brand-accent" />
+                <LuLoader className="w-3.5 h-3.5 animate-spin text-brand-accent" />
               ) : (
-                <LuCloudUpload className="w-4 h-4 stroke-2 text-brand-accent" />
+                <span className="w-3.5 h-3.5 rounded-full bg-brand-accent text-white flex items-center justify-center">
+                  <LuPlus className="w-2.5 h-2.5 stroke-[3]" />
+                </span>
               )}
               <span>{isUploading ? "Importing…" : "Import"}</span>
             </span>
-            <DropdownMenuTrigger aria-label="More ways to import" className="h-full px-1 flex items-center justify-center w-6 hover:bg-brand-light/10 rounded-r-[6px] border-l border-brand-light/10">
-              <LuChevronDown className="w-3.5 h-3.5" />
+            <DropdownMenuTrigger aria-label="More ways to import" className="h-full px-0.5 flex items-center justify-center w-5 hover:bg-brand-button rounded-r-[4px]">
+              <LuChevronDown className="w-3 h-3" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              sideOffset={2}
-              className="dark mt-1 w-44 flex flex-col text-brand-light bg-brand-background"
-            >
-              <DropdownMenuItem
-                onClick={() => handleUpload(false)}
-                className="w-full cursor-pointer py-2"
-              >
-                <TbFileUpload className="w-4 h-4 stroke-2" />
-                <span className="text-[12px]">Import files</span>
+            <DropdownMenuContent align="start" sideOffset={4} className={cn(menuSurface, "w-[186px]")}>
+              <DropdownMenuItem onClick={() => handleUpload(false)} className={menuRow}>
+                <TbFileUpload className="w-4 h-4" />
+                <span>Import files</span>
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => handleUpload(true)}
-                className="w-full cursor-pointer py-2"
-              >
-                <TbFolderUp className="w-4 h-4 stroke-2" />
-                <span className="text-[12px]">Import a folder</span>
+              <DropdownMenuItem onClick={() => handleUpload(true)} className={menuRow}>
+                <TbFolderUp className="w-4 h-4" />
+                <span>Import a folder</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </div>
@@ -816,51 +837,45 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         <button
           type="button"
           disabled
-          title="Record: recording a voiceover isn't here yet"
-          aria-label="Record"
-          className="h-8 w-8 shrink-0 flex items-center justify-center rounded-[6px] bg-brand text-brand-light/35 cursor-not-allowed"
+          title="Recording isn't here yet"
+          className="h-6 shrink-0 px-2 flex items-center gap-1.5 rounded-[4px] bg-brand-background-light text-[12px] font-medium text-brand-light/35 cursor-not-allowed"
         >
-          <LuMic className="w-4 h-4" />
+          <LuVideo className="w-3.5 h-3.5" />
+          Record
         </button>
-        <div className="relative flex-1 min-w-0">
-          <LuSearch className="w-3.5 h-3.5 text-brand-light/40 absolute left-2 top-1/2 -translate-y-1/2" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search"
-            data-testid="media-search"
-            className="w-full h-8 rounded-[6px] pl-7 pr-2 text-[12px] bg-brand text-brand-light/90 placeholder:text-brand-light/35 border border-transparent focus:border-brand-light/20"
-          />
-        </div>
+        <div className="flex-1" />
+        <button
+          type="button"
+          title="Search"
+          data-testid="media-search-open"
+          onClick={() => setSearching(true)}
+          className={toolIcon}
+        >
+          <LuSearch className="w-3.5 h-3.5" />
+        </button>
+          </>
+        )}
+        <span className="w-px h-3 bg-brand-hover shrink-0" />
         <button
           type="button"
           title={layout === "grid" ? "Show as a list" : "Show as a grid"}
           data-testid="media-layout"
           onClick={() => setLayout(layout === "grid" ? "list" : "grid")}
-          className="h-8 w-8 shrink-0 rounded-[6px] text-brand-light/80 flex items-center justify-center bg-brand transition-colors hover:bg-brand-light/10 hover:text-brand-light"
+          className={toolIcon}
         >
-          {layout === "grid" ? <LuList className="w-4 h-4" /> : <LuLayoutGrid className="w-4 h-4" />}
+          {layout === "grid" ? <LuList className="w-3.5 h-3.5" /> : <LuLayoutGrid className="w-3.5 h-3.5" />}
         </button>
+        <span className="w-px h-3 bg-brand-hover shrink-0" />
         <DropdownMenu open={sortOpen} onOpenChange={setSortOpen}>
           <DropdownMenuTrigger asChild>
-            <button
-              className={cn(
-                "h-8 w-8 shrink-0 rounded-[6px] text-brand-light/80 flex items-center justify-center bg-brand transition-colors hover:bg-brand-light/10 hover:text-brand-light",
-                sortOpen && "bg-brand-light/10 text-brand-light",
-              )}
-              title="Sort"
-              aria-label="Sort"
-            >
-              <LuArrowUpDown className="w-4 h-4" />
+            <button className={cn(toolIcon, sortOpen && "bg-[#3f3f3f]")} title="Sort" aria-label="Sort">
+              <LuArrowUpDown className="w-3.5 h-3.5" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="dark w-48 flex flex-col text-brand-light bg-brand-background font-poppins"
-          >
+          <DropdownMenuContent align="end" className={cn(menuSurface, "w-[155px]")}>
             {/* Sort key (mutually exclusive via checkboxes) */}
             <DropdownMenuCheckboxItem
-              className="text-[11px] font-medium"
+              className={menuCheck}
               checked={sortKey === "name"}
               onCheckedChange={(checked) => {
                 if (checked) setSortKey("name");
@@ -869,7 +884,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
               Name
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
-              className="text-[11px] font-medium"
+              className={menuCheck}
               checked={sortKey === "duration"}
               onCheckedChange={(checked) => {
                 if (checked) setSortKey("duration");
@@ -878,7 +893,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
               Duration
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
-              className="text-[11px] font-medium"
+              className={menuCheck}
               checked={sortKey === "date"}
               onCheckedChange={(checked) => {
                 if (checked) setSortKey("date");
@@ -889,7 +904,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             <DropdownMenuSeparator />
             {/* Sort order (mutually exclusive via checkboxes) */}
             <DropdownMenuCheckboxItem
-              className="text-[11px] font-medium"
+              className={menuCheck}
               checked={sortOrder === "asc"}
               onCheckedChange={(checked) => {
                 if (checked) setSortOrder("asc");
@@ -898,7 +913,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
               Ascending
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
-              className="text-[11px] font-medium"
+              className={menuCheck}
               checked={sortOrder === "desc"}
               onCheckedChange={(checked) => {
                 if (checked) setSortOrder("desc");
@@ -908,25 +923,16 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <span className="w-px h-3 bg-brand-hover shrink-0" />
         <DropdownMenu open={filterOpen} onOpenChange={setFilterOpen}>
           <DropdownMenuTrigger asChild>
-            <button
-              className={cn(
-                "h-8 w-8 shrink-0 rounded-[6px] text-brand-light/80 flex items-center justify-center bg-brand transition-colors hover:bg-brand-light/10 hover:text-brand-light",
-                (filterOpen || selectedTypes.size > 0) && "bg-brand-light/10 text-brand-light",
-              )}
-              title="Filter"
-              aria-label="Filter"
-            >
-              <BsFilter className="w-4 h-4" />
+            <button className={cn(toolIcon, (filterOpen || selectedTypes.size > 0) && "bg-[#3f3f3f]")} title="Filter" aria-label="Filter">
+              <BsFilter className="w-3.5 h-3.5" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="dark w-44 flex flex-col text-brand-light bg-brand-background font-poppins text-[12px]"
-          >
+          <DropdownMenuContent align="end" className={cn(menuSurface, "w-[140px]")}>
             <DropdownMenuCheckboxItem
-              className="text-[11px] font-medium"
+              className={menuCheck}
               checked={selectedTypes.size === 0}
               onCheckedChange={(checked) => {
                 if (checked) setSelectedTypes(new Set());
@@ -941,7 +947,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             ] as const).map(([type, label]) => (
               <DropdownMenuCheckboxItem
                 key={type}
-                className="text-[11px] font-medium"
+                className={menuCheck}
                 checked={selectedTypes.has(type)}
                 onCheckedChange={(checked) => {
                   setSelectedTypes((prev) => {
@@ -958,6 +964,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      )}
       <div
         ref={listContainerRef}
         className="flex-1 min-h-0 relative"
@@ -977,27 +984,32 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             </div>  
           </div>
         )}
-        {!isMediaListLoading && items.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center w-full gap-y-2 pb-8 text-brand-lighter/60">
-            <LuFolder className="w-6 h-6 text-brand-light/50" />
-            <div className="flex flex-col items-center justify-center gap-y-1">
-              <span className="text-brand-lighter/90 text-[12px] font-medium">
-                No media yet
+        {empty && (
+          <div className="h-full p-3">
+            <button
+              type="button"
+              data-testid="media-import"
+              onClick={() => handleUpload(false)}
+              className="w-full h-full rounded-[6px] border border-dashed border-[#525252] bg-brand-background-light hover:bg-[#424242] flex flex-col items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2 text-[15px] font-semibold text-brand-lighter">
+                <span className="w-[18px] h-[18px] rounded-full bg-brand-accent text-white flex items-center justify-center">
+                  {isUploading ? <LuLoader className="w-3 h-3 animate-spin" /> : <LuPlus className="w-3 h-3 stroke-[3]" />}
+                </span>
+                {isUploading ? "Importing…" : "Import"}
               </span>
-              <span className="text-brand-lighter/50 text-[11px]">
-                Import files, or drop them here.
-              </span>
-            </div>
+              <span className="text-[12px] text-[#949494]">Drag and drop videos, photos and audio files here</span>
+            </button>
           </div>
         )}
         {/* Keep showing the grid even while background reloads happen. */}
         {items.length > 0 && (
           <ScrollArea className="h-full px-3 pb-3 pt-1 dark">
-            <div className="text-[12px] text-brand-light/80 text-left px-0.5 pb-1.5">{heading}</div>
+            <div className="text-[12px] text-brand-light text-left pt-2 pb-2">{heading}</div>
             <div
-              className={cn("grid w-full", layout === "grid" ? "gap-2" : "gap-0.5")}
+              className={cn("grid w-full", layout === "grid" ? "gap-x-4 gap-y-3" : "gap-0.5")}
               style={{
-                gridTemplateColumns: layout === "grid" ? "repeat(auto-fill, minmax(104px, 1fr))" : "1fr",
+                gridTemplateColumns: layout === "grid" ? "repeat(auto-fill, 120px)" : "1fr",
               }}
             >
               {displayItems.map((item) => (

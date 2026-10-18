@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { IconType } from "react-icons";
 import {
   LuFilm,
@@ -11,7 +11,9 @@ import {
   LuSlidersHorizontal,
   LuLayoutTemplate,
   LuChevronDown,
+  LuChevronLeft,
   LuChevronRight,
+  LuChevronUp,
 } from "react-icons/lu";
 import { MdPhotoFilter } from "react-icons/md";
 import { ResizablePanel } from "@/components/ui/resizable";
@@ -72,14 +74,17 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
   templates: [{ id: "templates", label: "Templates" }],
 };
 
-/** A tab's column of sections. */
+/**
+ * A tab's column of sections, as CapCut's: 24 px items on a 32 px pitch. Top-level items and
+ * group headings are filled; the selected item's label (and an open group's) is the accent.
+ */
 const SectionNav: React.FC<{
   items: { id: string; label: string; under?: string }[];
   value: string;
   onChange: (id: string) => void;
 }> = ({ items, value, onChange }) => {
   const [folded, setFolded] = useState<Record<string, boolean>>({});
-  const item = (it: { id: string; label: string }, indent = false) => (
+  const item = (it: { id: string; label: string }, child = false) => (
     <button
       key={it.id}
       type="button"
@@ -87,9 +92,8 @@ const SectionNav: React.FC<{
       aria-pressed={value === it.id}
       onClick={() => onChange(it.id)}
       className={cn(
-        "w-full h-7 flex items-center rounded-[6px] text-[12px] text-left truncate transition-colors cursor-pointer",
-        indent ? "pl-6 pr-2" : "px-2",
-        value === it.id ? "bg-brand-light/[0.08] text-brand-light" : "text-brand-light/60 hover:text-brand-light hover:bg-brand-light/[0.04]",
+        "w-full h-6 shrink-0 flex items-center px-2.5 rounded-[4px] text-[12px] font-semibold text-left truncate transition-colors cursor-pointer",
+        value === it.id ? "bg-brand-background-light text-brand-accent" : child ? "text-brand-light hover:bg-brand-light/[0.04]" : "bg-brand-background-light text-brand-light hover:bg-brand-button",
       )}
     >
       {it.label}
@@ -107,20 +111,45 @@ const SectionNav: React.FC<{
     const heading = it.under;
     const open = !folded[heading];
     out.push(
-      <div key={`group-${heading}`} className="flex flex-col gap-0.5">
-        <button
-          type="button"
-          onClick={() => setFolded((f) => ({ ...f, [heading]: open }))}
-          className="w-full h-7 flex items-center gap-1 px-1.5 rounded-[6px] text-[12px] text-brand-light/80 hover:text-brand-light cursor-pointer"
-        >
-          {open ? <LuChevronDown className="w-3.5 h-3.5" /> : <LuChevronRight className="w-3.5 h-3.5" />}
-          {heading}
-        </button>
-        {open && items.filter((g) => g.under === heading).map((g) => item(g, true))}
-      </div>,
+      <button
+        key={`group-${heading}`}
+        type="button"
+        onClick={() => setFolded((f) => ({ ...f, [heading]: open }))}
+        className={cn(
+          "w-full h-6 shrink-0 flex items-center justify-between px-2.5 rounded-[4px] text-[12px] font-semibold bg-brand-background-light hover:bg-brand-button cursor-pointer",
+          open ? "text-brand-accent" : "text-brand-light",
+        )}
+      >
+        {heading}
+        {open ? <LuChevronUp className="w-3 h-3" /> : <LuChevronDown className="w-3 h-3" />}
+      </button>,
     );
+    if (open) items.filter((g) => g.under === heading).forEach((g) => out.push(item(g, true)));
   }
-  return <nav aria-label="Sections" className="w-[110px] shrink-0 flex flex-col gap-0.5 p-1.5 border-r border-brand-light/[0.06]">{out}</nav>;
+  return (
+    <nav aria-label="Sections" className="w-[120px] shrink-0 flex flex-col gap-2 px-2 pt-4 overflow-y-auto border-r-[0.5px] border-brand-hairline">
+      {out}
+    </nav>
+  );
+};
+
+/** The tab row's sideways scroll buttons, shown when the tabs don't fit (as CapCut's). */
+const useOverflow = (ref: React.RefObject<HTMLElement | null>) => {
+  const [edges, setEdges] = useState({ left: false, right: false });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setEdges({ left: el.scrollLeft > 1, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 1 });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    el.addEventListener("scroll", update, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", update);
+    };
+  }, [ref]);
+  return edges;
 };
 
 /**
@@ -137,6 +166,9 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   const section = useSidebarStore((s) => s.section) ?? "media";
   const openSection = useSidebarStore((s) => s.openSection);
   const [picked, setPicked] = useState<Partial<Record<SidebarSection, string>>>({});
+  const tabsRef = useRef<HTMLElement | null>(null);
+  const overflow = useOverflow(tabsRef);
+  const scrollTabs = (dx: number) => tabsRef.current?.scrollBy({ left: dx, behavior: "smooth" });
   const sections = SECTIONS[section];
   const sub = picked[section] ?? sections?.[0]?.id ?? "";
 
@@ -163,31 +195,45 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
       defaultSize={defaultSize}
       order={order}
       data-testid="assets"
-      className="bg-brand-background rounded-md overflow-hidden flex flex-col"
+      className="bg-brand-background rounded-lg overflow-hidden flex flex-col"
     >
-      {/* Scrolls sideways when the panel is narrower than the tabs; the edge fades to say so. */}
-      <nav
-        aria-label="Libraries"
-        style={{ scrollbarWidth: "none", maskImage: "linear-gradient(90deg, #000 calc(100% - 16px), transparent)" }}
-        className="shrink-0 flex items-stretch px-1 pt-1 pb-0.5 border-b border-brand-light/[0.06] overflow-x-auto [&::-webkit-scrollbar]:hidden"
-      >
-        {TABS.map(({ section: s, title, icon: Icon }) => (
-          <button
-            key={s}
-            type="button"
-            data-testid={`assets-tab-${s}`}
-            aria-pressed={section === s}
-            onClick={() => openSection(s)}
-            className={cn(
-              "shrink-0 flex-1 flex flex-col items-center justify-center gap-1 h-[52px] px-[3px] rounded-[6px] transition-colors cursor-pointer",
-              section === s ? "text-brand-accent" : "text-brand-light/60 hover:text-brand-light",
-            )}
-          >
-            <Icon className="w-[18px] h-[18px]" />
-            <span className="text-[11px] leading-none whitespace-nowrap">{title}</span>
+      {/* The tab row on the panel's header strip; it scrolls sideways when the panel is
+          narrower than the tabs, with buttons at the ends. */}
+      <div className="relative h-[42px] shrink-0 bg-brand-header border-b-[0.5px] border-brand-hairline">
+        <nav
+          ref={tabsRef}
+          aria-label="Libraries"
+          style={{ scrollbarWidth: "none" }}
+          className="h-full flex items-stretch px-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+        >
+          {TABS.map(({ section: s, title, icon: Icon }) => (
+            <button
+              key={s}
+              type="button"
+              data-testid={`assets-tab-${s}`}
+              aria-pressed={section === s}
+              onClick={() => openSection(s)}
+              className={cn(
+                "shrink-0 min-w-[49px] flex flex-col items-center justify-center gap-1 px-1 transition-colors cursor-pointer",
+                section === s ? "text-brand-accent" : "text-brand-light hover:text-brand-lighter",
+              )}
+            >
+              <Icon className="w-[17px] h-[17px]" />
+              <span className="text-[12px] font-medium leading-none whitespace-nowrap">{title}</span>
+            </button>
+          ))}
+        </nav>
+        {overflow.left && (
+          <button type="button" aria-label="Earlier tabs" onClick={() => scrollTabs(-160)} className="absolute left-1 top-1/2 -translate-y-1/2 w-3 h-[19px] rounded-[3px] bg-brand-button text-[#cccccc] flex items-center justify-center">
+            <LuChevronLeft className="w-3 h-3" />
           </button>
-        ))}
-      </nav>
+        )}
+        {overflow.right && (
+          <button type="button" aria-label="More tabs" onClick={() => scrollTabs(160)} className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-[19px] rounded-[3px] bg-brand-button text-[#cccccc] flex items-center justify-center">
+            <LuChevronRight className="w-3 h-3" />
+          </button>
+        )}
+      </div>
       <div className="flex-1 min-h-0 flex">
         {sections && <SectionNav items={sections} value={sub} onChange={(v) => setPicked((p) => ({ ...p, [section]: v }))} />}
         <div data-testid="assets-content" className="flex-1 min-w-0 min-h-0">

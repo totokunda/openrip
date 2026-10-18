@@ -1,18 +1,14 @@
 import React from "react";
-import { LuChevronDown, LuMaximize, LuShrink, LuX } from "react-icons/lu";
+import { LuCheck, LuMaximize, LuPause, LuPlay, LuShrink, LuSquareDashed, LuX } from "react-icons/lu";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { useViewportStore } from "@/lib/viewport";
 import { usePlayerStore, type PreviewQuality } from "@/lib/player";
 import { cn } from "@/lib/utils";
-import { BackButton, PlayPauseButton, RewindBackward, RewindForward } from "@/components/controls/Buttons";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { BackButton, RewindBackward, RewindForward } from "@/components/controls/Buttons";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import RatioMenu from "./RatioMenu";
+import Boxed from "./Boxed";
 
 /** "HH:MM:SS:FF", as CapCut shows time: hours, minutes, seconds and the frame within it. */
 export const timecode = (frames: number, fps: number) => {
@@ -24,8 +20,8 @@ export const timecode = (frames: number, fps: number) => {
   return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}:${pad(ff)}`;
 };
 
-/** The playhead's time over the project's length (their seconds ride along for the harness). */
-const TimeControl: React.FC = () => {
+/** The playhead's time over the project's length (their seconds ride along for scripts). */
+const TimeControl: React.FC<{ off: boolean }> = ({ off }) => {
   const clipDuration = useClipStore((s) => s.clipDuration);
   const focusFrame = useControlsStore((s) => s.focusFrame);
   const fps = useControlsStore((s) => s.fps);
@@ -34,37 +30,42 @@ const TimeControl: React.FC = () => {
       data-testid="player-time"
       data-time={fps ? (focusFrame || 0) / fps : 0}
       data-total={fps ? (clipDuration || 0) / fps : 0}
-      className="text-[12px] tabular-nums whitespace-nowrap"
+      className={cn("text-[12px] tabular-nums whitespace-nowrap", off && "opacity-40")}
     >
       <span className="text-brand-accent">{timecode(focusFrame, fps)}</span>
-      <span className="text-brand-light/35 px-1.5">|</span>
-      <span className="text-brand-light/55">{timecode(clipDuration, fps)}</span>
+      <span className="text-brand-hover px-1">/</span>
+      <span className="text-brand-light">{timecode(clipDuration, fps)}</span>
     </span>
   );
 };
 
-const IconButton: React.FC<{ title: string; onClick: () => void; children: React.ReactNode; testId?: string }> = ({
+const IconButton: React.FC<{ title: string; onClick: () => void; children: React.ReactNode; testId?: string; active?: boolean }> = ({
   title,
   onClick,
   children,
   testId,
+  active,
 }) => (
   <button
     type="button"
     title={title}
     aria-label={title}
+    aria-pressed={active}
     data-testid={testId}
     onClick={onClick}
-    className="h-7 w-7 flex items-center justify-center rounded-[5px] text-brand-light/70 hover:text-brand-light hover:bg-brand-light/10 transition-colors cursor-pointer"
+    className={cn(
+      "h-6 w-6 flex items-center justify-center rounded-[4px] hover:bg-brand-light/[0.08] transition-colors cursor-pointer",
+      active ? "text-brand-accent" : "text-brand-light/80 hover:text-brand-light",
+    )}
   >
     {children}
   </button>
 );
 
-const QUALITIES: { value: PreviewQuality; label: string }[] = [
-  { value: 1, label: "Full" },
-  { value: 0.5, label: "Half" },
-  { value: 0.25, label: "Quarter" },
+const QUALITIES: { value: PreviewQuality; label: string; title: string; note: string }[] = [
+  { value: 1, label: "Full", title: "Full quality", note: "The canvas at its size on screen" },
+  { value: 0.5, label: "Half", title: "Half", note: "Smoother playback; exports aren't affected" },
+  { value: 0.25, label: "Quarter", title: "Quarter", note: "Smoothest playback; exports aren't affected" },
 ];
 
 /** The preview's quality: the engine renders at this fraction of the canvas's size on screen. */
@@ -76,20 +77,18 @@ const QualityMenu: React.FC = () => {
       <DropdownMenuTrigger
         title="Preview quality"
         data-testid="preview-quality"
-        className="h-7 px-2 flex items-center gap-1 rounded-[5px] text-[12px] text-brand-light/75 hover:text-brand-light hover:bg-brand-light/10 transition-colors cursor-pointer"
+        className="h-6 px-1 flex items-center rounded-[4px] text-brand-light/80 hover:text-brand-light hover:bg-brand-light/[0.08] transition-colors cursor-pointer"
       >
-        {QUALITIES.find((q) => q.value === quality)?.label}
-        <LuChevronDown className="w-3 h-3 opacity-70" />
+        <Boxed>{QUALITIES.find((q) => q.value === quality)?.label}</Boxed>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" className="dark w-40 bg-brand-background/95 backdrop-blur-md border border-brand-light/10 rounded-[8px]">
+      <DropdownMenuContent align="end" side="top" className="dark w-[300px] p-1 bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px]">
         {QUALITIES.map((q) => (
-          <DropdownMenuItem
-            key={q.value}
-            onClick={() => setQuality(q.value)}
-            className={cn("dark text-[12px] justify-between", quality === q.value && "text-brand-accent")}
-          >
-            {q.label}
-            <span className="text-brand-light/40 tabular-nums">{q.value === 1 ? "100%" : `${q.value * 100}%`}</span>
+          <DropdownMenuItem key={q.value} onClick={() => setQuality(q.value)} className="dark h-[46px] rounded-[4px] items-start gap-3 py-1.5 focus:bg-brand-hover">
+            <span className="w-4 pt-0.5 text-brand-accent">{quality === q.value && <LuCheck className="w-3.5 h-3.5" />}</span>
+            <span className="flex flex-col gap-0.5">
+              <span className="text-[13px] font-semibold text-brand-lighter">{q.title}</span>
+              <span className="text-[12px] text-[#6c6c6c]">{q.note}</span>
+            </span>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -98,46 +97,66 @@ const QualityMenu: React.FC = () => {
 };
 
 /**
- * Under the player, as in CapCut: the time on the left (HH:MM:SS:FF), the transport in the
- * middle, and the preview's quality, zoom to fit, the canvas's ratio and full screen on the
- * right.
+ * Under the player, as in CapCut: the time on the left (HH:MM:SS:FF), play in the middle (go
+ * to start and ±5 s beside it), and safe areas, the preview's quality, zoom to fit, the
+ * canvas's ratio and full screen on the right.
  */
 const PlayerBar: React.FC = () => {
   const setIsFullscreen = useControlsStore((s) => s.setIsFullscreen);
+  const isPlaying = useControlsStore((s) => s.isPlaying);
+  const play = useControlsStore((s) => s.play);
+  const pause = useControlsStore((s) => s.pause);
+  const hasClips = useClipStore((s) => s.clips.length > 0);
   const zoomToFit = useViewportStore((s) => s.zoomToFit);
   const isAspectEditing = useViewportStore((s) => s.isAspectEditing);
   const setAspectEditing = useViewportStore((s) => s.setAspectEditing);
+  const guides = usePlayerStore((s) => s.guides);
+  const setGuides = usePlayerStore((s) => s.setGuides);
 
   return (
-    <div className="h-10 shrink-0 grid grid-cols-[1fr_auto_1fr] items-center px-3 border-t border-brand-light/[0.06]">
-      <div className="flex items-center min-w-0">
-        <TimeControl />
+    <div className="@container h-11 shrink-0 grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-2">
+      <div className="flex items-center min-w-0 overflow-hidden">
+        <TimeControl off={!hasClips} />
       </div>
-      <div className="flex items-center gap-x-3.5">
-        <BackButton />
-        <RewindBackward />
-        <div data-testid="play" title="Play or pause" className="[&_svg]:!h-6 [&_svg]:!w-6">
-          <PlayPauseButton />
+      <div className="flex items-center gap-x-3 [&_svg]:!text-brand-light/60">
+        {/* In a narrow player (the Vertical layout) only play stays. */}
+        <div className="flex items-center gap-x-3 @max-[520px]:hidden">
+          <BackButton />
+          <RewindBackward />
         </div>
-        <RewindForward />
+        <button
+          type="button"
+          data-testid="play"
+          title={isPlaying ? "Pause" : "Play"}
+          onClick={() => (isPlaying ? pause() : play())}
+          className="h-7 w-7 flex items-center justify-center rounded-[4px] text-[#cecece] hover:text-white hover:bg-brand-light/[0.08] cursor-pointer [&_svg]:!text-[#cecece]"
+        >
+          {isPlaying ? <LuPause className="w-3.5 h-3.5 fill-current" /> : <LuPlay className="w-3.5 h-3.5 fill-current" />}
+        </button>
+        <div className="@max-[520px]:hidden">
+          <RewindForward />
+        </div>
       </div>
-      <div className="flex items-center justify-end gap-x-0.5 min-w-0">
+      <div className="flex items-center justify-end gap-x-1 min-w-0">
         {isAspectEditing && (
           <button
             type="button"
             onClick={() => setAspectEditing(false)}
-            className="h-7 px-2 mr-1 flex items-center gap-1.5 rounded-[5px] text-[12px] text-brand-light/90 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition-colors"
+            className="h-6 px-2 mr-1 flex items-center gap-1.5 rounded-[4px] text-[12px] text-brand-light border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition-colors"
           >
             Done editing size <LuX className="w-3 h-3" />
           </button>
         )}
+        <IconButton title="Safe areas" onClick={() => setGuides(!guides)} active={guides} testId="safe-areas-button">
+          <LuSquareDashed className="w-3.5 h-3.5" />
+        </IconButton>
         <QualityMenu />
         <IconButton title="Zoom to fit" onClick={() => zoomToFit()} testId="zoom-to-fit">
-          <LuShrink className="w-4 h-4" />
+          <LuShrink className="w-3.5 h-3.5" />
         </IconButton>
         <RatioMenu />
         <IconButton title="Full screen" onClick={() => setIsFullscreen(true)} testId="fullscreen">
-          <LuMaximize className="w-4 h-4" />
+          <LuMaximize className="w-3.5 h-3.5" />
         </IconButton>
       </div>
     </div>

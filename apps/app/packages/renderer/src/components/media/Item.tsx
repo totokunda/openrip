@@ -42,6 +42,13 @@ import {
 import Draggable from "@/components/dnd/Draggable";
 import { revealPathInFolder } from "@app/preload";
 
+/** A long name cut in the middle, so its start and its extension both show ("abc…xyz.mp4"). */
+const middle = (name: string, max: number) => {
+  if (name.length <= max) return name;
+  const head = Math.ceil((max - 1) / 2);
+  return `${name.slice(0, head)}…${name.slice(name.length - (max - 1 - head))}`;
+};
+
 // Module-level thumbnail caches so we don't have to regenerate waveforms/posters
 // every time a sidebar remounts or the user navigates back to a menu.
 const audioWaveformCache = new Map<string, CanvasImageSource | null>();
@@ -334,12 +341,12 @@ export const MediaThumb: React.FC<{
         />
       )}
       {mediaInfo?.duration && (
-        <span className="text-[10px] text-brand-light/90 absolute bottom-1 left-1 p-1 rounded bg-brand-background-dark/60 z-10">
+        <span className="text-[10.5px] text-brand-light absolute top-1 right-1.5 z-10 tabular-nums [text-shadow:0_0_3px_rgba(0,0,0,0.9)]">
           {formatDuration(mediaInfo.duration)}
         </span>
       )}
       {isDragging && mediaInfo && !mediaInfo?.duration && (
-        <span className="text-[10px] text-brand-light/90 absolute bottom-1 left-1 p-1 rounded bg-brand-background-dark/60 z-10">
+        <span className="text-[10.5px] text-brand-light absolute top-1 right-1.5 z-10 tabular-nums [text-shadow:0_0_3px_rgba(0,0,0,0.9)]">
           {formatDuration(5)}
         </span>
       )}
@@ -385,17 +392,19 @@ const Item: React.FC<ItemProps> = ({
       <div
         key={item.name}
         className={cn(
-          "group rounded-md transition-colors hover:bg-brand-light/5",
-          row ? "flex items-center gap-2.5 p-1" : "p-1.5",
+          "group rounded-[4px] transition-colors",
+          row ? "flex items-center gap-2.5 p-1 hover:bg-brand-light/5" : "w-[120px]",
           {
             "bg-brand-light/5": renamingItem === item.name,
           },
         )}
       >
-        <div className={cn("relative", row && "w-16 shrink-0")}>
+        <div className={cn("relative", row && "w-[46px] shrink-0")}>
           <div
             className={cn(
-              "w-full aspect-video overflow-hidden  rounded-md bg-brand relative",
+              // CapCut's card: a fixed 120×80 thumbnail, the media letterboxed on a raised fill.
+              "overflow-hidden rounded-[4px] bg-brand-background-light relative group-hover:ring-1 group-hover:ring-brand-light/20",
+              row ? "w-[46px] h-[30px]" : "w-[120px] h-[80px]",
               {
                 "opacity-50": isCreatingProxy,
                 "cursor-pointer": !isCreatingProxy,
@@ -403,8 +412,8 @@ const Item: React.FC<ItemProps> = ({
             )}
           >
             <MediaThumb item={item} />
-            {added && (
-              <span className="absolute top-1 left-1 z-10 text-[9.5px] leading-none px-1.5 py-[3px] rounded-[4px] bg-brand-accent/90 text-white">
+            {added && !row && (
+              <span className="absolute top-1 left-1 z-10 text-[10px] leading-none px-1.5 py-[2px] rounded-[2px] bg-brand-background-dark/85 text-brand-light">
                 Added
               </span>
             )}
@@ -527,8 +536,9 @@ const Item: React.FC<ItemProps> = ({
             />
           </div>
         ) : (
-          <div className={cn("px-0 text-[11.5px] cursor-pointer text-brand-light/85 text-start truncate", row ? "flex-1 min-w-0" : "pt-1.5")}>
-            {showName ? item.name : ""}
+          <div title={item.name} className={cn("px-0 text-[11.5px] cursor-pointer text-[#949494] text-start whitespace-nowrap overflow-hidden", row ? "flex-1 min-w-0 truncate" : "pt-1")}>
+            {showName ? (row ? item.name : middle(item.name, 20)) : ""}
+            {row && added && <span className="ml-2 text-[10px] px-1.5 py-px rounded-[2px] bg-brand-background-dark/85 text-brand-light">Added</span>}
           </div>
         )}
       </div>
