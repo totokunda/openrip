@@ -167,6 +167,9 @@ pub struct TextStyle<'a> {
     /// Fill colour per character (indices as in the laid-out text, line breaks included),
     /// replacing `color`; characters past the end use `color`. Not used with `effect`.
     pub char_colors: Option<&'a [[u8; 4]]>,
+    /// A line under each line of text at the font's underline position and thickness, in the
+    /// fill and inside the outlines. Not drawn on curved text or with `effect`.
+    pub underline: bool,
 }
 
 /// A layered text style (CapCut's library text styles): shadows at the back, then strokes
@@ -399,6 +402,8 @@ pub struct TextLayout {
     size: f32,
     /// Each line's left edge and width in the block, and its line box (top, height).
     lines: Vec<[f32; 4]>,
+    /// Each line's baseline in the block.
+    baselines: Vec<f32>,
 }
 
 /// Rasterised text.
@@ -459,6 +464,7 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
     let height = line_box + advance_y * (lines.len().saturating_sub(1)) as f32;
     let mut glyphs = Vec::new();
     let mut boxes = Vec::new();
+    let mut baselines = Vec::new();
     for (i, (line, w)) in lines.into_iter().enumerate() {
         let x0 = match style.align {
             Align::Left => 0.0,
@@ -467,9 +473,30 @@ pub fn layout(text: &str, style: &TextStyle) -> TextLayout {
         };
         let baseline = baseline0 + i as f32 * advance_y;
         boxes.push([x0, w, i as f32 * advance_y, line_box]);
+        baselines.push(baseline);
         glyphs.extend(line.into_iter().map(|(glyph, face, x, char_index, advance)| Placed { glyph, face, x: x0 + x, baseline, advance, line: i, char_index }));
     }
-    TextLayout { glyphs, width, height, size: style.size, lines: boxes }
+    TextLayout { glyphs, width, height, size: style.size, lines: boxes, baselines }
+}
+
+/// The pixels of a bar in a `w`×`h` image, x from `x0` to `x1` and y from `y0` to `y1`, each
+/// with how much of it the bar covers (fractional edges anti-aliased): `put(index, coverage)`.
+fn bar(w: u32, h: u32, [x0, x1, y0, y1]: [f32; 4], mut put: impl FnMut(usize, f32)) {
+    for py in (y0.floor() as i32).max(0)..(y1.ceil() as i32).min(h as i32) {
+        let cy = (y1.min(py as f32 + 1.0) - y0.max(py as f32)).clamp(0.0, 1.0);
+        for px in (x0.floor() as i32).max(0)..(x1.ceil() as i32).min(w as i32) {
+            let cx = (x1.min(px as f32 + 1.0) - x0.max(px as f32)).clamp(0.0, 1.0);
+            put((py * w as i32 + px) as usize, cx * cy);
+        }
+    }
+}
+
+/// What a bar puts into a coverage buffer: its coverage at `alpha`, joined with what's there.
+fn union(cov: &mut [f32], alpha: f32) -> impl FnMut(usize, f32) + '_ {
+    move |i, a| {
+        let a = a * alpha;
+        cov[i] = cov[i] + a - cov[i] * a;
+    }
 }
 
 /// A line split into runs of characters one face of `font` draws: (face, byte range). Spaces
@@ -721,6 +748,51 @@ impl TextLayout {
                                 *t = over(c, *t);
                             }
                         }
+                    }
+                }
+            }
+        }
+        // The underline: a bar at the font's underline position and thickness (`post`), under
+        // each line's characters (those an animation shows so far), in the fill and outlined
+        // like the glyphs.
+        if style.underline && style.curve == 0.0 {
+            let thick = if metrics.stroke_size > 0.0 { metrics.stroke_size } else { self.size / 15.0 }.max(1.0);
+            let below = if metrics.underline_offset != 0.0 { -metrics.underline_offset } else { self.size * 0.1 };
+            for (line, &[x0, line_w, _, _]) in self.lines.iter().enumerate() {
+                let alpha_of = |g: &Placed| char_alpha.and_then(|a| a.get(g.char_index)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
+                let all: Vec<&Placed> = self.glyphs.iter().filter(|g| g.line == line).collect();
+                let shown: Vec<&Placed> = all.iter().copied().filter(|g| alpha_of(g) > 0.0).collect();
+                let Some(first) = shown.first() else { continue };
+                let end = if shown.len() == all.len() { x0 + line_w } else { shown.iter().map(|g| g.x + g.advance).fold(x0, f32::max) };
+                let alpha = shown.iter().map(|g| alpha_of(g)).fold(0.0, f32::max);
+                let y = top + self.baselines[line] + below;
+                let rect = [left + x0, left + end, y - thick / 2.0, y + thick / 2.0];
+                let grown = |d: f32| [rect[0] - d, rect[1] + d, rect[2] - d, rect[3] + d];
+                if let Some(cov) = outline.as_mut() {
+                    bar(w, h, grown(stroke), union(cov, alpha));
+                }
+                for (cov, &(_, width)) in more.iter_mut().zip(style.more_strokes) {
+                    bar(w, h, grown(width), union(cov, alpha));
+                }
+                match tinted.as_mut() {
+                    None => bar(w, h, rect, union(&mut fill, alpha)),
+                    Some(tinted) => {
+                        // The line's first character's colour, or the gradient across the bar.
+                        let color = style.char_colors.and_then(|c| c.get(first.char_index)).copied().unwrap_or(style.color);
+                        let frame = style.gradient.map(|gr| gr.frame([rect[0], rect[2], rect[1] - rect[0], rect[3] - rect[2]], self.lines.get(line).copied(), left, top, [self.width, self.height]));
+                        bar(w, h, rect, |i, a| {
+                            let a = a * alpha;
+                            let (px, py) = ((i as u32 % w) as f32 + 0.5, (i as u32 / w) as f32 + 0.5);
+                            let c = match (style.gradient, frame) {
+                                (Some(gr), Some(frame)) => {
+                                    let c = gr.at(px, py, frame);
+                                    let a = a * c[3] * style.color[3] as f32 / 255.0;
+                                    [c[0] * a, c[1] * a, c[2] * a, a]
+                                }
+                                _ => premul(color, a),
+                            };
+                            tinted[i] = over(c, tinted[i]);
+                        });
                     }
                 }
             }
@@ -1315,7 +1387,7 @@ mod tests {
         assert!(latin.covers("Hello") && !latin.covers("ő") && ext.covers("ő"));
         fn style(font: &Font) -> TextStyle<'_> {
             #[rustfmt::skip]
-            let s = TextStyle { font, size: 40.0, color: [255; 4], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: true, stroke: None, more_strokes: &[], gradient: None, glow: None, background: None, shadow: None, max_width: None, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None };
+            let s = TextStyle { font, size: 40.0, color: [255; 4], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: true, stroke: None, more_strokes: &[], gradient: None, glow: None, background: None, shadow: None, max_width: None, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None, underline: false };
             s
         }
         let alone = layout("Hő Ha", &style(&latin));

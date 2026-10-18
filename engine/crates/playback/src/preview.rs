@@ -1193,6 +1193,7 @@ impl PreviewEngine {
                 effect: effect.as_ref(),
                 curve: text.layout.curve,
                 char_colors: char_colors.as_deref(),
+                underline: run.underline,
             };
             let lay = text::layout(&shown, &style);
             // Library text animations (typing reveals) as per-character opacity.
@@ -1235,7 +1236,7 @@ impl PreviewEngine {
                 text.layout.alignment,
                 text.layout.letter_spacing.to_bits(),
                 (text.layout.line_spacing.to_bits(), text.layout.line_height.map(f32::to_bits), text.layout.kerning),
-                (style.max_width.map(f32::to_bits), origin[0].to_bits(), origin[1].to_bits(), style.bold.to_bits(), style.italic.to_bits(), style.curve.to_bits()),
+                (style.max_width.map(f32::to_bits), origin[0].to_bits(), origin[1].to_bits(), style.bold.to_bits(), style.italic.to_bits(), style.curve.to_bits(), style.underline),
                 (
                     styled.as_ref().map(|(id, _)| id),
                     (!more_strokes.is_empty() || run.gradient.is_some() || glow.is_some()).then(|| format!("{more_strokes:?} {:?} {glow:?}", run.gradient)),

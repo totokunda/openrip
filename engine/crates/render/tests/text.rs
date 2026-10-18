@@ -11,7 +11,7 @@ fn font() -> Option<Font> {
 }
 
 fn style(font: &Font, max_width: Option<f32>) -> TextStyle<'_> {
-    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: false, stroke: None, more_strokes: &[], gradient: None, glow: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None }
+    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: false, stroke: None, more_strokes: &[], gradient: None, glow: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None, underline: false }
 }
 
 #[test]
@@ -261,6 +261,27 @@ fn a_glow_lights_around_the_text_from_its_middle() {
     let (l, r) = (row.iter().position(|p| p[3] > 250).unwrap(), row.iter().rposition(|p| p[3] > 250).unwrap());
     let light = |range: std::ops::Range<usize>| range.map(|x| row[x][3] as u32).sum::<u32>();
     assert!(light(l.saturating_sub(30)..l) > light(r + 1..(r + 31).min(row.len())), "left of the text should glow more");
+}
+
+#[test]
+fn an_underline_runs_under_each_line_at_the_fonts_position() {
+    let Some(f) = font() else { return };
+    let plain = style(&f, None);
+    let under = TextStyle { underline: true, ..style(&f, None) };
+    let a = layout("HH\nHHHH", &plain).rasterize(&plain, [0.0, 0.0]).image;
+    let b = layout("HH\nHHHH", &under).rasterize(&under, [0.0, 0.0]).image;
+    // What the underline added, row by row: two bands (one a line), the second line's longer.
+    let added: Vec<usize> = (0..b.height as usize).map(|y| (0..b.width as usize).filter(|x| { let i = (y * b.width as usize + x) * 4 + 3; b.data[i] as u16 > a.data[i] as u16 + 100 }).count()).collect();
+    let rows: Vec<usize> = (0..added.len()).filter(|&y| added[y] > 0).collect();
+    let bands: Vec<&[usize]> = rows.chunk_by(|p, q| q - p == 1).collect();
+    assert_eq!(bands.len(), 2, "{rows:?}");
+    let width = |band: &[usize]| band.iter().map(|&y| added[y]).max().unwrap();
+    assert!(width(bands[1]) as f32 > 1.8 * width(bands[0]) as f32);
+    // Arial's underline: 0.106 em below the baseline, 0.073 em thick (its post table), at 40 px.
+    assert!(bands[0].len() <= 5, "{} rows thick", bands[0].len());
+    // Under the glyphs: none of it above the bottom of the first line's H.
+    let h_bottom = (0..a.height as usize).filter(|&y| (0..a.width as usize).any(|x| a.data[(y * a.width as usize + x) * 4 + 3] > 128)).find(|&y| (0..a.width as usize).all(|x| a.data[((y + 1) * a.width as usize + x) * 4 + 3] <= 128)).unwrap();
+    assert!(bands[0][0] > h_bottom, "underline at {} above the glyphs' bottom {h_bottom}", bands[0][0]);
 }
 
 #[test]
