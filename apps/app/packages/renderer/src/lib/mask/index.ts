@@ -24,7 +24,8 @@ export const useMaskStore = create<MaskState>((set) => ({
   tool: "lasso",
   shape: "rectangle",
   brushSize: 10,
-  featherAmount: 2,
+  // CapCut's Feather, 0–100: new masks start hard-edged.
+  featherAmount: 0,
   activeMaskId: null,
   isMaskDragging: false,
   isOverMask: false,

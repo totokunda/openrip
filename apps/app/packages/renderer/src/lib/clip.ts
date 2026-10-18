@@ -20,6 +20,7 @@ import { AUDIO_EXTS, MIN_DURATION, VIDEO_EXTS, IMAGE_EXTS } from "./settings";
 import { getMediaInfo, getMediaInfoCached } from "./media/utils";
 import { getLowercaseExtension } from "@app/preload";
 import { remapMaskWithClipTransformProportional } from "./mask/clipTransformUtils";
+import { scaleKeyframes, shiftKeyframes, splitKeyframes } from "./keyframes";
 
 import _ from "lodash";
 
@@ -922,6 +923,10 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
         );
         nextUpdate.endFrame = start + newDuration;
         (nextUpdate as VideoClipProps).speed = newSpeed as any;
+        // Keys stay on the media: their frames scale with the clip.
+        if (!Object.prototype.hasOwnProperty.call(clipToUpdate, "keyframes")) {
+          nextUpdate.keyframes = scaleKeyframes(current.keyframes, oldSpeed / newSpeed);
+        }
       }
 
       const updatedClip = { ...current, ...nextUpdate } as AnyClipProps;
@@ -1151,6 +1156,8 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
             ...currentClip,
             startFrame: desiredStartFrame,
             trimStart: frameDelta + (currentClip.trimStart || 0),
+            // Keys stay on the content as the start moves (they're clip-local).
+            keyframes: shiftKeyframes(currentClip.keyframes, -frameDelta),
           };
           // A caption's words keep time with the speech as its start moves.
           if (currentClip.type === "text" && currentClip.spokenWords) {
@@ -1612,6 +1619,14 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
         trimEnd: safeOldTrimEnd,
       };
 
+      // Each half keeps the keys on its side, and one at the cut so the motion carries on
+      // (the right half's moved to its start), as CapCut splits a keyframed clip.
+      if (clip.keyframes) {
+        const [leftKeys, rightKeys] = splitKeyframes(clip.keyframes, cutRel, useControlsStore.getState().fps || 30);
+        newClip1.keyframes = leftKeys;
+        newClip2.keyframes = rightKeys;
+      }
+
       // A text's In animation plays where the clip starts, so it stays on the left clip; a
       // transition leads into the clip after, so it stays on the right one, which ends where
       // the clip did. A caption's words keep time with the speech: the right clip starts that
@@ -2058,6 +2073,7 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
         if (ef != null) updated.endFrame = ef;
         if (ts != null) (updated as any).trimStart = ts;
         if (te != null) (updated as any).trimEnd = te;
+        if (clip.keyframes && oldFps > 0 && newFps > 0) updated.keyframes = scaleKeyframes(clip.keyframes, newFps / oldFps);
 
         return updated as AnyClipProps;
       });

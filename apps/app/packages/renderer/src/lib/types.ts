@@ -58,6 +58,93 @@ export interface ClipTransform {
   };
 }
 
+/**
+ * A clip property keyframes can drive (lib/keyframes.ts; docs/plan/app-engine-integration.md,
+ * "Keyframes"). Values are in the clip field's own units:
+ * - "position": [x, y], the centre of the clip's box in world units (y down);
+ * - "scale": [scaleX, scaleY], as the transform's;
+ * - "rotation": degrees clockwise, about the box's centre;
+ * - "opacity": 0–100; "volume": dB (travelling as gain does, as CapCut's volume keys do);
+ * - the Adjust sliders ("brightness", …, on their scale); "intensity", a filter bar's
+ *   strength or a sticker bar's opacity (0–100);
+ * - a text's "color" (#rrggbb), "fontSize", "stroke", "strokeWidth", "strokeOpacity",
+ *   "shadowColor", "shadowOpacity", "shadowBlur", "backgroundColor", "backgroundOpacity";
+ * - "draft:<id>": one of a converted clip's own adjustments (`draftAdjustments`) on CapCut's
+ *   scale, or "draft:<id>:hue" (":saturation", ":lightness") for an HSL range.
+ */
+export type KeyframeProperty =
+  | "position"
+  | "scale"
+  | "rotation"
+  | "opacity"
+  | "volume"
+  | "brightness"
+  | "contrast"
+  | "hue"
+  | "saturation"
+  | "sharpness"
+  | "noise"
+  | "blur"
+  | "vignette"
+  | "intensity"
+  | "color"
+  | "fontSize"
+  | "stroke"
+  | "strokeWidth"
+  | "strokeOpacity"
+  | "shadowColor"
+  | "shadowOpacity"
+  | "shadowBlur"
+  | "backgroundColor"
+  | "backgroundOpacity"
+  | `draft:${string}`;
+
+/** A keyframe's value: a number, one per component (position, scale), or a colour. */
+export type KeyframeValue = number | number[] | string;
+
+/**
+ * CapCut's keyframe graph presets: straight, held until the next key, or CapCut's curve with
+ * its default handles (0.4 of the span, flat) leaving this key ("easeIn", slow to start),
+ * arriving at the next ("easeOut", slow to end) or both ("easeInOut").
+ */
+export type KeyframePreset = "linear" | "hold" | "easeIn" | "easeOut" | "easeInOut";
+
+/**
+ * A curve handle as an offset from its key: in frames (positive leaving a key, negative
+ * arriving at the next) and in the property's units (0–1 channels for a colour), one number
+ * for every component or one per component.
+ */
+export interface KeyframeHandle {
+  frames: number | number[];
+  value: number | number[];
+}
+
+/**
+ * CapCut's curve with explicit handles (the keyframe graph's custom curve): `out` leaves this
+ * key, `in` arrives at the next. Components marked in `straight` go in a straight line.
+ */
+export interface KeyframeCurve {
+  out: KeyframeHandle;
+  in: KeyframeHandle;
+  straight?: boolean[];
+}
+
+/** How a key's value travels to the next key's (linear without one). */
+export type KeyframeEase = KeyframePreset | KeyframeCurve;
+
+/**
+ * A key at a clip-local frame (0 is where the clip starts on the timeline; fractional frames
+ * keep a CapCut key's exact time), at the project's frame rate.
+ */
+export interface Keyframe {
+  frame: number;
+  value: KeyframeValue;
+  ease?: KeyframeEase;
+}
+
+/** A clip's keyframes by property, each list sorted by frame. */
+export type ClipKeyframes = Partial<Record<KeyframeProperty, Keyframe[]>>;
+
 export interface ClipProps {
   // For grouping
   groupId?: string;
@@ -74,6 +161,11 @@ export interface ClipProps {
   transform?: ClipTransform;
   originalTransform?: ClipTransform;
   type: ClipType;
+  /**
+   * Keyframed properties (lib/keyframes.ts). While a property has keys they decide its value
+   * and the field's own value is ignored; editing it at the playhead sets a key there.
+   */
+  keyframes?: ClipKeyframes;
 }
 
 export interface TimelineProps {
@@ -307,13 +399,25 @@ export interface MaskData {
     scaleY?: number;
     renderOnce?: boolean;
   };
+  // For the brush tool: strokes in world units at the mask's transform, as the lasso's points
+  brushStrokes?: MaskBrushStroke[];
+  // How this pose travels to the next keyframe's (linear without one; poses of different
+  // shapes hold)
+  ease?: KeyframeEase;
+}
 
+/** One stroke of a brush mask: its points, its width (`size`) and whether it erases. */
+export interface MaskBrushStroke {
+  points: number[]; // [x1, y1, x2, y2, ...]
+  size: number;
+  erase?: boolean;
 }
 
 export type MaskClipProps = {
   id: string;
   clipId?: string;
   tool: MaskTool;
+  // The edge's softness, 0–100 as CapCut's Feather (the engine softens it as CapCut does)
   featherAmount: number;
   brushSize?: number;
   // Mask data for the initial frame/keyframes
@@ -444,6 +548,7 @@ export function clipSignature(clip: AnyClipProps): string {
       clip.groupId ?? "",
       encodeTransform(clip.transform),
       encodeTransform(clip.originalTransform),
+      keyframesSignature(clip.keyframes),
     );
 
     // Per-type specific fields (keep minimal for speed)
@@ -651,6 +756,13 @@ function masksSignature(arr: MaskClipProps[] | undefined): string {
     ].join(",");
   }
   return parts.join("|");
+}
+
+function keyframesSignature(keyframes: ClipKeyframes | undefined): string {
+  if (!keyframes) return "";
+  return Object.entries(keyframes)
+    .map(([p, keys]) => `${p}:${(keys ?? []).map((k) => `${n(k.frame)}=${JSON.stringify(k.value)}${k.ease ? JSON.stringify(k.ease) : ""}`).join(";")}`)
+    .join("|");
 }
 
 function linesSignature(lines: DrawingLine[] | undefined): string {
