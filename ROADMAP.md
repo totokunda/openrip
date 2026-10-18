@@ -170,6 +170,11 @@ Match CapCut's layout and workflows. Don't copy its assets.
   - audio effects and beat markers via DSP
   - captions from SRT import ✅ (and VTT, and export as SRT)
   - stickers and templates
+  - classic versions of CapCut's AI-labelled tools (in scope since 2026-10-18; spec §6.31):
+    - motion tracking: text, stickers, photos and masks follow a point or region (point or planar tracking);
+    - Split scenes (shot-change detection);
+    - optical-flow interpolation for Optical flow and Smooth slow-mo;
+    - Auto adjust, Color match and Make colors consistent (statistics and histogram matching).
 
 **Legal line:** reproduce layout, interaction patterns and workflows only. Don't use CapCut's name, logos, icons, proprietary effects, music, fonts or other bundled content. Use openly licensed assets instead (OFL fonts, CC0/CC-BY media).
 

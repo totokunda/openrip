@@ -597,7 +597,7 @@ This is the build checklist: every control and option visible in the captures, g
 - **partly**: some of it exists, or it exists only as engine rendering of imported CapCut drafts with no editing UI, or in a different place;
 - **missing**: not in OpenRip.
 
-Out-of-scope items (AI/ML, cloud, account, sharing, CapCut content) are listed under each table instead of in it, so the counts cover in-scope work only. Where CapCut's version is ML but a classic algorithm does the same job (stabilisation, denoise, loudness normalisation, beat detection, chroma key), the row is in scope and means the classic version.
+Out-of-scope items (AI/ML, cloud, account, sharing, CapCut content) are listed under each table instead of in it, so the counts cover in-scope work only. Where CapCut's version is ML but a classic algorithm does the same job (stabilisation, denoise, loudness normalisation, beat detection, chroma key, and since 2026-10-18 motion tracking, scene detection, optical-flow interpolation and colour matching: §6.31), the row is in scope and means the classic version.
 
 OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plus later commits (undo/redo, the Animation tab, CapCut import, engine export) and the components under `apps/app/packages/renderer/src/components`.
 
@@ -635,7 +635,10 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.28 Context menus | 5 | 3 | 13 |
 | 6.29 Export dialog | 5 | 2 | 9 |
 | 6.30 Other dialogs | 2 | 0 | 4 |
-| **Total (337 in-scope features)** | **77** | **75** | **185** |
+| 6.31 Classic-algorithm features brought into scope | 0 | 1 | 10 |
+| **Total (348 in-scope features)** | **77** | **76** | **195** |
+
+The counts above are as written. A re-audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows (32.0% strict, 47.8% with partly as half); with the text, inspector and audio branches then in progress, 146 / 86 / 105 (43.3% / 56.1%). §6.31's 11 rows were added after it.
 
 ### 6.1 App menu bar (macOS)
 
@@ -777,7 +780,7 @@ Screenshots are in `05-left-media/` unless a path says otherwise.
 | Yours › Favorites | `013-yours-favorites-empty.png`, `014-favorites-type-filter.png` | missing |
 | Yours › My presets (saved clip presets) | `015-my-presets-library.png` | missing |
 
-Out of scope: Import › From library (stock), Generate (AI image, AI video, AI dialogue scene: `15-left-ai-and-other/009-media-generate-default.png`–`15-left-ai-and-other/034-dialogue-react-tab.png`), Spaces and Brand assets (`017-spaces-default.png`–`020-spaces-asset-context.png`, `016-brand-assets-empty.png`), Library stock categories and the Commercial filter (`023-library-default.png`, `031-library-filter-menu.png`–`034-library-search-orientation-menu.png`), Dreamina (`15-left-ai-and-other/035-dreamina-default.png`), Split scenes and Transcript menu items, the "AI clipper" bottom bar, the empty state's Generate and AI avatars tiles.
+Out of scope: Import › From library (stock), Generate (AI image, AI video, AI dialogue scene: `15-left-ai-and-other/009-media-generate-default.png`–`15-left-ai-and-other/034-dialogue-react-tab.png`), Spaces and Brand assets (`017-spaces-default.png`–`020-spaces-asset-context.png`, `016-brand-assets-empty.png`), Library stock categories and the Commercial filter (`023-library-default.png`, `031-library-filter-menu.png`–`034-library-search-orientation-menu.png`), Dreamina (`15-left-ai-and-other/035-dreamina-default.png`), Transcript menu items (Split scenes is in scope: §6.31), the "AI clipper" bottom bar, the empty state's Generate and AI avatars tiles.
 
 ### 6.6 Left panel: Audio
 
@@ -928,7 +931,7 @@ Screenshots are in `17-inspector-project/` unless a path says otherwise.
 | Project settings › Performance: Proxy on/off, proxy resolution 720P/540P | `008-project-settings-performance.png`, `009-proxy-resolution-dropdown.png` | partly (per-item 480p proxies) |
 | Global edits › Make volume consistent (classic loudness matching) | `011-project-smart-suggestions.png`, `012-project-global-edits-bottom.png` | missing |
 
-Out of scope: Smart suggestions › Analyze, Make colors better, Make colors consistent, Make voice clearer, Make video clearer, Retouch face.
+Out of scope: Smart suggestions › Analyze, Make colors better, Make voice clearer, Make video clearer, Retouch face.
 
 ### 6.17 Inspector: video clip
 
@@ -979,13 +982,13 @@ Tabs: Video (Basic, Remove BG, Mask, Retouch), Audio, Speed, Animation, Adjust, 
 | Crop (from the timeline toolbar): ratio Free/…/16:9/9:16, rotation slider, Reset, Confirm | `31-dialogs/039-crop-dialog.png`, `31-dialogs/040-crop-ratio-menu.png` | partly (no rotation, different presets) |
 | Mirror (horizontal flip) | `30-timeline-toolbar/032-mirrored-video-state.png` | missing |
 
-Out of scope: Enhance quality, Optical flow, AI remove, AI expand, AI remix, Eye contact, Lip sync, Relight, Auto reframe, AI movement, Camera tracking, Remove BG › Auto removal and Custom removal, all of Retouch (`018-retouch-face-controls.png`, `019-retouch-features-controls.png`), AI stylize (`024-ai-stylize-form.png`), Smooth slow-mo, Velocity effects, Canvas › Brand backgrounds, CapCut canvas patterns.
+Out of scope: Enhance quality, AI remove, AI expand, AI remix, Eye contact, Lip sync, Relight, Auto reframe, AI movement, Camera tracking, Remove BG › Auto removal and Custom removal, all of Retouch (`018-retouch-face-controls.png`, `019-retouch-features-controls.png`), AI stylize (`024-ai-stylize-form.png`), Velocity effects, Canvas › Brand backgrounds, CapCut canvas patterns.
 
 ### 6.18 Inspector: photo clip
 
 Screenshots are in `19-inspector-photo/` unless a path says otherwise.
 
-Same as video except: tabs are Video, Animation, Tracking, Adjust, AI stylize (no Audio or Speed tab), and Basic has no Stabilize. Reference: `19-inspector-photo/001-photo-selected-basic-top.png`. OpenRip status follows 6.17; the photo Tracking tab is OOS (motion tracking).
+Same as video except: tabs are Video, Animation, Tracking, Adjust, AI stylize (no Audio or Speed tab), and Basic has no Stabilize. Reference: `19-inspector-photo/001-photo-selected-basic-top.png`. OpenRip status follows 6.17; the photo Tracking tab is in §6.31.
 
 ### 6.19 Inspector: audio clip
 
@@ -1037,7 +1040,7 @@ Tabs: Text (Basic, Bubble, Effects), Animation (In, Out, Loop), Tracking, Text t
 | Animation › Out, Loop | `020-animation-in-grid.png` | missing |
 | Template text: per-paragraph text fields | `001-template-basic-paragraphs.png` | missing |
 
-Out of scope: Bubble and Effects content (`018-bubble-grid.png`, `019-effects-grid.png`), Tracking (`022-tracking-default.png`, `023-motion-tracking-options.png`), Text to speech (`024-text-to-speech.png`), AI avatars, CapCut fonts and preset content.
+Out of scope: Bubble and CapCut's Effects content (`018-bubble-grid.png`, `019-effects-grid.png`; the Effects tab with OpenRip's own styles is in §6.31, as is Tracking), Text to speech (`024-text-to-speech.png`), AI avatars, CapCut fonts and preset content.
 
 ### 6.21 Inspector: sticker clip
 
@@ -1048,7 +1051,7 @@ Screenshots are in `22-inspector-sticker/` unless a path says otherwise.
 | Transform (scale, locked uniform scale, position, rotate, align) | `22-inspector-sticker/001-sticker-transform.png` | has (as an image clip) |
 | Animation › In, Out, Loop with duration | `002-sticker-animation.png` | missing |
 
-Out of scope: Tracking, CapCut animation content.
+Out of scope: CapCut animation content (Tracking is in §6.31).
 
 ### 6.22 Inspector: effect, filter and transition clips
 
@@ -1080,7 +1083,7 @@ Screenshots are in `25-inspector-adjustment-layer/` unless a path says otherwise
 | Mask on an adjustment layer (several masks, shapes, settings) | `024-multiple-masks.png`–`026-rectangle-mask-controls.png` | partly |
 | Save as preset | `001-basic-top.png` | missing |
 
-Out of scope: Auto adjust, Color match, Color correction, Protect skin tone, Track mask (`027-mask-track-direction-menu.png`, `028-mask-tracking-bottom.png`), "Add presets to brand kit".
+Out of scope: Color correction, Protect skin tone (Auto adjust, Color match and Track mask are in §6.31), "Add presets to brand kit".
 
 ### 6.24 Inspector: caption clip
 
@@ -1196,7 +1199,7 @@ Video clip menu (`30-timeline-toolbar/001-video-context-menu.png` to `012-video-
 | Transition › Delete | `013-transition-context-menu.png` | missing (no transition clips) |
 | Split at playhead from the menu | – (CapCut keeps it in the toolbar) | has |
 
-Out of scope: EditPilot (every menu's first item), Split scenes, Transcript, Generate captions, Isolate voice and its submenu, Remove background, Enhance voice, Enhance quality, Optical flow (as ML), Adjust color › Auto adjust / Color match / Color correction, Camera tracking, AI movement, Image to video, AI avatars, Text to speech, AI packaging.
+Out of scope: EditPilot (every menu's first item), Transcript, Generate captions, Isolate voice and its submenu, Remove background, Enhance voice, Enhance quality, Adjust color › Color correction, Camera tracking, AI movement, Image to video, AI avatars, Text to speech, AI packaging.
 
 ### 6.29 Export dialog
 
@@ -1239,6 +1242,24 @@ Screenshots are in `31-dialogs/` unless a path says otherwise.
 | Confirm before discarding unsaved edits | `035-cover-exit-confirmation.png` | has (alert dialog for deletes; editor autosaves) |
 
 Out of scope: cover design templates, stickers, AI design panel, AI image tools, Brand kit, Frames (`028-cover-design-templates.png`, `030-cover-design-stickers.png`–`034-cover-ai-tools-menu.png`); Feedback (`002-feedback-default.png`–`005-feedback-issue-bottom.png`); Network testing (`011-network-status.png`); local-network permission prompt (`001-local-network-permission.png`); voiceover Enhance voice.
+
+### 6.31 Classic-algorithm features brought into scope (2026-10-18)
+
+CapCut's versions of these are listed under AI or left out above; each has a classic, non-ML method that does the same job, so OpenRip builds that (the rule in §6's preamble).
+
+| Feature | CapCut reference | OpenRip |
+|---|---|---|
+| Split scenes: cut a clip at its shot changes (Media and clip menus) | `30-timeline-toolbar/001-video-context-menu.png` | missing |
+| Optical flow (Video ▸ Basic): frames blended along motion for smoother low frame rates | `18-inspector-video/004-basic-enhancement-sections.png` | missing |
+| Speed ▸ Smooth slow-mo: in-between frames by motion interpolation when slowed down | `18-inspector-video/020-speed-standard.png` | missing |
+| Text ▸ Tracking: a text follows a point or region of the video under it | `21-inspector-text/022-tracking-default.png`, `023-motion-tracking-options.png` | missing |
+| Sticker ▸ Tracking | `22-inspector-sticker/001-sticker-transform.png` (its tab row) | missing |
+| Photo/overlay ▸ Tracking | `19-inspector-photo/001-photo-selected-basic-top.png` | missing |
+| Mask ▸ Track mask: the mask follows the tracked region, with its direction menu | `25-inspector-adjustment-layer/026-rectangle-mask-controls.png`, `027-mask-track-direction-menu.png`, `028-mask-tracking-bottom.png` | missing |
+| Adjust ▸ Auto adjust: levels, white balance and contrast set from the clip's own statistics | `25-inspector-adjustment-layer/001-basic-top.png`, `30-timeline-toolbar/008-video-context-adjust-color.png` | missing |
+| Adjust ▸ Color match: a clip graded to match a reference frame's colour statistics | `25-inspector-adjustment-layer/001-basic-top.png`, `30-timeline-toolbar/008-video-context-adjust-color.png` | missing |
+| Smart suggestions ▸ Make colors consistent: every clip matched to one reference | `17-inspector-project/011-project-smart-suggestions.png` | missing |
+| Text ▸ Effects with OpenRip's own styles (CapCut's content stays out) | `21-inspector-text/019-effects-grid.png` | partly (the engine draws the styles; no tab on main) |
 
 ## 7. Gaps in the captures (recapture list)
 
