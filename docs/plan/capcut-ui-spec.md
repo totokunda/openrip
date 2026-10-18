@@ -457,6 +457,7 @@ Reference: `003`, `005-attributes-layout.png`, `30-timeline-toolbar/031-clip-tra
 | Main track video | 76 px band (#2f2f2f with #373737 lines top and bottom) | 74 | label band 17–18, thumbnail band 39, bottom band 16 (own audio waveform) |
 | Audio | 50 px row + 2 px gap | 48 | label chip at top-left over the waveform; waveform bars #33757d on extracted audio (lighter tint of the clip colour), baseline #597f84 |
 
+- Waveforms (measured on `003`'s extracted audio and `18-inspector-video/001`'s video band): bars 1 px wide every 2 px (2 device px on, 2 off), the first 1.5 px into the clip, rising from the clip's (or band's) bottom edge, drawn to half a pixel; no bar where the sound is under the floor. Each bar is the RMS of the 2 px of sound just before it on a dB scale: 27 × (1 + dB / 50.6) px on an audio clip at 30%, half that in the video's 16 px band (a fit of `003`'s 213 bars to IMG_9079's audio: correlation 0.98, 0.8 px off on average). The 0.5 px line across (#597f84 on teal, about white at 27%) sits at 13/27 of that scale (13 px on the audio clip, 6.5 px in the band). Music's bars are #3a7faf on #182f55 (the Linkage legend). A photo, or a video whose sound was extracted, has an empty bottom band.
 - Clip corner radius ≈3–4 px.
 - Label chip: 14–16 px tall, radius ≈3, 4 px from the clip's top-left, padding ≈4 px; the clip colour with ≈7–10% white over it; effect, filter, adjustment, caption and template chips start with a 12 px type glyph; media clips add a second chip with the duration (`HH:MM:SS:FF`); 11–12 px `text.primary`.
 - Thumbnails tile about every 50 px.
@@ -1150,13 +1151,13 @@ Screenshots are in `30-timeline-toolbar/` unless a path says otherwise.
 | Track header: lock | `03-editor-overview/003-base-timeline-built.png` | missing |
 | Track header: hide (eye) | `03-editor-overview/003-base-timeline-built.png` | has |
 | Track header: mute | `03-editor-overview/003-base-timeline-built.png` | has |
-| Track "…" › Track height: Short, Default, Tall | `023-track-height-menu.png` | missing |
-| Track "…" › Audio waveform size: 30%, 60%, 100% | `024-track-waveform-size-menu.png` | missing |
+| Track "…" › Track height: Short, Default, Tall | `023-track-height-menu.png` | has (video and audio tracks; Short and Tall are 0.7× and 1.4× the row, not captured) |
+| Track "…" › Audio waveform size: 30%, 60%, 100% | `024-track-waveform-size-menu.png` | has (bars 1×, 2× and 3.3× as tall; 60% and 100% not captured) |
 | Cover tile on the main track, cover frame picker | `03-editor-overview/003-base-timeline-built.png`, `31-dialogs/027-cover-frame-selector.png` | partly (covers are generated automatically, not editable or shown) |
 | Video thumbnails on clips | `03-editor-overview/003-base-timeline-built.png` | has |
-| Audio waveforms | `03-editor-overview/003-base-timeline-built.png` | has |
-| Video clip's own audio waveform in a bottom band | `03-editor-overview/003-base-timeline-built.png` | missing |
-| Label chip with name and duration | `03-editor-overview/003-base-timeline-built.png` | partly |
+| Audio waveforms | `03-editor-overview/003-base-timeline-built.png` | has (CapCut's bars, scale, volume line and colours: renderer/src/lib/waveform.ts) |
+| Video clip's own audio waveform in a bottom band | `03-editor-overview/003-base-timeline-built.png` | has |
+| Label chip with name and duration | `03-editor-overview/003-base-timeline-built.png` | has (video, photo and audio clips) |
 | Colour per clip type | `31-dialogs/038-linkage-settings.png` | has (different colours) |
 | Selection outline with trim handles | `03-editor-overview/003-base-timeline-built.png` | has |
 | Transition handle on a cut (select, delete, drag duration) | `030-marker-edit-popover.png`, `013-transition-context-menu.png` | missing |
