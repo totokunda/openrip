@@ -7,6 +7,7 @@
 // See docs/plan/app-engine-integration.md.
 import { create } from "zustand";
 import { onMenuEdit } from "@app/preload";
+import { inputDocument } from "./window-group";
 import _ from "lodash";
 import { useClipStore, pruneAssetsForClips } from "./clip";
 import { useControlsStore } from "./control";
@@ -329,9 +330,10 @@ export function initHistory() {
   // Files dropped from the Finder come without a press in the window.
   window.addEventListener("drop", () => action++, opts);
   // Edit ▸ Undo and Redo in the menu bar: a focused field's typing, as the menu would undo
-  // it, else the project.
+  // it, else the project. The field can be in a panel's own window (lib/panel-windows.ts).
   onMenuEdit((cmd) => {
-    if (editable(document.activeElement)) document.execCommand(cmd);
+    const doc = inputDocument();
+    if (editable(doc.activeElement)) doc.execCommand(cmd);
     else if (cmd === "undo") undo();
     else redo();
   });

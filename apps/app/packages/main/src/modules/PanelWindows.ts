@@ -174,14 +174,15 @@ export function attachPanelWindows(editor: BrowserWindow) {
     if (!panel) return;
     owners.set(child, editor);
     byName.set(frameName, child);
+    // On the editor's display (it starts full screen on macOS, in a Space of its own).
+    const besideFullScreenEditor = () =>
+      mac && !editor.isDestroyed() && editor.isFullScreen() && screen.getDisplayMatching(child.getBounds()).id === screen.getDisplayMatching(editor.getBounds()).id;
     if (mac) {
-      // The editor starts full screen on macOS, in a Space of its own. A window opening on
-      // another display is an ordinary window there (the player on a second screen). One on
-      // the editor's display would become a full-screen tab of it, or open in another Space
-      // out of sight: the editor leaves full screen first (maximized, as CapCut's window is)
-      // and the panel's window opens beside it.
-      const sameDisplay = screen.getDisplayMatching(child.getBounds()).id === screen.getDisplayMatching(editor.getBounds()).id;
-      if (editor.isFullScreen() && sameDisplay) {
+      // A window opening on another display is an ordinary window there (the player on a
+      // second screen). One on the full-screen editor's display would become a full-screen tab
+      // of it, or open in another Space out of sight: the editor leaves full screen first
+      // (maximized, as CapCut's window is) and the panel's window opens beside it.
+      if (besideFullScreenEditor()) {
         const show = () => {
           clearTimeout(fallback);
           if (!editor.isDestroyed() && !editor.isFullScreen()) editor.maximize();
@@ -196,7 +197,14 @@ export function attachPanelWindows(editor: BrowserWindow) {
     }
     if (places()[panel]?.maximized) child.maximize();
     const save = () => remember(panel, child);
-    child.on("moved", save);
+    child.on("moved", () => {
+      save();
+      // Moved onto the full-screen editor's display, it would be out of sight behind it.
+      if (besideFullScreenEditor()) {
+        editor.once("leave-full-screen", () => !editor.isDestroyed() && editor.maximize());
+        editor.setFullScreen(false);
+      }
+    });
     child.on("resized", save);
     child.on("maximize", save);
     child.on("unmaximize", save);
@@ -212,10 +220,14 @@ export function attachPanelWindows(editor: BrowserWindow) {
     });
   });
   editor.on("close", () => (editorClosing = true));
-  // Its panels' windows go with it.
-  editor.on("closed", () => {
+  // Its panels' windows go with it, and with its page (a reload, or the page crashing: the
+  // windows would be left blank; the page opens them again).
+  const closeAll = () => {
     for (const [child, owner] of owners) {
       if (owner === editor && !child.isDestroyed()) child.destroy();
     }
-  });
+  };
+  editor.on("closed", closeAll);
+  editor.webContents.on("did-navigate", closeAll);
+  editor.webContents.on("render-process-gone", closeAll);
 }
