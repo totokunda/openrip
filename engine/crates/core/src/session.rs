@@ -61,8 +61,9 @@ impl Image {
             let mut enc = png::Encoder::new(&mut out, self.width, self.height);
             enc.set_color(png::ColorType::Rgba);
             enc.set_depth(png::BitDepth::Eight);
-            // A still is saved once: a good size matters more than a few ms.
-            enc.set_compression(png::Compression::Balanced);
+            // fdeflate's fast mode: a 4K frame in a fraction of the time zlib's default takes,
+            // for a file a little larger.
+            enc.set_compression(png::Compression::Fast);
             enc.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
             let mut w = enc.write_header().map_err(png_error)?;
             w.write_image_data(&self.data).map_err(png_error)?;
