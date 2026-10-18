@@ -53,6 +53,9 @@ pub struct ImportReport {
     pub library_items: BTreeMap<String, usize>,
     /// Keyframed properties that aren't mapped yet.
     pub unmapped_keyframes: BTreeMap<String, usize>,
+    /// Transitions and clip animations the engine doesn't draw (only CapCut does), by kind,
+    /// name and resource id.
+    pub unmapped_library: BTreeMap<String, usize>,
     /// Keyframe curve types seen (to verify easing mapping).
     pub curve_types: BTreeMap<String, usize>,
     /// Raw track `attribute` values seen (meaning not confirmed yet).
@@ -345,10 +348,27 @@ const BUILTIN_ANIMATIONS: &[(&str, &str)] = &[
     ("7289356246623195649", "caption_word_color"),
     // The 弹出 ("pop") templates' caption style: one word at a time, nothing else changes.
     ("7135040682032370178", "caption_one_word"),
+    // Video Fade Out (its `Transform.lua`: opacity 1 → 0, linear; docs/parity/clip-animations.md).
+    ("6798320902548230669", "fade_out"),
 ];
 
+/// CapCut animations by their English name and kind, for those whose resource ids aren't
+/// known here: the built-in that does the same.
+const NAMED_ANIMATIONS: &[(&str, AnimationKind, &str)] = &[("Fade In", AnimationKind::In, "fade_in"), ("Fade Out", AnimationKind::Out, "fade_out")];
+
 /// CapCut library transitions OpenRip draws itself, by resource id (docs/parity/transitions.md).
-const BUILTIN_TRANSITIONS: &[(&str, &str)] = &[("6724845376098013708", "white_flash"), ("6864867302936941064", "blink"), ("7637430135737650452", "white_fade")];
+const BUILTIN_TRANSITIONS: &[(&str, &str)] = &[
+    ("6724845376098013708", "white_flash"),
+    ("6864867302936941064", "blink"),
+    ("7637430135737650452", "white_fade"),
+    // Its bundle's VerticalZoomNear shader.
+    ("6724226861666144779", "pull_in"),
+    // A local draft names it; the bundle isn't on this machine.
+    ("6724239388189921806", "black_fade"),
+];
+
+/// CapCut transitions by their English name, for those whose resource ids aren't known here.
+const NAMED_TRANSITIONS: &[(&str, &str)] = &[("Mix", "mix"), ("Black Fade", "black_fade"), ("Pull in", "pull_in"), ("Pull out", "pull_out")];
 
 /// Where CapCut wraps a fixed-size text box: this fraction of the canvas width per unit of
 /// its `fixed_width`, at the clip's scale 1 (calibration session 5 bounds it to
@@ -615,11 +635,24 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         .iter()
                         .map(|a| {
                             let library = library_ref(a);
+                            // A video's combo is CapCut's "group".
+                            let kind = match s(a, "type").as_str() {
+                                "group" => AnimationKind::Combo,
+                                ty => serde_json::from_value(Value::String(ty.to_string())).unwrap_or(AnimationKind::Other),
+                            };
+                            let builtin = BUILTIN_ANIMATIONS
+                                .iter()
+                                .find(|(id, _)| *id == library.resource_id)
+                                .map(|(_, ours)| *ours)
+                                .or_else(|| NAMED_ANIMATIONS.iter().find(|(name, k, _)| *name == library.name && *k == kind).map(|(.., ours)| *ours));
+                            if builtin.is_none() && kind != AnimationKind::Caption {
+                                bump(&mut report.unmapped_library, format!("animation: {} ({})", library.name, library.resource_id));
+                            }
                             Animation {
-                                kind: serde_json::from_value(Value::String(s(a, "type"))).unwrap_or(AnimationKind::Other),
+                                kind,
                                 start: Micros(i(a, "start")),
                                 duration: Micros(i(a, "duration")),
-                                builtin: BUILTIN_ANIMATIONS.iter().find(|(id, _)| *id == library.resource_id).map(|(_, ours)| ours.to_string()),
+                                builtin: builtin.map(str::to_string),
                                 resource: Some(s(a, "path")).filter(|p| !p.is_empty()),
                                 library: Some(library),
                             }
@@ -674,12 +707,20 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                 "transitions" => {
                     let lib = library_ref(m);
                     bump(&mut report.library_items, "transition".to_string());
+                    let builtin = BUILTIN_TRANSITIONS
+                        .iter()
+                        .find(|(id, _)| *id == lib.resource_id)
+                        .or_else(|| NAMED_TRANSITIONS.iter().find(|(name, _)| *name == lib.name))
+                        .map(|(_, ours)| ours.to_string());
+                    if builtin.is_none() {
+                        bump(&mut report.unmapped_library, format!("transition: {} ({})", lib.name, lib.resource_id));
+                    }
                     out.transitions.push(Transition {
                         id,
                         name: s(m, "name"),
                         duration: Micros(i(m, "duration")),
                         overlap: b(m, "is_overlap", true),
-                        builtin: BUILTIN_TRANSITIONS.iter().find(|(id, _)| *id == lib.resource_id).map(|(_, ours)| ours.to_string()),
+                        builtin,
                         resource: Some(s(m, "path")).filter(|p| !p.is_empty()),
                         library: Some(lib),
                     });
@@ -1183,6 +1224,30 @@ mod tests {
         assert!(import_draft_json(&d, "hint").unwrap().project.materials.texts[0].layout.background.is_none());
         d["materials"]["texts"][0]["check_flag"] = json!(23);
         assert!(import_draft_json(&d, "hint").unwrap().project.materials.texts[0].layout.background.is_some());
+    }
+
+    #[test]
+    fn maps_transitions_and_clip_animations_to_built_ins() {
+        let mut d = sample_draft();
+        d["materials"]["transitions"] = json!([
+            {"id": "X1", "name": "Pull in", "resource_id": "6724226861666144779", "duration": 400_000, "is_overlap": false},
+            {"id": "X2", "name": "Mix", "resource_id": "70000000000000001", "duration": 500_000, "is_overlap": true},
+            {"id": "X3", "name": "Flash Split", "resource_id": "7460753045769425409", "duration": 200_000, "is_overlap": true}]);
+        d["materials"]["material_animations"] = json!([{"id": "A1", "type": "sticker_animation", "animations": [
+            {"type": "out", "name": "Fade Out", "resource_id": "6798320902548230669", "start": 0, "duration": 1_366_666, "material_type": "video"},
+            {"type": "in", "name": "Fade In", "resource_id": "70000000000000002", "start": 0, "duration": 500_000, "material_type": "video"},
+            {"type": "group", "name": "Swing", "resource_id": "70000000000000003", "start": 0, "duration": 3_000_000, "material_type": "video"},
+            {"type": "out", "name": "Blurred Fade-in", "resource_id": "7473710407329255953", "start": 0, "duration": 500_000, "material_type": "video"}]}]);
+        let Imported { project, report } = import_draft_json(&d, "hint").unwrap();
+        let t: Vec<Option<&str>> = project.materials.transitions.iter().map(|t| t.builtin.as_deref()).collect();
+        assert_eq!(t, [Some("pull_in"), Some("mix"), None]);
+        let a: Vec<(AnimationKind, Option<&str>)> = project.materials.animations[0].items.iter().map(|a| (a.kind.clone(), a.builtin.as_deref())).collect();
+        assert_eq!(a, [(AnimationKind::Out, Some("fade_out")), (AnimationKind::In, Some("fade_in")), (AnimationKind::Combo, None), (AnimationKind::Out, None)]);
+        // What only CapCut draws is reported, by name and resource id.
+        assert_eq!(report.unmapped_library.get("transition: Flash Split (7460753045769425409)"), Some(&1));
+        assert_eq!(report.unmapped_library.get("animation: Swing (70000000000000003)"), Some(&1));
+        assert_eq!(report.unmapped_library.get("animation: Blurred Fade-in (7473710407329255953)"), Some(&1));
+        assert_eq!(report.unmapped_library.len(), 3);
     }
 
     /// `words` as CapCut stores them: parallel arrays, spaces as words of their own.

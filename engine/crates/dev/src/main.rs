@@ -159,6 +159,7 @@ struct Totals {
     foreign: BTreeMap<String, usize>,
     library_items: BTreeMap<String, usize>,
     unmapped_keyframes: BTreeMap<String, usize>,
+    unmapped_library: BTreeMap<String, usize>,
     curve_types: BTreeMap<String, usize>,
     track_attributes: BTreeMap<i64, usize>,
     warnings: BTreeMap<String, usize>,
@@ -207,6 +208,7 @@ fn capcut_scan(root: &Path) -> Result<(), ImportError> {
                 merge(&mut t.foreign, &report.foreign);
                 merge(&mut t.library_items, &report.library_items);
                 merge(&mut t.unmapped_keyframes, &report.unmapped_keyframes);
+                merge(&mut t.unmapped_library, &report.unmapped_library);
                 merge(&mut t.curve_types, &report.curve_types);
                 merge(&mut t.track_attributes, &report.track_attributes);
                 for w in &report.warnings {
@@ -251,6 +253,7 @@ fn capcut_scan(root: &Path) -> Result<(), ImportError> {
     println!("kept as foreign:     {:?}", t.foreign);
     println!("library items:       {:?}", t.library_items);
     println!("unmapped keyframes:  {:?}", t.unmapped_keyframes);
+    println!("not drawn (CapCut's only): {:?}", t.unmapped_library);
     println!("curve types:         {:?}", t.curve_types);
     println!("track attributes:    {:?}", t.track_attributes);
     println!("warnings:            {:?}", t.warnings);
