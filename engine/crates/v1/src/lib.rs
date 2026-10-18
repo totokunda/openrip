@@ -31,6 +31,7 @@ mod app;
 mod color;
 mod compositing;
 mod keys;
+mod text;
 pub use app::{relaid_texts, to_app_project};
 
 #[derive(Debug, thiserror::Error)]
@@ -606,6 +607,15 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
     if ty == "text" && (["text", "fontSize", "color"].into_iter().any(changed) || app::TEXT_STYLE_KEYS.into_iter().any(differs)) {
         edit_text(&mut seg, clip, &base, materials);
     }
+    if ty == "text" && differs("textEffect") {
+        // The Effects tab's style replaces the draft's library style.
+        seg.attachments.retain(|id| !text::is_text_style(materials, id));
+        if let Some(e) = text::text_effect(&seg.id, clip) {
+            materials.effects.retain(|m| m.id != e.id);
+            seg.attachments.push(e.id.clone());
+            materials.effects.push(e);
+        }
+    }
     // The app's keyframes for the properties it changed (on top of the draft's, which stay
     // for the rest).
     let props = |v: &Value| v.get("keyframes").and_then(Value::as_object).cloned().unwrap_or_default();
@@ -738,6 +748,7 @@ fn edit_text(seg: &mut Segment, clip: &Value, base: &Value, materials: &mut Mate
             None => b,
         });
     }
+    text::edit(&mut t, clip, &differs);
     seg.material = t.id.clone();
     materials.texts.retain(|m| m.id != t.id);
     materials.texts.push(t);
@@ -793,6 +804,12 @@ fn convert_clip(
         "text" => {
             let mid = MaterialId(format!("{id}-text"));
             materials.texts.push(convert_text(&mid, clip, world));
+            // The Effects tab's style.
+            if let Some(e) = text::text_effect(&id, clip) {
+                attachments.push(e.id.clone());
+                materials.effects.retain(|m| m.id != e.id);
+                materials.effects.push(e);
+            }
             mid
         }
         "filter" => {
@@ -1450,9 +1467,9 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
             size_unit: SizeUnit::CanvasHeight,
             // v1's colorOpacity has no effect in its renderer, so it isn't applied here.
             fill: hex(clip, "color", Rgba::BLACK),
-            gradient: None,
+            gradient: clip.get("fillGradient").and_then(text::gradient),
             stroke,
-            more_strokes: Vec::new(),
+            more_strokes: text::more_strokes(clip),
             bold: f(clip, "fontWeight", 400.0) >= 700.0,
             italic: s(clip, "fontStyle") == "italic",
             underline: s(clip, "textDecoration") == "underline",
@@ -1465,14 +1482,14 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
                 "right" => 2,
                 _ => 0,
             },
-            letter_spacing: 0.0,
-            line_spacing: 0.0,
+            letter_spacing: text::letter_spacing(clip),
+            line_spacing: text::line_spacing(clip, false),
             // Konva's default line height.
             line_height: Some(1.0),
             kerning: true,
             background,
             shadow,
-            glow: None,
+            glow: text::glow(clip),
             max_width: None,
             curve: 0.0,
             // Konva draws v1 text inside its box (wrapping at the box's width), aligned by
@@ -1679,4 +1696,55 @@ mod tests {
         assert_eq!(project.materials.media[0].path, "/Users/me/My Clip.mp4");
         assert!(project.validate().is_empty());
     }
+
+    #[test]
+    fn the_text_tabs_spacing_glow_gradient_outlines_and_style() {
+        let mut d = doc();
+        let clip = d["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["type"] == "text").unwrap();
+        // Character 2 and Line 3 (CapCut's steps of 1/20 em), a gradient, a second outline of
+        // 9 px at 60 px, a glow in the text's colours and a style from the Effects tab.
+        clip["letterSpacing"] = json!(2);
+        clip["lineSpacing"] = json!(3);
+        clip["fillGradient"] = json!({ "colors": ["#ff0000", "#0000ff80"], "angle": 90, "span": "text" });
+        clip["moreStrokes"] = json!([{ "color": "#ffffff", "width": 9, "opacity": 50 }, { "color": "#000000", "width": 0 }]);
+        clip["glowEnabled"] = json!(true);
+        clip["glowIntensity"] = json!(60);
+        clip["glowOffsetY"] = json!(-50);
+        clip["textEffect"] = json!({ "id": "shadowed", "name": "Shadowed", "shadows": [{ "paint": { "color": "#000000", "opacity": 80 }, "distance": 0.08, "angle": -45, "blur": 0.05 }] });
+        let fs = clip["fontSize"].as_f64().unwrap();
+        let Imported { project, .. } = import_v1_json(&d).unwrap();
+        let text = &project.materials.texts[0];
+        let run = &text.runs[0];
+        assert!((text.layout.letter_spacing - 0.1).abs() < 1e-6 && (text.layout.line_spacing - 0.15).abs() < 1e-6);
+        let g = run.gradient.as_ref().unwrap();
+        assert_eq!((g.stops.clone(), g.angle_deg, g.span, g.colors[1].a), (vec![0.0, 1.0], 90.0, GradientSpan::Text, 128.0 / 255.0));
+        assert_eq!(run.more_strokes.len(), 1);
+        assert!((run.more_strokes[0].width - (9.0 / fs) as f32).abs() < 1e-6 && run.more_strokes[0].color.a == 0.5);
+        let glow = text.layout.glow.as_ref().unwrap();
+        assert_eq!((glow.color, glow.strength, glow.range, glow.direction), (None, 0.6, 0.2, [0.5, 0.25]));
+        let seg = project.tracks.iter().flat_map(|t| &t.segments).find(|s| s.material == text.id).unwrap();
+        let style = project.materials.effects.iter().find(|e| seg.attachments.contains(&e.id)).unwrap();
+        let fx = style.text_style.as_ref().unwrap();
+        assert_eq!((style.name.as_str(), fx.shadows.len(), fx.shadows[0].paint.alpha), ("Shadowed", 1, 0.8));
+        // Without the fields, the text is as before.
+        let plain = &import_v1_json(&doc()).unwrap().project.materials.texts[0];
+        assert!(plain.layout.glow.is_none() && plain.runs[0].gradient.is_none() && plain.runs[0].more_strokes.is_empty());
+        assert_eq!((plain.layout.letter_spacing, plain.layout.line_spacing), (0.0, 0.0));
+    }
+
+    #[test]
+    fn glow_keyframes_drive_the_glow() {
+        let mut d = doc();
+        let clip = d["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["type"] == "text").unwrap();
+        clip["glowEnabled"] = json!(true);
+        clip["keyframes"] = json!({ "glowIntensity": [{ "frame": 0, "value": 0 }, { "frame": 12, "value": 100 }], "glowColor": [{ "frame": 0, "value": "#ff0000" }] });
+        let project = import_v1_json(&d).unwrap().project;
+        let text = &project.materials.texts[0];
+        let seg = project.tracks.iter().flat_map(|t| &t.segments).find(|s| s.material == text.id).unwrap();
+        let at = seg.text_at(text, Micros(250_000));
+        let glow = at.layout.glow.unwrap();
+        assert!((glow.strength - 0.5).abs() < 1e-3, "{glow:?}");
+        assert_eq!(glow.color, Some(Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }));
+    }
 }
+

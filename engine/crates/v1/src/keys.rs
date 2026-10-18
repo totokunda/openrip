@@ -59,6 +59,9 @@ const TEXT_PROPS: &[(&str, &[Param], bool, f64)] = &[
     ("shadowBlur", &[Param::ShadowSmoothing], true, 1.0),
     ("backgroundColor", &[Param::BackgroundRed, Param::BackgroundGreen, Param::BackgroundBlue], false, 1.0),
     ("backgroundOpacity", &[Param::BackgroundAlpha], false, 0.01),
+    ("glowColor", &[Param::GlowRed, Param::GlowGreen, Param::GlowBlue], false, 1.0),
+    ("glowIntensity", &[Param::GlowStrength], false, 0.01),
+    ("glowRange", &[Param::GlowRange], false, 0.01),
 ];
 
 /// What an app property of `clip` (drawn as `seg`) drives in the model. `None` for a

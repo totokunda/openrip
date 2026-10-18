@@ -66,11 +66,14 @@ pub(crate) fn kind_from_name(name: &str) -> Option<TrackKind> {
 
 /// The text panel's style fields (`TextProperties` and its stroke, shadow and background
 /// sections) a converted text clip carries; a change to any of them is applied on import.
-pub(crate) const TEXT_STYLE_KEYS: [&str; 20] = [
+pub(crate) const TEXT_STYLE_KEYS: [&str; 30] = [
     "fontFamily", "fontWeight", "fontStyle", "textDecoration", "textAlign", "textTransform",
     "strokeEnabled", "stroke", "strokeWidth", "strokeOpacity",
     "shadowEnabled", "shadowColor", "shadowOpacity", "shadowOffsetX", "shadowOffsetY", "shadowBlur",
     "backgroundEnabled", "backgroundColor", "backgroundOpacity", "backgroundCornerRadius",
+    // Spacing, the gradient fill, more outlines and the glow (`text.rs`).
+    "letterSpacing", "lineSpacing", "fillGradient", "moreStrokes",
+    "glowEnabled", "glowColor", "glowIntensity", "glowRange", "glowOffsetX", "glowOffsetY",
 ];
 
 /// The Adjust panel's sliders; the app's scale, applied on top of CapCut's own adjustments.
@@ -496,6 +499,9 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
             clip.insert("backgroundColor".into(), json!(hex(bg.map_or(Rgba::BLACK, |b| b.color))));
             clip.insert("backgroundOpacity".into(), pct(bg.map_or(1.0, |b| b.color.a)));
             clip.insert("backgroundCornerRadius".into(), num(bg.filter(|b| b.style == 2).map_or(0.0, |b| b.corner_radius as f64 * fs)));
+            // Spacing, the gradient fill, more outlines, the glow and the Effects tab's style.
+            let style = seg.attachments.iter().find_map(|id| project.materials.effects.iter().find(|e| &e.id == id && e.text_style.is_some()));
+            crate::text::emit(&mut clip, t, style, fs, run.is_none_or(|r| r.size_unit == SizeUnit::CapCut));
             // The Animation tab: the In animation, and for captions that follow the speech,
             // their style.
             let anims = animations(project, seg);
@@ -554,7 +560,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
     // import can tell what the app changed.
     let base_keys = [
         "startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "reverse", "speedCurve", "freeze", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color",
-        "animationIn", "animationOut", "animationCombo", "animationLoop", "captionStyle", "transitionOut", "keyframes",
+        "animationIn", "animationOut", "animationCombo", "animationLoop", "captionStyle", "transitionOut", "keyframes", "textEffect",
     ];
     let base: Map<String, Value> = base_keys
         .iter()
@@ -693,6 +699,92 @@ mod tests {
         let bg = t.layout.background.unwrap();
         assert_eq!((bg.color.b, bg.color.a, bg.width, bg.style), (1.0, 0.5, 0.14, 2));
         assert!((bg.corner_radius - 0.4).abs() < 0.05, "{bg:?}");
+    }
+
+    /// The caption with CapCut's spacing (Character 1, Line 2), a glow, a gradient, a second
+    /// outline and a library text style.
+    fn styled() -> Project {
+        let mut p = project();
+        let t = &mut p.materials.texts[0];
+        t.layout.letter_spacing = 0.05;
+        t.layout.line_spacing = 0.12;
+        t.layout.glow = Some(TextGlow { color: None, strength: 0.3, range: 0.2, direction: [0.5, 0.5], style: Some(LibraryRef { app: "capcut".into(), resource_id: "7194814374001775105".into(), name: "Glow".into(), category: "text_glow".into() }) });
+        t.runs[0].gradient = Some(Gradient { colors: vec![Rgba::WHITE, Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }], stops: vec![0.0, 1.0], angle_deg: 90.0, span: GradientSpan::Character });
+        t.runs[0].more_strokes = vec![Stroke { color: Rgba { r: 0.0, g: 0.0, b: 1.0, a: 0.5 }, width: 0.2 }];
+        p.materials.effects.push(Effect {
+            id: MaterialId("ts".into()),
+            category: EffectCategory::Other,
+            name: "Retro".into(),
+            params: BTreeMap::new(),
+            builtin: None,
+            resource: Some("/cache/style".into()),
+            library: Some(LibraryRef { app: "capcut".into(), resource_id: "9".into(), name: "Retro".into(), category: "text_effect".into() }),
+            text_style: Some(Box::new(TextEffect { fill: Some(Paint { alpha: 1.0, kind: PaintKind::Solid(Rgba::WHITE) }), ..Default::default() })),
+        });
+        p.tracks[1].segments[0].attachments.push(MaterialId("ts".into()));
+        p
+    }
+
+    #[test]
+    fn spacing_glow_gradient_and_outlines_show_in_capcuts_units_and_come_back() {
+        let p = styled();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "c").unwrap();
+        // CapCut's panel: Character 1, Line 2.
+        assert_eq!((clip["letterSpacing"].as_f64(), clip["lineSpacing"].as_f64()), (Some(1.0), Some(2.0)));
+        assert_eq!((clip["glowEnabled"].as_bool(), clip["glowIntensity"].as_f64(), clip["glowRange"].as_f64(), clip["glowColor"].as_str()), (Some(true), Some(30.0), Some(20.0), Some("")));
+        assert_eq!(clip["fillGradient"]["colors"], json!(["#ffffff", "#ff0000"]));
+        assert_eq!((clip["moreStrokes"][0]["color"].as_str(), clip["moreStrokes"][0]["opacity"].as_f64()), (Some("#0000ff"), Some(50.0)));
+        assert_eq!(clip["textEffect"], json!({ "id": "", "name": "Retro" }));
+        // Unedited, it all comes back as it was.
+        let back = import_v1_json(&doc).unwrap().project;
+        assert_eq!(segment(&back, "c").material, MaterialId("t".into()));
+        assert_eq!(segment(&back, "c").attachments, segment(&p, "c").attachments);
+        // Edited: Character 3, Line 4, a green glow moved right, no gradient, the Effects tab's
+        // own style in place of CapCut's.
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "c").unwrap();
+        clip["letterSpacing"] = json!(3);
+        clip["lineSpacing"] = json!(4);
+        clip["glowColor"] = json!("#00ff00");
+        clip["glowOffsetX"] = json!(40);
+        clip["fillGradient"] = Value::Null;
+        clip["textEffect"] = json!({ "id": "neon", "name": "Neon", "fill": { "color": "#ffffff" }, "strokes": [{ "width": 0.1, "paint": { "textColor": true } }], "glow": { "intensity": 60, "range": 40 } });
+        let back = import_v1_json(&doc).unwrap().project;
+        let seg = segment(&back, "c");
+        let t = back.materials.texts.iter().find(|t| t.id == seg.material).unwrap();
+        assert!((t.layout.letter_spacing - 0.15).abs() < 1e-6 && (t.layout.line_spacing - 0.22).abs() < 1e-6, "{:?}", t.layout);
+        let glow = t.layout.glow.as_ref().unwrap();
+        assert_eq!((glow.color, glow.direction), (Some(Rgba { r: 0.0, g: 1.0, b: 0.0, a: 1.0 }), [0.7, 0.5]));
+        // CapCut's glow keeps its style.
+        assert_eq!(glow.style.as_ref().map(|s| s.resource_id.as_str()), Some("7194814374001775105"));
+        assert!(t.runs[0].gradient.is_none() && t.runs[0].more_strokes.len() == 1);
+        assert!(!seg.attachments.contains(&MaterialId("ts".into())));
+        let style = back.materials.effects.iter().find(|e| seg.attachments.contains(&e.id) && e.text_style.is_some()).unwrap();
+        let fx = style.text_style.as_ref().unwrap();
+        assert_eq!((style.builtin.as_deref(), fx.sharp_edges, fx.strokes.len()), (Some("openrip:neon"), true, 1));
+        assert!(matches!(fx.strokes[0].paint.kind, PaintKind::TextColor { .. }));
+        assert_eq!(fx.glow.as_ref().map(|g| (g.strength, g.range)), Some((0.6, 0.4)));
+        // Taken off: no style at all.
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "c").unwrap();
+        clip["textEffect"] = Value::Null;
+        let back = import_v1_json(&doc).unwrap().project;
+        let seg = segment(&back, "c");
+        assert!(!back.materials.effects.iter().any(|e| seg.attachments.contains(&e.id) && e.text_style.is_some()));
+    }
+
+    #[test]
+    fn a_project_converted_before_the_new_fields_keeps_its_text() {
+        let p = styled();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        // As an older conversion wrote it: none of the new fields, in the clip or its base.
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "c").unwrap();
+        for k in ["letterSpacing", "lineSpacing", "fillGradient", "moreStrokes", "glowEnabled", "glowColor", "glowIntensity", "glowRange", "glowOffsetX", "glowOffsetY", "textEffect"] {
+            clip.as_object_mut().unwrap().remove(k);
+            clip["engine"]["base"].as_object_mut().unwrap().remove(k);
+        }
+        let back = import_v1_json(&doc).unwrap().project;
+        assert_eq!(segment(&back, "c").material, MaterialId("t".into()));
+        assert_eq!(segment(&back, "c").attachments, segment(&p, "c").attachments);
     }
 
     /// The project with a typing animation and a caption style on the caption, and a
