@@ -24,6 +24,7 @@ mod player;
 pub mod preview;
 mod scrub;
 mod server;
+mod timing;
 pub mod sticker;
 pub mod thumbs;
 pub mod transition;

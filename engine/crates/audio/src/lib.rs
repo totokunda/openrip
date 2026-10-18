@@ -4,7 +4,9 @@
 //! are silent, every other clip's audio is summed at its volume (keyframes included) with
 //! its fades. Video clips contribute their own sound. Speed changes keep the pitch (CapCut's
 //! default; FFmpeg's atempo) unless the clip asks for the pitch to follow the speed
-//! (`change_pitch`), which resamples. Reversed clips play their audio backwards. A clip's
+//! (`change_pitch`), which resamples. Reversed clips play their audio backwards (CapCut's
+//! copy played backward where it has one), then through the same speed change. A speed curve
+//! plays varispeed, the pitch following the speed, as CapCut's does. A clip's
 //! voice filter (CapCut's audio effect, see [`fx`]) works on its sound after the speed
 //! change and before its volume. The mix is limited at full scale, as CapCut's exports are
 //! (docs/parity/voice-effects.md).
@@ -47,7 +49,7 @@ mod tempo {
 use std::collections::HashMap;
 use std::path::Path;
 
-use openrip_model::{AudioFade, EffectCategory, MediaKind, Micros, Project, Segment, TrackKind};
+use openrip_model::{AudioFade, EffectCategory, MediaKind, Micros, Project, Remap, Segment, TrackKind};
 
 #[cfg(feature = "ffmpeg")]
 pub use decode::AudioDecoder;
@@ -90,6 +92,24 @@ pub struct MixReport {
     pub missing: Vec<String>,
 }
 
+/// Source samples fed to a constant speed's stretcher at a time.
+const STRETCH_CHUNK: usize = 1024;
+
+/// Linear interpolation of interleaved stereo `src` at the positions `at(i)` (in samples) for
+/// each output sample `i` of `out`.
+fn resample(src: &[f32], at: impl Fn(usize) -> f64, out: &mut [f32]) {
+    let last = src.len().saturating_sub(1);
+    for i in 0..out.len() / CHANNELS {
+        let x = at(i).max(0.0);
+        let (k, f) = (x.floor() as usize, (x - x.floor()) as f32);
+        for c in 0..CHANNELS {
+            let a = src[(k * CHANNELS + c).min(last)];
+            let b = src[((k + 1) * CHANNELS + c).min(last)];
+            out[i * CHANNELS + c] = a + (b - a) * f;
+        }
+    }
+}
+
 /// A sped-up clip's time-stretcher, kept while the mix stays continuous.
 struct Stretch {
     tempo: tempo::Tempo,
@@ -121,13 +141,15 @@ pub struct Mixer {
     rate: u32,
     stretches: HashMap<String, Stretch>,
     reversed: HashMap<String, ReverseWindow>,
+    /// Reversed clips whose decoder reads the copy played backward, with the time it mirrors
+    /// about (the media's length: the copy's `t` is the media's `length - t`).
+    copies: HashMap<String, Micros>,
     /// One decoder per clip; `None` once a clip turned out to have no usable audio.
     decoders: HashMap<String, Option<Box<dyn AudioSource>>>,
     /// Voice filters by clip; `None` when a clip's filter couldn't be loaded.
     voices: HashMap<String, Option<Voice>>,
     /// The output limiter's gain, and the sample it continues at (a jump resets it).
     limiter: (f32, i64),
-    scratch: Vec<f32>,
     resampled: Vec<f32>,
 }
 
@@ -138,7 +160,7 @@ impl Mixer {
     }
 
     pub fn with_rate(project: Project, rate: u32) -> Self {
-        Mixer { project, rate, stretches: HashMap::new(), reversed: HashMap::new(), decoders: HashMap::new(), voices: HashMap::new(), limiter: (1.0, -1), scratch: Vec::new(), resampled: Vec::new() }
+        Mixer { project, rate, stretches: HashMap::new(), reversed: HashMap::new(), copies: HashMap::new(), decoders: HashMap::new(), voices: HashMap::new(), limiter: (1.0, -1), resampled: Vec::new() }
     }
 
     pub fn rate(&self) -> u32 {
@@ -149,6 +171,7 @@ impl Mixer {
     pub fn set_project(&mut self, project: Project) {
         let ids: std::collections::HashSet<&str> = project.tracks.iter().flat_map(|t| t.segments.iter().map(|s| s.id.as_str())).collect();
         self.decoders.retain(|id, _| ids.contains(id.as_str()));
+        self.copies.retain(|id, _| ids.contains(id.as_str()));
         self.stretches.clear();
         self.reversed.clear();
         self.voices.clear();
@@ -174,8 +197,16 @@ impl Mixer {
             if media.kind == MediaKind::Photo || (media.kind == MediaKind::Video && !media.has_audio) {
                 continue;
             }
-            let path = media.path.clone();
+            // A reversed clip plays the copy CapCut rendered backward (with its sound) where
+            // it's readable, forward from the mirrored time.
+            let copy = if seg.reverse { media.reverse_path.clone().filter(|p| openrip_platform::assets::exists(Path::new(p))) } else { None };
+            let mirror = copy.as_ref().map(|_| media.duration);
+            let path = copy.unwrap_or_else(|| media.path.clone());
             if !self.decoders.contains_key(&seg.id) {
+                match mirror {
+                    Some(d) => self.copies.insert(seg.id.clone(), d),
+                    None => self.copies.remove(&seg.id),
+                };
                 let d = match open_audio(Path::new(&path), self.rate) {
                     Ok(d) => d,
                     Err(_) => {
@@ -256,74 +287,102 @@ impl Mixer {
     /// A clip's sound for `n` samples from clip-local sample `local`, speed and direction
     /// applied (interleaved stereo).
     fn clip_samples(&mut self, seg: &Segment, decoder: &mut dyn AudioSource, local: i64, n: usize) -> Result<Vec<f32>, AudioError> {
-        let rate = self.rate;
-        let source_start = seg.source.map_or(0, |s| sample_at(s.start, rate));
         let speed = if seg.speed > 0.0 { seg.speed } else { 1.0 };
-        let src_at = source_start + (local as f64 * speed).round() as i64;
-        self.scratch.resize(n * CHANNELS, 0.0);
-        let samples: &[f32] = if seg.reverse {
-            // Backwards from the out-point: sample i of the block is source sample
-            // last - (local + i) * speed.
-            let source_end = seg.source.map_or(0, |s| sample_at(s.end(), rate));
-            let hi = source_end - 1 - (local as f64 * speed).round() as i64;
-            let lo = hi - (n as f64 * speed).ceil() as i64;
-            let fits = self.reversed.get(&seg.id).is_some_and(|w| w.start <= lo.max(0) && hi < w.start + (w.samples.len() / CHANNELS) as i64);
-            if !fits {
-                // Decode a second (plus this block) ending at `hi`, reading forward once.
-                let start = (lo - rate as i64).max(0);
-                let mut samples = vec![0f32; ((hi - start + 1).max(0) as usize) * CHANNELS];
-                decoder.read(start, &mut samples)?;
-                self.reversed.insert(seg.id.clone(), ReverseWindow { start, samples });
-            }
-            let w = &self.reversed[&seg.id];
-            for i in 0..n {
-                let src = hi - (i as f64 * speed).round() as i64;
-                let k = (src - w.start).clamp(0, (w.samples.len() / CHANNELS) as i64 - 1) as usize;
-                for c in 0..CHANNELS {
-                    self.scratch[i * CHANNELS + c] = if src >= 0 { w.samples[k * CHANNELS + c] } else { 0.0 };
-                }
-            }
-            &self.scratch
-        } else if (speed - 1.0).abs() < 1e-9 {
-            decoder.read(src_at, &mut self.scratch)?;
-            &self.scratch
+        let mut out = vec![0f32; n * CHANNELS];
+        if let Some(remap) = seg.speed_curve(&self.project.materials).and_then(|s| Remap::new(&s.curve)) {
+            self.curved(seg, decoder, &remap, local, &mut out)?;
+            return Ok(out);
+        }
+        // Where the block starts in the clip's source as it plays it.
+        let pos = (local as f64 * speed).round() as i64;
+        if (speed - 1.0).abs() < 1e-9 {
+            self.played(seg, decoder, pos, &mut out)?;
         } else if !seg.change_pitch && tempo::AVAILABLE {
             // Keep the pitch: stream the source through atempo.
-            let rate = self.rate;
             let fresh = self.stretches.get(&seg.id).is_none_or(|st| st.next_out != local);
             if fresh {
-                self.stretches.insert(seg.id.clone(), Stretch { tempo: tempo::Tempo::new(rate, speed)?, next_out: local, next_in: src_at });
+                self.stretches.insert(seg.id.clone(), Stretch { tempo: tempo::Tempo::new(self.rate, speed)?, next_out: local, next_in: pos });
             }
-            let st = self.stretches.get_mut(&seg.id).unwrap();
-            let chunk = 1024usize;
-            let mut feed = vec![0f32; chunk * CHANNELS];
+            let mut feed = vec![0f32; STRETCH_CHUNK * CHANNELS];
             let mut guard = 0;
-            while st.tempo.available() < n && guard < 10_000 {
-                decoder.read(st.next_in, &mut feed)?;
+            while self.stretches[&seg.id].tempo.available() < n && guard < 10_000 {
+                let next_in = self.stretches[&seg.id].next_in;
+                self.played(seg, decoder, next_in, &mut feed)?;
+                let st = self.stretches.get_mut(&seg.id).unwrap();
                 st.tempo.push(&feed)?;
-                st.next_in += chunk as i64;
+                st.next_in += STRETCH_CHUNK as i64;
                 guard += 1;
             }
-            st.tempo.take(&mut self.scratch);
+            let st = self.stretches.get_mut(&seg.id).unwrap();
+            st.tempo.take(&mut out);
             st.next_out += n as i64;
-            &self.scratch
         } else {
-            // Linear resampling: pitch follows speed until time-stretching lands.
+            // Linear resampling: the pitch follows the speed.
             let need = (n as f64 * speed).ceil() as usize + 2;
-            self.resampled.resize(need * CHANNELS, 0.0);
-            decoder.read(src_at, &mut self.resampled)?;
-            for i in 0..n {
-                let x = i as f64 * speed;
-                let (k, f) = (x.floor() as usize, (x - x.floor()) as f32);
-                for c in 0..CHANNELS {
-                    let a = self.resampled[(k * CHANNELS + c).min(self.resampled.len() - 1)];
-                    let b = self.resampled[((k + 1) * CHANNELS + c).min(self.resampled.len() - 1)];
-                    self.scratch[i * CHANNELS + c] = a + (b - a) * f;
-                }
+            let mut src = std::mem::take(&mut self.resampled);
+            src.resize(need * CHANNELS, 0.0);
+            self.played(seg, decoder, pos, &mut src)?;
+            resample(&src, |i| i as f64 * speed, &mut out);
+            self.resampled = src;
+        }
+        Ok(out)
+    }
+
+    /// A curved clip's sound (`clip_samples`), as CapCut plays it: varispeed, each sample read
+    /// at the source time the remap gives and interpolated, so the pitch follows the speed
+    /// (CapCut's curve ignores "change pitch"; docs/parity/speed.md).
+    fn curved(&mut self, seg: &Segment, decoder: &mut dyn AudioSource, remap: &Remap, local: i64, out: &mut [f32]) -> Result<(), AudioError> {
+        let rate = self.rate;
+        let n = out.len() / CHANNELS;
+        let length = (sample_at(seg.target.end(), rate) - sample_at(seg.target.start, rate)).max(1) as f64;
+        let source = seg.source.map_or(length, |s| sample_at(s.duration, rate).max(1) as f64);
+        // Source position (as played) at clip-local sample `i`.
+        let at = |i: i64| remap.source_at(i as f64 / length) * source;
+        let (first, last) = (at(local), at(local + n as i64));
+        let base = first.floor() as i64;
+        let need = (last.ceil() as i64 - base).max(0) as usize + 2;
+        let mut src = std::mem::take(&mut self.resampled);
+        src.resize(need * CHANNELS, 0.0);
+        self.played(seg, decoder, base, &mut src)?;
+        resample(&src, |i| at(local + i as i64) - base as f64, out);
+        self.resampled = src;
+        Ok(())
+    }
+
+    /// The clip's source samples in the order it plays them, from `pos` samples into its
+    /// playback (0 is its in-point, or its out-point when reversed), into `out`.
+    fn played(&mut self, seg: &Segment, decoder: &mut dyn AudioSource, pos: i64, out: &mut [f32]) -> Result<(), AudioError> {
+        let rate = self.rate;
+        let n = out.len() / CHANNELS;
+        let source = seg.source.unwrap_or_default();
+        if !seg.reverse {
+            return decoder.read(sample_at(source.start, rate) + pos, out);
+        }
+        if let Some(&length) = self.copies.get(&seg.id) {
+            // The copy played backward, forward from the out-point's mirror.
+            return decoder.read(sample_at(length - source.end(), rate) + pos, out);
+        }
+        // Backward from the out-point: sample i is source sample `last - (pos + i)`.
+        let hi = sample_at(source.end(), rate) - 1 - pos;
+        let lo = hi - n as i64;
+        let fits = self.reversed.get(&seg.id).is_some_and(|w| w.start <= lo.max(0) && hi < w.start + (w.samples.len() / CHANNELS) as i64);
+        if !fits {
+            // Decode a second (plus this block) ending at `hi`, reading forward once.
+            let start = (lo - rate as i64).max(0);
+            let mut samples = vec![0f32; ((hi - start + 1).max(0) as usize) * CHANNELS];
+            decoder.read(start, &mut samples)?;
+            self.reversed.insert(seg.id.clone(), ReverseWindow { start, samples });
+        }
+        let w = &self.reversed[&seg.id];
+        let have = (w.samples.len() / CHANNELS) as i64;
+        for i in 0..n {
+            let src = hi - i as i64;
+            let k = (src - w.start).clamp(0, (have - 1).max(0)) as usize;
+            for c in 0..CHANNELS {
+                out[i * CHANNELS + c] = if src >= 0 && have > 0 { w.samples[k * CHANNELS + c] } else { 0.0 };
             }
-            &self.scratch
-        };
-        Ok(samples.to_vec())
+        }
+        Ok(())
     }
 
     /// The clip's voice filter, ready for the block at clip-local `local`: where its input

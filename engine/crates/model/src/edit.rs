@@ -618,6 +618,8 @@ fn plan_speed(p: &Project, segment_id: &str, speed: f64) -> Result<Vec<Op>, Edit
     };
     let mut out = seg.clone();
     out.speed = speed;
+    // A constant speed replaces a curve (CapCut's Normal tab).
+    out.attachments.retain(|id| !p.materials.speeds.iter().any(|s| &s.id == id && s.curve.len() >= 2));
     out.target.duration = scale(src.duration, 1.0 / speed).max(p.fps.frame_duration());
     scale_keys(&mut out, seg.speed / speed);
     check_free(track, &out.target, &[&seg.id])?;
@@ -806,6 +808,8 @@ mod tests {
             duration: Micros(secs * SEC),
             has_audio: true,
             matte: None,
+            reverse_path: None,
+            freeze: None,
         })
     }
 

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 pub use openrip_media::load_png;
-use openrip_media::{open_video, Decoder, DecoderOptions, MediaError, VideoFrame};
+use openrip_media::{open_video, Decoder, DecoderOptions, MediaError, ReverseReader, VideoFrame};
 use openrip_model::{Animation, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_platform::assets;
 use openrip_render::text::{self, Align, Font, TextStyle};
@@ -27,6 +27,9 @@ const PREFETCH: Micros = Micros(1_500_000);
 /// Memory for decoded stills; the least recently drawn go first beyond it (a 4K still is
 /// 33 MB, and drafts can hold hundreds).
 const STILLS_BUDGET: usize = 512 << 20;
+/// Decoded frames a reversed clip keeps in each window while it plays (two windows are held;
+/// see `ReverseReader`): a GOP of 4K pictures at the preview's size, or ten whole ones.
+const REVERSE_WINDOW: usize = 256 << 20;
 
 /// Media to get ready off the render thread: a decoder positioned at a clip's in-point, or
 /// a still image decoded (and written to the GPU).
@@ -154,10 +157,15 @@ enum Pixels {
     Mix(openrip_render::Mix),
 }
 
-/// The media file a segment plays.
+/// The media file a segment plays (for a reversed clip, the copy played backward when it has
+/// one; see `timing`).
 fn media_path(p: &Project, segment: &str) -> Option<String> {
     let s = p.tracks.iter().flat_map(|t| t.segments.iter()).find(|s| s.id == segment)?;
-    p.materials.media.iter().find(|m| m.id == s.material).map(|m| m.path.clone())
+    let m = p.materials.media.iter().find(|m| m.id == s.material)?;
+    Some(match m.kind {
+        MediaKind::Audio => m.path.clone(),
+        _ => crate::timing::picture(p, s, m, s.target.start).path().to_string(),
+    })
 }
 
 /// A shape's paths as the rasteriser's outlines, in its box of `size` units.
@@ -265,8 +273,17 @@ pub(crate) fn still_key(path: &str) -> u64 {
     key_of(path)
 }
 
+/// A reversed clip's backward reader while it plays, with the file it reads.
+struct Reverser {
+    reader: ReverseReader,
+    path: String,
+    last_used: u64,
+}
+
 struct OpenDecoder {
     decoder: Decoder,
+    /// The file it reads (a reversed clip's may be the copy played backward).
+    path: String,
     last_used: u64,
 }
 
@@ -276,6 +293,8 @@ pub struct PreviewEngine {
     /// One decoder per segment, so two clips of the same file at different times don't
     /// fight over one decoder's position.
     decoders: HashMap<String, OpenDecoder>,
+    /// Reversed clips playing, by segment (see `reversed_frame`).
+    reversers: HashMap<String, Reverser>,
     /// Decoded stills by path, with the tick last used (see `STILLS_BUDGET`).
     images: HashMap<String, (std::sync::Arc<RgbaImage>, u64)>,
     fonts: HashMap<String, Font>,
@@ -316,6 +335,10 @@ pub struct PreviewEngine {
     tick: u64,
     /// The time of the last frame gathered.
     last_time: Option<Micros>,
+    /// The frame being gathered follows the last one (playing or exporting).
+    following: bool,
+    /// The frame is for a preview surface (shown at its size), not an export or a still.
+    preview_surface: bool,
 }
 
 impl PreviewEngine {
@@ -326,6 +349,7 @@ impl PreviewEngine {
         Ok(PreviewEngine {
             project,
             decoders: HashMap::new(),
+            reversers: HashMap::new(),
             images: HashMap::new(),
             fonts: HashMap::new(),
             failed: HashMap::new(),
@@ -348,6 +372,8 @@ impl PreviewEngine {
             compositor,
             tick: 0,
             last_time: None,
+            following: false,
+            preview_surface: false,
         })
     }
 
@@ -400,6 +426,7 @@ impl PreviewEngine {
     /// Render the frame at `t` and read it back.
     pub fn render_image(&mut self, t: Micros, width: u32, height: u32) -> Result<(RgbaImage, FrameReport), PreviewError> {
         let t0 = std::time::Instant::now();
+        self.preview_surface = false;
         let (pixels, report) = self.gather(t, width, height);
         let t1 = std::time::Instant::now();
         let layers = self.layers(&pixels, t, width, height);
@@ -419,6 +446,7 @@ impl PreviewEngine {
     pub fn render_into(&mut self, t: Micros, target: &mut Surface) -> Result<FrameReport, PreviewError> {
         let (w, h) = (target.width(), target.height());
         let t0 = std::time::Instant::now();
+        self.preview_surface = true;
         let (pixels, report) = self.gather(t, w, h);
         let t1 = std::time::Instant::now();
         let layers = self.layers(&pixels, t, w, h);
@@ -447,6 +475,7 @@ impl PreviewEngine {
     #[cfg(target_vendor = "apple")]
     pub fn render_to_nv12(&mut self, t: Micros, target: &objc2_core_video::CVPixelBuffer) -> Result<FrameReport, PreviewError> {
         let (w, h) = (objc2_core_video::CVPixelBufferGetWidth(target) as u32, objc2_core_video::CVPixelBufferGetHeight(target) as u32);
+        self.preview_surface = false;
         let (pixels, report) = self.gather(t, w, h);
         let layers = self.layers(&pixels, t, w, h);
         self.compositor.render_to_nv12(target, [0, 0, 0], &layers)?;
@@ -474,7 +503,7 @@ impl PreviewEngine {
                 // The project may have been edited since: keep it only if the clip still
                 // plays that file.
                 if self.media_path(&segment).as_deref() == Some(path.as_str()) {
-                    self.decoders.entry(segment).or_insert(OpenDecoder { decoder, last_used: self.tick });
+                    self.decoders.entry(segment).or_insert(OpenDecoder { decoder, path, last_used: self.tick });
                 }
             }
             Prefetched::Still(path, img) => {
@@ -514,14 +543,17 @@ impl PreviewEngine {
         for track in self.project.tracks.iter().filter(|tr| matches!(tr.kind, TrackKind::Video) && !tr.hidden) {
             for seg in track.segments.iter().filter(|s| s.visible && s.target.start > t && s.target.start.0 <= t.0 + PREFETCH.0) {
                 let Some(media) = self.project.materials.media.iter().find(|m| m.id == seg.material && m.kind != MediaKind::Audio) else { continue };
-                let still = media.kind == MediaKind::Photo;
+                let (path, at, still) = match crate::timing::picture(&self.project, seg, media, seg.target.start) {
+                    crate::timing::Picture::Still(path) => (path, Micros::ZERO, true),
+                    crate::timing::Picture::Video { path, at, .. } => (path, at, false),
+                };
                 // Stills are shared by path; decoders belong to a segment.
-                let key = if still { media.path.clone() } else { seg.id.clone() };
+                let key = if still { path.clone() } else { seg.id.clone() };
                 let ready = if still { self.images.contains_key(&key) } else { self.decoders.contains_key(&key) };
-                if ready || self.prefetch.pending.contains(&key) || self.failed.contains_key(&media.path) {
+                if ready || self.prefetch.pending.contains(&key) || self.failed.contains_key(&path) {
                     continue;
                 }
-                let job = PrefetchJob { segment: seg.id.clone(), path: media.path.clone(), at: seg.source_time(seg.target.start).unwrap_or(Micros::ZERO), still, upload };
+                let job = PrefetchJob { segment: seg.id.clone(), path, at, still, upload };
                 if jobs.send(job).is_ok() {
                     self.prefetch.pending.insert(key);
                 }
@@ -533,6 +565,7 @@ impl PreviewEngine {
         self.tick += 1;
         // Frames following each other: playing or exporting.
         let following = self.last_time.is_some_and(|last| t > last && t.0 - last.0 <= 250_000);
+        self.following = following;
         self.last_time = Some(t);
         self.run_prefetch(t, following && !self.scrubbing);
         if self.scrubbing {
@@ -1025,59 +1058,79 @@ impl PreviewEngine {
         if media.kind == MediaKind::Audio {
             return Ok(None);
         }
-        if let Some(why) = self.failed.get(&media.path) {
-            return Err((media.path.clone(), why.clone()));
+        // The file and time: the media itself, a reversed clip's copy played backward, or a
+        // freeze frame's video (see `timing`).
+        let picture = crate::timing::picture(&self.project, seg, &media, t);
+        let path = picture.path().to_string();
+        if let Some(why) = self.failed.get(&path) {
+            return Err((path.clone(), why.clone()));
         }
-        let fail = |e: &dyn std::fmt::Display| (media.path.clone(), e.to_string());
-        if media.kind == MediaKind::Photo {
-            // Dragging the playhead: a stand-in at about the frame's size (uploading a 4K
-            // still costs more than the rest of the frame).
-            if self.scrubbing {
-                let img = match self.scrub.still(&media.path) {
-                    Some(img) => img,
-                    None => {
-                        let full = match self.still(&media.path) {
-                            Some(img) => img,
-                            None => self.keep_still(&media.path, load_still(Path::new(&media.path)).map_err(|e| fail(&e))?),
-                        };
-                        let k = crate::scrub::shrink_factor(full.width, full.height, w.max(h));
-                        let small = if k > 1 { std::sync::Arc::new(crate::scrub::shrink(&full, k)) } else { full };
-                        self.scrub.insert_still(&media.path, small.clone());
-                        small
-                    }
-                };
-                let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), seg.local_time(t), None);
-                return Ok(Some(Pixels::Image(img, key_of(("scrub", &media.path)), mattes)));
-            }
-            self.await_prefetch(&media.path);
-            let img = match self.still(&media.path) {
-                Some(img) => {
-                    self.scrub.uploading(&media.path);
-                    img
+        let fail = |e: &dyn std::fmt::Display| (path.clone(), e.to_string());
+        let (at, source, backward) = match picture {
+            crate::timing::Picture::Video { at, media, backward, .. } => (at, media, backward),
+            crate::timing::Picture::Still(_) => {
+                // Dragging the playhead: a stand-in at about the frame's size (uploading a 4K
+                // still costs more than the rest of the frame).
+                if self.scrubbing {
+                    let img = match self.scrub.still(&path) {
+                        Some(img) => img,
+                        None => {
+                            let full = match self.still(&path) {
+                                Some(img) => img,
+                                None => self.keep_still(&path, load_still(Path::new(&path)).map_err(|e| fail(&e))?),
+                            };
+                            let k = crate::scrub::shrink_factor(full.width, full.height, w.max(h));
+                            let small = if k > 1 { std::sync::Arc::new(crate::scrub::shrink(&full, k)) } else { full };
+                            self.scrub.insert_still(&path, small.clone());
+                            small
+                        }
+                    };
+                    let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), seg.local_time(t), None);
+                    return Ok(Some(Pixels::Image(img, key_of(("scrub", &path)), mattes)));
                 }
-                None => match self.scrub.full(&media.path) {
+                self.await_prefetch(&path);
+                let img = match self.still(&path) {
                     Some(img) => {
-                        self.images.insert(media.path.clone(), (img.clone(), self.tick));
+                        self.scrub.uploading(&path);
                         img
                     }
-                    None => self.keep_still(&media.path, load_still(Path::new(&media.path)).map_err(|e| fail(&e))?),
-                },
-            };
-            let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), seg.local_time(t), None);
-            return Ok(Some(Pixels::Image(img, still_key(&media.path), mattes)));
+                    None => match self.scrub.full(&path) {
+                        Some(img) => {
+                            self.images.insert(path.clone(), (img.clone(), self.tick));
+                            img
+                        }
+                        None => self.keep_still(&path, load_still(Path::new(&path)).map_err(|e| fail(&e))?),
+                    },
+                };
+                let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), seg.local_time(t), None);
+                return Ok(Some(Pixels::Image(img, still_key(&path), mattes)));
+            }
+        };
+        // A reversed clip playing (or exporting) walks down its file: frames come from windows
+        // decoded ahead (`ReverseReader`). Paused, seeking or dragging, it's read like any clip:
+        // the same frame for the same time.
+        if backward && self.following && !self.scrubbing {
+            let frame = self.reversed_frame(seg, &path, at, w.max(h)).map_err(|e| fail(&e))?;
+            let Some((frame, orientation)) = frame else { return Ok(None) };
+            let upright = if orientation.rem_euclid(180) == 90 { (frame.height(), frame.width()) } else { (frame.width(), frame.height()) };
+            let cutout = media.matte.as_deref().and_then(|dir| self.matte_at(dir, frame.time, orientation));
+            let mattes = self.masked(seg, upright, orientation, source, seg.local_time(t), cutout);
+            return Ok(Some(Pixels::Video(frame, orientation, mattes)));
         }
         let key = seg.id.clone();
         self.await_prefetch(&key);
+        if self.decoders.get(&key).is_some_and(|d| d.path != path) {
+            self.decoders.remove(&key);
+        }
         if !self.decoders.contains_key(&key) {
-            let decoder = open_video(Path::new(&media.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() }).map_err(|e| fail(&e))?;
-            self.decoders.insert(key.clone(), OpenDecoder { decoder, last_used: 0 });
+            let decoder = open_video(Path::new(&path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() }).map_err(|e| fail(&e))?;
+            self.decoders.insert(key.clone(), OpenDecoder { decoder, path: path.clone(), last_used: 0 });
         }
         let d = self.decoders.get_mut(&key).unwrap();
         d.last_used = self.tick;
         let orientation = d.decoder.info().rotation;
         let before = d.decoder.stats();
         let t0 = std::time::Instant::now();
-        let at = media_time(seg, t, media.duration);
         // Dragging the playhead: the exact frame only if it's at most three pictures ahead of
         // the last one decoded; else a decoded frame within half a second, else the GOP's
         // keyframe (one decode instead of every picture from the keyframe on).
@@ -1085,10 +1138,10 @@ impl PreviewEngine {
         let near_ahead = pos.is_some_and(|p| at >= p && at.0 - p.0 <= 3 * step.0);
         let frame = if self.scrubbing && !near_ahead && !d.decoder.frame_near(at, Micros::ZERO).is_some_and(|(_, exact)| exact) {
             // The keyframe's stand-in, if the workers got it ready (see `ScrubAhead`).
-            self.scrub.learn_index(&media.path, || crate::scrub::stand_in_keys(d.decoder.as_ref()));
+            self.scrub.learn_index(&path, || crate::scrub::stand_in_keys(d.decoder.as_ref()));
             match d.decoder.frame_near(at, Micros(500_000)) {
                 Some((f, _)) => Some(f),
-                None => match d.decoder.keyframe_time(at).and_then(|k| self.scrub.keyframe(&media.path, k)) {
+                None => match d.decoder.keyframe_time(at).and_then(|k| self.scrub.keyframe(&path, k)) {
                     Some(f) => Some(f),
                     None => d.decoder.keyframe_at(at).map_err(|e| fail(&e))?,
                 },
@@ -1108,10 +1161,37 @@ impl PreviewEngine {
             );
         }
         let Some(frame) = frame else { return Ok(None) };
-        let cutout = media.matte.as_deref().and_then(|dir| self.matte_at(dir, frame.time, orientation));
+        // The cut-out's masks are by the media's own frame times.
+        let matte_time = if at == source { frame.time } else { source };
+        let cutout = media.matte.as_deref().and_then(|dir| self.matte_at(dir, matte_time, orientation));
         let upright = if orientation.rem_euclid(180) == 90 { (frame.height(), frame.width()) } else { (frame.width(), frame.height()) };
-        let mattes = self.masked(seg, upright, orientation, at, seg.local_time(t), cutout);
+        let mattes = self.masked(seg, upright, orientation, source, seg.local_time(t), cutout);
         Ok(Some(Pixels::Video(frame, orientation, mattes)))
+    }
+
+    /// A reversed clip's frame at `at` in `path`, while it plays: from its [`ReverseReader`]
+    /// (opened at the first frame, with windows at about the preview's `size` when it's drawn
+    /// into a preview surface), and the turn that shows it upright.
+    fn reversed_frame(&mut self, seg: &Segment, path: &str, at: Micros, size: u32) -> Result<Option<(VideoFrame, i32)>, MediaError> {
+        if self.reversers.get(&seg.id).is_some_and(|r| r.path != path) {
+            self.reversers.remove(&seg.id);
+        }
+        if !self.reversers.contains_key(&seg.id) {
+            // Preview surfaces show frames at about their own size: a 4K GOP held small fits a
+            // window (VideoToolbox shrinks it as it decodes). Export and stills read them whole.
+            let shrink_to = if self.preview_surface { size } else { 0 };
+            let reader = ReverseReader::open(Path::new(path), &DecoderOptions { shrink_to, ..Default::default() }, REVERSE_WINDOW)?;
+            self.reversers.insert(seg.id.clone(), Reverser { reader, path: path.to_string(), last_used: self.tick });
+        }
+        let r = self.reversers.get_mut(&seg.id).unwrap();
+        r.last_used = self.tick;
+        let orientation = r.reader.info().rotation;
+        let t0 = std::time::Instant::now();
+        let frame = r.reader.frame_at(at)?;
+        if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 10 {
+            eprintln!("[preview]   reversed: source {:.3}s waited {:.1} ms ({:?})", at.as_secs_f64(), t0.elapsed().as_secs_f64() * 1e3, r.reader.stats());
+        }
+        Ok(frame.map(|f| (f, orientation)))
     }
 
     /// The clip's cut-out (if it has one) and masks at `at` (time in its source; `local` in the
@@ -1239,6 +1319,9 @@ impl PreviewEngine {
             let oldest = self.decoders.iter().min_by_key(|(_, d)| d.last_used).map(|(k, _)| k.clone()).unwrap();
             self.decoders.remove(&oldest);
         }
+        // A reversed clip's windows go once it stops playing (paused, or off the screen).
+        let tick = self.tick;
+        self.reversers.retain(|_, r| tick - r.last_used < 3);
     }
 
     /// How a clip's animations move it at clip-local time `local` (none when it has none).
@@ -1386,16 +1469,6 @@ impl PreviewEngine {
             })
             .collect()
     }
-}
-
-/// The media time a video clip shows at `t`: its `source_time` inside the clip. Outside it
-/// (the other clip of a transition that mixes them, drawn on past its end or ahead of its
-/// start) its media carries on at its speed, up to the media's own ends.
-fn media_time(seg: &Segment, t: Micros, duration: Micros) -> Micros {
-    let Some(source) = seg.source.filter(|_| !seg.target.contains(t) && duration.0 > 0) else { return seg.source_time(t).unwrap_or(Micros::ZERO) };
-    let offset = (seg.local_time(t).0 as f64 * seg.speed).round() as i64;
-    let at = if seg.reverse { source.end().0 - 1 - offset } else { source.start.0 + offset };
-    Micros(at.clamp(0, duration.0 - 1))
 }
 
 /// A transition's mix in output pixels: each clip's move, scale and turn about the canvas

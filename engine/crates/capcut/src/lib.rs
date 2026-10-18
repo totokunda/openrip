@@ -24,6 +24,10 @@ const ATTR_MUTED: i64 = 1;
 const ATTR_HIDDEN: i64 = 2;
 const ATTR_LOCKED: i64 = 4;
 
+/// How close to a frame's start CapCut's frame lookup snaps to it (its frame-time helper):
+/// a time truncated to the µs just before a frame finds that frame.
+const FRAME_SNAP: Micros = Micros(800);
+
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
     #[error("can't read {path}: {source}")]
@@ -115,12 +119,17 @@ pub fn import_draft_dir(dir: &Path) -> Result<Imported, ImportError> {
         serde_json::from_slice(&raw).map_err(|source| ImportError::Json { path: info.display().to_string(), source })?;
     let name_hint = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let mut imported = import_draft_json(&doc, &name_hint)?;
-    // Paths inside the draft folder (stills CapCut made, e.g. freeze frames) start with a
-    // placeholder for it.
-    for m in &mut imported.project.materials.media {
-        if let Some((_, rel)) = m.path.split_once("_##/").filter(|_| m.path.starts_with("##_draftpath_placeholder")) {
-            m.path = dir.join(rel).to_string_lossy().into_owned();
+    // Paths inside the draft folder (stills CapCut made, e.g. freeze frames, and reversed
+    // copies) start with a placeholder for it.
+    let in_draft = |path: &mut String| {
+        if let Some((_, rel)) = path.split_once("_##/").filter(|_| path.starts_with("##_draftpath_placeholder")) {
+            *path = dir.join(rel).to_string_lossy().into_owned();
         }
+    };
+    for m in &mut imported.project.materials.media {
+        in_draft(&mut m.path);
+        m.reverse_path.iter_mut().for_each(in_draft);
+        m.freeze.iter_mut().for_each(|fr| in_draft(&mut fr.video));
     }
     imported.report.missing_media.retain(|p| !p.starts_with("##_draftpath_placeholder") || !p.split_once("_##/").is_some_and(|(_, rel)| assets::exists(&dir.join(rel))));
     // A background-removal result is a folder holding a numbered folder with the masks.
@@ -550,6 +559,8 @@ fn library_ref(m: &Value) -> LibraryRef {
 
 fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport) {
     let Some(tables) = mats.as_object() else { return };
+    // Freeze frames and the video materials they were taken from.
+    let mut freeze_sources: Vec<(MaterialId, MaterialId)> = Vec::new();
     for (table, items) in tables {
         let Some(items) = items.as_array() else { continue };
         for m in items {
@@ -572,7 +583,19 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                             .filter(|mt| i(mt, "flag") != 0)
                             .map(|mt| s(mt, "path"))
                             .filter(|p| !p.is_empty()),
+                        // The copy CapCut rendered backward when the clip was reversed (in the
+                        // draft folder, resolved by `import_draft_dir`).
+                        reverse_path: Some(s(m, "reverse_path")).filter(|p| !p.is_empty()),
+                        // A freeze frame's still: what it's a still of (its video's path is
+                        // resolved below, once every video is read).
+                        // CapCut's `timestamp` is where the clip was split, truncated to the µs;
+                        // the still is the frame starting there, which CapCut finds by snapping
+                        // to a frame's start within 0.8 ms (its file is named for that start).
+                        freeze: m.get("freeze").filter(|fr| fr.is_object()).map(|fr| Freeze { video: s(fr, "source_material_path"), at: Micros(i(fr, "timestamp") + FRAME_SNAP.0) }),
                     });
+                    if let Some(source) = m.get("freeze").map(|fr| s(fr, "source_material_id")).filter(|id| !id.is_empty()) {
+                        freeze_sources.push((MaterialId(s(m, "id")), MaterialId(source)));
+                    }
                     true
                 }
                 "audios" => {
@@ -585,6 +608,8 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         duration: Micros(i(m, "duration")),
                         has_audio: true,
                         matte: None,
+                        reverse_path: None,
+                        freeze: None,
                     });
                     true
                 }
@@ -593,13 +618,17 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                     true
                 }
                 "speeds" => {
-                    let curve = m
-                        .get("curve_speed")
+                    // A curve counts in curve mode (`mode` 1); a normal speed may keep the last
+                    // curve it had.
+                    let curved = i(m, "mode") == 1;
+                    let cs = m.get("curve_speed").filter(|c| c.is_object() && curved);
+                    let curve = cs
                         .and_then(|c| c.get("speed_points"))
                         .and_then(Value::as_array)
                         .map(|pts| pts.iter().map(|p| (f(p, "x", 0.0), f(p, "y", 1.0))).collect())
                         .unwrap_or_default();
-                    out.speeds.push(Speed { id, speed: f(m, "speed", 1.0), curve });
+                    let preset = cs.map(|c| s(c, "name")).filter(|n| !n.is_empty());
+                    out.speeds.push(Speed { id, speed: f(m, "speed", 1.0), curve, preset });
                     true
                 }
                 "canvases" => {
@@ -836,6 +865,14 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                 }
                 out.foreign.push(Foreign { id: MaterialId(s(m, "id")), app: APP.into(), kind: table.clone(), raw: m.clone() });
             }
+        }
+    }
+    // A freeze frame names the video it was taken from by material too: that material's path
+    // is the one in use (it may have been relinked since).
+    for (still, source) in freeze_sources {
+        let Some(path) = out.media.iter().find(|m| m.id == source && m.kind == MediaKind::Video).map(|m| m.path.clone()) else { continue };
+        if let Some(fr) = out.media.iter_mut().find(|m| m.id == still).and_then(|m| m.freeze.as_mut()) {
+            fr.video = path;
         }
     }
 }
@@ -1124,6 +1161,61 @@ mod tests {
         assert_eq!(report.library_items.get("effects:text_effect"), Some(&1));
         assert_eq!(report.library_items.get("effects:brightness"), None);
         assert!(report.problems.is_empty(), "{:?}", report.problems);
+    }
+
+    /// CapCut's speed tools as drafts store them: a curve (speed `mode` 1, its mean as
+    /// `speed`), a reversed clip with the copy CapCut rendered backward, and a freeze frame (a
+    /// photo of the frame, naming the video and where it was split).
+    #[test]
+    fn imports_speed_curves_reversed_copies_and_freeze_frames() {
+        let pts = [(0.0, 5.2), (0.4, 5.2), (0.6, 1.0), (1.0, 1.0)];
+        let remap = Remap::new(&pts).unwrap();
+        let length = remap.output_length(6_000_000);
+        let draft = json!({
+            "id": "D", "fps": 30.0, "canvas_config": {"width": 1080, "height": 1920},
+            "materials": {
+                "videos": [
+                    {"id": "V", "type": "video", "path": "/nope/v.mp4", "duration": 20_000_000, "reverse_path": "##_draftpath_placeholder_X_##/rev.mp4"},
+                    {"id": "P", "type": "photo", "path": "##_draftpath_placeholder_X_##/still_6666666-sdr709.jpg", "duration": 10_800_000_000_i64, "material_name": "Freeze",
+                     "freeze": {"source_material_id": "V", "source_material_path": "/old/place/v.mp4", "reverse_material_path": "", "timestamp": 6_666_666}}
+                ],
+                "speeds": [
+                    {"id": "S1", "type": "speed", "mode": 1, "speed": remap.average(),
+                     "curve_speed": {"id": "C", "name": "Flash In", "speed_points": pts.iter().map(|(x, y)| json!({"x": x, "y": y})).collect::<Vec<_>>()}},
+                    // A normal speed keeps the last curve it had, unused.
+                    {"id": "S2", "type": "speed", "mode": 0, "speed": 1.0, "curve_speed": {"name": "Montage", "speed_points": [{"x": 0.0, "y": 1.0}, {"x": 1.0, "y": 3.0}]}}
+                ]
+            },
+            "tracks": [{"id": "T", "type": "video", "segments": [
+                {"id": "A", "material_id": "V", "speed": remap.average(), "source_timerange": {"start": 2_000_000, "duration": 6_000_000}, "target_timerange": {"start": 0, "duration": length},
+                 "extra_material_refs": ["S1"],
+                 // Keys in source time: at 5 s of the media (3 s into the source range).
+                 "common_keyframes": [{"property_type": "KFTypeGlobalAlpha", "keyframe_list": [
+                     {"time_offset": 2_000_000, "values": [1.0], "curveType": "Line"}, {"time_offset": 5_000_000, "values": [0.0], "curveType": "Line"}]}]},
+                {"id": "B", "material_id": "P", "speed": 1.0, "source_timerange": {"start": 0, "duration": 3_000_000}, "target_timerange": {"start": length, "duration": 3_000_000}, "extra_material_refs": ["S2"]},
+                {"id": "C", "material_id": "V", "speed": 1.0, "reverse": true, "source_timerange": {"start": 6_666_666, "duration": 2_000_000}, "target_timerange": {"start": length + 3_000_000, "duration": 2_000_000}, "extra_material_refs": ["S2"]}
+            ]}]
+        });
+        let Imported { project, .. } = import_draft_json(&draft, "").unwrap();
+        let p = &project;
+        let seg = |id: &str| p.tracks[0].segments.iter().find(|s| s.id == id).unwrap();
+        // The curve, with its preset's name; the unused one is no curve.
+        let curve = seg("A").speed_curve(&p.materials).unwrap();
+        assert_eq!((curve.curve.len(), curve.preset.as_deref()), (4, Some("Flash In")));
+        assert!(seg("B").speed_curve(&p.materials).is_none() && seg("C").speed_curve(&p.materials).is_none());
+        // Keys placed by the curve's inverse: the fast start reaches 3 s of source sooner than
+        // the mean speed would.
+        let key = seg("A").opacity.keys[1].at;
+        assert_eq!(key, Micros(remap.output_offset(3_000_000, length)));
+        assert!(key.0 < (3_000_000.0 / remap.average()) as i64);
+        // The reversed copy, and the freeze: the video by its material's path, the frame
+        // starting at the split (CapCut snaps 0.8 ms).
+        let v = p.materials.media.iter().find(|m| m.id.0 == "V").unwrap();
+        assert_eq!(v.reverse_path.as_deref(), Some("##_draftpath_placeholder_X_##/rev.mp4"));
+        assert!(seg("C").reverse);
+        let still = p.materials.media.iter().find(|m| m.id.0 == "P").unwrap();
+        assert_eq!(still.freeze, Some(Freeze { video: "/nope/v.mp4".into(), at: Micros(6_667_466) }));
+        assert_eq!(still.kind, MediaKind::Photo);
     }
 
     /// A sticker bundle names its picture: a PNG through its script, or a GIF in its config.

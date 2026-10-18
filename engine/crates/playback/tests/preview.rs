@@ -90,3 +90,79 @@ fn a_missing_file_does_not_stall_the_cut_to_it() {
     // The prefetcher's failed open used to leave the render thread waiting 500 ms.
     assert!(worst < 300.0, "worst frame {worst:.0} ms");
 }
+
+/// The barcode's frame number in a rendered image.
+fn number_in(img: &openrip_render::RgbaImage) -> i64 {
+    (0..9).map(|bit| ((img.data[((64 * img.width + bit * 64 + 32) * 4) as usize] > 128) as i64) << bit).sum()
+}
+
+#[test]
+fn a_reversed_clip_plays_the_frames_it_shows_paused() {
+    let Some(a) = clip("preview-edit-a.mp4") else { return };
+    // Source frames 100..250 (5 s) backward.
+    let mut p = project(&a, 100);
+    p.tracks[0].segments[0].reverse = true;
+    let fps = FrameRate::new(30, 1);
+    // Playing: every frame in order (the reverse reader's windows).
+    let mut playing = PreviewEngine::new(p.clone()).unwrap();
+    let played: Vec<i64> = (0..150).map(|n| number_in(&playing.render_image(fps.frame_start(n) + Micros(1000), 640, 128).unwrap().0)).collect();
+    // Paused: each frame on its own, in a scattered order (the decoder's seeks).
+    let mut paused = PreviewEngine::new(p).unwrap();
+    for n in [149, 3, 77, 76, 140, 0, 31, 100] {
+        let t = fps.frame_start(n) + Micros(1000);
+        paused.render_image(t + Micros(5_000_000), 640, 128).unwrap(); // seek away first
+        assert_eq!(number_in(&paused.render_image(t, 640, 128).unwrap().0), played[n as usize], "frame {n}");
+    }
+    // Backward from the out-point: the clip's first frame is source frame 249, its last 100.
+    assert_eq!(played[0], 249);
+    assert_eq!(played[149], 100);
+    assert!(played.windows(2).all(|w| w[1] == w[0] - 1), "{played:?}");
+}
+
+#[test]
+fn a_speed_curve_picks_frames_by_the_remapped_time() {
+    let Some(a) = clip("preview-edit-a.mp4") else { return };
+    let mut p = project(&a, 0);
+    // CapCut's Flash In: fast (5.2×) to start, then 1×.
+    let preset = openrip_model::speed::CURVE_PRESETS.iter().find(|c| c.name == "Flash In").unwrap();
+    p.materials.speeds.push(openrip_model::Speed { id: "sp".into(), speed: 1.0, curve: preset.points.to_vec(), preset: Some("Flash In".into()) });
+    let seg = &mut p.tracks[0].segments[0];
+    seg.attachments.push("sp".into());
+    let remap = openrip_model::Remap::new(preset.points).unwrap();
+    // 8 s of source at the curve's mean speed.
+    seg.source = Some(openrip_model::TimeRange::new(Micros(0), Micros(8_000_000)));
+    seg.target.duration = Micros(remap.output_length(8_000_000));
+    let length = seg.target.duration;
+    let mut e = PreviewEngine::new(p).unwrap();
+    let fps = FrameRate::new(30, 1);
+    for n in [0, 5, 20, 40, (length.0 * 30 / 1_000_000) - 1] {
+        let t = fps.frame_start(n) + Micros(1000);
+        let want = fps.frame_of(Micros(remap.source_offset(t.0, length.0)));
+        assert_eq!(number_in(&e.render_image(t, 640, 128).unwrap().0), want, "timeline frame {n}");
+    }
+}
+
+#[test]
+fn a_freeze_frame_without_its_still_draws_the_video_frame() {
+    let Some(a) = clip("preview-edit-a.mp4") else { return };
+    let mut p = project(&a, 0);
+    let fps = FrameRate::new(30, 1);
+    // An OpenRip freeze: no picture, frame 123 of the clip.
+    p.materials.media.push(openrip_model::Media {
+        id: "fr".into(),
+        kind: openrip_model::MediaKind::Photo,
+        path: String::new(),
+        width: 640,
+        height: 128,
+        duration: Micros(10_000_000),
+        has_audio: false,
+        matte: None,
+        reverse_path: None,
+        freeze: Some(openrip_model::Freeze { video: a.to_string_lossy().into_owned(), at: fps.frame_start(123) + Micros(800) }),
+    });
+    p.tracks[0].segments[0].material = "fr".into();
+    let mut e = PreviewEngine::new(p).unwrap();
+    for n in [0, 50, 149] {
+        assert_eq!(number_at(&mut e, n), 123, "frame {n}");
+    }
+}

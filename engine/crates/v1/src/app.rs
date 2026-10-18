@@ -380,12 +380,26 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
             clip.insert("type".into(), json!(ty));
             clip.insert("assetId".into(), json!(m.id.0));
             if ty != "image" {
-                clip.insert("speed".into(), json!(seg.speed));
+                let src = seg.source.unwrap_or(TimeRange::new(Micros::ZERO, seg.target.duration));
+                // A curved clip's speed is the curve's average, as the app keeps it.
+                let curve = seg.speed_curve(&project.materials);
+                let speed = match curve {
+                    Some(_) if seg.target.duration.0 > 0 => src.duration.0 as f64 / seg.target.duration.0 as f64,
+                    _ => seg.speed,
+                };
+                clip.insert("speed".into(), json!(speed));
+                clip.insert("reverse".into(), json!(seg.reverse));
+                clip.insert(
+                    "speedCurve".into(),
+                    curve.map_or(Value::Null, |c| json!({ "preset": c.preset, "points": c.curve.iter().map(|(x, y)| json!({ "x": x, "y": y })).collect::<Vec<_>>() })),
+                );
+                if ty == "video" {
+                    clip.insert("freeze".into(), Value::Null);
+                }
                 clip.insert("volume".into(), json!(20.0 * (seg.volume.value.max(1e-4) as f64).log10()));
                 // Trims in timeline frames before the speed, as the app keeps them.
-                let src = seg.source.unwrap_or(TimeRange::new(Micros::ZERO, seg.target.duration));
-                let trim_start = ticks.frame(Micros((src.start.0 as f64 / seg.speed.max(1e-6)) as i64));
-                let full = ticks.frame(Micros((m.duration.0 as f64 / seg.speed.max(1e-6)) as i64));
+                let trim_start = ticks.frame(Micros((src.start.0 as f64 / speed.max(1e-6)) as i64));
+                let full = ticks.frame(Micros((m.duration.0 as f64 / speed.max(1e-6)) as i64));
                 let trim_end = (full - trim_start - (end - start)).max(0);
                 clip.insert("trimStartTick".into(), json!(ticks.tick(trim_start)));
                 clip.insert("trimEndTick".into(), json!(ticks.tick(trim_end)));
@@ -532,8 +546,8 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
     // What the engine needs to draw it as it was, and the app's fields as written, so an
     // import can tell what the app changed.
     let base_keys = [
-        "startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color", "animationIn", "animationOut", "animationCombo",
-        "animationLoop", "captionStyle", "transitionOut", "keyframes",
+        "startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "reverse", "speedCurve", "freeze", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color",
+        "animationIn", "animationOut", "animationCombo", "animationLoop", "captionStyle", "transitionOut", "keyframes",
     ];
     let base: Map<String, Value> = base_keys
         .iter()
@@ -559,7 +573,7 @@ mod tests {
     /// attached, and a caption above it.
     fn project() -> Project {
         let mut p = Project::new("p", "P", Canvas { width: 1080, height: 1920 }, FrameRate::new(30, 1));
-        p.materials.media.push(Media { id: MaterialId("m".into()), kind: MediaKind::Video, path: "/tmp/clip.mov".into(), width: 1080, height: 1920, duration: Micros(10_000_000), has_audio: true, matte: Some("/tmp/matte".into()) });
+        p.materials.media.push(Media { id: MaterialId("m".into()), kind: MediaKind::Video, path: "/tmp/clip.mov".into(), width: 1080, height: 1920, duration: Micros(10_000_000), has_audio: true, matte: Some("/tmp/matte".into()), reverse_path: None, freeze: None });
         let mut fx = BTreeMap::new();
         fx.insert("intensity".to_string(), 0.5);
         p.materials.effects.push(Effect { id: MaterialId("fx".into()), category: EffectCategory::Filter, name: "Film".into(), params: fx, builtin: None, resource: Some("/bundle".into()), library: None, text_style: None });
@@ -1216,5 +1230,95 @@ mod tests {
         let text = back.materials.texts.iter().find(|t| t.id == segment(&back, "c").material).unwrap();
         assert_eq!((text.text.as_str(), text.runs[0].range), ("Bye", (0, 3)));
         assert!(back.materials.texts.iter().any(|t| t.text == "Hello there"));
+    }
+
+    /// One of CapCut's curve presets' points.
+    fn preset_points(name: &str) -> Vec<(f64, f64)> {
+        openrip_model::speed::CURVE_PRESETS.iter().find(|c| c.name == name).unwrap().points.to_vec()
+    }
+
+    /// The Montage preset's points as the app writes them.
+    fn montage() -> Value {
+        let pts: Vec<Value> = preset_points("Montage").iter().map(|(x, y)| json!({"x": x, "y": y})).collect();
+        json!({"preset": "Montage", "points": pts})
+    }
+
+    #[test]
+    fn the_apps_speed_tools_reach_the_engine() {
+        let p = project();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clip = clip_mut(&mut doc, "v");
+        clip.as_object_mut().unwrap().remove("engine");
+        // Reversed, on a curve whose mean speed is the clip's `speed`.
+        let average = Remap::new(&preset_points("Montage")).unwrap().average();
+        clip["reverse"] = json!(true);
+        clip["speedCurve"] = montage();
+        clip["speed"] = json!(average);
+        let back = import_v1_json(&doc).unwrap().project;
+        let v = segment(&back, "v");
+        assert!(v.reverse);
+        let curve = v.speed_curve(&back.materials).unwrap();
+        assert_eq!((curve.preset.as_deref(), curve.curve.len(), curve.speed), (Some("Montage"), 6, average));
+        // Its source is its length at the mean speed.
+        let src = v.source.unwrap();
+        assert!((src.duration.0 as f64 - v.target.duration.0 as f64 * average).abs() < 2.0);
+
+        // A freeze frame: the asset's frame at 1.5 s, held, without sound.
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clip = clip_mut(&mut doc, "v");
+        clip.as_object_mut().unwrap().remove("engine");
+        clip["freeze"] = json!({"at": 1.5});
+        let back = import_v1_json(&doc).unwrap().project;
+        let v = segment(&back, "v");
+        let still = back.materials.media.iter().find(|m| m.id == v.material).unwrap();
+        assert_eq!((still.kind, still.path.as_str(), still.has_audio), (MediaKind::Photo, "", false));
+        assert_eq!(still.freeze, Some(Freeze { video: "/tmp/clip.mov".into(), at: Micros(1_500_000) }));
+        assert_eq!((v.source, v.speed), (Some(TimeRange::new(Micros::ZERO, v.target.duration)), 1.0));
+    }
+
+    #[test]
+    fn speed_tool_edits_apply_to_a_converted_clip() {
+        // A converted clip on a curve: shown with its curve and mean speed, unchanged if unedited.
+        let mut p = project();
+        let pts = preset_points("Flash In");
+        let remap = Remap::new(&pts).unwrap();
+        p.materials.speeds.push(Speed { id: MaterialId("cs".into()), speed: remap.average(), curve: pts.clone(), preset: Some("Flash In".into()) });
+        let v = &mut p.tracks[0].segments[0];
+        v.attachments.push(MaterialId("cs".into()));
+        v.target.duration = Micros(remap.output_length(4_000_000));
+        let doc = to_app_project(&p, &mut |_| None);
+        let shown = doc["timeline"]["clips"].as_array().unwrap().iter().find(|c| c["clipId"] == "v").unwrap().clone();
+        assert_eq!(shown["speedCurve"]["preset"], "Flash In");
+        assert!((shown["speed"].as_f64().unwrap() - remap.average()).abs() < 1e-3);
+        assert_eq!(shown["reverse"], false);
+        let back = import_v1_json(&doc).unwrap().project;
+        assert_eq!(segment(&back, "v"), segment(&p, "v"));
+
+        // Reversed in the app, and the curve swapped for Montage: the draft's own speed goes.
+        let mut doc = doc.clone();
+        let clip = clip_mut(&mut doc, "v");
+        clip["reverse"] = json!(true);
+        clip["speedCurve"] = montage();
+        let back = import_v1_json(&doc).unwrap().project;
+        let v = segment(&back, "v");
+        assert!(v.reverse);
+        assert!(!v.attachments.contains(&MaterialId("cs".into())));
+        assert_eq!(v.speed_curve(&back.materials).unwrap().preset.as_deref(), Some("Montage"));
+
+        // The curve taken off: no curve at all.
+        let mut doc = doc.clone();
+        clip_mut(&mut doc, "v")["speedCurve"] = Value::Null;
+        let back = import_v1_json(&doc).unwrap().project;
+        assert!(segment(&back, "v").speed_curve(&back.materials).is_none());
+
+        // Made a freeze frame: the clip keeps the draft's effect.
+        let mut doc = to_app_project(&p, &mut |_| None);
+        clip_mut(&mut doc, "v")["freeze"] = json!({"at": 2.0});
+        let back = import_v1_json(&doc).unwrap().project;
+        let v = segment(&back, "v");
+        assert!(v.attachments.contains(&MaterialId("fx".into())));
+        assert!(v.speed_curve(&back.materials).is_none());
+        let still = back.materials.media.iter().find(|m| m.id == v.material).unwrap();
+        assert_eq!(still.freeze.as_ref().map(|f| f.at), Some(Micros(2_000_000)));
     }
 }

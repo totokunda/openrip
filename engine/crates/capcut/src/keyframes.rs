@@ -125,13 +125,23 @@ pub(crate) fn apply(seg_json: &Value, seg: &mut Segment, kind: TrackKind, materi
     if channels.is_empty() {
         return;
     }
-    // Keys on media are in its time; the model's are the segment's own.
+    // Keys on media are in its time; the model's are the segment's own. Through a speed curve
+    // CapCut places them by the curve's inverse, snapping to the clip's ends within a
+    // millisecond (docs/parity/speed.md).
     let (origin, speed) = match seg.source {
         Some(src) if seg.speed > 0.0 => (src.start.0, seg.speed),
         _ => (0, 1.0),
     };
-    let local = |at: i64| Micros(((at - origin) as f64 / speed).round() as i64);
-    let ctx = Ctx { local: &local, speed };
+    let remap = seg.speed_curve(materials).and_then(|s| Remap::new(&s.curve)).filter(|_| seg.source.is_some());
+    let length = seg.target.duration.0;
+    let local = |at: i64| match &remap {
+        Some(r) => {
+            let t = r.output_offset(at - origin, length);
+            Micros(if t < 1_000 { 0 } else if length - t < 1_000 { length } else { t })
+        }
+        None => Micros(((at - origin) as f64 / speed).round() as i64),
+    };
+    let ctx = Ctx { local: &local, speed: if remap.is_some() { seg.speed.max(0.1) } else { speed } };
     let drawn = matches!(kind, TrackKind::Video | TrackKind::Text | TrackKind::Sticker | TrackKind::Filter | TrackKind::Audio);
 
     let mut take = |name: &str| channels.remove(name);

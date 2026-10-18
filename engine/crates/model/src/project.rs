@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::animated::{Animated, Vec2};
 use crate::keyed::ParamKeys;
-use crate::material::{MaterialId, Materials};
+use crate::material::{MaterialId, Materials, Speed};
+use crate::speed::Remap;
 use crate::time::{FrameRate, Micros, TimeRange};
 
 /// Version of OpenRip's native project format (v1 was the TypeScript app's JSON).
@@ -80,8 +81,10 @@ pub struct Segment {
     pub source: Option<TimeRange>,
     /// Where the segment sits on the timeline.
     pub target: TimeRange,
-    /// Constant playback speed (1.0 = normal). Speed curves are an attachment.
+    /// Constant playback speed (1.0 = normal). A speed curve is an attachment (a [`Speed`]
+    /// material with points), which then decides the timing; see [`Segment::media_time`].
     pub speed: f64,
+    /// Played backward, from its out-point to its in-point (CapCut's Reverse).
     #[serde(default)]
     pub reverse: bool,
     /// Let the pitch follow the speed (CapCut's "change pitch", `is_tone_modify`). Off by
@@ -125,6 +128,47 @@ impl Segment {
         let last = (source.end().0 - 1).max(source.start.0);
         let t = if self.reverse { source.end().0 - 1 - offset } else { source.start.0 + offset };
         Some(Micros(t.clamp(source.start.0, last)))
+    }
+
+    /// The speed curve it plays by: the curved [`Speed`] among its attachments, if any.
+    pub fn speed_curve<'a>(&self, materials: &'a Materials) -> Option<&'a Speed> {
+        if materials.speeds.iter().all(|s| s.curve.len() < 2) {
+            return None;
+        }
+        self.attachments.iter().find_map(|id| materials.speeds.iter().find(|s| &s.id == id && s.curve.len() >= 2))
+    }
+
+    /// [`Segment::source_time`] with its speed curve, if it has one: the local time's progress
+    /// through the clip remapped to progress through its source ([`Remap`]), counted from the
+    /// in-point, or back from the out-point when reversed (the curve runs along the clip as
+    /// played).
+    pub fn media_time(&self, materials: &Materials, timeline: Micros) -> Option<Micros> {
+        match self.speed_curve(materials).and_then(|s| Remap::new(&s.curve)) {
+            Some(remap) => self.remapped_time(&remap, timeline),
+            None => self.source_time(timeline),
+        }
+    }
+
+    /// The media time at a timeline time through `remap`.
+    pub fn remapped_time(&self, remap: &Remap, timeline: Micros) -> Option<Micros> {
+        let source = self.source?;
+        let length = self.target.duration.0.max(1);
+        let local = self.local_time(timeline).0.clamp(0, length);
+        let offset = remap.source_offset(local, length);
+        let last = (source.end().0 - 1).max(source.start.0);
+        let t = if self.reverse { source.end().0 - 1 - offset } else { source.start.0 + offset };
+        Some(Micros(t.clamp(source.start.0, last)))
+    }
+
+    /// The clip-local time at which it shows `offset` into its source as played (from the
+    /// in-point, or from the out-point when reversed): the inverse of [`Segment::media_time`],
+    /// for content placed in source time (CapCut's keyframes).
+    pub fn local_of_played(&self, materials: &Materials, offset: Micros) -> Micros {
+        let Some(source) = self.source else { return offset };
+        match self.speed_curve(materials).and_then(|s| Remap::new(&s.curve)) {
+            Some(remap) if source.duration.0 > 0 => Micros(remap.output_offset(offset.0, self.target.duration.0)),
+            _ => Micros((offset.0 as f64 / if self.speed > 0.0 { self.speed } else { 1.0 }).round() as i64),
+        }
     }
 }
 
@@ -267,5 +311,39 @@ mod tests {
         assert_eq!(s.source_time(Micros(0)), Some(Micros(13_999_999)));
         assert_eq!(s.source_time(Micros(1_000_000)), Some(Micros(12_999_999)));
         assert_eq!(s.source_time(Micros(3_999_999)), Some(Micros(10_000_000)));
+    }
+
+    #[test]
+    fn media_time_follows_the_speed_curve_as_played() {
+        // Flash Out: 1× then 5.2×, over 6 s of source from 10 s.
+        let pts = crate::speed::CURVE_PRESETS.iter().find(|c| c.name == "Flash Out").unwrap().points.to_vec();
+        let remap = Remap::new(&pts).unwrap();
+        let length = remap.output_length(6_000_000);
+        let mut materials = Materials::default();
+        materials.speeds.push(Speed { id: MaterialId("sp".into()), speed: remap.average(), curve: pts, preset: Some("Flash Out".into()) });
+        // A constant speed attached too (CapCut attaches one to every clip): the curve decides.
+        materials.speeds.push(Speed { id: MaterialId("flat".into()), speed: 1.0, curve: vec![], preset: None });
+        let mut s = clip((10_000_000, 6_000_000), (2_000_000, length), remap.average(), false);
+        s.attachments = vec![MaterialId("flat".into()), MaterialId("sp".into())];
+        assert_eq!(s.speed_curve(&materials).map(|c| c.id.0.as_str()), Some("sp"));
+        // Ends at the in- and out-points; slow (about 1×) at the start.
+        assert_eq!(s.media_time(&materials, Micros(2_000_000)), Some(Micros(10_000_000)));
+        assert_eq!(s.media_time(&materials, Micros(2_000_000 + length)), Some(Micros(15_999_999)));
+        let early = s.media_time(&materials, Micros(2_100_000)).unwrap().0 - 10_000_000;
+        assert!((early - 100_000).abs() < 2_000, "{early}");
+        // The keyframe direction: a source offset back to the local time that shows it.
+        for local in [0, 333_333, length / 2, length - 1] {
+            let shown = s.media_time(&materials, Micros(2_000_000 + local)).unwrap().0 - 10_000_000;
+            assert!((s.local_of_played(&materials, Micros(shown)).0 - local).abs() <= 10, "{local}");
+        }
+        // Reversed: the curve runs along the clip as played, from the out-point.
+        s.reverse = true;
+        assert_eq!(s.media_time(&materials, Micros(2_000_000)), Some(Micros(15_999_999)));
+        let early_back = 15_999_999 - s.media_time(&materials, Micros(2_100_000)).unwrap().0;
+        assert_eq!(early_back, early);
+        // Without the curve it's the constant speed.
+        s.attachments.pop();
+        s.reverse = false;
+        assert_eq!(s.media_time(&materials, Micros(3_000_000)), s.source_time(Micros(3_000_000)));
     }
 }

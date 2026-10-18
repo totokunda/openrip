@@ -569,15 +569,12 @@ pub(crate) fn plan(project: &Project, t: Micros, span: i64, size: u32, indexes: 
         for track in project.tracks.iter().filter(|tr| tr.kind == TrackKind::Video && !tr.hidden) {
             for seg in track.segments.iter().filter(|s| s.visible && s.target.contains(at)) {
                 let Some(media) = project.materials.media.iter().find(|m| m.id == seg.material && m.kind != MediaKind::Audio) else { continue };
-                let path = media.path.clone();
-                let job = if media.kind == MediaKind::Photo {
-                    Job::Still { path, size }
-                } else {
-                    match indexes.get(&path) {
+                let job = match crate::timing::picture(project, seg, media, at) {
+                    crate::timing::Picture::Still(path) => Job::Still { path, size },
+                    crate::timing::Picture::Video { path, at: source, .. } => match indexes.get(&path) {
                         None => Job::Index { path, size },
                         Some(None) => continue,
                         Some(Some(keys)) => {
-                            let Some(source) = seg.source_time(at) else { continue };
                             // The keyframe at or before (as the decoder finds it), and the
                             // middle of its GOP to seek to.
                             let i = keys.partition_point(|k| *k <= source);
@@ -585,7 +582,7 @@ pub(crate) fn plan(project: &Project, t: Micros, span: i64, size: u32, indexes: 
                             let seek = Micros((key.0 + keys.get(i).map_or(key.0 + 1_000_000, |k| k.0)) / 2);
                             Job::Keyframe { path, at: key, seek, size }
                         }
-                    }
+                    },
                 };
                 if seen.insert(job.key()) {
                     out.push(job);
@@ -687,7 +684,7 @@ mod tests {
         p.tracks.push(Track { id: "v".into(), kind: TrackKind::Video, name: String::new(), segments: vec![seg("v1", "video", 0, 20_000_000, 10_000_000)], muted: false, hidden: false, locked: false });
         let stills = (0..20).map(|i| seg(&format!("s{i}"), &format!("photo{i}"), i * 1_000_000, 1_000_000, 0)).collect();
         p.tracks.push(Track { id: "s".into(), kind: TrackKind::Video, name: String::new(), segments: stills, muted: false, hidden: false, locked: false });
-        let media = |id: &str, kind: MediaKind| Media { id: MaterialId(id.into()), path: format!("/{id}"), kind, width: 0, height: 0, duration: Micros(60_000_000), has_audio: false, matte: None };
+        let media = |id: &str, kind: MediaKind| Media { id: MaterialId(id.into()), path: format!("/{id}"), kind, width: 0, height: 0, duration: Micros(60_000_000), has_audio: false, matte: None, reverse_path: None, freeze: None };
         p.materials.media.push(media("video", MediaKind::Video));
         for i in 0..20 {
             p.materials.media.push(media(&format!("photo{i}"), MediaKind::Photo));

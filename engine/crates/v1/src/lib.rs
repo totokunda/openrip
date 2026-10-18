@@ -255,6 +255,8 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
             duration: Micros::from_secs_f64(f(a, "duration", 0.0)),
             has_audio: kind != MediaKind::Photo,
             matte: None,
+            reverse_path: None,
+            freeze: None,
         });
     }
 
@@ -483,6 +485,29 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
     }
     if changed("volume") {
         seg.volume = Animated::constant(10f64.powf(f(clip, "volume", 0.0) / 20.0) as f32);
+    }
+    if seg.source.is_some() && differs("reverse") {
+        seg.reverse = b(clip, "reverse");
+    }
+    if seg.source.is_some() && differs("speedCurve") {
+        // The app's curve replaces the draft's speed (CapCut attaches one to every clip).
+        seg.attachments.retain(|id| !materials.speeds.iter().any(|m| &m.id == id));
+        if let Some(sp) = app_speed_curve(&seg.id, clip, seg.speed) {
+            materials.speeds.retain(|m| m.id != sp.id);
+            seg.attachments.push(sp.id.clone());
+            materials.speeds.push(sp);
+        }
+    }
+    if ty == "video" && differs("freeze") {
+        // Made a freeze frame in the app: a still of the media's frame, keeping the rest of the
+        // clip (its effects, masks, adjustments), as CapCut's Freeze copies them.
+        if let Some(mid) = app_freeze(&seg.id, clip, materials) {
+            seg.material = mid;
+            seg.source = Some(TimeRange::new(Micros::ZERO, seg.target.duration));
+            seg.speed = 1.0;
+            seg.reverse = false;
+            seg.attachments.retain(|id| !materials.speeds.iter().any(|m| &m.id == id && m.curve.len() >= 2));
+        }
     }
     if ["fadeIn", "fadeOut"].into_iter().any(differs) {
         // The app's fades replace the draft's.
@@ -713,7 +738,14 @@ fn convert_clip(
         _ => None,
     };
 
+    // A freeze frame (`freeze` on a video clip): a still of the asset's frame at `at` seconds,
+    // drawn from the video, in a material of its own.
+    let freeze = (ty == "video").then(|| app_freeze(&id, clip, materials)).flatten();
+    let source = if freeze.is_some() { Some(TimeRange::new(Micros::ZERO, target.duration)) } else { source };
+    let speed = if freeze.is_some() { 1.0 } else { speed };
+
     let material = match ty {
+        _ if freeze.is_some() => freeze.clone().unwrap(),
         "video" | "image" | "audio" => {
             let asset = s(clip, "assetId");
             if !materials.contains(&MaterialId(asset.clone())) {
@@ -762,6 +794,14 @@ fn convert_clip(
     if is_av {
         volume = Animated::constant(10f64.powf(f(clip, "volume", 0.0) / 20.0) as f32);
         attach_fade(&id, clip, materials, &mut attachments);
+    }
+    // The Speed tab's curve: a speed the clip plays by (its `speed` is the curve's average).
+    if is_av && freeze.is_none() {
+        if let Some(sp) = app_speed_curve(&id, clip, speed) {
+            attachments.push(sp.id.clone());
+            materials.speeds.retain(|m| m.id != sp.id);
+            materials.speeds.push(sp);
+        }
     }
 
     // The Animation tab's animations: a text's In, Out and Loop; a video or photo's In, Out
@@ -823,7 +863,7 @@ fn convert_clip(
         source,
         target,
         speed,
-        reverse: false,
+        reverse: is_av && freeze.is_none() && b(clip, "reverse"),
         change_pitch: false,
         visible: true,
         render_index: 0,
@@ -834,6 +874,38 @@ fn convert_clip(
         attachments,
         keyframes: Vec::new(),
     })
+}
+
+/// The Speed tab's curve on a clip (`speedCurve`: `{ preset?, points: [{x, y}] }`, CapCut's
+/// speed points), as a speed material for it; `None` without one (or with fewer than two
+/// points). `speed` is the clip's, the curve's average.
+fn app_speed_curve(id: &str, clip: &Value, speed: f64) -> Option<Speed> {
+    let c = clip.get("speedCurve").filter(|c| c.is_object())?;
+    let points: Vec<(f64, f64)> = c.get("points").and_then(Value::as_array)?.iter().map(|p| (f(p, "x", 0.0), f(p, "y", 1.0))).collect();
+    (points.len() >= 2).then(|| Speed { id: MaterialId(format!("{id}-speed")), speed, curve: points, preset: Some(s(c, "preset")).filter(|p| !p.is_empty()) })
+}
+
+/// A freeze-frame clip's still (`freeze: { at }` on a video clip, `at` in seconds of its
+/// asset): a material of its own that holds the asset's frame then. `None` for any other clip.
+fn app_freeze(id: &str, clip: &Value, materials: &mut Materials) -> Option<MaterialId> {
+    let fr = clip.get("freeze").filter(|f| f.is_object())?;
+    let asset = materials.media.iter().find(|m| m.id.0 == s(clip, "assetId"))?.clone();
+    let mid = MaterialId(format!("{id}-freeze"));
+    materials.media.retain(|m| m.id != mid);
+    materials.media.push(Media {
+        id: mid.clone(),
+        kind: MediaKind::Photo,
+        // No picture: it's drawn from the video.
+        path: String::new(),
+        width: asset.width,
+        height: asset.height,
+        duration: asset.duration,
+        has_audio: false,
+        matte: asset.matte.clone(),
+        reverse_path: None,
+        freeze: Some(Freeze { video: asset.path.clone(), at: Micros::from_secs_f64(f(fr, "at", 0.0).max(0.0)) }),
+    });
+    Some(mid)
 }
 
 /// The clip's audio fades, as a material it's attached to.

@@ -182,6 +182,26 @@ pub struct Media {
     /// `maskinfo/<source µs>`), covering the whole picture upright.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub matte: Option<String>,
+    /// A copy of the video played backward that the source app rendered (CapCut's
+    /// `reverse_path`, made when a clip is reversed), with its sound. Frame for frame it's
+    /// the video mirrored in time about its middle: its time `t` shows the video's
+    /// `duration - t`. Reversed clips play it forward where it's readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reverse_path: Option<String>,
+    /// A freeze frame: this material is a still of one instant of a video.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub freeze: Option<Freeze>,
+}
+
+/// What a freeze frame holds (CapCut's Freeze). CapCut saves the still as a picture, the
+/// material's `path` (a photo); OpenRip's own have no picture (an empty `path`) and are drawn
+/// from the video, as CapCut's are when their picture is missing. A freeze has no sound.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Freeze {
+    /// The video it's a still of.
+    pub video: String,
+    /// Its time in the video (the frame shown then).
+    pub at: Micros,
 }
 
 /// Rich text: the full string plus styled runs over character ranges.
@@ -546,13 +566,19 @@ pub enum Geometry {
     Line { points: Vec<[f32; 2]>, tension: f32, closed: bool },
 }
 
+/// A clip's speed (CapCut's `speeds` table): constant, or a curve that remaps its time
+/// (`crate::speed`). A segment plays by the curve of the speed it's attached to.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Speed {
     pub id: MaterialId,
     pub speed: f64,
-    /// Speed-curve control points as (progress 0..1, speed multiplier), if curved.
+    /// Speed-curve control points as (progress 0..1, speed multiplier), if curved (CapCut's
+    /// `curve_speed.speed_points`; see `crate::speed` for what they mean).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub curve: Vec<(f64, f64)>,
+    /// The curve's preset (CapCut's `curve_speed.name`: "Montage", "Hero", …), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

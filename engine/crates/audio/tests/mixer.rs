@@ -113,6 +113,74 @@ fn speed_keeps_pitch_unless_asked_not_to() {
     }
 }
 
+/// A 440 Hz tone, 8 s.
+fn tone() -> Option<PathBuf> {
+    if Command::new("ffmpeg").arg("-version").output().is_err() {
+        return None;
+    }
+    let tone = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("mixer-tone-8s.wav");
+    if !tone.exists() {
+        // Each test writes its own copy and moves it in (tests run at once).
+        let tmp = tone.with_extension(format!("{:?}.wav", std::thread::current().id()).replace(['(', ')', ' '], ""));
+        let st = Command::new("ffmpeg").args(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=8:r=48000", "-ac", "2"]).arg(&tmp).status().unwrap();
+        assert!(st.success());
+        std::fs::rename(tmp, &tone).unwrap();
+    }
+    Some(tone)
+}
+
+/// Mix `p` from timeline `from` for `seconds`, in playback-sized blocks; the left channel.
+fn mix_left(p: Project, from: f64, seconds: f64) -> Vec<f32> {
+    let mut m = Mixer::new(p);
+    let mut left = Vec::new();
+    let mut block = vec![0f32; 1024 * CHANNELS];
+    let start = (from * RATE as f64) as i64;
+    for i in 0..(seconds * RATE as f64 / 1024.0) as i64 {
+        m.mix(start + i * 1024, &mut block).unwrap();
+        left.extend(block.iter().step_by(2));
+    }
+    left
+}
+
+#[test]
+fn a_speed_curve_plays_varispeed_as_capcuts_does() {
+    let Some(tone) = tone() else { return };
+    // Flash Out: 1× for the first 40% of the source, 5.2× from 60%; 4 s of source.
+    let pts = openrip_model::speed::CURVE_PRESETS.iter().find(|c| c.name == "Flash Out").unwrap().points.to_vec();
+    let remap = openrip_model::Remap::new(&pts).unwrap();
+    for change_pitch in [false, true] {
+        let mut p = project(tone.to_str().unwrap(), &[(false, false, 1.0)]);
+        p.materials.speeds.push(openrip_model::Speed { id: openrip_model::MaterialId("sp".into()), speed: remap.average(), curve: pts.clone(), preset: None });
+        let seg = &mut p.tracks[0].segments[0];
+        seg.attachments.push(openrip_model::MaterialId("sp".into()));
+        seg.change_pitch = change_pitch;
+        seg.source = Some(openrip_model::TimeRange::new(openrip_model::Micros(0), openrip_model::Micros(4_000_000)));
+        seg.target.duration = openrip_model::Micros(remap.output_length(4_000_000));
+        let length = seg.target.duration.as_secs_f64();
+        // The pitch follows the speed either way ("change pitch" doesn't apply to a curve):
+        // 440 Hz where it's 1×, 5.2 × 440 Hz at the end.
+        let slow = mix_left(p.clone(), 1.05, 0.3);
+        assert!((frequency(&slow, RATE) - 440.0).abs() < 440.0 * 0.03, "change_pitch={change_pitch}: start {:.1} Hz", frequency(&slow, RATE));
+        let fast = mix_left(p, 1.0 + length - 0.25, 0.2);
+        assert!((frequency(&fast, RATE) - 5.2 * 440.0).abs() < 5.2 * 440.0 * 0.03, "change_pitch={change_pitch}: end {:.1} Hz", frequency(&fast, RATE));
+    }
+}
+
+#[test]
+fn a_reversed_clip_with_a_speed_keeps_its_pitch() {
+    let Some(tone) = tone() else { return };
+    for (change_pitch, want) in [(false, 440.0), (true, 660.0)] {
+        let mut p = project(tone.to_str().unwrap(), &[(false, false, 1.0)]);
+        let seg = &mut p.tracks[0].segments[0];
+        seg.reverse = true;
+        seg.speed = 1.5;
+        seg.change_pitch = change_pitch;
+        seg.source = Some(openrip_model::TimeRange::new(openrip_model::Micros(0), openrip_model::Micros(1_500_000)));
+        let f = frequency(&mix_left(p, 1.2, 0.6), RATE);
+        assert!((f - want).abs() < want * 0.03, "change_pitch={change_pitch}: {f:.1} Hz, want {want}");
+    }
+}
+
 #[test]
 fn reversed_clips_play_their_audio_backwards() {
     let Some(path) = noise() else { return };
