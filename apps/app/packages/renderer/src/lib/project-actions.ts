@@ -3,6 +3,7 @@
 import {
   createProject,
   deleteProject,
+  listProjects,
   loadProjectJson,
   saveProjectCover,
   saveProjectJson,
@@ -49,6 +50,24 @@ export const createAndOpenProject = async (aspectRatio?: { width: number; height
   if (!useProjectsStore.getState().projects.some((p) => p.id === created.id)) store.addProject(created);
   openProject(created.id);
   return created;
+};
+
+/**
+ * Bring the projects' lengths, file sizes and covers up to date from their files, for the
+ * home screen (the list is read once at start-up). Names and times the stores hold win:
+ * the open project's may not have been written yet.
+ */
+export const refreshProjects = async () => {
+  const res = await listProjects<ProjectSettings>();
+  if (!res?.success || !Array.isArray(res.data)) return;
+  const disk = new Map(res.data.map((p) => [p.id, p]));
+  const store = useProjectsStore.getState();
+  store.setProjects(
+    store.projects.map((p) => {
+      const d = disk.get(p.id);
+      return d ? { ...p, filePath: d.filePath, sizeBytes: d.sizeBytes, durationUs: d.durationUs, coverPath: p.coverPath ?? d.coverPath } : p;
+    }),
+  );
 };
 
 /** Resolves once the project `id` is the one in the stores (after a switch has loaded it). */

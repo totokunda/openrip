@@ -10,6 +10,10 @@ export interface ProjectSettings {
   createdAt?: number;
   lastModified?: number;
   coverPath?: string;
+  /** From the project list (the home screen's cards): its file, the file's size, its length. */
+  filePath?: string;
+  sizeBytes?: number;
+  durationUs?: number;
 }
 
 interface ProjectsStoreState {

@@ -986,6 +986,9 @@ export class JSONPersistenceModule implements AppModule {
             createdAt?: number;
             lastModified?: number;
             coverPath?: string;
+            filePath: string;
+            sizeBytes: number;
+            durationUs: number;
           }>
         >
       > => {
@@ -1010,6 +1013,9 @@ export class JSONPersistenceModule implements AppModule {
             createdAt?: number;
             lastModified?: number;
             coverPath?: string;
+            filePath: string;
+            sizeBytes: number;
+            durationUs: number;
           }> = [];
 
           for (const entry of entries) {
@@ -1068,6 +1074,11 @@ export class JSONPersistenceModule implements AppModule {
               ? path.join(coversDir, coverFilename)
               : undefined;
 
+            // For the home screen's cards: the project's length (its last clip's end, in µs)
+            // and the size of its file.
+            const clips: any[] = Array.isArray((doc as any).timeline?.clips) ? (doc as any).timeline.clips : [];
+            const durationUs = clips.reduce((end, c) => Math.max(end, Number(c?.endTick) || 0), 0);
+
             projects.push({
               id,
               name,
@@ -1077,6 +1088,9 @@ export class JSONPersistenceModule implements AppModule {
               createdAt,
               lastModified,
               coverPath,
+              filePath,
+              sizeBytes: Buffer.byteLength(raw, "utf8"),
+              durationUs: Number.isFinite(durationUs) ? durationUs : 0,
             });
           }
 
