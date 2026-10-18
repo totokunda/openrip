@@ -49,7 +49,9 @@ pub(crate) struct Input(pub *mut ff::AVFormatContext);
 impl Input {
     pub(crate) fn open(path: &Path) -> Result<Input, MediaError> {
         init_logging();
-        let c = c_path(path)?;
+        // FFmpeg opens files by name: the asset's file on disk.
+        let file = openrip_platform::assets::local_path(path).ok_or_else(|| MediaError::Open { path: path.into(), msg: "not a file FFmpeg can open".into() })?;
+        let c = c_path(&file)?;
         let mut fmt: *mut ff::AVFormatContext = std::ptr::null_mut();
         unsafe {
             let r = ff::avformat_open_input(&mut fmt, c.as_ptr(), std::ptr::null(), std::ptr::null_mut());

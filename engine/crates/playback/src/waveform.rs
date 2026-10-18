@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use openrip_audio::{AudioError, Peaks};
+use openrip_platform::assets;
 
 use crate::thumbs::media_key;
 
@@ -25,7 +26,7 @@ pub fn waveform(path: &Path, per_second: u32, cache_dir: Option<&Path>) -> Resul
 }
 
 fn load(file: &Path, per_second: u32) -> Option<Peaks> {
-    let b = std::fs::read(file).ok()?;
+    let b = assets::read(file).ok()?;
     let word = |i: usize| b.get(i..i + 4).map(|w| u32::from_le_bytes(w.try_into().unwrap()));
     if b.get(..4)? != MAGIC || word(4)? != per_second {
         return None;
@@ -36,7 +37,6 @@ fn load(file: &Path, per_second: u32) -> Option<Peaks> {
 }
 
 fn save(file: &Path, p: &Peaks) -> std::io::Result<()> {
-    std::fs::create_dir_all(file.parent().unwrap())?;
     let mut b = Vec::with_capacity(12 + p.peak.len() * 8);
     b.extend_from_slice(MAGIC);
     b.extend_from_slice(&p.per_second.to_le_bytes());
@@ -44,8 +44,6 @@ fn save(file: &Path, p: &Peaks) -> std::io::Result<()> {
     for v in p.peak.iter().chain(&p.rms) {
         b.extend_from_slice(&v.to_le_bytes());
     }
-    // Write then rename, so a reader never sees half a file.
-    let tmp = file.with_extension("tmp");
-    std::fs::write(&tmp, b)?;
-    std::fs::rename(tmp, file)
+    // Whole or not at all, so a reader never sees half a file.
+    assets::write(file, &b)
 }

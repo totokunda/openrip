@@ -5,13 +5,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use openrip_model::{CurvePoint, Project, Segment};
+use openrip_platform::assets;
 use openrip_render::{Curves, Hsl, RgbaImage};
 
 /// CapCut's fade lookup table from its colour bundle: a 289×17 PNG (17 grids of 17×17, as the
 /// exposure tables) stored inside `fade_max.texture`, an AmazingEngine texture file. `None`
 /// when the bundle or the table isn't there (the fade slider is then left out).
 pub fn fade_table(bundle: &Path) -> Option<RgbaImage> {
-    let bytes = std::fs::read(bundle.join("AmazingFeature_adjustColor").join("image").join("fade_max.texture")).ok()?;
+    let bytes = assets::read(&bundle.join("AmazingFeature_adjustColor").join("image").join("fade_max.texture")).ok()?;
     let start = bytes.windows(8).position(|w| w == b"\x89PNG\r\n\x1a\n")?;
     let mut dec = png::Decoder::new(std::io::Cursor::new(&bytes[start..]));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);

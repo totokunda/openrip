@@ -14,6 +14,7 @@ bytemuck = { version = "1", features = ["derive"] }
 thiserror.workspace = true
 swash = "0.2"
 openrip-frame.workspace = true
+openrip-platform.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

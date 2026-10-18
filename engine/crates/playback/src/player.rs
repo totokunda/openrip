@@ -14,6 +14,7 @@ use std::thread::JoinHandle;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use openrip_audio::{sample_at, Mixer, CHANNELS};
 use openrip_model::{Micros, Project};
+use openrip_platform::tasks::{self, Task};
 
 /// Mixed audio kept ahead of the device.
 const AHEAD_MS: i64 = 150;
@@ -54,7 +55,9 @@ struct Shared {
 pub struct Player {
     shared: Arc<Shared>,
     rate: u32,
-    threads: Vec<JoinHandle<()>>,
+    /// The thread that owns the device's stream, and the mixer.
+    output: Option<JoinHandle<()>>,
+    mixer: Option<Task>,
 }
 
 impl Player {
@@ -95,9 +98,9 @@ impl Player {
         let rate = ready_rx.recv().map_err(|e| PlayerError::Output(e.to_string()))??;
         let mix = {
             let shared = shared.clone();
-            std::thread::Builder::new().name("audio-mixer".into()).spawn(move || run_mixer(Mixer::with_rate(project, rate), &shared, rate)).map_err(|e| PlayerError::Output(e.to_string()))?
+            tasks::spawn("audio-mixer", move || run_mixer(Mixer::with_rate(project, rate), &shared, rate)).map_err(|e| PlayerError::Output(e.to_string()))?
         };
-        Ok(Player { shared, rate, threads: vec![out, mix] })
+        Ok(Player { shared, rate, output: Some(out), mixer: Some(mix) })
     }
 
     /// Start (or restart) playback at timeline time `t`.
@@ -154,8 +157,11 @@ impl Drop for Player {
     fn drop(&mut self) {
         self.shared.quit.store(true, Ordering::SeqCst);
         self.shared.cond.notify_all();
-        for t in self.threads.drain(..) {
+        if let Some(t) = self.output.take() {
             t.thread().unpark();
+            let _ = t.join();
+        }
+        if let Some(t) = self.mixer.take() {
             let _ = t.join();
         }
     }

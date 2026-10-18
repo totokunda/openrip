@@ -10,6 +10,7 @@ use std::path::Path;
 
 use openrip_media::{DecoderOptions, MediaError, VideoDecoder, VideoFrame};
 use openrip_model::{Animation, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
+use openrip_platform::assets;
 use openrip_render::text::{self, Align, Font, TextStyle};
 use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source, Uploader};
 
@@ -54,42 +55,40 @@ struct Prefetcher {
     ready: std::sync::mpsc::Receiver<Prefetched>,
     /// Segments (or still paths) with a job in flight.
     pending: std::collections::HashSet<String>,
-    worker: Option<std::thread::JoinHandle<()>>,
+    worker: Option<openrip_platform::tasks::Task>,
 }
 
 impl Prefetcher {
     fn new(uploader: Uploader) -> Prefetcher {
         let (job_tx, job_rx) = std::sync::mpsc::channel::<PrefetchJob>();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        let worker = std::thread::Builder::new()
-            .name("decoder-prefetch".into())
-            .spawn(move || {
-                for job in job_rx {
-                    // Report failures too: the render thread may be waiting for this job.
-                    let done = if job.still {
-                        match load_still(Path::new(&job.path)) {
-                            Ok(img) => {
-                                if job.upload {
-                                    uploader.upload(still_key(&job.path), &img);
-                                }
-                                Prefetched::Still(job.path, img)
+        let worker = openrip_platform::tasks::spawn("decoder-prefetch", move || {
+            for job in job_rx {
+                // Report failures too: the render thread may be waiting for this job.
+                let done = if job.still {
+                    match load_still(Path::new(&job.path)) {
+                        Ok(img) => {
+                            if job.upload {
+                                uploader.upload(still_key(&job.path), &img);
                             }
-                            Err(_) => Prefetched::Failed(job.path),
+                            Prefetched::Still(job.path, img)
                         }
-                    } else {
-                        let opened = VideoDecoder::open(Path::new(&job.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() });
-                        // Decode the first frame now (it stays in the decoder's cache).
-                        match opened.map(|mut d| d.frame_at(job.at).is_ok().then_some(d)) {
-                            Ok(Some(d)) => Prefetched::Decoder(job.segment, job.path, Box::new(d)),
-                            _ => Prefetched::Failed(job.segment),
-                        }
-                    };
-                    if ready_tx.send(done).is_err() {
-                        return;
+                        Err(_) => Prefetched::Failed(job.path),
                     }
+                } else {
+                    let opened = VideoDecoder::open(Path::new(&job.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() });
+                    // Decode the first frame now (it stays in the decoder's cache).
+                    match opened.map(|mut d| d.frame_at(job.at).is_ok().then_some(d)) {
+                        Ok(Some(d)) => Prefetched::Decoder(job.segment, job.path, Box::new(d)),
+                        _ => Prefetched::Failed(job.segment),
+                    }
+                };
+                if ready_tx.send(done).is_err() {
+                    return;
                 }
-            })
-            .ok();
+            }
+        })
+        .ok();
         Prefetcher { jobs: Some(job_tx), ready: ready_rx, pending: Default::default(), worker }
     }
 }
@@ -109,6 +108,8 @@ pub enum PreviewError {
     Render(#[from] RenderError),
     #[error(transparent)]
     Media(#[from] MediaError),
+    #[error("can't start the preview worker: {0}")]
+    Worker(std::io::Error),
 }
 
 /// What a frame needed that couldn't be drawn.
@@ -740,7 +741,7 @@ impl PreviewEngine {
     fn pixels(&mut self, seg: &Segment, t: Micros, w: u32, h: u32) -> Result<Option<Pixels>, (String, String)> {
         if let Some(text) = self.project.materials.texts.iter().find(|m| m.id == seg.material).cloned() {
             let Some(run) = text.runs.first() else { return Ok(None) };
-            let path = if !run.font.path.is_empty() && Path::new(&run.font.path).exists() {
+            let path = if !run.font.path.is_empty() && assets::exists(Path::new(&run.font.path)) {
                 run.font.path.clone()
             } else {
                 let name = run.font.name.clone();
@@ -1093,7 +1094,7 @@ impl PreviewEngine {
     /// before it), turned into the stored picture's axes.
     fn matte_at(&mut self, dir: &str, at: Micros, orientation: i32) -> Option<std::sync::Arc<RgbaImage>> {
         let times = self.matte_times.entry(dir.to_string()).or_insert_with(|| {
-            let mut t: Vec<i64> = std::fs::read_dir(Path::new(dir).join("mask")).into_iter().flatten().filter_map(Result::ok).filter_map(|e| e.file_name().to_str()?.parse().ok()).collect();
+            let mut t: Vec<i64> = assets::list(&Path::new(dir).join("mask")).into_iter().flatten().filter_map(|p| p.file_name()?.to_str()?.parse().ok()).collect();
             t.sort_unstable();
             std::sync::Arc::new(t)
         });
@@ -1105,9 +1106,9 @@ impl PreviewEngine {
             *last = tick;
             return Some(m.clone());
         }
-        let info: serde_json::Value = serde_json::from_slice(&std::fs::read(Path::new(dir).join("maskinfo").join(t.to_string())).ok()?).ok()?;
+        let info: serde_json::Value = serde_json::from_slice(&assets::read(&Path::new(dir).join("maskinfo").join(t.to_string())).ok()?).ok()?;
         let (w, h) = (info.pointer("/boundingBox/width")?.as_u64()? as u32, info.pointer("/boundingBox/height")?.as_u64()? as u32);
-        let raw = std::fs::read(&key).ok()?;
+        let raw = assets::read(Path::new(&key)).ok()?;
         if raw.len() < (w * h) as usize {
             return None;
         }
@@ -1300,10 +1301,10 @@ impl PreviewEngine {
 /// skin.
 fn load_filter(bundle: &Path, key: u64) -> Result<Lut3d, String> {
     let dir = bundle.join("AmazingFeature").join("texture");
-    let mut tables: Vec<_> = std::fs::read_dir(&dir).map_err(|e| e.to_string())?.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "vf")).collect();
+    let mut tables: Vec<_> = assets::list(&dir).map_err(|e| e.to_string())?.into_iter().filter(|p| p.extension().is_some_and(|x| x == "vf")).collect();
     tables.sort_by_key(|p| !p.file_name().is_some_and(|n| n.to_string_lossy().contains("bg")));
     let file = tables.first().ok_or("no lookup table in the filter bundle")?;
-    Lut3d::from_vf(&std::fs::read(file).map_err(|e| e.to_string())?, key).ok_or_else(|| format!("unreadable lookup table {}", file.display()))
+    Lut3d::from_vf(&assets::read(file).map_err(|e| e.to_string())?, key).ok_or_else(|| format!("unreadable lookup table {}", file.display()))
 }
 
 /// Decode a still image: PNG directly (keeps alpha), anything else through FFmpeg.
@@ -1328,13 +1329,13 @@ fn font_file_for(name: &str) -> String {
         for dir in &dirs {
             for ext in ["ttf", "otf", "ttc"] {
                 let p = Path::new(dir).join(format!("{}.{ext}", name.trim()));
-                if p.exists() {
+                if assets::exists(&p) {
                     return p.to_string_lossy().into_owned();
                 }
             }
         }
     }
-    if Path::new(DEFAULT_FONT).exists() {
+    if assets::exists(Path::new(DEFAULT_FONT)) {
         DEFAULT_FONT.to_string()
     } else {
         "/System/Library/Fonts/Helvetica.ttc".to_string()
@@ -1372,7 +1373,7 @@ fn shift_hsb([r, g, b]: [f32; 3], hue: f32, saturation: f32, brightness: f32) ->
 }
 
 pub fn load_png(path: &Path) -> Result<RgbaImage, Box<dyn std::error::Error>> {
-    let mut dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path)?));
+    let mut dec = png::Decoder::new(std::io::BufReader::new(assets::open(path)?));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = dec.read_info()?;
     let mut buf = vec![0; reader.output_buffer_size().ok_or("png too large")?];

@@ -200,7 +200,7 @@ fn canvas_for_aspect(aw: f64, ah: f64) -> Canvas {
 // ---- entry points --------------------------------------------------------------
 
 pub fn import_v1_file(path: &Path) -> Result<Imported, ImportError> {
-    let raw = std::fs::read(path).map_err(|source| ImportError::Io { path: path.display().to_string(), source })?;
+    let raw = openrip_platform::assets::read(path).map_err(|source| ImportError::Io { path: path.display().to_string(), source })?;
     let doc: Value =
         serde_json::from_slice(&raw).map_err(|source| ImportError::Json { path: path.display().to_string(), source })?;
     import_v1_json(&doc)
@@ -408,7 +408,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
     project.tracks = tracks;
 
     for m in &project.materials.media {
-        if !m.path.is_empty() && !Path::new(&m.path).exists() {
+        if !m.path.is_empty() && !openrip_platform::assets::exists(Path::new(&m.path)) {
             report.missing_media.push(m.path.clone());
         }
     }

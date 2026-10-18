@@ -9,12 +9,12 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
 use std::time::Instant;
 
 use objc2_core_foundation::CFRetained;
 use objc2_core_video::CVPixelBuffer;
 use openrip_model::{FrameRate, Micros, Project};
+use openrip_platform::tasks::{self, Task};
 use openrip_render::Compositor;
 
 use crate::{PreviewEngine, PreviewError};
@@ -73,7 +73,7 @@ struct Shared {
 
 pub struct PreviewPipeline {
     shared: Arc<Shared>,
-    worker: Option<JoinHandle<()>>,
+    worker: Option<Task>,
 }
 
 impl PreviewPipeline {
@@ -86,7 +86,7 @@ impl PreviewPipeline {
         });
         let worker = {
             let shared = shared.clone();
-            std::thread::Builder::new().name("preview-render".into()).spawn(move || run(&mut engine, &shared)).expect("spawn preview worker")
+            tasks::spawn("preview-render", move || run(&mut engine, &shared)).map_err(PreviewError::Worker)?
         };
         Ok(PreviewPipeline { shared, worker: Some(worker) })
     }

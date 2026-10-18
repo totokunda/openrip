@@ -24,7 +24,7 @@ pub struct Font {
 
 impl Font {
     pub fn from_file(path: &Path) -> std::io::Result<Font> {
-        Font::from_bytes(std::fs::read(path)?).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a font"))
+        Font::from_bytes(openrip_platform::assets::read(path)?).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a font"))
     }
 
     pub fn from_bytes(data: Vec<u8>) -> Option<Font> {

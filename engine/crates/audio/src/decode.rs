@@ -41,7 +41,9 @@ unsafe impl Send for AudioDecoder {}
 impl AudioDecoder {
     /// `None` if the file has no audio stream.
     pub fn open(path: &Path, rate: u32) -> Result<Option<AudioDecoder>, AudioError> {
-        let c = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| AudioError::Other("path has a NUL byte".into()))?;
+        // FFmpeg opens files by name: the asset's file on disk.
+        let file = openrip_platform::assets::local_path(path).ok_or_else(|| AudioError::Other(format!("{} isn't a file FFmpeg can open", path.display())))?;
+        let c = CString::new(file.to_string_lossy().as_bytes()).map_err(|_| AudioError::Other("path has a NUL byte".into()))?;
         unsafe {
             let mut fmt: *mut ff::AVFormatContext = std::ptr::null_mut();
             check("avformat_open_input", ff::avformat_open_input(&mut fmt, c.as_ptr(), std::ptr::null(), std::ptr::null_mut()))?;

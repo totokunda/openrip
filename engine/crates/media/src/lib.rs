@@ -27,14 +27,15 @@ pub use openrip_frame::{FrameError, FramePixels, Matrix, PixelFormat, RgbImage, 
 pub use info::{probe, AudioInfo, ColorInfo, MediaInfo, VideoInfo};
 pub use openrip_model::{FrameRate, Micros};
 
-/// Start the platform's hardware decoder on a background thread. The first VideoToolbox
-/// session in a process costs ~80 ms (later ones ~2 ms), so call this at engine start to keep
-/// it off the first clip the user opens.
-pub fn warm_up() -> std::thread::JoinHandle<()> {
-    std::thread::spawn(|| {
+/// Start the platform's hardware decoder in the background. The first VideoToolbox session
+/// in a process costs ~80 ms (later ones ~2 ms), so call this at engine start to keep it off
+/// the first clip the user opens.
+pub fn warm_up() -> openrip_platform::tasks::Task {
+    openrip_platform::tasks::spawn("decoder-warm-up", || {
         #[cfg(target_os = "macos")]
         vt::warm_up();
     })
+    .unwrap_or_else(|_| openrip_platform::tasks::Task::done())
 }
 
 /// FFmpeg library versions in use, e.g. for diagnostics.

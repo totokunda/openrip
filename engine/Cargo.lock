@@ -1166,6 +1166,7 @@ version = "0.0.0"
 dependencies = [
  "ffmpeg-sys-next",
  "openrip-model",
+ "openrip-platform",
  "realfft",
  "serde_json",
  "thiserror 2.0.21",
@@ -1176,6 +1177,7 @@ name = "openrip-capcut"
 version = "0.1.0"
 dependencies = [
  "openrip-model",
+ "openrip-platform",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1193,6 +1195,7 @@ dependencies = [
  "openrip-export",
  "openrip-media",
  "openrip-model",
+ "openrip-platform",
  "openrip-playback",
  "openrip-render",
  "openrip-v1",
@@ -1254,6 +1257,7 @@ dependencies = [
  "objc2-video-toolbox",
  "openrip-frame",
  "openrip-model",
+ "openrip-platform",
  "serde",
  "thiserror 2.0.21",
 ]
@@ -1279,6 +1283,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "openrip-platform"
+version = "0.0.0"
+
+[[package]]
 name = "openrip-playback"
 version = "0.0.0"
 dependencies = [
@@ -1288,6 +1296,7 @@ dependencies = [
  "openrip-audio",
  "openrip-media",
  "openrip-model",
+ "openrip-platform",
  "openrip-render",
  "png",
  "serde_json",
@@ -1307,6 +1316,7 @@ dependencies = [
  "openrip-frame",
  "openrip-media",
  "openrip-model",
+ "openrip-platform",
  "pollster",
  "swash",
  "thiserror 2.0.21",
@@ -1318,6 +1328,7 @@ name = "openrip-v1"
 version = "0.1.0"
 dependencies = [
  "openrip-model",
+ "openrip-platform",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

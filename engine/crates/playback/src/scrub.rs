@@ -201,7 +201,7 @@ pub(crate) struct ScrubAhead {
     /// Writes full-size stills to the compositor's GPU from the workers.
     uploader: Option<Uploader>,
     /// Started on the first drag (most engines never scrub: export, thumbnails, playback).
-    workers: Vec<std::thread::JoinHandle<()>>,
+    workers: Vec<openrip_platform::tasks::Task>,
     ready_tx: Sender<Ready>,
     ready: Receiver<Ready>,
     /// The drag's recent positions and when they were asked for.
@@ -293,7 +293,7 @@ impl ScrubAhead {
     fn start(&mut self) {
         for i in 0..WORKERS {
             let (shared, ready, uploader) = (self.shared.clone(), self.ready_tx.clone(), self.uploader.clone());
-            if let Ok(w) = std::thread::Builder::new().name(format!("scrub-ahead-{i}")).spawn(move || work(&shared, &ready, uploader.as_ref())) {
+            if let Ok(w) = openrip_platform::tasks::spawn(format!("scrub-ahead-{i}"), move || work(&shared, &ready, uploader.as_ref())) {
                 self.workers.push(w);
             }
         }

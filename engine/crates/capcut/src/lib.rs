@@ -11,6 +11,7 @@ use std::path::Path;
 pub mod amg;
 
 use openrip_model::*;
+use openrip_platform::assets;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -103,9 +104,9 @@ pub fn import_draft_dir(dir: &Path) -> Result<Imported, ImportError> {
     let info = ["draft_info.json", "draft_content.json"]
         .iter()
         .map(|n| dir.join(n))
-        .find(|p| p.exists())
+        .find(|p| assets::exists(p))
         .ok_or_else(|| ImportError::NotADraft(format!("{} has no draft_info.json", dir.display())))?;
-    let raw = std::fs::read(&info).map_err(|source| ImportError::Io { path: info.display().to_string(), source })?;
+    let raw = assets::read(&info).map_err(|source| ImportError::Io { path: info.display().to_string(), source })?;
     let doc: Value =
         serde_json::from_slice(&raw).map_err(|source| ImportError::Json { path: info.display().to_string(), source })?;
     let name_hint = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -117,20 +118,18 @@ pub fn import_draft_dir(dir: &Path) -> Result<Imported, ImportError> {
             m.path = dir.join(rel).to_string_lossy().into_owned();
         }
     }
-    imported.report.missing_media.retain(|p| !p.starts_with("##_draftpath_placeholder") || !p.split_once("_##/").is_some_and(|(_, rel)| dir.join(rel).exists()));
+    imported.report.missing_media.retain(|p| !p.starts_with("##_draftpath_placeholder") || !p.split_once("_##/").is_some_and(|(_, rel)| assets::exists(&dir.join(rel))));
     // A background-removal result is a folder holding a numbered folder with the masks.
     for m in &mut imported.project.materials.media {
         let Some(matte) = &m.matte else { continue };
         let rel = matte.split_once("_##/").map_or(matte.as_str(), |(_, rest)| rest);
         let root = dir.join(rel);
-        let found = std::fs::read_dir(&root)
+        let found = assets::list(&root)
             .ok()
             .into_iter()
             .flatten()
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .find(|p| p.join("mask").is_dir())
-            .or_else(|| root.join("mask").is_dir().then(|| root.clone()));
+            .find(|p| assets::is_dir(&p.join("mask")))
+            .or_else(|| assets::is_dir(&root.join("mask")).then(|| root.clone()));
         match found {
             Some(p) => m.matte = Some(p.to_string_lossy().into_owned()),
             None => {
@@ -236,7 +235,7 @@ pub fn import_draft_json(doc: &Value, name_hint: &str) -> Result<Imported, Impor
     report.tracks = project.tracks.len();
 
     for m in &project.materials.media {
-        if !m.path.is_empty() && !Path::new(&m.path).exists() {
+        if !m.path.is_empty() && !assets::exists(Path::new(&m.path)) {
             report.missing_media.push(m.path.clone());
         }
     }
@@ -428,7 +427,7 @@ const CAPCUT_WRAP_PER_UNIT: f32 = 0.00134;
 /// docs/parity/capcut-bundles.md). `None` when the bundle isn't on this machine or is the
 /// other kind. Texture paths become absolute paths into the bundle.
 fn text_style(bundle: &Path) -> Option<TextEffect> {
-    let Some(style) = std::fs::read(bundle.join("effectStyle.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else {
+    let Some(style) = assets::read(&bundle.join("effectStyle.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else {
         return sdf_text_style(bundle);
     };
     let paint = |layer: &Value| -> Option<Paint> {
@@ -518,7 +517,7 @@ const SDF_OUTLINE_EM: f32 = 1.5;
 /// past the outlines). Gradients use their first stop; texture overlays and inner shadows
 /// are left out (in the measured style they sit under the fill).
 fn sdf_text_style(bundle: &Path) -> Option<TextEffect> {
-    let roots = amg::decode(&std::fs::read(bundle.join("effect.prefab")).ok()?, SDF_NAMES)?;
+    let roots = amg::decode(&assets::read(&bundle.join("effect.prefab")).ok()?, SDF_NAMES)?;
     fn find<'a>(v: &'a Value, class: &str) -> Option<&'a Value> {
         match v {
             Value::Object(o) if o.get("@class").and_then(Value::as_str) == Some(class) => Some(v),
@@ -555,20 +554,20 @@ fn sdf_text_style(bundle: &Path) -> Option<TextEffect> {
 /// (`"format": "gif"`), else the image its `infoSticker.lua` loads (`singleImage.png`), with
 /// one frame's size from `heycanInfo.json`. `None` when the bundle isn't on this machine.
 fn sticker_file(bundle: &Path) -> Option<(String, bool, u32, u32)> {
-    let read = |name: &str| std::fs::read(bundle.join(name)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+    let read = |name: &str| assets::read(&bundle.join(name)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
     let link = read("config.json").and_then(|c| c.pointer("/effect/Link/0").cloned()).unwrap_or(Value::Null);
     let animated = s(&link, "format") == "gif";
     let file = if animated {
         Some(s(&link, "path")).filter(|p| !p.is_empty()).unwrap_or_else(|| "final.gif".into())
     } else {
         // The script's `source = "…"`.
-        std::fs::read_to_string(bundle.join("infoSticker.lua"))
+        assets::read_to_string(&bundle.join("infoSticker.lua"))
             .ok()
             .and_then(|lua| lua.split("source").nth(1).and_then(|rest| rest.split('"').nth(1)).map(str::to_string))
             .unwrap_or_else(|| "singleImage.png".into())
     };
     let path = bundle.join(&file);
-    if !path.is_file() {
+    if !assets::is_file(&path) {
         return None;
     }
     let info = read("heycanInfo.json").unwrap_or(Value::Null);

@@ -12,6 +12,7 @@ openrip-media.workspace = true
 openrip-model.workspace = true
 openrip-render.workspace = true
 openrip-audio.workspace = true
+openrip-platform.workspace = true
 cpal = "0.18"
 png = "0.18"
 serde_json.workspace = true

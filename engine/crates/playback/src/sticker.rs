@@ -77,7 +77,7 @@ fn load(path: &Path, animated: bool) -> Result<Frames, String> {
         let img = crate::preview::load_png(path).map_err(|e| e.to_string())?;
         return Ok(Frames { frames: vec![(Arc::new(img), 1)], period: 0 });
     }
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let bytes = openrip_platform::assets::read(path).map_err(|e| e.to_string())?;
     let decoded = crate::gif::decode(&bytes).ok_or("not a GIF")?;
     let mut end = 0i64;
     let frames = decoded

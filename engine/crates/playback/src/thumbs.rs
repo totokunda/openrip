@@ -120,7 +120,7 @@ impl Thumbnailer {
                     let image = self.scale(Source::Video(&frame), height, rotation);
                     if let Some(dir) = disk {
                         // Best effort: a full disk only costs the cache.
-                        let _ = save_png(dir, &thumb_file(dir, height, time), &image);
+                        let _ = save_png(&thumb_file(dir, height, time), &image);
                     }
                     if !deliver(Thumb { index, time, exact: true, image }) {
                         break;
@@ -210,10 +210,9 @@ fn is_still(path: &Path) -> bool {
 
 /// A folder name for one version of a file: its path, size and modification time.
 pub(crate) fn media_key(path: &Path) -> Option<String> {
-    let meta = std::fs::metadata(path).ok()?;
-    let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
+    let v = openrip_platform::assets::version(path)?;
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    (path, meta.len(), mtime.as_nanos()).hash(&mut h);
+    (path, v.len, v.modified_ns).hash(&mut h);
     Some(format!("{:016x}", h.finish()))
 }
 
@@ -221,15 +220,14 @@ fn thumb_file(dir: &Path, height: u32, t: Micros) -> PathBuf {
     dir.join(format!("{height}-{}.png", t.0))
 }
 
-fn save_png(dir: &Path, file: &Path, img: &RgbaImage) -> Result<(), Box<dyn std::error::Error>> {
-    std::fs::create_dir_all(dir)?;
-    // Write then rename, so a reader never sees half a file.
-    let tmp = file.with_extension("tmp");
-    let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(&tmp)?), img.width, img.height);
+fn save_png(file: &Path, img: &RgbaImage) -> Result<(), Box<dyn std::error::Error>> {
+    let mut bytes = Vec::new();
+    let mut enc = png::Encoder::new(&mut bytes, img.width, img.height);
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
     enc.set_compression(png::Compression::Fast);
     enc.write_header()?.write_image_data(&img.data)?;
-    std::fs::rename(tmp, file)?;
+    // Whole or not at all, so a reader never sees half a file.
+    openrip_platform::assets::write(file, &bytes)?;
     Ok(())
 }

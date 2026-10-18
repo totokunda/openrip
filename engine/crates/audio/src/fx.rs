@@ -114,7 +114,7 @@ impl Chain {
     /// The voice filter in `bundle` (CapCut's downloaded copy) with the clip's slider values
     /// by name; sliders not given take their defaults.
     pub fn load(bundle: &Path, sliders: &BTreeMap<String, f64>, rate: u32) -> Result<Chain, String> {
-        let read = |name: &str| -> Result<Value, String> { serde_json::from_slice(&std::fs::read(bundle.join(name)).map_err(|e| format!("{name}: {e}"))?).map_err(|e| format!("{name}: {e}")) };
+        let read = |name: &str| -> Result<Value, String> { serde_json::from_slice(&openrip_platform::assets::read(&bundle.join(name)).map_err(|e| format!("{name}: {e}"))?).map_err(|e| format!("{name}: {e}")) };
         let preset = read("mdsp_preset.json")?;
         // The sliders, in their parameter order.
         let extra = read("extra.json").unwrap_or(Value::Null);

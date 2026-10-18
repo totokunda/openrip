@@ -72,10 +72,10 @@ impl ProjectInfo {
 
 /// Load a project: a CapCut draft folder, an OpenRip project JSON, or a v1 project file.
 pub fn load_project(path: &Path) -> Result<(Project, Source)> {
-    if path.is_dir() {
+    if openrip_platform::assets::is_dir(path) {
         return Ok((openrip_capcut::import_draft_dir(path)?.project, Source::CapCut));
     }
-    let text = std::fs::read_to_string(path)?;
+    let text = openrip_platform::assets::read_to_string(path)?;
     if let Ok(p) = serde_json::from_str::<Project>(&text) {
         return Ok((p, Source::OpenRip));
     }

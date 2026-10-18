@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use openrip_media::{DecoderOptions, MediaError, Micros, VideoDecoder, VideoFrame};
+use openrip_platform::tasks::{self, Task};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SeekMode {
@@ -66,7 +66,7 @@ struct Shared {
 /// One source's decoder on a worker thread.
 pub struct FrameServer {
     shared: Arc<Shared>,
-    worker: Option<JoinHandle<()>>,
+    worker: Option<Task>,
 }
 
 impl FrameServer {
@@ -77,10 +77,8 @@ impl FrameServer {
         let shared = Arc::new(Shared { slot: Mutex::new(Slot::default()), cond: Condvar::new() });
         let worker = {
             let shared = shared.clone();
-            std::thread::Builder::new()
-                .name(format!("frame-server {}", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()))
-                .spawn(move || run(decoder, &shared, deliver))
-                .expect("spawn frame server")
+            let name = format!("frame-server {}", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default());
+            tasks::spawn(name, move || run(decoder, &shared, deliver)).map_err(|e| MediaError::Open { path: path.into(), msg: format!("can't start its frame server: {e}") })?
         };
         Ok(FrameServer { shared, worker: Some(worker) })
     }

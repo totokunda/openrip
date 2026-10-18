@@ -13,6 +13,7 @@ thiserror.workspace = true
 serde.workspace = true
 openrip-model.workspace = true
 openrip-frame.workspace = true
+openrip-platform.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "objc2-io-surface"] }
