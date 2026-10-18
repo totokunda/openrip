@@ -34,6 +34,7 @@ import EngineFrame from "./EngineFrame";
 import TrackingRegion from "./TrackingRegion";
 import { useEngineDraws } from "@/lib/engine-preview";
 import DrawingPreview from "./clips/DrawingPreview";
+import PenOverlay from "./PenOverlay";
 import MaskPreview from "./clips/MaskPreview";
 import { useControlsStore } from "@/lib/control";
 import {
@@ -67,7 +68,8 @@ import {
   mergePolygons,
 } from "@/lib/polygon";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
-import { shapeClip, shapeSize } from "@/lib/shape-presets";
+import { lineHeight, shapeClip, shapeSize } from "@/lib/shape-presets";
+import { vertices } from "@/lib/shape-geometry";
 
 // The applicators of a clip with none over it: one array, so clip previews keep their props.
 const NO_APPLICATORS: ReturnType<typeof getApplicatorsForClip> = [];
@@ -1892,14 +1894,28 @@ const Preview: React.FC<PreviewProps> = () => {
         const x = Math.min(shapeStart.x, worldEndX);
         const y = Math.min(shapeStart.y, worldEndY);
         const { width, height } = shapeSize(shape, Math.abs(worldEndX - shapeStart.x), Math.abs(worldEndY - shapeStart.y));
+        const canvas = { width: rectWidth, height: rectHeight };
+        const at = { clipId: uuidv4(), timelineId: uuidv4(), startFrame: focusFrame, fps: DEFAULT_FPS, totalFrames: totalTimelineFrames };
+        const addTrack = () =>
+          addTimeline({ timelineId: at.timelineId, type: "shape", timelineY: 0, timelineHeight: 40, timelineWidth: 0, muted: false, hidden: false }, -1);
 
-        // Only create shape if it has meaningful size
-        if (width > 5 && height > 5) {
-          const timelineId = uuidv4();
-          addTimeline({ timelineId, type: "shape", timelineY: 0, timelineHeight: 40, timelineWidth: 0, muted: false, hidden: false }, -1);
-          addClip(
-            shapeClip(shape, { x, y, width, height }, { clipId: uuidv4(), timelineId, startFrame: focusFrame, fps: DEFAULT_FPS, totalFrames: totalTimelineFrames }),
-          );
+        if (shape === "line" || shape === "arrow") {
+          // From where the drag began to where it ended: the line's box turned along it.
+          const dx = worldEndX - shapeStart.x;
+          const dy = worldEndY - shapeStart.y;
+          const length = Math.hypot(dx, dy);
+          if (length > 5) {
+            const turn = Math.atan2(dy, dx);
+            const h = lineHeight(length);
+            addTrack();
+            const clip = shapeClip(shape, { x: shapeStart.x + (Math.sin(turn) * h) / 2, y: shapeStart.y - (Math.cos(turn) * h) / 2, width: length, height: h }, at, canvas);
+            clip.transform = { ...clip.transform!, rotation: (turn * 180) / Math.PI };
+            addClip(clip);
+          }
+        } else if (width > 5 && height > 5) {
+          // Only create shape if it has meaningful size
+          addTrack();
+          addClip(shapeClip(shape, { x, y, width, height }, at, canvas));
         }
 
         // Reset shape creation state
@@ -1938,6 +1954,8 @@ const Preview: React.FC<PreviewProps> = () => {
       maskShape,
       resetMaskShapeDrawingRefs,
       tempDrawingPoints,
+      rectWidth,
+      rectHeight,
     ],
   );
 
@@ -2085,6 +2103,7 @@ const Preview: React.FC<PreviewProps> = () => {
         );
       }
       case "line":
+      case "arrow":
         return (
           <KonvaLine
             {...sharedProps}
@@ -2096,6 +2115,12 @@ const Preview: React.FC<PreviewProps> = () => {
             ]}
           />
         );
+      case "triangle":
+      case "parallelogram":
+      case "trapezoid": {
+        const pts = vertices(shape, width, height) ?? [];
+        return <KonvaLine {...sharedProps} x={x} y={y} closed points={pts.flatMap((p) => [p.x, p.y])} />;
+      }
       case "star":
         return (
           <KonvaStar
@@ -2691,6 +2716,8 @@ const Preview: React.FC<PreviewProps> = () => {
                   rectWidth={rectWidth}
                   rectHeight={rectHeight}
                 />
+                {/* The Stickers tab's Pen: the path being drawn, or a pen shape's points. */}
+                <PenOverlay rectWidth={rectWidth} rectHeight={rectHeight} scale={scale} position={position} />
                 {renderLassoPath()}
                 {renderMaskRectPreview()}
                 {renderMaskBrushDrawing()}

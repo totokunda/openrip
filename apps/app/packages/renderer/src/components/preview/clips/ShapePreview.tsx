@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Rect, Ellipse, Line, Star, Transformer, Group } from "react-konva";
+import { Rect, Ellipse, Line, Star, Transformer, Group, Shape as KShape } from "react-konva";
 import type Konva from "konva";
 import {
   PolygonClipProps,
@@ -22,6 +22,9 @@ import { BaseClipApplicator } from "./apply/base";
 import ApplicatorFilter from "./custom/ApplicatorFilter";
 import { sanitizeCornerRadius } from "@/lib/konva/sanitizeCornerRadius";
 import { useClipFocusFrame, useEngineDraws } from "@/lib/engine-preview";
+import { dashes, drawShape, outlineOf } from "@/lib/shape-geometry";
+import { fillOn, strokeOn } from "@/lib/shape-presets";
+import { usePenStore } from "@/lib/pen";
 
 //@ts-ignore
 Konva.Filters.Applicator = ApplicatorFilter;
@@ -169,11 +172,18 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
     fill = "#3b82f6",
     stroke = "#1e40af",
     strokeWidth = 2,
-  } = clip as ShapeClipProps;
+    // A clip just removed (an undo) can render once more before its preview goes.
+  } = (clip ?? {}) as ShapeClipProps;
 
   // Opacity values used in caching dependencies
   const fillOpacity = (clip as ShapeClipProps)?.fillOpacity ?? 100;
   const strokeOpacity = (clip as ShapeClipProps)?.strokeOpacity ?? 100;
+  // CapCut's shapes and the pen's are drawn by their outline (lib/shape-geometry.ts), as the
+  // engine draws them; the app's first shapes by Konva's own.
+  const byOutline = !!clip && outlineOf(clip, 1, 1) !== null;
+  const isLine = shapeType === "line" || shapeType === "arrow";
+  const penDrawing = !!clip?.penDrawing;
+  const penEditing = usePenStore((s) => s.editingClipId === clipId);
 
   // Stable filters array so react-konva doesn't set a new filters prop each render
   const filtersArray = useMemo(
@@ -422,9 +432,10 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
     const node = shapeRef.current;
     if (!node) return;
     if (isInteracting) return;
-    // Refresh cache to reflect latest visual attributes
+    // Refresh cache to reflect latest visual attributes (a shape drawn by its outline draws
+    // past its box, its shadow, marks and mitres: it isn't cached).
     node.clearCache();
-    node.cache({ pixelRatio: 2 });
+    if (!byOutline) node.cache({ pixelRatio: 2 });
     node.getLayer()?.batchDraw?.();
   }, [
     // Avoid recache on pure transforms (x, y, rotation, scale) — cached bitmap will be transformed.
@@ -441,6 +452,8 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
     height,
     applicatorClipsSignature,
     isInFrame,
+    byOutline,
+    clip,
   ]);
 
   const handleClick = useCallback(() => {
@@ -577,7 +590,8 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
       const useWidthHeight =
         shapeType === "rectangle" ||
         shapeType === "ellipse" ||
-        shapeType === "line";
+        shapeType === "line" ||
+        byOutline;
 
       if (useWidthHeight) {
         setClipTransform(clipId, {
@@ -590,7 +604,7 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
           rotation: node.rotation(),
         });
         // Only update node dimensions for shapes that have width/height properties
-        if (shapeType === "rectangle" || shapeType === "line") {
+        if (shapeType === "rectangle" || shapeType === "line" || byOutline) {
           node.width(actualWidth);
           node.height(actualHeight);
         } else if (shapeType === "ellipse") {
@@ -663,6 +677,7 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
     clipTransform,
     width,
     height,
+    byOutline,
   ]);
 
   useEffect(() => {
@@ -670,6 +685,9 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
     if (inputMode) return;
     const handleWindowClick = (e: MouseEvent) => {
       if (!isSelected) return;
+      // The pen's clicks (drawing it, or on its points and outline) keep it selected.
+      const pen = usePenStore.getState();
+      if (pen.editingClipId === clipId || pen.drawingClipId === clipId) return;
       const now =
         typeof performance !== "undefined" && performance.now
           ? performance.now()
@@ -728,22 +746,41 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
       height,
     );
 
+    // The Fill and Stroke groups' checks, the stroke's Style and the Shadow, for the app's
+    // first shapes too.
+    const sc = clip as ShapeClipProps;
+    const shadowAngle = ((sc?.shadowAngle ?? 45) * Math.PI) / 180;
+    const shadowDistance = sc?.shadowDistance ?? 0;
     const baseProps = {
       ref: shapeRef,
       scaleX,
       scaleY,
       rotation,
-      fill: fillWithOpacity,
-      stroke: strokeWithOpacity,
+      fill: sc && fillOn(sc) ? fillWithOpacity : undefined,
+      stroke: sc && strokeOn(sc) ? strokeWithOpacity : undefined,
       strokeWidth,
-      draggable: tool === "pointer" && !isTransforming && !inputMode,
+      dash: dashes(sc?.strokeStyle, strokeWidth),
+      lineCap: (sc?.strokeStyle === "dotted" ? "round" : "butt") as "round" | "butt",
+      draggable: tool === "pointer" && !isTransforming && !inputMode && !penEditing,
       opacity: engineHides ? 0 : (clipTransform?.opacity ?? 100) / 100,
       onDragStart: handleDragStart,
       onDragMove: handleDragMove,
       onDragEnd: handleDragEnd,
       onClick: handleClick,
+      // A pen shape's points are edited after a double-click on it, as its outline.
+      onDblClick: () => {
+        if (shapeType === "path" && !inputMode && !isFullscreen) usePenStore.getState().edit(clipId);
+      },
       perfectDrawEnabled: false,
-      shadowForStrokeEnabled: false,
+      shadowForStrokeEnabled: !!sc?.shadowEnabled,
+      ...(sc?.shadowEnabled
+        ? {
+            shadowColor: sc.shadowColor ?? "#000000",
+            shadowOpacity: (sc.shadowOpacity ?? 50) / 100,
+            shadowBlur: 0,
+            shadowOffset: { x: shadowDistance * Math.cos(shadowAngle), y: shadowDistance * Math.sin(shadowAngle) },
+          }
+        : {}),
     };
 
     // Props for shapes positioned from top-left corner
@@ -763,6 +800,35 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
     };
 
     // Use stable references to avoid invalidating cached filter output
+
+    // CapCut's shapes and the pen's: the outline drawn as the engine draws it (shadow, fill,
+    // stroke, marks); the whole box takes a click.
+    if (byOutline) {
+      const { fill: _f, stroke: _s, dash: _d, shadowColor: _c, ...outlineProps } = baseProps as any;
+      return (
+        <KShape
+          {...outlineProps}
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          // Nothing to draw while the pen is still drawing it (the pen's overlay shows it).
+          sceneFunc={(ctx) => {
+            if (penDrawing) return;
+            drawShape(ctx._context as CanvasRenderingContext2D, sc, width, height, safeCornerRadius as number);
+          }}
+          hitFunc={(ctx, shape) => {
+            if (penDrawing) return;
+            ctx.beginPath();
+            ctx.rect(0, 0, width, height);
+            ctx.closePath();
+            ctx.fillStrokeShape(shape);
+          }}
+          fill={penDrawing ? undefined : "#000"}
+          shadowEnabled={false}
+        />
+      );
+    }
 
     switch (shapeType) {
       case "rectangle":
@@ -845,7 +911,7 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
     }
   };
 
-  if (!isInFrame) {
+  if (!isInFrame || !clip) {
     return null;
   }
 
@@ -963,7 +1029,7 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
         anchorCornerRadius={8}
         anchorStroke="#E3E3E3"
         anchorStrokeWidth={1}
-        visible={tool === "pointer" && isSelected && !isFullscreen && !inputMode}
+        visible={tool === "pointer" && isSelected && !isFullscreen && !inputMode && !penDrawing && !penEditing}
         borderStrokeWidth={2}
         rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
         boundBoxFunc={transformerBoundBoxFunc as any}
@@ -977,16 +1043,12 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
             node.getLayer()?.batchDraw?.();
           }
         }}
-        enabledAnchors={[
-          "top-left",
-          "top-center",
-          "top-right",
-          "bottom-left",
-          "bottom-right",
-          "middle-left",
-          "middle-right",
-          "bottom-center",
-        ]}
+        // A line or an arrow is lengthened from its ends.
+        enabledAnchors={
+          isLine && byOutline
+            ? ["middle-left", "middle-right"]
+            : ["top-left", "top-center", "top-right", "bottom-left", "bottom-right", "middle-left", "middle-right", "bottom-center"]
+        }
       />
     </React.Fragment>
   );

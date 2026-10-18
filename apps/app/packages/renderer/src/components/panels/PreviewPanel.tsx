@@ -15,9 +15,9 @@ interface PreviewPanelProps {
 /**
  * The player, as CapCut's: a header with its name and its menu (oscilloscope, guides and
  * rulers, still frames); the canvas, with the scopes under it when shown; and the bottom bar.
- * There is no tool row: text comes from the Text tab, drawing and shapes from the Stickers
- * tab and masks from the Mask tab, and their keys (T, D, S; V or H to go back) still work,
- * with a chip on the canvas while one is on.
+ * There is no tool row: text comes from the Text tab, shapes and the Pen from the Stickers
+ * tab and masks from the Mask tab, and their keys (T, S; V or H to go back) still work, with
+ * a chip on the canvas while one is on (and CapCut's "Click to start drawing" for the Pen).
  */
 const PreviewPanel: React.FC<PreviewPanelProps> = ({
   id = "player",

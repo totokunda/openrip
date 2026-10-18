@@ -14,6 +14,7 @@ import { useClipStore } from "@/lib/clip";
 import { useDrawingStore } from "@/lib/drawing";
 import { useMaskStore } from "@/lib/mask";
 import { useViewportStore } from "@/lib/viewport";
+import { SHAPES } from "@/lib/shape-presets";
 import { undo, redo } from "@/lib/history";
 import { handleTimelineKey, zoomTimelineTo } from "@/lib/timeline-shortcuts";
 import { actionFor } from "@/lib/keymap";
@@ -385,31 +386,12 @@ const Controls = () => {
       const key = e.key.toLowerCase();
 
       // In-mode selections using number keys (no modifiers)
-      // Shape mode: 1=Rectangle, 2=Ellipse, 3=Polygon, 4=Line, 5=Star
+      // Shape mode: the Shapes library's order, 1 rectangle … 7 arrow.
       if (!isMod && viewport.tool === "shape") {
-        if (key === "1") {
+        const pick = SHAPES[Number(key) - 1];
+        if (/^[1-9]$/.test(key) && pick) {
           e.preventDefault();
-          viewport.setShape("rectangle");
-          return;
-        }
-        if (key === "2") {
-          e.preventDefault();
-          viewport.setShape("ellipse");
-          return;
-        }
-        if (key === "3") {
-          e.preventDefault();
-          viewport.setShape("polygon");
-          return;
-        }
-        if (key === "4") {
-          e.preventDefault();
-          viewport.setShape("line");
-          return;
-        }
-        if (key === "5") {
-          e.preventDefault();
-          viewport.setShape("star");
+          viewport.setShape(pick.id);
           return;
         }
       }
@@ -434,26 +416,8 @@ const Controls = () => {
         }
       }
 
-      // Draw mode: 1=Brush, 2=Highlighter, 3=Eraser
-      if (!isMod && viewport.tool === "draw") {
-        if (key === "1") {
-          e.preventDefault();
-          drawingStore.setTool("brush");
-          return;
-        }
-        if (key === "2") {
-          e.preventDefault();
-          drawingStore.setTool("highlighter");
-          return;
-        }
-        if (key === "3") {
-          e.preventDefault();
-          drawingStore.setTool("eraser");
-          return;
-        }
-      }
-
-      // Tool switching (letters, no modifiers)
+      // Tool switching (letters, no modifiers). CapCut draws no freehand lines, so there's no
+      // draw tool (D); a project's drawings still show and can be selected, moved and deleted.
       if (!isMod) {
         if (key === "v") {
           e.preventDefault();
@@ -463,11 +427,6 @@ const Controls = () => {
         if (key === "h") {
           e.preventDefault();
           viewport.setTool("hand");
-          return;
-        }
-        if (key === "d") {
-          e.preventDefault();
-          viewport.setTool("draw");
           return;
         }
         if (key === "t") {

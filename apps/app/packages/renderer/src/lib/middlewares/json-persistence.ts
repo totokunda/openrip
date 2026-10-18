@@ -840,7 +840,8 @@ const hydrateStoresFromProjectJson = async (
       if (useViewportStore && typeof useViewportStore.setState === "function" && Object.keys(doc.editorState ?? {}).length > 0) {
         useViewportStore.setState({
           aspectRatio: doc.settings?.aspectRatio,
-          tool: doc.editorState?.tool,
+          // The freehand draw tool is gone (CapCut has none): a project left on it opens on select.
+          tool: doc.editorState?.tool === "draw" ? "pointer" : doc.editorState?.tool,
           shape: doc.editorState?.shape,
           scale: doc.editorState?.scale,
           position: doc.editorState?.position,

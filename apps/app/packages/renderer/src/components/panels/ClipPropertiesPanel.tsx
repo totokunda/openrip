@@ -21,6 +21,7 @@ import MaskPropertiesPanel from '../properties/mask/MaskPropertiesPanel';
 import AnimationProperties, { KIND_LABEL, animationKinds } from '../properties/AnimationProperties'
 import SpeedProperties from '../properties/SpeedProperties'
 import FilterProperties from '../properties/FilterProperties'
+import ShapeProperties from '../properties/ShapeProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
 import { useInspectorStore } from '@/lib/inspector'
 import TrackingProperties from '../properties/TrackingProperties'
@@ -142,18 +143,10 @@ const ClipPropertiesPanel: React.FC = () => {
           tracking,
           duration('Duration'),
         ];
+      // CapCut's Shapes tab: one scrolling column of groups (its Animation and Tracking tabs
+      // aren't here: shapes don't animate in the engine yet, and tracking is out of scope).
       case 'shape':
-        return [
-          {
-            id: 'shape',
-            label: 'Shape',
-            sections: [
-              { id: 'basic', label: 'Basic', content: appearance },
-              { id: 'transform', label: 'Transform', content: stack(position, layout) },
-            ],
-          },
-          duration('Duration'),
-        ];
+        return [{ id: 'shape', label: 'Shapes', sections: [{ id: 'shape', label: 'Shapes', content: <ShapeProperties clipId={clipId} /> }] }];
       case 'audio':
         // CapCut's tabs for an audio clip: Basic, Voice changer, Speed.
         return [

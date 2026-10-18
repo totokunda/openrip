@@ -43,6 +43,7 @@ import { MarkerEditor, MarkerFlags } from "./Markers";
 import { RULER_HEIGHT, TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { applyTransition, cutsOn, useTransitionDropStore } from "@/lib/transitions";
 import type { TransitionDrag } from "../menus/TransitionMenu";
+import { addLibraryShape, type ShapeDrag } from "../menus/ShapesMenu";
 import KeyframeGraph from "./KeyframeGraph";
 import { imageDurationFrames } from "@/lib/preferences";
 
@@ -357,12 +358,27 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     return best;
   };
 
+  // A shape tile from Stickers ▸ Shapes dropped on the timeline: the frame under the pointer
+  // (null when it's let go elsewhere).
+  const frameUnder = (event: { activatorEvent: Event | null; delta: { x: number; y: number } }): number | null => {
+    const start = event.activatorEvent as PointerEvent | null;
+    const el = containerRef.current;
+    if (!start || !el || typeof start.clientX !== "number") return null;
+    const r = el.getBoundingClientRect();
+    const cx = start.clientX + event.delta.x;
+    const cy = start.clientY + event.delta.y;
+    if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return null;
+    const [vs, ve] = controlStore.timelineDuration;
+    const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
+    return Math.max(0, Math.round(vs + (cx - r.left - TIME_ZERO_X) * perPx));
+  };
+
   useDndMonitor({
     onDragStart: (event) => {
       const data = event.active?.data?.current as unknown as
         | MediaItem
         | undefined;
-      if (!data || (data as unknown as TransitionDrag).type === "transition") return;
+      if (!data || (data as unknown as TransitionDrag).type === "transition" || (data as unknown as ShapeDrag).type === "shape-preset") return;
 
       setIsDragging(true);
 
@@ -452,6 +468,15 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         const target = Math.hypot(event.delta.x, event.delta.y) > 3 ? cutUnder(event) : null;
         useTransitionDropStore.getState().setTarget(null);
         if (target) applyTransition(target, drag.transition);
+        return;
+      }
+      // A shape goes in at the time it's let go at, on a new track at the top (the Shapes
+      // tab handles a press without a move, and a drop on the player).
+      const shapeDrag = data as unknown as ShapeDrag;
+      if (shapeDrag.type === "shape-preset") {
+        const frame = Math.hypot(event.delta.x, event.delta.y) > 3 ? frameUnder(event) : null;
+        if (frame != null) void addLibraryShape(shapeDrag.shape, { startFrame: frame });
+        setIsDragging(false);
         return;
       }
 

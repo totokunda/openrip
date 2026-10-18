@@ -1967,11 +1967,14 @@ const TimelineClip: React.FC<
                   ref={textRef}
                   x={9}
                   y={timelineHeight / 2}
+                  // CapCut's tags: "Shape to draw" while the Pen draws it, then "Custom
+                  // shape"; its library's shapes are "Shapes".
                   text={
-                    ((currentClip as ShapeClipProps)?.shapeType
-                      ?.charAt(0)
-                      .toUpperCase() ?? "") +
-                    ((currentClip as ShapeClipProps)?.shapeType?.slice(1) ?? "")
+                    (currentClip as ShapeClipProps).penDrawing
+                      ? "Shape to draw"
+                      : (currentClip as ShapeClipProps).shapeType === "path"
+                        ? "Custom shape"
+                        : "Shapes"
                   }
                   fontSize={9.5}
                   fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"

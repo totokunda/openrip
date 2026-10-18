@@ -24,7 +24,22 @@ export type TimelineType =
   | "draw"
   | "filter";
 export type ViewTool = "pointer" | "hand" | "mask" | "draw" | "shape" | "text";
-export type ShapeTool = "rectangle" | "ellipse" | "polygon" | "line" | "star";
+/**
+ * A shape clip's kind. CapCut's Stickers ▸ Shapes: rectangle, ellipse (its circle), triangle,
+ * parallelogram, trapezoid, line, arrow and the pen's `path`. `polygon` (a regular polygon)
+ * and `star` are the app's first shapes, kept for projects that have them.
+ */
+export type ShapeTool =
+  | "rectangle"
+  | "ellipse"
+  | "triangle"
+  | "parallelogram"
+  | "trapezoid"
+  | "line"
+  | "arrow"
+  | "path"
+  | "polygon"
+  | "star";
 
 /**
  * The app's first Adjust sliders, on its own scales (−100…100; blur, sharpness, noise and
@@ -620,14 +635,56 @@ export type AudioClipProps = ClipProps &
     fadeOut?: number;
   };
 
+/** A shape stroke's pattern (CapCut's stroke Style). */
+export type StrokeStyle = "solid" | "dashed" | "dotted";
+/** What an open outline carries at an end (CapCut's Cap: None, Arrow, Round). */
+export type StrokeCap = "none" | "arrow" | "round";
+
+/**
+ * A point of a pen path (or of a line or an arrow): where it is in the shape's box, in
+ * fractions of its width and height (0–1 from the top-left), and its Bézier handles as
+ * offsets from it in the same units. A corner has no handles.
+ */
+export interface PathPoint {
+  x: number;
+  y: number;
+  inX?: number;
+  inY?: number;
+  outX?: number;
+  outY?: number;
+}
+
 export type ShapeClipProps = ClipProps & {
   type: "shape";
   shapeType?: ShapeTool;
   fill?: string;
   fillOpacity?: number;
+  /** The Fill group's check (closed shapes are filled when it's unset). */
+  fillEnabled?: boolean;
   stroke?: string;
   strokeOpacity?: number;
+  /** World units. */
   strokeWidth?: number;
+  /** The Stroke group's check (on when it's unset and the stroke has a width). */
+  strokeEnabled?: boolean;
+  strokeStyle?: StrokeStyle;
+  /** An open outline's ends (a line, an arrow, an open pen path). An arrow's end is an arrow when unset. */
+  capStart?: StrokeCap;
+  capEnd?: StrokeCap;
+  shadowEnabled?: boolean;
+  shadowColor?: string;
+  /** Percent. */
+  shadowOpacity?: number;
+  /** World units. */
+  shadowDistance?: number;
+  /** Degrees clockwise from the right, on screen. */
+  shadowAngle?: number;
+  /** A pen path's points (a line's and an arrow's two), in its box. */
+  path?: PathPoint[];
+  /** Whether the pen path closes back to its first point. */
+  pathClosed?: boolean;
+  /** A pen shape still being drawn (CapCut's "Shape to draw" on the timeline). */
+  penDrawing?: boolean;
 };
 
 export type PolygonClipProps = ShapeClipProps & {
@@ -1029,6 +1086,7 @@ export function clipSignature(clip: AnyClipProps): string {
           s.stroke ?? "",
           n(s.strokeOpacity),
           n(s.strokeWidth),
+          JSON.stringify([s.fillEnabled, s.strokeEnabled, s.strokeStyle, s.capStart, s.capEnd, s.shadowEnabled, s.shadowColor, s.shadowOpacity, s.shadowDistance, s.shadowAngle, s.path, s.pathClosed]),
         );
         break;
       }

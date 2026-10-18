@@ -26,7 +26,7 @@ import MediaMenu from "@/components/menus/MediaMenu";
 import FilterMenu from "../menus/FilterMenu";
 import TextMenu from "../menus/TextMenu";
 import TransitionMenu from "../menus/TransitionMenu";
-import CanvasToolsMenu from "../menus/CanvasToolsMenu";
+import ShapesMenu from "../menus/ShapesMenu";
 import AudioMenu, { type AudioSection } from "../menus/AudioMenu";
 import PendingMenu, { type Pending } from "../menus/PendingMenu";
 import CaptionsMenu from "../menus/CaptionsMenu";
@@ -77,9 +77,9 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
     { id: "captions", label: "Local captions" },
     { id: "animations", label: "Animations" },
   ],
+  // CapCut's column without Yours and GIPHY (an online service): Stickers, then Shapes.
   stickers: [
     { id: "stickers", label: "Stickers" },
-    { id: "draw", label: "Draw" },
     { id: "shapes", label: "Shapes" },
   ],
   effects: [{ id: "effects", label: "Video effects" }],
@@ -205,7 +205,7 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
       case "transitions":
         return <TransitionMenu category={sub || undefined} />;
       case "stickers":
-        return sub === "draw" || sub === "shapes" ? <CanvasToolsMenu part={sub} /> : <PendingMenu section="stickers" />;
+        return sub === "shapes" ? <ShapesMenu /> : <PendingMenu section="stickers" />;
       case "audio":
         return <AudioMenu section={sub as AudioSection} />;
       default:
