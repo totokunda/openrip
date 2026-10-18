@@ -102,10 +102,10 @@ export default async (ctx) => {
   const [bx, by] = [map.x(3), await rowY(ctx, doc, sound.timelineId)];
   await win.mouse.click(bx, by, { button: "right" });
   await win.waitForTimeout(400);
-  await win.locator("[data-menu-item=auto-beats]").hover();
+  await win.locator("[data-testid=menu-auto-beats]").hover();
   await win.waitForTimeout(300);
   await shot("bt-3-menu");
-  await settled(win, () => win.locator("[data-menu-item=auto-beat1]").click());
+  await settled(win, () => win.locator("[data-testid=menu-auto-beat1]").click());
   c = await saved();
   await win.waitForTimeout(300);
   const bars = await markerCount(win);
