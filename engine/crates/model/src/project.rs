@@ -154,7 +154,11 @@ impl Segment {
         let source = self.source?;
         let length = self.target.duration.0.max(1);
         let local = self.local_time(timeline).0.clamp(0, length);
-        let offset = remap.source_offset(local, length);
+        // Through the curve to progress through the source as it plays. (CapCut works in µs of
+        // source, the speed's integral times the clip's length; its source length is that
+        // integral's total to the µs, and this keeps a clip whose length was rounded, or which
+        // was cut from a curved one, inside its source.)
+        let offset = (remap.source_at(local as f64 / length as f64) * source.duration.0 as f64).round() as i64;
         let last = (source.end().0 - 1).max(source.start.0);
         let t = if self.reverse { source.end().0 - 1 - offset } else { source.start.0 + offset };
         Some(Micros(t.clamp(source.start.0, last)))
@@ -166,7 +170,7 @@ impl Segment {
     pub fn local_of_played(&self, materials: &Materials, offset: Micros) -> Micros {
         let Some(source) = self.source else { return offset };
         match self.speed_curve(materials).and_then(|s| Remap::new(&s.curve)) {
-            Some(remap) if source.duration.0 > 0 => Micros(remap.output_offset(offset.0, self.target.duration.0)),
+            Some(remap) if source.duration.0 > 0 => Micros((remap.timeline_at(offset.0 as f64 / source.duration.0 as f64) * self.target.duration.0 as f64).round() as i64),
             _ => Micros((offset.0 as f64 / if self.speed > 0.0 { self.speed } else { 1.0 }).round() as i64),
         }
     }

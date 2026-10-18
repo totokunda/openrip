@@ -397,7 +397,9 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                     clip.insert("freeze".into(), Value::Null);
                 }
                 clip.insert("volume".into(), json!(20.0 * (seg.volume.value.max(1e-4) as f64).log10()));
-                // Trims in timeline frames before the speed, as the app keeps them.
+                // Trims in timeline frames before the speed, as the app keeps them (a reversed
+                // clip's from the media's end, in the order it plays).
+                let src = if seg.reverse { crate::played_order(src, m.duration) } else { src };
                 let trim_start = ticks.frame(Micros((src.start.0 as f64 / speed.max(1e-6)) as i64));
                 let full = ticks.frame(Micros((m.duration.0 as f64 / speed.max(1e-6)) as i64));
                 let trim_end = (full - trim_start - (end - start)).max(0);
@@ -1257,6 +1259,10 @@ mod tests {
         let back = import_v1_json(&doc).unwrap().project;
         let v = segment(&back, "v");
         assert!(v.reverse);
+        // Its trims count from the media's end, as it plays: the draft's 1 s in-point, now at
+        // the curve's mean speed, is that far before the 10 s media's end.
+        let src = v.source.unwrap();
+        assert!((src.end().0 as f64 - (10_000_000.0 - 1_000_000.0 * average)).abs() <= 2.0, "{src:?}");
         let curve = v.speed_curve(&back.materials).unwrap();
         assert_eq!((curve.preset.as_deref(), curve.curve.len(), curve.speed), (Some("Montage"), 6, average));
         // Its source is its length at the mean speed.
@@ -1293,6 +1299,20 @@ mod tests {
         assert_eq!(shown["reverse"], false);
         let back = import_v1_json(&doc).unwrap().project;
         assert_eq!(segment(&back, "v"), segment(&p, "v"));
+        // A reversed one too, and trimmed in the app it keeps its out-point (where it starts
+        // playing): the trims count from the media's end.
+        let mut rp = p.clone();
+        rp.tracks[0].segments[0].reverse = true;
+        let rdoc = to_app_project(&rp, &mut |_| None);
+        assert_eq!(segment(&import_v1_json(&rdoc).unwrap().project, "v"), segment(&rp, "v"));
+        let mut trimmed = rdoc.clone();
+        let tc = clip_mut(&mut trimmed, "v");
+        let end = tc["endTick"].as_str().unwrap().parse::<i64>().unwrap() - 500_000;
+        tc["endTick"] = json!(end.to_string());
+        let back = import_v1_json(&trimmed).unwrap().project;
+        let (was, now) = (segment(&rp, "v").source.unwrap(), segment(&back, "v").source.unwrap());
+        // (Within a frame at its speed: the app keeps trims in whole frames.)
+        assert!((now.end().0 - was.end().0).abs() < 70_000 && now.duration < was.duration, "{was:?} → {now:?}");
 
         // Reversed in the app, and the curve swapped for Montage: the draft's own speed goes.
         let mut doc = doc.clone();

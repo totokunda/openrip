@@ -466,16 +466,25 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
         if seg.source.is_some() {
             let speed = f(clip, "speed", seg.speed).clamp(0.1, 100.0);
             let trim_start = clock.frame(clip, "trimStartTick", "trimStart").max(0);
-            seg.source = Some(TimeRange::new(Micros((clock.at(trim_start).0 as f64 * speed).round() as i64), Micros((target.duration.0 as f64 * speed).round() as i64)));
+            let played = TimeRange::new(Micros((clock.at(trim_start).0 as f64 * speed).round() as i64), Micros((target.duration.0 as f64 * speed).round() as i64));
+            // A reversed clip's trims count from the media's end, as it plays.
+            let reversed = if differs("reverse") { b(clip, "reverse") } else { seg.reverse };
+            let length = materials.media.iter().find(|m| m.id == seg.material).map(|m| m.duration);
+            seg.source = Some(match length {
+                Some(length) if reversed => played_order(played, length),
+                _ => played,
+            });
             seg.speed = speed;
         }
         seg.target = target;
         // Keys stay on the media (on the clip's content for clips without media) through a
         // trim or a new speed; the app moves the ones it shows itself (below).
         match (was_source, seg.source) {
-            (Some(a), Some(b)) => {
+            (Some(was), Some(now)) => {
                 let (old, new) = (was_speed, seg.speed);
-                keys::retime(&mut seg, |t| Micros(((t.0 as f64 * old + (a.start.0 - b.start.0) as f64) / new).round() as i64), old / new);
+                // Counted as it plays: from the in-point, or from the out-point when reversed.
+                let shift = if seg.reverse || b(clip, "reverse") { now.end().0 - was.end().0 } else { was.start.0 - now.start.0 };
+                keys::retime(&mut seg, |t| Micros(((t.0 as f64 * old + shift as f64) / new).round() as i64), old / new);
             }
             _ => {
                 let moved = target.start - was_start;
@@ -789,6 +798,13 @@ fn convert_clip(
         }
     };
 
+    // A reversed clip's trims count in the order it plays: from the media's end.
+    let reverse = is_av && freeze.is_none() && b(clip, "reverse");
+    let source = match (source, materials.media.iter().find(|m| m.id == material)) {
+        (Some(src), Some(m)) if reverse => Some(played_order(src, m.duration)),
+        (s, _) => s,
+    };
+
     // Audio: dB → linear, fades → material.
     let mut volume = Animated::constant(1.0f32);
     if is_av {
@@ -863,7 +879,7 @@ fn convert_clip(
         source,
         target,
         speed,
-        reverse: is_av && freeze.is_none() && b(clip, "reverse"),
+        reverse,
         change_pitch: false,
         visible: true,
         render_index: 0,
@@ -874,6 +890,12 @@ fn convert_clip(
         attachments,
         keyframes: Vec::new(),
     })
+}
+
+/// The source range of a reversed clip from one counted in the order it plays (the app's trims,
+/// from the end of media `length` long), and back: the same mirror both ways.
+pub(crate) fn played_order(src: TimeRange, length: Micros) -> TimeRange {
+    TimeRange::new(Micros((length.0 - src.start.0 - src.duration.0).max(0)), src.duration)
 }
 
 /// The Speed tab's curve on a clip (`speedCurve`: `{ preset?, points: [{x, y}] }`, CapCut's
