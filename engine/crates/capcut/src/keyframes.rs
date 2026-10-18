@@ -187,8 +187,9 @@ pub(crate) fn apply(seg_json: &Value, seg: &mut Segment, kind: TrackKind, materi
         }
     }
     if let Some(c) = take("KFTypePrimaryColorWheelIntensity") {
-        if let Some(id) = attachment(seg, &c.material, |id| materials.color_wheels.iter().any(|w| &w.id == id && !w.log)) {
-            push(seg, id, Param::WheelIntensity, scalar(&ctx, &c, 0, 1.0));
+        match attachment(seg, &c.material, |id| materials.color_wheels.iter().any(|w| &w.id == id && !w.log)) {
+            Some(id) => push(seg, id, Param::WheelIntensity, scalar(&ctx, &c, 0, 1.0)),
+            None => *report.unmapped_keyframes.entry("KFTypePrimaryColorWheelIntensity (no colour wheels)".into()).or_insert(0) += c.keys.len(),
         }
     }
     for (ty, param) in [("KFTypeHslHueIntensity", Param::HslHue), ("KFTypeHslSaturationIntensity", Param::HslSaturation), ("KFTypeHslLightnessIntensity", Param::HslLightness)] {
@@ -224,7 +225,7 @@ pub(crate) fn apply(seg_json: &Value, seg: &mut Segment, kind: TrackKind, materi
     }
     if !drawn {
         // Mapped, but on a track the engine doesn't draw yet (adjustment layers, effects).
-        let label = format!("keyframes on a {} track (not drawn)", crate::kind_label(kind));
+        let label = format!("keyframes on {} tracks (not drawn)", crate::kind_label(kind));
         let n = seg.keyframes.iter().map(|k| k.keys.len()).sum::<usize>();
         if n > 0 {
             *report.unmapped_keyframes.entry(label).or_insert(0) += n;
