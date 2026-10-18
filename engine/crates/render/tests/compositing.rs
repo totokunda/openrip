@@ -187,3 +187,40 @@ fn a_cube_lut_on_a_clip() {
     }
     assert_eq!(draw(0.0).data, c.render(W, H, [0, 0, 0], &[Layer::from_model(&img, [W, H], [0.0, 0.0], [1.0, 1.0], 0.0)]).data);
 }
+
+/// A Hald CLUT image of `level` grading by `f`: entry r + n·g + n²·b (n = level²) at that
+/// pixel index, standing for the colour (r, g, b) / (n − 1).
+fn hald(level: u32, f: impl Fn([f32; 3]) -> [f32; 3]) -> RgbaImage {
+    let (side, n) = (level * level * level, level * level);
+    image(side, side, |x, y| {
+        let i = y * side + x;
+        let c = [(i % n) as f32, (i / n % n) as f32, (i / (n * n)) as f32].map(|v| v / (n - 1) as f32);
+        let o = f(c).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+        [o[0], o[1], o[2], 255]
+    })
+}
+
+#[test]
+fn a_hald_lut_too_big_for_a_texture_draws_as_a_smaller_one() {
+    let warm = |c: [f32; 3]| [c[0].powf(0.8), c[1], c[2] * 0.8];
+    // Level 12 is 144 entries a side: laid out 144² = 20736 wide, past the GPU's 8192.
+    let big = Lut3d::from_hald(&hald(12, warm), 21).unwrap();
+    let small = Lut3d::from_hald(&hald(8, warm), 22).unwrap();
+    assert_eq!((big.size, small.size), (144, 64));
+    // Resampling keeps the entries at the colours they stand for, either alignment.
+    let id = |n: u32, edge| Lut3d { key: 0, size: n, edge_aligned: edge, rgb: (0..n * n * n).flat_map(|i| [i % n, i / n % n, i / (n * n)].map(|v| if edge { v as f32 / (n - 1) as f32 } else { (v as f32 + 0.5) / n as f32 })).collect() };
+    for edge in [true, false] {
+        let (r, want) = (id(9, edge).resampled(5), id(5, edge));
+        assert!(r.rgb.iter().zip(&want.rgb).all(|(a, b)| (a - b).abs() < 1e-5), "edge_aligned {edge}");
+    }
+    let Some(c) = gpu() else { return };
+    let img = image(W, H, |x, y| [(x * 4) as u8, (y * 8) as u8, ((x + y) * 3) as u8, 255]);
+    let draw = |lut: &Lut3d| c.render(W, H, [0, 0, 0], &[Layer { lut: Some((lut, 1.0)), ..Layer::from_model(&img, [W, H], [0.0, 0.0], [1.0, 1.0], 0.0) }]);
+    let (a, b) = (draw(&big), draw(&small));
+    let worst = a.data.iter().zip(&b.data).map(|(p, q)| (*p as i32 - *q as i32).abs()).max().unwrap();
+    assert!(worst <= 2, "level 12 drawn {worst} levels off level 8");
+    // And it is the grade.
+    let p = px(&a, 40, 10);
+    let want = warm([160.0 / 255.0, 80.0 / 255.0, 150.0 / 255.0]).map(|v| (v * 255.0).round() as i32);
+    assert!((0..3).all(|k| (p[k] as i32 - want[k]).abs() <= 2), "{p:?} vs {want:?}");
+}

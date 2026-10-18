@@ -105,6 +105,40 @@ impl Lut3d {
         }
         ((2..=128).contains(&size) && rgb.len() == (size * size * size * 3) as usize).then_some(Lut3d { key, size, rgb, edge_aligned: true })
     }
+
+    /// The table with `size` entries a side, each read from this one by trilinear
+    /// interpolation at the colour it stands for (so it keeps its alignment): for a table too
+    /// big for the GPU's textures, as a level-12 Hald CLUT's 144 a side is.
+    pub fn resampled(&self, size: u32) -> Lut3d {
+        let (n, m) = (self.size as usize, size.max(2) as usize);
+        // Where entry i of m sits in this table, in entries.
+        let at = |i: usize| -> f32 {
+            let pos = if self.edge_aligned { i as f32 / (m - 1) as f32 * (n - 1) as f32 } else { (i as f32 + 0.5) / m as f32 * n as f32 - 0.5 };
+            pos.clamp(0.0, (n - 1) as f32)
+        };
+        let axis: Vec<(usize, usize, f32)> = (0..m)
+            .map(|i| {
+                let p = at(i);
+                let lo = p.floor() as usize;
+                (lo, (lo + 1).min(n - 1), p - lo as f32)
+            })
+            .collect();
+        let entry = |r: usize, g: usize, b: usize| &self.rgb[(r + n * g + n * n * b) * 3..][..3];
+        let mut rgb = Vec::with_capacity(m * m * m * 3);
+        for &(b0, b1, fb) in &axis {
+            for &(g0, g1, fg) in &axis {
+                for &(r0, r1, fr) in &axis {
+                    for c in 0..3 {
+                        let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+                        let along_r = |g: usize, b: usize| lerp(entry(r0, g, b)[c], entry(r1, g, b)[c], fr);
+                        let along_g = |b: usize| lerp(along_r(g0, b), along_r(g1, b), fg);
+                        rgb.push(lerp(along_g(b0), along_g(b1), fb));
+                    }
+                }
+            }
+        }
+        Lut3d { key: self.key, size: m as u32, rgb, edge_aligned: self.edge_aligned }
+    }
 }
 
 /// CapCut's chroma key over a layer's own pixels (chroma.wgsl): the picked colour (straight
@@ -504,6 +538,9 @@ impl Compositor {
         let required_features = adapter.features() & wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("openrip compositor"), required_features, ..Default::default() }))
             .map_err(|e| RenderError::Device(e.to_string()))?;
+        // A GPU validation error is reported, not raised: wgpu's default handler panics, and a
+        // panic inside the app's call into the engine takes the whole app down.
+        device.on_uncaptured_error(std::sync::Arc::new(|e| eprintln!("[render] GPU error: {e}")));
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("compositor"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders.wgsl").into()) });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
@@ -1080,12 +1117,22 @@ impl Compositor {
 
     /// `src` looked up through `lut` and mixed in by `strength`, into `dst` (same size).
     fn lut_pass(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, dst: &wgpu::Texture, lut: &Lut3d, strength: f32) {
-        let n = lut.size;
         let table = {
             let mut cache = self.luts.lock().unwrap();
             cache
                 .entry(lut.key | 1 << 63)
                 .or_insert_with(|| {
+                    // The table is laid out n² wide: one too big for the GPU's textures is
+                    // resampled to the largest that fits.
+                    let fit = (self.device.limits().max_texture_dimension_2d as f64).sqrt() as u32;
+                    let fitted;
+                    let lut = if lut.size > fit {
+                        fitted = lut.resampled(fit);
+                        &fitted
+                    } else {
+                        lut
+                    };
+                    let n = lut.size;
                     let tex = self.device.create_texture(&wgpu::TextureDescriptor {
                         label: Some("filter lut"),
                         size: wgpu::Extent3d { width: n * n, height: n, depth_or_array_layers: 1 },
@@ -1118,6 +1165,7 @@ impl Compositor {
                 })
                 .clone()
         };
+        let n = table.height();
         let params: [f32; 4] = [n as f32, strength.clamp(0.0, 1.0), if lut.edge_aligned { 1.0 } else { 0.0 }, 0.0];
         let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&params), usage: wgpu::BufferUsages::UNIFORM });
         let (src_view, table_view, dst_view) = (src.create_view(&Default::default()), table.create_view(&Default::default()), dst.create_view(&Default::default()));
