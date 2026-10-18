@@ -15,8 +15,12 @@ use openrip_platform::assets;
 use openrip_render::text::{self, Align, Font, TextStyle};
 use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source, Surface, Uploader};
 
-/// CapCut's default font, used when a text run names none.
-const DEFAULT_FONT: &str = "/Applications/CapCut.app/Contents/Resources/Font/SystemFont/en.ttf";
+/// CapCut's default font, for CapCut's own text whose font isn't found (a draft names it).
+/// OpenRip's own text never uses it.
+const CAPCUT_FONT: &str = "/Applications/CapCut.app/Contents/Resources/Font/SystemFont/en.ttf";
+/// The system fonts OpenRip's own text falls back to, in order: Konva's default family, as the
+/// app's own text box shows it, then Helvetica.
+const APP_FONTS: [&str; 2] = ["Arial", "Helvetica"];
 /// Decoders kept open; the least recently used is closed beyond this.
 const MAX_DECODERS: usize = 12;
 /// Decoded-frame cache per preview decoder: room to step back through a 1080p GOP without
@@ -1016,8 +1020,11 @@ impl PreviewEngine {
             let path = if !run.font.path.is_empty() && assets::exists(Path::new(&run.font.path)) {
                 run.font.path.clone()
             } else {
+                // CapCut's text falls back to CapCut's font, the app's own to a system font.
+                let capcut = run.size_unit == SizeUnit::CapCut;
                 let name = run.font.name.clone();
-                self.font_files.entry(name.clone()).or_insert_with(|| font_file_for(&name)).clone()
+                let key = if capcut { name.clone() } else { format!("app:{name}") };
+                self.font_files.entry(key).or_insert_with(|| font_file_for(&name, capcut)).clone()
             };
             if let Some(why) = self.failed.get(&path) {
                 return Err((path.clone(), why.clone()));
@@ -1661,28 +1668,29 @@ pub(crate) fn load_still(path: &Path) -> Result<RgbaImage, String> {
 }
 
 /// A font file for a family name: an installed font whose file is named after it (e.g.
-/// "Arial" → Arial.ttf) in the system and user font folders; otherwise CapCut's default font
-/// if CapCut is installed, otherwise Helvetica. Bold and italic stay synthetic.
-fn font_file_for(name: &str) -> String {
+/// "Arial" → Arial.ttf) in the system and user font folders; otherwise, for CapCut's own text
+/// (`capcut`), CapCut's default font if CapCut is installed; otherwise Arial, else Helvetica
+/// ([`APP_FONTS`]), so OpenRip's own text never depends on CapCut. Bold and italic stay
+/// synthetic.
+fn font_file_for(name: &str, capcut: bool) -> String {
     let mut dirs = vec!["/System/Library/Fonts/Supplemental".to_string(), "/System/Library/Fonts".to_string(), "/Library/Fonts".to_string()];
     if let Some(home) = std::env::var_os("HOME") {
         dirs.push(Path::new(&home).join("Library/Fonts").to_string_lossy().into_owned());
     }
-    if !name.trim().is_empty() {
-        for dir in &dirs {
-            for ext in ["ttf", "otf", "ttc"] {
-                let p = Path::new(dir).join(format!("{}.{ext}", name.trim()));
-                if assets::exists(&p) {
-                    return p.to_string_lossy().into_owned();
-                }
-            }
+    let find = |name: &str| -> Option<String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return None;
         }
+        dirs.iter().flat_map(|dir| ["ttf", "otf", "ttc"].map(|ext| Path::new(dir).join(format!("{name}.{ext}")))).find(|p| assets::exists(p)).map(|p| p.to_string_lossy().into_owned())
+    };
+    if let Some(p) = find(name) {
+        return p;
     }
-    if assets::exists(Path::new(DEFAULT_FONT)) {
-        DEFAULT_FONT.to_string()
-    } else {
-        "/System/Library/Fonts/Helvetica.ttc".to_string()
+    if capcut && assets::exists(Path::new(CAPCUT_FONT)) {
+        return CAPCUT_FONT.to_string();
     }
+    APP_FONTS.iter().find_map(|n| find(n)).unwrap_or_else(|| "/System/Library/Fonts/Helvetica.ttc".to_string())
 }
 
 /// An RGB colour (0..1) shifted in HSB: hue by degrees, saturation and brightness by
@@ -1713,4 +1721,26 @@ fn shift_hsb([r, g, b]: [f32; 3], hue: f32, saturation: f32, brightness: f32) ->
     };
     let m = v - c;
     [r + m, g + m, b + m]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_apps_own_text_never_falls_back_to_capcuts_font() {
+        // A family the system has is found by name, for either.
+        if assets::exists(Path::new("/System/Library/Fonts/Supplemental/Georgia.ttf")) {
+            assert!(font_file_for("Georgia", false).ends_with("Georgia.ttf"));
+            assert!(font_file_for("Georgia", true).ends_with("Georgia.ttf"));
+        }
+        // One it doesn't: a system font for the app's text, CapCut's for a draft's.
+        let app = font_file_for("No Such Family", false);
+        assert!(!app.contains("CapCut"), "{app}");
+        assert!(app.ends_with("Arial.ttf") || app.ends_with("Helvetica.ttc"), "{app}");
+        assert!(!font_file_for("", false).contains("CapCut"));
+        if assets::exists(Path::new(CAPCUT_FONT)) {
+            assert_eq!(font_file_for("No Such Family", true), CAPCUT_FONT);
+        }
+    }
 }
