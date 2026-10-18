@@ -77,6 +77,14 @@ export type EngineAddon = {
   stopRecording(): { path: string; durationUs: number; rate: number; channels: number } | null;
   /** Record a stand-in microphone that hears a tone (automated tests). */
   useToneInput(): void;
+  /** Split scenes: shot changes in a file's range (media µs); progress and cancel by `job`. */
+  detectScenes(job: number, path: string, startUs: number, durationUs: number | null, sensitivity: number | null): Promise<SceneCut[]>;
+  /** Color match: a range's colour statistics (Oklab moments and more). */
+  colorStats(job: number, path: string, startUs: number, durationUs: number | null): Promise<ColorStats>;
+  /** Auto adjust: the Basic sliders (panel scale) from a range's statistics, through a match. */
+  autoAdjust(job: number, path: string, startUs: number, durationUs: number | null, matched: MatchOn | null): Promise<AutoAdjustValues>;
+  analysisProgress(job: number): { done: number; total: number } | null;
+  cancelAnalysis(job: number): void;
   registerFonts(faces: { family: string; weight: number; italic: boolean; path: string; unicodeRange?: string }[]): void;
   fontFamilies(): FontFamily[];
   /** Motion tracking: a region of a video followed through its frames (engine/crates/core/src/track.rs). */
@@ -110,6 +118,15 @@ export type FontFamily = { name: string; weights: number[]; italic: boolean; bun
 
 /** A font face the page has (an `@font-face` rule), its file as the page loads it. */
 export type PageFontFace = { family: string; weight: number; italic: boolean; url: string; unicodeRange?: string };
+
+/** A shot change: the new shot's first frame (media µs), its kind, the transition's span. */
+export type SceneCut = { timeUs: number; kind: "hard" | "dissolve" | "fade"; startUs: number; endUs: number; score: number };
+/** A range's colour statistics: Oklab means and spreads, luma, chroma, the cast. */
+export type ColorStats = { mean: number[]; std: number[]; lumaMean: number; lumaStd: number; lumaPercentiles: number[]; chroma: number; neutral: number[] | null; pixels: number };
+export type MatchOn = { sourceMean: number[]; sourceStd: number[]; referenceMean: number[]; referenceStd: number[]; intensity: number };
+export type AutoAdjustValues = { brightness: number; contrast: number; saturation: number; temperature: number; tint: number; whites: number; blacks: number; stats: ColorStats };
+/** An analysis's answer, or why there's none (`cancelled` after a cancel). */
+export type AnalysisResult<T> = { ok: true; value: T } | { ok: false; cancelled?: boolean; error?: string };
 
 /** A frame from the engine's thumbnailer: RGBA, `width * height * 4` bytes. */
 export type Thumbnail = { index: number; timeUs: number; exact: boolean; width: number; height: number; rgba: Buffer };
@@ -398,7 +415,7 @@ export class EngineModule implements AppModule {
     const settings = getSettingsModule();
     addon?.setHardwareDecoding?.(settings.getPreferences().hardwareDecoding);
     settings.on("preferences-changed", (p: Preferences) => addon?.setHardwareDecoding?.(p.hardwareDecoding));
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:waveform", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still"]) {
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:waveform", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still", "engine:detect-scenes", "engine:color-stats", "engine:auto-adjust", "engine:analysis-progress", "engine:analysis-cancel"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -444,6 +461,32 @@ export class EngineModule implements AppModule {
         return null;
       }
     });
+    // Split scenes, Color match and Auto adjust (lib/analysis.ts): long reads of a clip's
+    // media, each with a job number for its progress and cancel.
+    const analysis = async <T>(what: string, run: (engine: EngineAddon) => Promise<T>): Promise<AnalysisResult<T>> => {
+      if (!addon) return { ok: false, error: "engine not available" };
+      try {
+        return { ok: true, value: await run(addon) };
+      } catch (e) {
+        const why = message(e);
+        if (why === "cancelled") return { ok: false, cancelled: true };
+        console.warn(`[engine] ${what} failed:`, why);
+        return { ok: false, error: why };
+      }
+    };
+    const fileOf = (path: string) => (path.startsWith("file://") ? fileURLToPath(path) : path);
+    const us = (sec: number | null) => (sec == null ? null : Math.round(sec * 1e6));
+    ipcMain.handle("engine:detect-scenes", (_event, job: number, path: string, startSec: number, durationSec: number | null, sensitivity: number | null) =>
+      analysis("split scenes", (e) => e.detectScenes(job, fileOf(path), us(startSec) ?? 0, us(durationSec), sensitivity ?? null)),
+    );
+    ipcMain.handle("engine:color-stats", (_event, job: number, path: string, startSec: number, durationSec: number | null) =>
+      analysis("colour statistics", (e) => e.colorStats(job, fileOf(path), us(startSec) ?? 0, us(durationSec))),
+    );
+    ipcMain.handle("engine:auto-adjust", (_event, job: number, path: string, startSec: number, durationSec: number | null, matched: MatchOn | null) =>
+      analysis("auto adjust", (e) => e.autoAdjust(job, fileOf(path), us(startSec) ?? 0, us(durationSec), matched ?? null)),
+    );
+    ipcMain.handle("engine:analysis-progress", (_event, job: number) => addon?.analysisProgress(job) ?? null);
+    ipcMain.handle("engine:analysis-cancel", (_event, job: number) => addon?.cancelAnalysis(job));
     ipcMain.handle("engine:loudness", async (_event, path: string, startSec: number, durationSec: number | null) => {
       if (!addon) return null;
       const file = path.startsWith("file://") ? fileURLToPath(path) : path;

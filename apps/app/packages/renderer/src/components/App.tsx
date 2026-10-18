@@ -17,6 +17,7 @@ import { TransitionDragTile } from "@/components/menus/TransitionMenu";
 import { cn } from "@/lib/utils";
 import { useClipStore } from "@/lib/clip";
 import GlobalContextMenu from "@/components/GlobalContextMenu";
+import AnalysisPill from "@/components/timeline/AnalysisPill";
 import { useProjectsStore } from "@/lib/projects";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/react-query/queryClient";
@@ -326,6 +327,7 @@ const App: React.FC = () => {
       </main>
       <GlobalContextMenu />
       <AppDialogs />
+      <AnalysisPill />
       <DragOverlay dropAnimation={null}>
         {activeDragItem ? (
           <div

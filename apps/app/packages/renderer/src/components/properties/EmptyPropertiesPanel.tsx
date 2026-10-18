@@ -9,11 +9,13 @@ import { timecode } from "@/components/preview/PlayerBar";
 import { usePreference } from "@/lib/preferences";
 import { revealPathInFolder } from "@app/preload";
 import { refreshProjects } from "@/lib/project-actions";
+import GlobalEdits, { useProjectInspectorTab } from "./project/GlobalEdits";
 
 /**
- * With nothing selected the inspector shows the project's Details, as CapCut's does: a label
- * and value grid in two groups (the project; its canvas and timing), and Modify, which opens
- * the project's settings.
+ * With nothing selected the inspector shows the project, as CapCut's does, in two tabs:
+ * Project (its global edits, project/GlobalEdits.tsx) and Details: a label and value grid in
+ * two groups (the project; its canvas and timing), and Modify, which opens the project's
+ * settings.
  */
 const EmptyPropertiesPanel: React.FC = () => {
   const project = useProjectsStore((s) => s.getActiveProject());
@@ -61,11 +63,33 @@ const EmptyPropertiesPanel: React.FC = () => {
     ],
   ];
 
+  // CapCut's two tabs: Project (global edits) and Details.
+  const tab = useProjectInspectorTab((s) => s.tab);
+  const tabButton = (id: "project" | "details", label: string) => (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={tab === id}
+      data-testid={`project-tab-${id}`}
+      onClick={() => useProjectInspectorTab.setState({ tab: id })}
+      className={`h-full px-[13px] first:pl-[11px] text-[13px] font-semibold ${tab === id ? "text-brand-accent" : "text-brand-light hover:text-brand-lighter"}`}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <div data-testid="inspector-project" className="flex flex-col h-full min-w-0">
-      <div className="h-[42px] shrink-0 flex items-center px-[11px] bg-brand-header border-b-[0.5px] border-brand-hairline">
-        <span className="text-[13px] font-semibold text-brand-accent">Details</span>
+      <div role="tablist" className="h-[42px] shrink-0 flex items-center bg-brand-header border-b-[0.5px] border-brand-hairline">
+        {tabButton("project", "Project")}
+        {tabButton("details", "Details")}
       </div>
+      {tab === "project" ? (
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+          <GlobalEdits />
+        </div>
+      ) : (
+      <>
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-3">
         {groups.map((rows, i) => (
           <dl key={i} className="py-3 border-b border-brand-divider last:border-b-0">
@@ -88,6 +112,8 @@ const EmptyPropertiesPanel: React.FC = () => {
           Modify
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 };

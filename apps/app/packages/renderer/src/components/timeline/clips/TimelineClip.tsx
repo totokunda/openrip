@@ -55,6 +55,7 @@ import MotionMarks from "./MotionMarks";
 import { freezeTarget } from "@/lib/timeline-motion";
 import BeatMarkers from "./BeatMarkers";
 import { projectBeatPoints, soundMenuItems } from "@/lib/audio-tools";
+import { analysisMenuItems } from "@/lib/analysis";
 import { useViewportStore } from "@/lib/viewport";
 import { useContextMenuStore, ContextMenuItem } from "@/lib/context-menu";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -1236,6 +1237,8 @@ const TimelineClip: React.FC<
 
       const clipActions: ContextMenuItem[] = [
         ...editTools,
+        // Split scenes and Adjust color ▸ (lib/analysis.ts).
+        ...analysisMenuItems(clip, targetIds.length),
         {
           id: "split",
           label: "Split at Playhead",

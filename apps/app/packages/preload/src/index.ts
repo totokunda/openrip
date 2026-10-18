@@ -30,13 +30,18 @@ export {
   engineFontFamilies,
   engineOutputLevels,
   engineExportStill,
+  engineDetectScenes,
+  engineColorStats,
+  engineAutoAdjust,
+  engineAnalysisProgress,
+  engineCancelAnalysis,
   onEngineExportProgress,
   getEnginePreviewEnabled,
   setEnginePreviewEnabled,
   ENGINE_FRAME_CANVAS_ID,
   ENGINE_FRAME_EVENT,
 } from "./engine.js";
-export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult, EngineThumbnail, EngineBeats, EngineWaveform, EngineFontFace, EngineFontFamily, EngineStillResult } from "./engine.js";
+export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult, EngineThumbnail, EngineBeats, EngineWaveform, EngineFontFace, EngineFontFamily, EngineStillResult, EngineSceneCut, EngineColorStats, EngineMatchOn, EngineAutoAdjust, EngineAnalysis } from "./engine.js";
 
 // Motion tracking with the engine (the Tracking tab and Track mask)
 export { engineTrack, engineTrackCancel, onEngineTrackProgress } from "./engine.js";

@@ -413,10 +413,13 @@ export type ClipLut = { path: string; name?: string; intensity?: number };
  *   engine draws the smooth curve CapCut draws through them;
  * - `wheels`: the primary wheels (lift, gamma, gain, offset) and their strength, 0–100
  *   (100 when missing);
- * - `lut`: a LUT, drawn first.
- * The engine draws them in CapCut's order: LUT, HSL, curves, wheels, sliders. On a clip
- * converted from a CapCut draft they go on top of the draft's own (`draftAdjustments`): a
- * slider or HSL range set in both draws this one.
+ * - `lut`: a LUT, drawn first;
+ * - `auto`: Auto adjust's record of the slider values it put into `adjust` (lib/color-tools.ts);
+ * - `match`: Color match, a table the engine makes from both clips' statistics, drawn before
+ *   the LUT.
+ * The engine draws them in CapCut's order: Color match, LUT, HSL, curves, wheels, sliders. On
+ * a clip converted from a CapCut draft they go on top of the draft's own
+ * (`draftAdjustments`): a slider or HSL range set in both draws this one.
  */
 export type ClipColor = {
   adjust?: Partial<Record<AdjustSlider, number>>;
@@ -424,6 +427,36 @@ export type ClipColor = {
   curves?: Partial<Record<CurveChannel, CurvePointXY[]>>;
   wheels?: { lift?: ColorWheel; gamma?: ColorWheel; gain?: ColorWheel; offset?: ColorWheel; intensity?: number };
   lut?: ClipLut | null;
+  auto?: ClipAutoAdjust | null;
+  match?: ClipColorMatch | null;
+};
+
+/** A clip's colour statistics in Oklab (L, a, b): each channel's mean and standard deviation. */
+export type ColorMoments = { mean: [number, number, number]; std: [number, number, number] };
+
+/**
+ * Adjust ▸ Auto adjust: the slider values the engine found from the clip's own statistics (the
+ * panel's scale, at full intensity), the intensity (0–100), and what it added to `adjust` (so
+ * it can be taken off again and the user's own changes stay); `range` the media seconds it read.
+ */
+export type ClipAutoAdjust = {
+  intensity: number;
+  values: Partial<Record<AdjustSlider, number>>;
+  applied: Partial<Record<AdjustSlider, number>>;
+  range?: [number, number];
+};
+
+/**
+ * Adjust ▸ Color match: the clip's and the reference's colour statistics, the intensity
+ * (0–100) and the reference clip; `consistent` when Smart suggestions ▸ Make colors consistent
+ * set it.
+ */
+export type ClipColorMatch = {
+  intensity: number;
+  source: ColorMoments;
+  reference: ColorMoments;
+  ref: { clipId: string; name?: string };
+  consistent?: boolean;
 };
 
 /**

@@ -24,6 +24,10 @@ export type ContextMenuAction =
   | "deleteKeyframe"
   | "keyframeEase"
   | "keyframeGraph"
+  /** Split scenes, Adjust color ▸ Auto adjust and Color match (lib/analysis.ts). */
+  | "splitScenes"
+  | "autoAdjust"
+  | "colorMatch"
   /** A row that only opens its submenu. */
   | "none"
   /** The item's own `run` does it. */

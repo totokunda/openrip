@@ -257,6 +257,15 @@ export function withoutHistory(fn: () => void) {
   }
 }
 
+/**
+ * Make the next change a step of its own, without a press: for an edit applied when work the
+ * user started in the background finishes (Split scenes, Color match), whatever was pressed
+ * meanwhile. Everything it changes in the same task belongs to that step.
+ */
+export function beginStep() {
+  action++;
+}
+
 /** Stop recording while a project loads, and forget the last project's steps. */
 export function pauseHistory() {
   present = null;

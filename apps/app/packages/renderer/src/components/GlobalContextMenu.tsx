@@ -4,6 +4,7 @@ import { useContextMenuStore, type ContextMenuItem } from "@/lib/context-menu";
 import { LuCheck, LuChevronRight } from "react-icons/lu";
 import { removeTransition } from "@/lib/transitions";
 import { freezeAtPlayhead, toggleReverse } from "@/lib/timeline-motion";
+import { runAnalysisAction } from "@/lib/analysis";
 import { easeKeysAt, removeKeysAt, useKeyframeGraphStore } from "@/lib/timeline-keyframes";
 import type { KeyframePreset } from "@/lib/types";
 import { useClipStore } from "@/lib/clip";
@@ -498,6 +499,8 @@ const GlobalContextMenu: React.FC = () => {
         freezeAtPlayhead(target.primaryClipId);
       } else if (action === "reverse") {
         toggleReverse(target.primaryClipId);
+      } else if (action === "splitScenes" || action === "autoAdjust" || action === "colorMatch") {
+        runAnalysisAction(action, target.primaryClipId);
       }
     } else if (target?.type === "marker") {
       if (action === "editMarker") useMarkerEditorStore.getState().open(target.markerId);

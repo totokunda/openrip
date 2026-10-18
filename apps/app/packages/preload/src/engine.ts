@@ -65,6 +65,46 @@ export function engineLoudness(path: string, startSec: number, durationSec: numb
   return ipcRenderer.invoke("engine:loudness", path, startSec, durationSec);
 }
 
+/** A shot change Split scenes found: the new shot's first frame (media µs), its kind, the transition's span. */
+export type EngineSceneCut = { timeUs: number; kind: "hard" | "dissolve" | "fade"; startUs: number; endUs: number; score: number };
+/** A range's colour statistics: Oklab means and spreads (L, a, b), luma, chroma, the cast. */
+export type EngineColorStats = { mean: number[]; std: number[]; lumaMean: number; lumaStd: number; lumaPercentiles: number[]; chroma: number; neutral: number[] | null; pixels: number };
+/** A Color match on the clip, for Auto adjust to see through. */
+export type EngineMatchOn = { sourceMean: number[]; sourceStd: number[]; referenceMean: number[]; referenceStd: number[]; intensity: number };
+/** Auto adjust's sliders on the panel's scale, and the statistics it read. */
+export type EngineAutoAdjust = { brightness: number; contrast: number; saturation: number; temperature: number; tint: number; whites: number; blacks: number; stats: EngineColorStats };
+/** An analysis's answer, or why there's none (`cancelled` after `engineCancelAnalysis`). */
+export type EngineAnalysis<T> = { ok: true; value: T } | { ok: false; cancelled?: boolean; error?: string };
+
+/**
+ * Split scenes: the shot changes in the video `path` over `durationSec` from `startSec` of its
+ * media (to its end for null); `sensitivity` 0–1. `job` is a number the caller picks for
+ * `engineAnalysisProgress` and `engineCancelAnalysis`.
+ */
+export function engineDetectScenes(job: number, path: string, startSec: number, durationSec: number | null, sensitivity: number | null = null): Promise<EngineAnalysis<EngineSceneCut[]>> {
+  return ipcRenderer.invoke("engine:detect-scenes", job, path, startSec, durationSec, sensitivity);
+}
+
+/** Color match: the colour statistics of `path`'s range, from frames spread across it. */
+export function engineColorStats(job: number, path: string, startSec: number, durationSec: number | null): Promise<EngineAnalysis<EngineColorStats>> {
+  return ipcRenderer.invoke("engine:color-stats", job, path, startSec, durationSec);
+}
+
+/** Auto adjust: the Basic sliders from the range's own statistics (through `matched`, a match on the clip). */
+export function engineAutoAdjust(job: number, path: string, startSec: number, durationSec: number | null, matched: EngineMatchOn | null): Promise<EngineAnalysis<EngineAutoAdjust>> {
+  return ipcRenderer.invoke("engine:auto-adjust", job, path, startSec, durationSec, matched);
+}
+
+/** A running analysis's progress in frames; null when it isn't running. */
+export function engineAnalysisProgress(job: number): Promise<{ done: number; total: number } | null> {
+  return ipcRenderer.invoke("engine:analysis-progress", job);
+}
+
+/** Stop analysis `job`; its call answers `{ ok: false, cancelled: true }`. */
+export function engineCancelAnalysis(job: number): Promise<void> {
+  return ipcRenderer.invoke("engine:analysis-cancel", job);
+}
+
 /** Id of the canvas the engine's frames are drawn into; the page creates it. */
 export const ENGINE_FRAME_CANVAS_ID = "openrip-engine-frame";
 /** Event fired on that canvas after each frame is drawn (detail: time, width, height). */
