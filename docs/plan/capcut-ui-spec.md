@@ -624,7 +624,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.14 Left panel: Templates | 0 | 0 | 1 |
 | 6.15 Player | 12 | 1 | 0 |
 | 6.16 Inspector: project (nothing selected) | 1 | 3 | 7 |
-| 6.17 Inspector: video clip | 21 | 7 | 12 |
+| 6.17 Inspector: video clip | 24 | 5 | 11 |
 | 6.18 Inspector: photo clip | (see 6.17) | | |
 | 6.19 Inspector: audio clip | 2 | 2 | 3 |
 | 6.20 Inspector: text clip | 11 | 5 | 7 |
@@ -639,7 +639,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.29 Export dialog | 5 | 2 | 9 |
 | 6.30 Other dialogs | 2 | 0 | 4 |
 | 6.31 Classic-algorithm features brought into scope | 1 | 10 | 1 |
-| **Total (351 in-scope features)** | **124** | **77** | **150** |
+| **Total (351 in-scope features)** | **127** | **75** | **149** |
 
 The counts above are as written. A re-audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows (32.0% strict, 47.8% with partly as half); with the text, inspector and audio branches then in progress, 146 / 86 / 105 (43.3% / 56.1%). §6.31's 11 rows were added after it.
 
@@ -964,16 +964,16 @@ Tabs: Video (Basic, Remove BG, Mask, Retouch), Audio, Speed, Animation, Adjust, 
 | Canvas › Pattern (OpenRip's own patterns) | `011-canvas-pattern-options.png` | partly (an image from a file; no patterns of our own yet) |
 | Canvas › Apply to all | `007-basic-bottom-canvas.png` | has |
 | Remove BG › Chroma key (colour picker, strength, shadow; expanded controls not captured) | `012-remove-background-options.png` | has (eyedropper on the picture, intensity, shadow, edge smoothing, spill) |
-| Mask › Add mask, several masks per clip | `013-mask-default.png`, `25-inspector-adjustment-layer/024-multiple-masks.png` | has (several masks; the engine paints outside the first only) |
-| Mask shapes › Circle, Rectangle, Stars | `013-mask-default.png` | has (ellipse, rectangle, 5-point star) |
+| Mask › Add mask, several masks per clip | `013-mask-default.png`, `25-inspector-adjustment-layer/024-multiple-masks.png` | has (checkbox, Add mask, chips and "+"; each mask cuts the clip) |
+| Mask shapes › Circle, Rectangle, Stars | `013-mask-default.png` | has (circle, rectangle, 5-point star) |
 | Mask shapes › Split (linear), Filmstrip (mirror) | `014-mask-split-controls.png` | has |
 | Mask shapes › Heart | `013-mask-default.png` | has |
-| Mask shapes › Text mask (content, font, size, B/U/I, spacing, alignment) | `015-mask-text-formatting.png` | missing |
-| Mask shapes › Brush (brush, eraser, size, feather, expansion) | `016-mask-brush-controls.png` | partly (stub) |
-| Mask shapes › Pen (free polygon) | `017-mask-pen-controls.png` | has (lasso) |
+| Mask shapes › Text mask (content, font, size, B/U/I, spacing, alignment) | `015-mask-text-formatting.png` | has (system fonts; no vertical text) |
+| Mask shapes › Brush (brush, eraser, size, feather, expansion) | `016-mask-brush-controls.png` | has (brush, eraser, clear; no quick brush) |
+| Mask shapes › Pen (free polygon) | `017-mask-pen-controls.png` | has (anchors with curve handles) |
 | Mask settings › Position, Rotation, Size W/H with link | `25-inspector-adjustment-layer/025-mask-rectangle.png` | has |
 | Mask settings › Feather, Invert | `014-mask-split-controls.png`, `25-inspector-adjustment-layer/025-mask-rectangle.png` | has |
-| Mask settings › Round corners, Expansion | `016-mask-brush-controls.png`, `25-inspector-adjustment-layer/026-rectangle-mask-controls.png` | partly (round corners; no expansion) |
+| Mask settings › Round corners, Expansion | `016-mask-brush-controls.png`, `25-inspector-adjustment-layer/026-rectangle-mask-controls.png` | has (expansion on the brush and pen; its scale unconfirmed) |
 | Speed › Standard: speed slider (ticks) and 1.00x field | `020-speed-standard.png` | has (0.1–5×) |
 | Speed › Duration field (set length directly) | `020-speed-standard.png` | missing |
 | Speed › Change audio pitch toggle | `020-speed-standard.png` | partly (pitch always kept) |

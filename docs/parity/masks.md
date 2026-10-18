@@ -35,7 +35,7 @@ OpenRip's mask tool (from Apex Studio, where masks fed AI models) draws rectangl
 
 `Mask` materials (`openrip-model`) carry the shape, centre (in half-sizes from the picture's middle, +y up), size, rotation, feather, invert, what each side shows (the clip, or a colour, clear for a cut-out) and any keys over time. A CapCut mask's keyframes are the segment's (`KFTypeCommonMask…`, [keyframes.md](keyframes.md)): its centre, size, rotation, feather and rounded corners travel by CapCut's curve. The preview draws each attached mask's coverage over the upright picture (at the picture's size, up to 2048 pixels on its long side), turns it into the stored picture's axes and hands it to the compositor, which paints the clip's pixels inside and outside by it before placing the clip (a background-removal matte is the first such pass). Photos take masks too.
 
-CapCut's rectangle, circle, linear, mirror, heart and star masks are drawn. The pen (`contour`) is imported but not drawn: its one local use has an empty path. In the app's engine mode the mask tool sends the project without masks, so the clip shows whole while masks are edited.
+CapCut's rectangle, circle, linear, mirror, heart and star masks are drawn. The pen (`contour`) is imported but not drawn: its one local use has an empty path. In the app's engine mode the mask tool's lasso sends the project without masks, so the clip shows whole while an outline is drawn; with the brush or the pen out the masks are drawn.
 
 ### Heart and star (2026-10-18)
 
@@ -73,6 +73,20 @@ The inspector's Mask tab offers CapCut's shapes on the app's own clips, and the 
 - **A keyed feather**: a pose's own `featherAmount` keys the feather with the place (`MaskKey.feather` in the model; the playback mixes it between poses like the rest, a pose without one taking the mask's).
 
 Checked by the v1 crate's test `the_inspectors_mask_shapes_and_keyed_feather` (centres, a heart spanning its box, round corners and feathers per key), the playback test `a_keyed_feather_travels`, and in the app by `insp-suite.mjs`: every shape, feather, round corners, invert and a keyed pose change the engine's frame.
+
+### Text, Pen, Brush, expansion and a draft's masks in the app (2026-10-18)
+
+The Mask tab now works as CapCut 9.5's (18-inspector-video 013–017): the section's checkbox, "Add mask" (a rectangle centred on the picture), chips with "+", and tiles that shape the selected mask (Split, Filmstrip, Circle, Rectangle, Stars, Heart, Text, Brush, Pen; there's no None tile, a mask is deleted from its chip). The canvas has CapCut's handles (components/preview/clips/MaskHandles.tsx): the dashed box with a dot at each corner, the feather knob above it (drag up), the rotate knob below, a rectangle's round-corner dot inside its top-left corner, Split's line and Filmstrip's two lines, a pen path's anchors and curve handles.
+
+- **Text** (`shapeType: "text"`, `text: {content, font, size, bold, italic, underline, letterSpacing, lineSpacing, align}` on each pose): the engine lays the words out with the text renderer (`TextLayout::line_boxes`, the system font by name, else the app's default), fills the glyphs and underline bars as the mask's coverage about the box's centre, turned with it; the feather blurs the coverage. New text masks read CapCut's "Default text" at a twelfth of the picture's height. A corner handle scales the font.
+- **Pen** (`tool: "pen"`, `penPath: {points: [{x, y, ix, iy, ox, oy}], closed}`): a closed path of cubic beziers through its anchors, each with the handles it arrives and leaves by. The engine draws the curve as a polygon (16 points a span); with a feather, a polygon's soft edge is measured every few pixels (up to 4) and filled in between, within a few levels of measuring every pixel and fast enough to drag. Clicks add anchors, a drag pulls out a curve handle (the other mirrors it), and a click on the first anchor or Enter closes it. The Pen tile first makes the mask an empty pen mask, which the engine skips, so the clip shows whole until the path closes, as in CapCut's 017. Poses with as many anchors travel anchor by anchor.
+- **Brush**: the Brush tile makes the mask an empty brush mask (the clip whole, as in 016) and strokes go on it; the eraser clears under its strokes; Clear empties it.
+- **Expansion** (`expansion`, −100…100 as CapCut's slider, per pose when keyed, on the brush and the pen): grows or shrinks the coverage by up to a tenth of the picture's height before the feather (`MaskKey.expansion`; a polygon's outline moves out along its normals, brush strokes widen). CapCut's draft field is `config.expansion`; the importer reads it on the same scale. The scale is a guess: no local draft or export uses it.
+- **The checkbox** (`masksOff` on the clip): unticked, the masks stay but the engine draws none (a converted draft's own masks included).
+- **A draft's masks** show in the tab: the app lists a converted CapCut segment's masks in `masks` (`draftMask` naming the material, `keyed` when it has keys; `app.rs`, `draft_masks`). Unedited they stay CapCut's materials as imported; edited, the app's replace the ones it listed. Pen paths (`penPath`) become pen masks, a draft's heart or star with its picture keeps it (`shapeBounds.picture`).
+- **Several masks**: each cuts the clip, wherever it is in the list (a mask with a clear outside), so their coverage multiplies, an intersection. Whether CapCut combines them the same way isn't checked: no local draft has two.
+
+Checked by the v1 tests (pen, text, circle, expansion, `masksOff`), the playback mask tests (expansion, text coverage), the renderer's unit tests (tiles, text box, pen poses, empty masks) and `inspmask` in the app, where every tile, handle and row changes the engine's frame and undoes.
 
 ### Masks on adjustment layers
 
