@@ -207,18 +207,35 @@ export type Asset = {
   thumbnail?: string;
 }
 
-/**
- * A text's In animation as the engine draws it ("type_1", "type_2", "typewriter"), or ""
- * for one from a CapCut draft the engine doesn't draw (kept as CapCut had it).
- */
-export type ClipAnimationIn = { type: string; duration: number; name?: string };
+/** The way a slide, push or wipe goes. */
+export type AnimationDirection = "left" | "right" | "up" | "down";
 
 /**
- * The transition from a video or photo into the next clip on its track ("white_flash",
- * "white_fade", "blink"), or "" for a CapCut one the engine doesn't draw. Blink draws the
- * image sequence CapCut downloaded with it (`resource`).
+ * A built-in's parameters (lib/animations.ts lists which take what): the direction of a
+ * slide, push or wipe (left when left out).
  */
-export type ClipTransition = { type: string; duration: number; name?: string; resource?: string | null };
+export type AnimationParams = { direction?: AnimationDirection };
+
+/**
+ * A clip's In, Out, Combo or Loop animation as the engine draws it: `type` is a built-in's
+ * id from lib/animations.ts ("fade_in", "slide", "type_2", …), or "" for one from a CapCut
+ * draft the engine doesn't draw (kept as CapCut had it, `name` its CapCut name). `duration`
+ * in seconds: an In runs from the clip's start, an Out up to its end (after the In; the
+ * engine shortens it so they don't overlap), a Combo over the whole clip whatever its
+ * duration, a Loop repeats once per its duration. All end by the clip's end.
+ */
+export type ClipAnimation = { type: string; duration: number; name?: string; params?: AnimationParams };
+
+/** A text's In animation (the typing ones and the clip moves alike). */
+export type ClipAnimationIn = ClipAnimation;
+
+/**
+ * The transition from a video or photo into the next clip on its track (a built-in's id
+ * from lib/animations.ts: "mix", "slide", "white_flash", …), or "" for a CapCut one the
+ * engine doesn't draw. It runs across the cut, half its duration on each side, at most the
+ * clip's length. Blink draws the image sequence CapCut downloaded with it (`resource`).
+ */
+export type ClipTransition = { type: string; duration: number; name?: string; resource?: string | null; params?: AnimationParams };
 
 /**
  * One of a CapCut draft's own adjustments on a video or photo, by its material id: an Adjust
@@ -255,6 +272,9 @@ export type VideoClipProps = ClipProps &
     speed?: number;
     masks: MaskClipProps[];
     transitionOut?: ClipTransition | null;
+    animationIn?: ClipAnimation | null;
+    animationOut?: ClipAnimation | null;
+    animationCombo?: ClipAnimation | null;
     draftAdjustments?: DraftAdjustment[];
   };
 
@@ -269,6 +289,9 @@ export type ImageClipProps = ClipProps &
     mediaAspectRatio?: number; // width / height
     masks: MaskClipProps[];
     transitionOut?: ClipTransition | null;
+    animationIn?: ClipAnimation | null;
+    animationOut?: ClipAnimation | null;
+    animationCombo?: ClipAnimation | null;
     draftAdjustments?: DraftAdjustment[];
   };
 
@@ -334,6 +357,8 @@ export type TextClipProps = ClipProps & {
   backgroundCornerRadius?: number;
   // Animation
   animationIn?: ClipAnimationIn | null;
+  animationOut?: ClipAnimation | null;
+  animationLoop?: ClipAnimation | null;
   /** How a caption that follows the speech pages its words ("none" shows it whole). */
   captionStyle?: string;
   /** Whether the text has spoken-word timing (CapCut's auto captions). */

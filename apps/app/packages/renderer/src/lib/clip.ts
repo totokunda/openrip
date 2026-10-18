@@ -503,13 +503,17 @@ const splitClipAt = (clip: AnyClipProps, cutFrame: number): [AnyClipProps, AnyCl
     newClip2.keyframes = rightKeys;
   }
 
-  // A text's In animation plays where the clip starts, so it stays on the left clip; a
-  // transition leads into the clip after, so it stays on the right one, which ends where
-  // the clip did. A caption's words keep time with the speech: the right clip starts that
-  // far into it.
+  // An In animation plays where the clip starts, so it stays on the left clip; an Out
+  // animation and a transition lead out of it, so they stay on the right one, which ends
+  // where the clip did. A Combo (video, photos) and a Loop (text) stay on both, each
+  // spanning its half (the engine fits their durations to the clip). A caption's words keep
+  // time with the speech: the right clip starts that far into it.
+  if (clip.type === "text" || clip.type === "video" || clip.type === "image") {
+    (newClip2 as TextClipProps | VideoClipProps | ImageClipProps).animationIn = null;
+    (newClip1 as TextClipProps | VideoClipProps | ImageClipProps).animationOut = null;
+  }
   if (clip.type === "text") {
     const text = newClip2 as TextClipProps;
-    text.animationIn = null;
     if (text.spokenWords) text.spokenFrom = (text.spokenFrom ?? 0) + cutRel / (useControlsStore.getState().fps || 30);
   }
   if (clip.type === "video" || clip.type === "image") {
