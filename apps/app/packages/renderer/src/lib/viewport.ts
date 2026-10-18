@@ -175,7 +175,8 @@ export const useViewportStore = create<ViewportState>((set, get) => ({
     if (viewportSize.width === 0 || viewportSize.height === 0) return;
     if (contentBounds.width === 0 || contentBounds.height === 0) return;
 
-    const padding = options?.padding ?? 0.90; // small margin so the frame isn't flush to the edges
+    // CapCut fits the frame to the canvas area exactly (the area keeps its own margin).
+    const padding = options?.padding ?? 1;
     const fitScale =
       Math.min(
         viewportSize.width / contentBounds.width,

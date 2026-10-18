@@ -191,7 +191,7 @@ export class ScopeRenderer {
         // soft trace, a crowded pixel bright.
         const spread = kind === 2 ? n / (w * h * 0.25) : (n * (kind === 0 ? 1 : 3)) / (w * h);
         // CapCut's traces are soft: a crowded pixel glows, an even spread is a faint veil.
-        const gain = (kind === 2 ? 0.6 : kind === 1 ? 0.32 : 0.45) / Math.max(1e-3, spread);
+        const gain = (kind === 2 ? 0.6 : kind === 1 ? 0.32 : 0.3) / Math.max(1e-3, spread);
         gl.uniform1f(gl.getUniformLocation(this.points, "uGain"), this.half ? gain : Math.max(gain, 1 / 255));
         if (kind === 2) gl.drawArrays(gl.POINTS, 0, n);
         else gl.drawArraysInstanced(gl.POINTS, 0, n, 3);

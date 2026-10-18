@@ -10,8 +10,8 @@ import { useViewportStore } from "./viewport";
 export const ZOOM_MIN = 0.5;
 export const ZOOM_MAX = 4;
 export const ZOOM_STEP = 0.1;
-/** The margin "fit" leaves around the frame (viewport.ts `zoomToFit`'s default). */
-const FIT_PADDING = 0.9;
+/** "Fit" fills the canvas area, as CapCut's (the area keeps a margin above the bar). */
+const FIT_PADDING = 1;
 
 type Size = { width: number; height: number };
 type Bounds = { x: number; y: number; width: number; height: number } | null;

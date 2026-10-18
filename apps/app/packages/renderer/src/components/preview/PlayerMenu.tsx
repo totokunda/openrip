@@ -87,7 +87,7 @@ const PlayerMenu: React.FC = () => {
         <MenuGlyph className="w-[13px] h-[11px]" />
       </Menu.Trigger>
       <Menu.Portal container={container}>
-        <Menu.Content data-testid="player-menu-content" align="end" sideOffset={6} className={`${MENU_PANEL} w-[200px]`}>
+        <Menu.Content data-testid="player-menu-content" align="start" alignOffset={2} sideOffset={2} className={`${MENU_PANEL} w-[200px]`}>
           <Menu.Sub>
             <SubRow testId="menu-oscilloscope">Color oscilloscope</SubRow>
             <Menu.Portal container={container}>

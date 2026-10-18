@@ -358,7 +358,12 @@ const EngineStage: React.FC<{ size: { width: number; height: number } }> = ({ si
  * accent, then the length), a scrub track with the accent up to a white dot, and the button to
  * leave. The bar fades after 3 s without the mouse moving. Esc or ⌘⇧F leaves.
  */
-const FullscreenPreview: React.FC<FullscreenPreviewProps> = ({ onExit }) => {
+const FullscreenPreview: React.FC<FullscreenPreviewProps> = ({ onExit: onExitProp }) => {
+  // The caller's function changes with every render of the preview: the effects below keep to
+  // the latest without starting again.
+  const exitRef = useRef(onExitProp);
+  exitRef.current = onExitProp;
+  const onExit = useCallback(() => exitRef.current(), []);
   const root = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [showBar, setShowBar] = useState(true);
