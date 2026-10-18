@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { app, ipcMain, sharedTexture } from "electron";
+import { app, ipcMain, net, sharedTexture } from "electron";
 import { AppModule } from "../AppModule.js";
 import { ModuleContext } from "../ModuleContext.js";
 import { ensureProjectJson } from "./JSONPersistenceModule.js";
@@ -146,9 +146,11 @@ function load(): EngineInfo {
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
- * The file behind a font the page loads: a file URL in the built app; in development the dev
- * server's `/@fs/` path to the file, or else a copy fetched from the server into
- * `<userData>/engine-fonts`. Null if it can't be had.
+ * The file behind a font the page loads: the file itself for a file URL, or the dev server's
+ * `/@fs/` path to it; otherwise (the built app's `app://renderer/…`, a dev server's other
+ * paths) a copy fetched through the app's protocols into `<userData>/engine-fonts`, named
+ * after the URL's path (the built app's file names carry their content hash). Null if it
+ * can't be had.
  */
 async function fontFile(url: string): Promise<string | null> {
   try {
@@ -158,11 +160,11 @@ async function fontFile(url: string): Promise<string | null> {
       const path = decodeURIComponent(u.pathname.slice(4));
       if (existsSync(path)) return path;
     }
-    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (!["app:", "http:", "https:"].includes(u.protocol)) return null;
     const dir = join(app.getPath("userData"), "engine-fonts");
-    const file = join(dir, decodeURIComponent(u.pathname).replace(/[^\w.-]+/g, "_"));
+    const file = join(dir, `${u.hostname}${decodeURIComponent(u.pathname)}`.replace(/[^\w.-]+/g, "_"));
     if (!existsSync(file)) {
-      const res = await fetch(u);
+      const res = await net.fetch(u.href);
       if (!res.ok) return null;
       await mkdir(dir, { recursive: true });
       await writeFile(file, Buffer.from(await res.arrayBuffer()));
