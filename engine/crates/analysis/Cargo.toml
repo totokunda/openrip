@@ -1,0 +1,15 @@
+[package]
+name = "openrip-analysis"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Classic (non-ML) picture analysis: shot changes, colour statistics, auto adjust and colour matching"
+
+# Pure Rust over pixels in memory: frames come from whoever decodes them (openrip-playback).
+[dependencies]
+
+[dev-dependencies]
+# The auto adjust tests solve against the real Adjust sliders (their CPU reference).
+openrip-render.workspace = true

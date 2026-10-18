@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target/check-targets}"
 
 # Pure Rust, no platform code at all: these build anywhere Rust does.
-PURE=(-p openrip-model -p openrip-platform -p openrip-motion -p openrip-capcut -p openrip-v1 -p openrip-frame)
+PURE=(-p openrip-model -p openrip-platform -p openrip-motion -p openrip-capcut -p openrip-v1 -p openrip-frame -p openrip-analysis)
 # The engine up to its API, with no built-in backend (no FFmpeg, no cpal): the seams,
 # rendering, playback logic, export's render loop and openrip-core. Platform code inside
 # them is behind cfgs with a portable fallback.

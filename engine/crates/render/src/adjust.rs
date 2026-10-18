@@ -146,6 +146,74 @@ impl Adjust {
     }
 }
 
+impl Adjust {
+    /// One straight (not premultiplied) colour, encoded 0–1, through the Adjust sliders as
+    /// `fs_adjust` draws them: brightness, contrast, saturation, highlights, shadows, whites
+    /// and blacks, temperature and tint, each clamped as the shader clamps it. A CPU
+    /// reference for analysis (Auto adjust solves against it) and tests. Left out: the
+    /// primary wheels, exposure and fade (lookup tables), Sharpen, clarity and the vignette
+    /// (neighbourhood passes), HSL and curves (grade.rs).
+    pub fn apply_rgb(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let p = self.params(false, false);
+        let clamp = |c: [f32; 3]| c.map(|v| v.clamp(0.0, 1.0));
+        let mut c = clamp(rgb);
+        if p.on1[2] > 0.5 {
+            let b = p.a[1];
+            let mut e = 1.0 + b * 5.0;
+            if b <= 0.0 {
+                e = 1.0 / (1.0 - b * 2.5);
+                c = c.map(|v| v + b * 0.01);
+            }
+            c = clamp(c.map(|v| 1.0 - (1.0 - v).max(0.0).powf(e)));
+        }
+        if p.on1[3] > 0.5 {
+            let pivot = p.a[3];
+            if p.a[2] <= 1.0 {
+                c = c.map(|v| p.a[2] * (v - pivot) + pivot);
+            } else {
+                c = c.map(|x| {
+                    let s = 1.0 / (1.0 + (-p.b[0] * (x - pivot)).exp());
+                    let y = s + pivot - 0.5;
+                    let k = p.b[0] * s * (1.0 - s);
+                    if x <= pivot {
+                        let t = (p.c[1] - k) / p.b[3];
+                        y + t * t * p.b[1]
+                    } else {
+                        let t = (p.c[1] - k) / p.c[0];
+                        y + t * t * p.b[2]
+                    }
+                });
+            }
+            c = clamp(c);
+        }
+        if p.on1[1] > 0.5 {
+            const LUMA: [f32; 3] = [0.208_54, 0.702_086, 0.089_374];
+            let s = p.a[0];
+            let l = (c[0] * LUMA[0] + c[1] * LUMA[1] + c[2] * LUMA[2]) * (1.0 - s);
+            c = clamp(c.map(|v| l + s * v));
+        }
+        if p.on2[0] > 0.5 {
+            let e = p.c[2];
+            c = clamp(c.map(|v| {
+                let t = 1.0 - v;
+                1.0 - t.max(0.0).powf(e) - (e - 1.0) * (t * t - t * t * t)
+            }));
+        }
+        if p.on2[1] > 0.5 {
+            let e = p.c[3];
+            c = clamp(c.map(|v| v.max(0.0).powf(e) + (e - 1.0) * (v * v - v * v * v)));
+        }
+        if p.on2[2] > 0.5 {
+            c = clamp(c.map(|v| p.d[0] * v + p.d[1]));
+        }
+        if p.on1[0] > 0.5 {
+            let dot = |m: [f32; 4]| m[0] * c[0] + m[1] * c[1] + m[2] * c[2];
+            c = clamp([dot(p.tt_r), dot(p.tt_g), dot(p.tt_b)]);
+        }
+        c
+    }
+}
+
 const CONTRAST_PIVOT: f64 = 0.435;
 
 #[repr(C)]
