@@ -310,12 +310,19 @@ export const getTimelineTypeForClip = (
 /** The space the timeline draws between tracks (inside each track's height). */
 const TRACK_GAP = 8;
 
+/** The track menu's Track height: Short and Tall against the Default row. */
+const TRACK_SIZES = { short: 0.7, tall: 1.4 } as const;
+
 /**
  * A track's height: CapCut's row for its kind (docs/plan/capcut-ui-spec.md §4.11: the main
- * track 76 px, overlay video 52, audio 50, text, filter and the rest 24) and the gap below it.
+ * track 76 px, overlay video 52, audio 50, text, filter and the rest 24), scaled by its Track
+ * height (video and audio tracks), and the gap below it.
  */
-export const trackHeightFor = (type: TimelineType, main: boolean) =>
-  (type === "media" ? (main ? 76 : 52) : type === "audio" ? 50 : 24) + TRACK_GAP;
+export const trackHeightFor = (type: TimelineType, main: boolean, size?: TimelineProps["size"]) => {
+  const row = type === "media" ? (main ? 76 : 52) : type === "audio" ? 50 : 24;
+  const scaled = size && (type === "media" || type === "audio") ? Math.round(row * TRACK_SIZES[size]) : row;
+  return scaled + TRACK_GAP;
+};
 
 export const getTimelineHeightForClip = (
   clip: AnyClipProps | MediaItem | string,
@@ -392,7 +399,7 @@ export const resolveOverlapsTimelines = (
 
   for (let i = 0; i < timelines.length; i++) {
     // Every track starts time 0 after the Cover column (an older project saved 24 px).
-    const timeline = { ...timelines[i], timelinePadding: TIME_ZERO_X, timelineHeight: trackHeightFor(timelines[i].type, timelines[i] === main) };
+    const timeline = { ...timelines[i], timelinePadding: TIME_ZERO_X, timelineHeight: trackHeightFor(timelines[i].type, timelines[i] === main, timelines[i].size) };
 
     // First timeline starts at 0
     if (i === 0) {

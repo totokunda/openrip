@@ -6,7 +6,7 @@ import React from "react";
 import { IoEye, IoEyeOff, IoVolumeHigh, IoVolumeMute } from "react-icons/io5";
 import { LuEllipsis, LuLock, LuLockOpen, LuPlus, LuTrash2 } from "react-icons/lu";
 import { useClipStore } from "@/lib/clip";
-import { useContextMenuStore } from "@/lib/context-menu";
+import { useContextMenuStore, type ContextMenuItem } from "@/lib/context-menu";
 import { mainTrackOf } from "@/lib/timeline-edit";
 import type { TimelineProps, TimelineType } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -128,13 +128,53 @@ export const TrackButtons: React.FC<TrackProp> = ({ track }) => {
   );
 };
 
-/** The track menu (right-click on its header or its row): lock or unlock, delete. */
+/**
+ * A video or audio track's display items, as CapCut's "…" menu has them: Track height › Short,
+ * Default, Tall (its row) and Audio waveform size › 30%, 60%, 100% (how tall its waveforms
+ * are), the current ones ticked. Saved with the track.
+ */
+const trackDisplayItems = (track: TimelineProps): ContextMenuItem[] => {
+  if (track.type !== "media" && track.type !== "audio") return [];
+  const set = (patch: Partial<TimelineProps>) => () => useClipStore.getState().updateTimeline(track.timelineId, patch);
+  const size = track.size ?? "default";
+  const waveform = track.waveform ?? 30;
+  return [
+    {
+      id: "track-height",
+      label: "Track height",
+      action: "none",
+      children: (["short", "default", "tall"] as const).map((s) => ({
+        id: `track-height-${s}`,
+        label: s[0].toUpperCase() + s.slice(1),
+        action: "custom" as const,
+        checked: size === s,
+        run: set({ size: s === "default" ? undefined : s }),
+      })),
+    },
+    {
+      id: "waveform-size",
+      label: "Audio waveform size",
+      action: "none",
+      children: ([30, 60, 100] as const).map((w) => ({
+        id: `waveform-size-${w}`,
+        label: `${w}%`,
+        action: "custom" as const,
+        checked: waveform === w,
+        run: set({ waveform: w === 30 ? undefined : w }),
+      })),
+    },
+  ];
+};
+
+/** The track menu (right-click on its header or its row, or its "…"): height and waveform size, lock or unlock, delete. */
 export const openTrackMenu = (e: { clientX: number; clientY: number }, track: TimelineProps) => {
   const { timelines } = useClipStore.getState();
+  const display = trackDisplayItems(track);
   useContextMenuStore.getState().openMenu({
     position: { x: e.clientX, y: e.clientY },
     target: { type: "track", timelineId: track.timelineId },
     groups: [
+      ...(display.length ? [{ id: "display", items: display }] : []),
       {
         id: "track",
         items: [

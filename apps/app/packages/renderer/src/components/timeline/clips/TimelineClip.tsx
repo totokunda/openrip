@@ -72,8 +72,8 @@ import {
 } from "react-icons/lu";
 import { MdPhotoFilter as MdFilterIcon } from "react-icons/md";
 
+import { MediaBandsFace, SoundClipFace, useMediaBands } from "./ClipBands";
 import {
-  generateTimelineThumbnailAudio,
   generateTimelineThumbnailImage,
   generateTimelineThumbnailVideo,
   generateTimelineThumbnailShape,
@@ -211,6 +211,10 @@ const TimelineClip: React.FC<
   const totalClipHeight = useMemo(() => {
     return timelineHeight;
   }, [timelineHeight]);
+  // A video's or photo's bands (CapCut's label, thumbnails, own sound): its thumbnails fill the
+  // middle one (ClipBands.tsx).
+  const bands = useMediaBands(clipType, timelineId, timelineHeight);
+  const thumbsHeight = bands ? bands.thumbs : timelineHeight;
 
   const currentStartFrame = currentClip?.startFrame ?? 0;
   const currentEndFrame = currentClip?.endFrame ?? 0;
@@ -307,11 +311,11 @@ const TimelineClip: React.FC<
 
   useEffect(() => {
     imageCanvas.width = Math.min(clipWidth, maxTimelineWidth);
-    imageCanvas.height = timelineHeight;
+    imageCanvas.height = thumbsHeight;
   }, [
     zoomLevel,
     clipWidth,
-    timelineHeight,
+    thumbsHeight,
     timelineWidth,
     timelinePadding,
     maxTimelineWidth,
@@ -416,6 +420,8 @@ const TimelineClip: React.FC<
 
   // Clamp HTML overlay to timeline bounds and offset to keep it visible
   const absClipX = isDragging ? tempClipPosition.x : clipPosition.x;
+  // What moves the clip's waveform bars onto whole device pixels (half a CSS pixel on Retina).
+  const pixelSnap = Math.round(absClipX * 2) / 2 - absClipX;
   const timelineLeft = assetMode ? 0 : timelinePadding;
   const timelineRight = timelineLeft + timelineWidth;
   const htmlLocalX = Math.max(0, Math.round(timelineLeft - absClipX));
@@ -460,29 +466,16 @@ const TimelineClip: React.FC<
   useEffect(() => {
     if (!currentClip) return;
 
-    if (clipType === "audio") {
-      generateTimelineThumbnailAudio(
-        clipType,
-        currentClip as AudioClipProps,
-        currentClipId,
-        mediaInfoRef.current ?? null,
-        imageCanvas,
-        timelineHeight,
-        currentStartFrame,
-        currentEndFrame,
-        timelineDuration,
-        timelineWidth,
-        timelinePadding,
-        groupRef,
-      );
-    } else if (clipType === "image") {
+    // An audio clip draws its waveform itself (SoundClipFace); videos and photos their
+    // thumbnails here, in their middle band.
+    if (clipType === "image") {
       generateTimelineThumbnailImage(
         clipType,
         currentClip as ImageClipProps,
         currentClipId,
         mediaInfoRef.current ?? null,
         imageCanvas,
-        timelineHeight,
+        thumbsHeight,
         thumbnailClipWidth.current,
         maxTimelineWidth,
         applyMask,
@@ -497,7 +490,7 @@ const TimelineClip: React.FC<
         currentClipId,
         mediaInfoRef.current ?? null,
         imageCanvas,
-        timelineHeight,
+        thumbsHeight,
         thumbnailClipWidth.current,
         maxTimelineWidth,
         timelineWidth,
@@ -536,6 +529,7 @@ const TimelineClip: React.FC<
     timelineDuration[1],
     overHang,
     resizeSide,
+    thumbsHeight,
     forceRerenderCounter,
   ]);
 
@@ -1851,16 +1845,42 @@ const TimelineClip: React.FC<
                 </Group>
               )}
             </Group>
-          ) : (
-            <Image
-              x={imageX}
-              y={0}
-              image={imageCanvas}
-              width={imageWidth}
+          ) : clipType === "audio" && currentClip ? (
+            <SoundClipFace
+              clip={currentClip}
+              timelineId={timelineId}
+              width={clipWidth}
               height={timelineHeight}
+              fromPx={imageX}
+              toPx={imageX + imageWidth}
+              snap={pixelSnap}
               cornerRadius={safeCornerRadius}
-              fill={clipType === "audio" ? "#1A2138" : "#FFFFFF"}
             />
+          ) : (
+            <>
+              <Image
+                x={imageX}
+                y={bands?.label ?? 0}
+                image={imageCanvas}
+                width={imageWidth}
+                height={thumbsHeight}
+                cornerRadius={bands ? 0 : safeCornerRadius}
+                fill="#FFFFFF"
+              />
+              {bands && currentClip && (
+                <MediaBandsFace
+                  clip={currentClip}
+                  timelineId={timelineId}
+                  width={clipWidth}
+                  height={timelineHeight}
+                  fromPx={imageX}
+                  toPx={imageX + imageWidth}
+                  snap={pixelSnap}
+                  cornerRadius={safeCornerRadius}
+                  bands={bands}
+                />
+              )}
+            </>
           )}
           {!assetMode && currentClip && (currentClip as AudioClipProps).beats && (
             <BeatMarkers clip={currentClip} width={clipWidth} height={timelineHeight} />

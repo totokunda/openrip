@@ -204,6 +204,10 @@ export interface TimelineProps {
   hidden: boolean;
   /** Its clips can't be selected or edited (CapCut's "Lock track"). */
   locked?: boolean;
+  /** CapCut's Track height (the track's "…" menu); missing is Default. */
+  size?: "short" | "tall";
+  /** CapCut's Audio waveform size, % (the track's "…" menu); missing is 30. */
+  waveform?: 30 | 60 | 100;
 }
 
 /** A timeline marker: a point in time on the ruler, with a colour and a note. */

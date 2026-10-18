@@ -37,6 +37,17 @@ export function engineThumbnails(path: string, timesUs: number[], height: number
   return ipcRenderer.invoke("engine:thumbnails", path, timesUs, height, exact);
 }
 
+/** A file's audio for the timeline's waveforms: per bucket of the mono mix, its peak and RMS (0..1). */
+export type EngineWaveform = { perSecond: number; peak: Float32Array; rms: Float32Array };
+
+/**
+ * The audio of `path` (a path or file URL) at `perSecond` buckets a second (it must divide
+ * 48 000), decoded once by the engine and kept on disk; null without audio or the engine.
+ */
+export function engineWaveform(path: string, perSecond: number): Promise<EngineWaveform | null> {
+  return ipcRenderer.invoke("engine:waveform", path, perSecond);
+}
+
 /** A file's beats as the engine finds them (lib/beats.ts `BeatGrid`): times in s of its media. */
 export type EngineBeats = { bpm: number; beats: { time: number; downbeat: boolean }[] };
 

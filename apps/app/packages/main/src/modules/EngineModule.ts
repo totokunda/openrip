@@ -65,6 +65,8 @@ export type EngineAddon = {
   setHardwareDecoding?(on: boolean): void;
   capcutToApp(dir: string): Promise<{ json: string; name: string; missingMedia: string[]; notes: string[] }>;
   thumbnails(path: string, timesUs: number[], height: number, exact: boolean): Promise<Thumbnail[]>;
+  /** A file's audio as buckets per second (peak and RMS of the mono mix), cached; null without audio. */
+  waveform(path: string, perSecond: number): Promise<{ perSecond: number; peak: Float32Array; rms: Float32Array } | null>;
   /** The beats in a file's audio (times in s of its media; downbeats 1 where a bar starts), cached; null without audio. */
   beats(path: string): Promise<{ bpm: number; times: Float64Array; downbeats: Uint8Array } | null>;
   /** EBU R128 loudness (LUFS, null for silence) and peak (dBFS) of a file's range, as CapCut measures it. */
@@ -372,7 +374,7 @@ export class EngineModule implements AppModule {
     const settings = getSettingsModule();
     addon?.setHardwareDecoding?.(settings.getPreferences().hardwareDecoding);
     settings.on("preferences-changed", (p: Preferences) => addon?.setHardwareDecoding?.(p.hardwareDecoding));
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still"]) {
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:waveform", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -388,6 +390,20 @@ export class EngineModule implements AppModule {
       } catch (e) {
         console.warn("[engine] thumbnails failed:", message(e));
         return [];
+      }
+    });
+
+    // A file's audio as buckets for the timeline's waveforms (the engine decodes it once and
+    // keeps the buckets on disk with the thumbnails).
+    ipcMain.handle("engine:waveform", async (_event, path: string, perSecond: number) => {
+      if (!addon) return null;
+      const file = path.startsWith("file://") ? fileURLToPath(path) : path;
+      try {
+        const w = await addon.waveform(file, perSecond);
+        return w && { perSecond: w.perSecond, peak: w.peak, rms: w.rms };
+      } catch (e) {
+        console.warn("[engine] waveform failed:", message(e));
+        return null;
       }
     });
 

@@ -485,6 +485,8 @@ const computeTimelineSignature = (timelines: unknown): string => {
     timelineY: t?.timelineY,
     muted: t?.muted,
     locked: t?.locked,
+    size: t?.size,
+    waveform: t?.waveform,
   }));
   return safeStringify(reduced);
 };

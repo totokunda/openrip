@@ -1,4 +1,3 @@
-export { generateTimelineThumbnailAudio } from "./generateTimelineThumbnailAudio";
 export { generateTimelineThumbnailImage } from "./generateTimelineThumbnailImage";
 export { generateTimelineThumbnailVideo } from "./generateTimelineThumbnailVideo";
 export { generateTimelineThumbnailShape } from "./generateTimelineThumbnailShape";

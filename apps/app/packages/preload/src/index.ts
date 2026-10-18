@@ -24,6 +24,7 @@ export {
   engineExportCancel,
   engineThumbnails,
   engineBeats,
+  engineWaveform,
   engineLoudness,
   engineRegisterFonts,
   engineFontFamilies,
@@ -35,7 +36,7 @@ export {
   ENGINE_FRAME_CANVAS_ID,
   ENGINE_FRAME_EVENT,
 } from "./engine.js";
-export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult, EngineThumbnail, EngineBeats, EngineFontFace, EngineFontFamily, EngineStillResult } from "./engine.js";
+export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult, EngineThumbnail, EngineBeats, EngineWaveform, EngineFontFace, EngineFontFamily, EngineStillResult } from "./engine.js";
 
 // Voiceover recording (the main process's VoiceoverModule)
 export { voiceoverStatus, voiceoverStart, voiceoverStop, voiceoverCancel, voiceoverList, onVoiceoverLevel } from "./voiceover.js";
