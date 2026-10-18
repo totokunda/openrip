@@ -73,6 +73,14 @@ fn fs_bilinear(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     return mix(top, bottom, f.y);
 }
 
+// Upload: straight-alpha 8-bit texels to premultiplied ones, rounded as (c * a + 127) / 255
+// in integers, so the passes after it see exactly the values a CPU premultiply gives.
+@fragment
+fn fs_premultiply(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let s = vec4<u32>(round(textureLoad(src, vec2<i32>(floor(pos.xy)), 0) * 255.0));
+    return vec4<f32>(vec4<u32>((s.rgb * s.a + 127u) / 255u, s.a)) / 255.0;
+}
+
 fn catrom(x: f32) -> f32 {
     let a = abs(x);
     if (a < 1.0) {

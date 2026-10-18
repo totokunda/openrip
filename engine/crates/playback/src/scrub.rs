@@ -2,8 +2,8 @@
 //! are got ready on background threads, at about the preview's size.
 //!
 //! A drag asks for frames far apart. Each new GOP costs a keyframe decode (~20 ms of
-//! VideoToolbox time for 4K), and each new still a decode, plus an upload of the whole
-//! picture when it's drawn (~25 ms for a 4K PNG). The engine tells [`ScrubAhead`] where
+//! VideoToolbox time for 4K), and each new still a decode, plus writing the whole picture
+//! to the GPU when it's drawn (~12 ms for a 4K PNG). The engine tells [`ScrubAhead`] where
 //! each frame of the drag is; from the drag's speed it plans what lies ahead (each video's
 //! keyframes, each still) and a few worker threads get them ready as stand-ins: video
 //! scaled by VideoToolbox as it decodes, stills box-filtered down. A keyframe's ~20 ms is
@@ -12,7 +12,9 @@
 //! release draws the full pictures.
 //!
 //! The same workers also decode an exact frame's stills beside its video
-//! ([`ScrubAhead::load_full`]), rather than one after another on the render thread.
+//! ([`ScrubAhead::load_full`]), rather than one after another on the render thread, and
+//! write them to the GPU there; stills decoded before but no longer on the GPU are written
+//! there too ([`ScrubAhead::upload`]).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
@@ -22,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use openrip_media::{DecoderOptions, PixelFormat, VideoDecoder, VideoFrame};
 use openrip_model::{MediaKind, Micros, Project, TrackKind};
-use openrip_render::RgbaImage;
+use openrip_render::{RgbaImage, Uploader};
 
 /// Worker threads (each with its own decoders).
 const WORKERS: usize = 3;
@@ -45,6 +47,9 @@ const STILL_BUDGET: usize = 128 << 20;
 /// head start, and decoding it again would take as much CPU (this only guards against a
 /// stuck worker).
 const WAIT_STILL: Duration = Duration::from_millis(1000);
+/// ... and for a still being written to the GPU, which takes a few milliseconds (after this
+/// the render thread writes it itself).
+const WAIT_UPLOAD: Duration = Duration::from_millis(100);
 /// ... and for a keyframe. Decoding one is mostly waiting on the hardware, which a busy
 /// machine slows less than it slows a worker thread, so after this the render thread
 /// decodes it itself.
@@ -63,7 +68,21 @@ pub(crate) enum Job {
     Still { path: String, size: u32 },
     /// A still at full size, for an exact frame (decoded beside the frame's other media).
     Full { path: String },
+    /// A still decoded before, written to the GPU for an exact frame.
+    Upload { path: String, picture: Picture },
 }
+
+/// A decoded still in a job; jobs are told apart by path, so it compares by identity.
+#[derive(Clone, Debug)]
+pub(crate) struct Picture(Arc<RgbaImage>);
+
+impl PartialEq for Picture {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Picture {}
 
 /// What a job makes, whatever size it was asked at.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -72,6 +91,7 @@ enum Key {
     Keyframe(String, Micros),
     Still(String),
     Full(String),
+    Upload(String),
 }
 
 impl Job {
@@ -81,12 +101,13 @@ impl Job {
             Job::Keyframe { path, at, .. } => Key::Keyframe(path.clone(), *at),
             Job::Still { path, .. } => Key::Still(path.clone()),
             Job::Full { path } => Key::Full(path.clone()),
+            Job::Upload { path, .. } => Key::Upload(path.clone()),
         }
     }
 
     fn path(&self) -> &str {
         match self {
-            Job::Index { path, .. } | Job::Keyframe { path, .. } | Job::Still { path, .. } | Job::Full { path } => path,
+            Job::Index { path, .. } | Job::Keyframe { path, .. } | Job::Still { path, .. } | Job::Full { path } | Job::Upload { path, .. } => path,
         }
     }
 }
@@ -99,6 +120,8 @@ enum Ready {
     /// A still's stand-in.
     Still(String, Option<Arc<RgbaImage>>),
     Full(String, Option<Arc<RgbaImage>>),
+    /// A still written to the GPU (or not, on a GPU's limits).
+    Uploaded(String),
 }
 
 impl Ready {
@@ -108,6 +131,7 @@ impl Ready {
             Ready::Keyframe(path, at, _) => Key::Keyframe(path.clone(), *at),
             Ready::Still(path, _) => Key::Still(path.clone()),
             Ready::Full(path, _) => Key::Full(path.clone()),
+            Ready::Uploaded(path) => Key::Upload(path.clone()),
         }
     }
 }
@@ -174,6 +198,8 @@ fn frame_bytes(f: &VideoFrame) -> usize {
 
 pub(crate) struct ScrubAhead {
     shared: Arc<Shared>,
+    /// Writes full-size stills to the compositor's GPU from the workers.
+    uploader: Option<Uploader>,
     /// Started on the first drag (most engines never scrub: export, thumbnails, playback).
     workers: Vec<std::thread::JoinHandle<()>>,
     ready_tx: Sender<Ready>,
@@ -194,10 +220,11 @@ pub(crate) struct ScrubAhead {
 }
 
 impl ScrubAhead {
-    pub(crate) fn new() -> ScrubAhead {
+    pub(crate) fn new(uploader: Option<Uploader>) -> ScrubAhead {
         let (ready_tx, ready) = std::sync::mpsc::channel();
         ScrubAhead {
             shared: Arc::default(),
+            uploader,
             workers: Vec::new(),
             ready_tx,
             ready,
@@ -228,7 +255,7 @@ impl ScrubAhead {
                 Job::Index { path, .. } => !self.indexes.contains_key(path),
                 Job::Keyframe { path, at, .. } => !self.keyframes.contains(&(path.clone(), *at)),
                 Job::Still { path, .. } => !self.stills.contains(path),
-                Job::Full { .. } => true,
+                Job::Full { .. } | Job::Upload { .. } => true,
             })
             .collect();
         if self.workers.is_empty() {
@@ -265,8 +292,8 @@ impl ScrubAhead {
 
     fn start(&mut self) {
         for i in 0..WORKERS {
-            let (shared, ready) = (self.shared.clone(), self.ready_tx.clone());
-            if let Ok(w) = std::thread::Builder::new().name(format!("scrub-ahead-{i}")).spawn(move || work(&shared, &ready)) {
+            let (shared, ready, uploader) = (self.shared.clone(), self.ready_tx.clone(), self.uploader.clone());
+            if let Ok(w) = std::thread::Builder::new().name(format!("scrub-ahead-{i}")).spawn(move || work(&shared, &ready, uploader.as_ref())) {
                 self.workers.push(w);
             }
         }
@@ -297,6 +324,7 @@ impl ScrubAhead {
             Ready::Still(path, None) | Ready::Full(path, None) => {
                 self.failed.insert(path);
             }
+            Ready::Uploaded(_) => {}
         }
     }
 
@@ -342,9 +370,10 @@ impl ScrubAhead {
         self.stills.get(&key).cloned()
     }
 
-    /// Decode these stills at full size on the workers, ahead of anything else queued: an
-    /// exact frame's stills then decode beside its video (and each other) rather than one
-    /// after another on the render thread. Collect each with [`ScrubAhead::full`].
+    /// Decode these stills at full size on the workers, ahead of anything else queued, and
+    /// write them to the GPU: an exact frame's stills then get ready beside its video (and
+    /// each other) rather than one after another on the render thread. Collect each with
+    /// [`ScrubAhead::full`].
     pub(crate) fn load_full(&mut self, paths: Vec<String>) {
         if paths.is_empty() {
             return;
@@ -360,6 +389,33 @@ impl ScrubAhead {
             }
         }
         self.shared.cond.notify_all();
+    }
+
+    /// Write these stills (decoded already) to the GPU on the workers, ahead of anything else
+    /// queued, so they get there beside the frame's video. Without an uploader, nothing.
+    pub(crate) fn upload(&mut self, stills: Vec<(String, Arc<RgbaImage>)>) {
+        if stills.is_empty() || self.uploader.is_none() {
+            return;
+        }
+        if self.workers.is_empty() {
+            self.start();
+        }
+        let mut q = self.shared.queue.lock().unwrap();
+        for (path, img) in stills.into_iter().rev() {
+            let job = Job::Upload { path, picture: Picture(img) };
+            if !q.running.contains(&job.key()) && !q.jobs.iter().any(|j| j.key() == job.key()) {
+                q.jobs.push_front(job);
+            }
+        }
+        self.shared.cond.notify_all();
+    }
+
+    /// If a worker is writing the still at `path` to the GPU (see [`ScrubAhead::upload`]),
+    /// wait for it (bounded); a queued job for it is dropped, as the compositor will write
+    /// it itself.
+    pub(crate) fn uploading(&mut self, path: &str) {
+        self.adopt();
+        self.wait_for(&Key::Upload(path.to_string()), WAIT_UPLOAD);
     }
 
     /// A still decoded at full size by the workers (see [`ScrubAhead::load_full`]), waiting
@@ -411,7 +467,7 @@ impl Drop for ScrubAhead {
 }
 
 /// A worker: takes jobs off the queue until told to quit.
-fn work(shared: &Shared, ready: &Sender<Ready>) {
+fn work(shared: &Shared, ready: &Sender<Ready>, uploader: Option<&Uploader>) {
     // (path, size, decoder), most recently used last.
     let mut decoders: Vec<(String, u32, VideoDecoder)> = Vec::new();
     loop {
@@ -447,7 +503,21 @@ fn work(shared: &Shared, ready: &Sender<Ready>) {
                     Arc::new(if k > 1 { shrink(&full, k) } else { full })
                 }),
             ),
-            Job::Full { path } => Ready::Full(path.clone(), crate::preview::load_still(Path::new(path)).ok().map(Arc::new)),
+            Job::Full { path } => Ready::Full(
+                path.clone(),
+                crate::preview::load_still(Path::new(path)).ok().map(|full| {
+                    if let Some(u) = uploader {
+                        u.upload(crate::preview::still_key(path), &full);
+                    }
+                    Arc::new(full)
+                }),
+            ),
+            Job::Upload { path, picture } => {
+                if let Some(u) = uploader {
+                    u.upload(crate::preview::still_key(path), &picture.0);
+                }
+                Ready::Uploaded(path.clone())
+            }
         };
         // Sent before it stops counting as running, so a render thread that finds it not
         // running has it in the channel (see `wait_for`).
@@ -641,7 +711,7 @@ mod tests {
             Job::Keyframe { at, .. } => format!("key {}", at.0 / 1_000_000),
             Job::Still { path, .. } => path.clone(),
             Job::Index { .. } => "index".into(),
-            Job::Full { .. } => "full".into(),
+            Job::Full { .. } | Job::Upload { .. } => "full".into(),
         };
         // Forward over 3 s from 2.5 s: timeline 2.5 s is 12.5 s into the file.
         let jobs = plan(&p, Micros(2_500_000), 3_000_000, 960, &indexes);
@@ -673,7 +743,7 @@ mod tests {
 
     #[test]
     fn the_span_follows_the_drags_speed_and_direction() {
-        let mut s = ScrubAhead::new();
+        let mut s = ScrubAhead::new(None);
         let t0 = Instant::now();
         // 2 s of timeline in 100 ms: 6 s over the look-ahead.
         s.recent = VecDeque::from([(Micros(1_000_000), t0), (Micros(3_000_000), t0 + Duration::from_millis(100))]);
@@ -714,6 +784,19 @@ mod tests {
         assert_eq!(shrink_factor(1920, 1080, 960), 2);
         assert_eq!(shrink_factor(1920, 1080, 1100), 1);
         assert_eq!(shrink_factor(640, 480, 0), 1);
+    }
+
+    #[test]
+    fn stills_to_write_to_the_gpu() {
+        let a = Arc::new(RgbaImage { width: 1, height: 1, data: vec![0; 4] });
+        let b = Arc::new((*a).clone());
+        // Jobs hold the decoded still itself, compared by identity rather than by pixels.
+        assert_eq!(Picture(a.clone()), Picture(a.clone()));
+        assert_ne!(Picture(a.clone()), Picture(b));
+        // Without an uploader there's nothing to do, and no workers start for it.
+        let mut s = ScrubAhead::new(None);
+        s.upload(vec![("/photo0".into(), a)]);
+        assert!(s.workers.is_empty() && s.shared.queue.lock().unwrap().jobs.is_empty());
     }
 
     #[test]

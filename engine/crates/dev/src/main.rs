@@ -34,6 +34,11 @@
 //!   openrip-dev pipeline-bench <project.json | draft-dir> [--seconds N]
 //!       Play through the render-ahead preview pipeline by the wall clock with a 60 Hz
 //!       display: frames shown on time, dropped, and the longest gap without a new frame.
+//!   openrip-dev still-bench <project.json | draft-dir> [--count N]
+//!       The compositor on a project's stills (default the first 12 PNGs), each drawn
+//!       full-frame into a 540-pixel preview surface and an NV12 export buffer at the canvas
+//!       size: as a new still, written ahead by another thread, again from the GPU cache, and
+//!       with its scale dragged; then frames drawn while another thread writes stills.
 //!   openrip-dev scrub-bench <media-file>
 //!       Simulate dragging the playhead (120 Hz input) at several speeds, in scrub mode and
 //!       accurate-only mode: frames shown per second, how far behind the playhead they are,
@@ -82,6 +87,7 @@ fn main() -> ExitCode {
         Some("cover-parity") if args.len() >= 2 => cover_parity(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
         Some("app-roundtrip") if args.len() >= 2 => app_roundtrip(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("seek-bench") if args.len() >= 2 => seek_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("still-bench") if args.len() >= 2 => still_bench(&args).map_err(|e| e.to_string()),
         Some("export-parity") if args.len() >= 3 => export_parity(&args).map_err(|e| e.to_string()),
         Some("wrap-probe") if args.len() >= 3 => wrap_probe(Path::new(&args[1]), Path::new(&args[2])).map_err(|e| e.to_string()),
         Some("thumbs-bench") if args.len() >= 2 => thumbs_bench(&args).map_err(|e| e.to_string()),
@@ -895,6 +901,96 @@ fn seek_bench(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         println!("{pass}: p50 {:.0} ms, p90 {:.0} ms, max {:.0} ms", s[s.len() / 2], s[s.len() * 9 / 10], s[s.len() - 1]);
     }
     Ok(())
+}
+
+/// The compositor on a project's stills, as exact frames meet them, into a 540-pixel preview
+/// surface and an NV12 export buffer at the canvas size: each drawn full-frame as a new
+/// still (decoded already), written ahead by another thread, again from the GPU cache, and
+/// at new sizes (a scale being dragged).
+#[cfg(target_os = "macos")]
+fn still_bench(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_render::{Compositor, Layer, Source};
+    let project = load_project(Path::new(&args[1]))?;
+    let count: usize = flag(args, "--count").map(|s| s.to_string_lossy().parse()).transpose()?.unwrap_or(12);
+    let mut paths: Vec<&str> = project.materials.media.iter().filter(|m| m.kind == openrip_model::MediaKind::Photo).map(|m| m.path.as_str()).collect();
+    paths.dedup();
+    let t0 = Instant::now();
+    let stills: Vec<_> = paths.iter().filter_map(|p| openrip_playback::preview::load_png(Path::new(p)).ok()).take(count).collect();
+    let Some(first) = stills.first() else { return Err("no PNG stills in the project".into()) };
+    println!("{} stills ({}x{}) decoded in {:.0} ms", stills.len(), first.width, first.height, t0.elapsed().as_secs_f64() * 1e3);
+    let (cw, ch) = (project.canvas.width.max(1), project.canvas.height.max(1));
+    let preview = if cw <= ch { (540, (540 * ch / cw) & !1) } else { ((540 * cw / ch) & !1, 540) };
+    let compositor = Compositor::new()?;
+    let uploader = compositor.uploader();
+    for (name, (w, h), nv12) in [("preview", preview, false), ("export", (cw & !1, ch & !1), true)] {
+        let target = if nv12 { Compositor::output_surface_nv12(w, h) } else { Compositor::output_surface(w, h) }.ok_or("no surface")?;
+        let draw = |key: u64, img: &openrip_render::RgbaImage, scale: f64| -> Result<f64, Box<dyn std::error::Error>> {
+            let layer = Layer::from_model(Source::Cached(key, img), [w, h], [0.0, 0.0], [scale, scale], 0.0);
+            let t0 = Instant::now();
+            if nv12 {
+                compositor.render_to_nv12(&target, [0, 0, 0], &[layer])?;
+            } else {
+                compositor.render_to_surface(&target, [0, 0, 0], &[layer])?;
+            }
+            Ok(t0.elapsed().as_secs_f64() * 1e3)
+        };
+        let (mut new, mut ahead, mut cached, mut resized) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for (i, img) in stills.iter().enumerate() {
+            let key = (i as u64) << 32 | w as u64;
+            new.push(draw(key, img, 1.0)?);
+            cached.push(draw(key, img, 1.0)?);
+            // A scale being dragged: a frame at one new size, then the next at another.
+            draw(key, img, 0.95)?;
+            resized.push(draw(key, img, 0.9)?);
+            // Written by another thread a moment before, as the engine's workers do while the
+            // render thread decodes the frame's video.
+            let key = key | 1 << 63;
+            std::thread::scope(|s| s.spawn(|| uploader.upload(key, img)).join()).map_err(|_| "upload thread")?;
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            ahead.push(draw(key, img, 1.0)?);
+        }
+        println!("{name} {w}x{h}:");
+        summary("  new still", new);
+        summary("  new still written ahead", ahead);
+        summary("  same still again (GPU cache)", cached);
+        summary("  same still, scale dragged", resized);
+    }
+    // One frame over and over while another thread writes stills back to back (far more
+    // than playback asks for): what writing ahead costs the frames drawn meanwhile.
+    let target = Compositor::output_surface(preview.0, preview.1).ok_or("no surface")?;
+    let layer = Layer::from_model(Source::Cached(0, first), [preview.0, preview.1], [0.0, 0.0], [1.0, 1.0], 0.0);
+    let frames = |n: usize| -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+        (0..n)
+            .map(|_| {
+                let t0 = Instant::now();
+                compositor.render_to_surface(&target, [0, 0, 0], std::slice::from_ref(&layer))?;
+                Ok(t0.elapsed().as_secs_f64() * 1e3)
+            })
+            .collect()
+    };
+    let quiet = frames(60)?;
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let busy = std::thread::scope(|s| {
+        s.spawn(|| {
+            for (i, img) in stills.iter().cycle().enumerate() {
+                if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                uploader.upload(1 << 62 | i as u64, img);
+            }
+        });
+        let busy = frames(60);
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        busy
+    })?;
+    summary("cached frame", quiet);
+    summary("cached frame, stills written beside", busy);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn still_bench(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    Err("still-bench needs macOS".into())
 }
 
 /// Every draft under `root` converted to the app's project format and back: the round trip

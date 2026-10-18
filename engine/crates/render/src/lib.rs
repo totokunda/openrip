@@ -18,9 +18,11 @@ pub mod adjust;
 pub mod grade;
 pub mod shape;
 pub mod text;
+mod upload;
 
 pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
 pub use grade::{CurvePoint, Curves, Hsl};
+pub use upload::Uploader;
 
 /// A 3D colour lookup table (CapCut's filters): `size`³ RGB entries, red fastest, then
 /// green, then blue; `key` identifies it for the GPU cache.
@@ -299,6 +301,8 @@ pub struct Compositor {
     area: wgpu::RenderPipeline,
     sharpen: wgpu::RenderPipeline,
     bilinear: wgpu::RenderPipeline,
+    /// Straight-alpha pixels as written -> premultiplied (see `upload`).
+    premultiply: wgpu::RenderPipeline,
     place: wgpu::RenderPipeline,
     /// The placement pass for BGRA targets (IOSurfaces handed to the app).
     place_bgra: wgpu::RenderPipeline,
@@ -323,7 +327,12 @@ pub struct Compositor {
     no_lut: wgpu::Texture,
     /// Resampled textures of keyed images, with the frame they were last drawn in.
     cache: std::sync::Mutex<std::collections::HashMap<CacheKey, (wgpu::Texture, u64)>>,
+    /// Keyed images premultiplied at full size: written ahead by other threads, or by the
+    /// frame that first drew them.
+    uploaded: std::sync::Arc<std::sync::Mutex<upload::Uploaded>>,
     frame: std::sync::atomic::AtomicU64,
+    /// Pixels the frames wrote to the GPU themselves (see `pixels_written`).
+    written: std::sync::atomic::AtomicU64,
     /// Intermediate textures from earlier frames, with the frame they were last used in.
     /// Allocating a 4K texture costs milliseconds; the same sizes come back every frame.
     pool: std::sync::Mutex<Vec<(wgpu::Texture, u64)>>,
@@ -443,6 +452,7 @@ impl Compositor {
             area: pipeline("fs_area", WIDE, None),
             sharpen: pipeline("fs_sharpen", CANVAS, None),
             bilinear: pipeline("fs_bilinear", CANVAS, None),
+            premultiply: pipeline("fs_premultiply", CANVAS, None),
             place: pipeline("fs_place", CANVAS, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             place_bgra: pipeline("fs_place", wgpu::TextureFormat::Bgra8Unorm, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             place_multiply: pipeline("fs_place", CANVAS, Some(MULTIPLY)),
@@ -556,7 +566,9 @@ impl Compositor {
             layout,
             yuv_layout,
             cache: Default::default(),
+            uploaded: std::sync::Arc::new(std::sync::Mutex::new(upload::Uploaded::new())),
             frame: Default::default(),
+            written: Default::default(),
             pool: Default::default(),
             readback: Default::default(),
         })
@@ -597,30 +609,48 @@ impl Compositor {
         }
     }
 
-    fn upload(&self, img: &RgbaImage) -> wgpu::Texture {
+    /// A handle for writing stills to this compositor's GPU from other threads, ahead of the
+    /// frames that draw them.
+    pub fn uploader(&self) -> Uploader {
+        Uploader::new(self.device.clone(), self.queue.clone(), self.layout.clone(), self.premultiply.clone(), self.uploaded.clone())
+    }
+
+    /// Whether the image `key` is on the GPU: premultiplied (written ahead, or drawn lately)
+    /// or resampled for one of the last frames.
+    pub fn holds(&self, key: u64) -> bool {
+        self.uploaded.lock().unwrap().holds(key) || self.cache.lock().unwrap().keys().any(|(k, _, _)| *k == key)
+    }
+
+    /// Pixels of images the frames wrote to the GPU themselves so far, rather than finding
+    /// them there (written ahead, or kept from an earlier frame); for tracing.
+    pub fn pixels_written(&self) -> u64 {
+        self.written.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// `img` on the GPU, premultiplied (every pass works on premultiplied colour): its
+    /// straight pixels written as they are and premultiplied by a pass, the texture they were
+    /// written to going in `scratch`. A keyed image (`key`) is kept premultiplied, or found
+    /// there already (see [`Uploader`]): don't render into it or recycle it.
+    fn upload(&self, enc: &mut wgpu::CommandEncoder, img: &RgbaImage, key: Option<u64>, scratch: &mut Vec<wgpu::Texture>) -> wgpu::Texture {
         let max = self.device.limits().max_texture_dimension_2d;
         if img.width > max || img.height > max {
             // Beyond the GPU's texture limit (panoramas): box-filter it down to fit first.
             let k = img.width.max(img.height).div_ceil(max);
-            return self.upload(&box_shrink(img, k));
+            return self.upload(enc, &box_shrink(img, k), None, scratch);
         }
-        // Premultiply on the way in; every pass works on premultiplied colour.
-        let mut data = img.data.clone();
-        for px in data.chunks_exact_mut(4) {
-            let a = px[3] as u32;
-            if a != 255 {
-                for c in &mut px[..3] {
-                    *c = ((*c as u32 * a + 127) / 255) as u8;
-                }
-            }
+        let frame = self.frame.load(std::sync::atomic::Ordering::Relaxed);
+        if let Some(tex) = key.and_then(|k| self.uploaded.lock().unwrap().get(k, img.width, img.height, frame)) {
+            return tex;
         }
-        let tex = self.texture(img.width, img.height, CANVAS, wgpu::TextureUsages::COPY_DST);
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            &data,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(img.width * 4), rows_per_image: Some(img.height) },
-            wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },
-        );
+        let straight = self.texture(img.width, img.height, CANVAS, wgpu::TextureUsages::COPY_DST);
+        upload::write(&self.queue, &straight, img);
+        self.written.fetch_add(img.width as u64 * img.height as u64, std::sync::atomic::Ordering::Relaxed);
+        let tex = self.texture(img.width, img.height, CANVAS, wgpu::TextureUsages::empty());
+        upload::premultiply(&self.device, &self.layout, &self.premultiply, enc, &straight, &tex);
+        scratch.push(straight);
+        if let Some(k) = key {
+            self.uploaded.lock().unwrap().insert(k, tex.clone(), Some(frame));
+        }
         tex
     }
 
@@ -1050,18 +1080,22 @@ impl Compositor {
                 Some(tex) => tex,
                 None => {
                     let src = match layer.source {
-                        Source::Image(img) | Source::Cached(_, img) => self.upload(img),
+                        Source::Image(img) => self.upload(enc, img, None, &mut scratch),
+                        Source::Cached(key, img) => self.upload(enc, img, Some(key), &mut scratch),
                         Source::Filter(..) | Source::Blur(_) => unreachable!("canvas passes are drawn above"),
                         Source::Video(frame) => match self.import_video(enc, frame) {
                             Some((rgba, planes)) => {
                                 keep.extend(planes);
                                 rgba
                             }
-                            None => self.upload(&rgb_of(frame)),
+                            None => self.upload(enc, &rgb_of(frame), None, &mut scratch),
                         },
                     };
                     // The texture's own size (an oversize image is uploaded smaller).
                     let (sw, sh) = (src.width(), src.height());
+                    // A keyed image stays on the GPU premultiplied (see `upload`): it mustn't go
+                    // back to the pool.
+                    let done_with = |src: wgpu::Texture, keep: &mut Vec<wgpu::Texture>, scratch: &mut Vec<wgpu::Texture>| if matches!(layer.source, Source::Cached(..)) { keep.push(src) } else { scratch.push(src) };
                     let resize = Params { src_size: [sw as f32, sh as f32], dst_size: [tw as f32, th as f32], inv0: [0.0; 4], inv1: [0.0; 4], misc: [1.0, DOWNSCALE_SHARPEN, 0.0, 0.0] };
                     let stage = if (tw, th) == (sw, sh) {
                         src
@@ -1070,12 +1104,13 @@ impl Compositor {
                         self.pass(enc, &self.area, &src, &wide, resize, Some(wgpu::Color::TRANSPARENT));
                         let sharp = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
                         self.pass(enc, &self.sharpen, &wide, &sharp, resize, Some(wgpu::Color::TRANSPARENT));
-                        scratch.extend([src, wide]);
+                        scratch.push(wide);
+                        done_with(src, &mut keep, &mut scratch);
                         sharp
                     } else {
                         let up = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
                         self.pass(enc, &self.bilinear, &src, &up, resize, Some(wgpu::Color::TRANSPARENT));
-                        scratch.push(src);
+                        done_with(src, &mut keep, &mut scratch);
                         up
                     };
                     if let Source::Cached(key, _) = layer.source {
@@ -1102,7 +1137,7 @@ impl Compositor {
             // Cut-outs and masks, before placement.
             let (mut stage, mut adjusted) = (stage, adjusted);
             for m in &layer.mattes {
-                let mask = self.upload(m.mask);
+                let mask = self.upload(enc, m.mask, None, &mut scratch);
                 let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
                 let paint = |p: Option<[f32; 4]>| p.map_or([0.0, 0.0, 0.0, -1.0], |c| [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]]);
                 let params: Vec<f32> = paint(m.inside).into_iter().chain(paint(m.outside)).collect();
@@ -1160,7 +1195,14 @@ impl Compositor {
         }
         scratch.push(blank);
         self.cache.lock().unwrap().retain(|_, (_, last)| frame - *last < CACHE_FRAMES);
+        self.uploaded.lock().unwrap().expire(frame);
         FrameTextures { _keep: keep, scratch }
+    }
+
+    /// Wait for the GPU to finish a frame's submission (not the uploads other threads may
+    /// have submitted since; the queue runs in order, so earlier ones are done too).
+    fn wait_for(&self, done: wgpu::SubmissionIndex) -> Result<(), RenderError> {
+        self.device.poll(wgpu::PollType::Wait { submission_index: Some(done), timeout: None }).map(drop).map_err(|e| RenderError::Device(e.to_string()))
     }
 
     /// A new IOSurface-backed BGRA pixel buffer to render into with
@@ -1186,8 +1228,8 @@ impl Compositor {
         let canvas = self.wrap_surface(&surface, 0, (w, h), wgpu::TextureFormat::Bgra8Unorm, true).ok_or_else(|| RenderError::Device("can't render into that surface".into()))?;
         let mut enc = self.device.create_command_encoder(&Default::default());
         let textures = self.encode_frame(&mut enc, &canvas, background, layers);
-        self.queue.submit([enc.finish()]);
-        self.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| RenderError::Device(e.to_string()))?;
+        let done = self.queue.submit([enc.finish()]);
+        self.wait_for(done)?;
         self.recycle(textures.scratch);
         Ok(())
     }
@@ -1221,8 +1263,8 @@ impl Compositor {
         let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0: [0.0; 4], inv1: [kr, 1.0 - kr - kb, kb, 0.0], misc: [0.0; 4] };
         self.pass(&mut enc, &self.luma, &canvas, &luma, params, Some(wgpu::Color::BLACK));
         self.pass(&mut enc, &self.chroma, &canvas, &chroma, params, Some(wgpu::Color::BLACK));
-        self.queue.submit([enc.finish()]);
-        self.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| RenderError::Device(e.to_string()))?;
+        let done = self.queue.submit([enc.finish()]);
+        self.wait_for(done)?;
         textures.scratch.push(canvas);
         self.recycle(textures.scratch);
         Ok(())
@@ -1246,9 +1288,9 @@ impl Compositor {
             wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(height) } },
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         );
-        self.queue.submit([enc.finish()]);
+        let done = self.queue.submit([enc.finish()]);
         buf.slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("map canvas"));
-        self.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
+        self.wait_for(done).expect("poll");
         let mapped = buf.slice(..).get_mapped_range().expect("mapped canvas");
         let mut data = Vec::with_capacity((width * height * 4) as usize);
         for y in 0..height as usize {

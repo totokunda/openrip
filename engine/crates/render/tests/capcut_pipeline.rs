@@ -125,6 +125,44 @@ fn renders_into_an_iosurface_like_into_memory() {
     }
 }
 
+/// Images are premultiplied on the GPU, rounded exactly as the CPU did, (c·a + 127) / 255:
+/// every colour at every alpha, drawn 1:1 over black, comes out premultiplied.
+#[test]
+fn uploads_premultiply_like_the_cpu() {
+    let Some(c) = gpu() else { return };
+    let src = image(256, 256, |x, y| [x as u8, 255 - x as u8, (x * 7 % 256) as u8, y as u8]);
+    let out = c.render(256, 256, [0, 0, 0], &[Layer::from_model(&src, [256, 256], [0.0, 0.0], [1.0, 1.0], 0.0)]);
+    for y in 0..256 {
+        for x in 0..256 {
+            let s = px(&src, x, y);
+            let want = [0, 1, 2].map(|i| ((s[i] as u32 * s[3] as u32 + 127) / 255) as u8);
+            assert_eq!(px(&out, x, y)[..3], want, "colour {:?} at alpha {}", &s[..3], s[3]);
+        }
+    }
+}
+
+/// A still another thread wrote to the GPU ahead of time, or one drawn before at another
+/// size, draws exactly as one written by the frame that draws it, shrunk, enlarged or 1:1.
+#[test]
+fn stills_written_ahead_draw_the_same() {
+    let Some(c) = gpu() else { return };
+    let src = image(96, 64, |x, y| [(x * 5) as u8, (y * 9) as u8, ((x ^ y) * 3) as u8, ((x * y) % 256) as u8]);
+    let uploader = c.uploader();
+    let sizes = [(41, 27), (96, 64), (150, 100)];
+    let draw = |key: u64, (w, h): (u32, u32)| c.render(w, h, [30, 60, 90], &[Layer::from_model(Source::Cached(key, &src), [w, h], [0.0, 0.0], [1.0, 1.0], 0.0)]);
+    for (i, size) in sizes.into_iter().enumerate() {
+        let here = draw(10 + i as u64, size);
+        std::thread::scope(|s| s.spawn(|| uploader.upload(20 + i as u64, &src)).join()).unwrap();
+        assert_eq!(draw(20 + i as u64, size).data, here.data, "{size:?}");
+    }
+    // One drawn the frame before at another size, resampled from what's kept on the GPU (a
+    // scale being dragged).
+    let heres: Vec<_> = sizes.iter().enumerate().map(|(i, size)| draw(40 + i as u64, *size)).collect();
+    for (size, here) in sizes.into_iter().zip(&heres) {
+        assert_eq!(draw(30, size).data, here.data, "{size:?} after another size");
+    }
+}
+
 #[test]
 fn sideways_sources_are_shown_upright() {
     let Some(c) = gpu() else { return };

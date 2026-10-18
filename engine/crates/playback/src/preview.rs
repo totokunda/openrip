@@ -11,7 +11,7 @@ use std::path::Path;
 use openrip_media::{DecoderOptions, MediaError, VideoDecoder, VideoFrame};
 use openrip_model::{Animation, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_render::text::{self, Align, Font, TextStyle};
-use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source};
+use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source, Uploader};
 
 /// CapCut's default font, used when a text run names none.
 const DEFAULT_FONT: &str = "/Applications/CapCut.app/Contents/Resources/Font/SystemFont/en.ttf";
@@ -27,12 +27,16 @@ const PREFETCH: Micros = Micros(1_500_000);
 const STILLS_BUDGET: usize = 512 << 20;
 
 /// Media to get ready off the render thread: a decoder positioned at a clip's in-point, or
-/// a still image decoded.
+/// a still image decoded (and written to the GPU).
 struct PrefetchJob {
     segment: String,
     path: String,
     at: Micros,
     still: bool,
+    /// Write the still to the GPU too: only while frames follow each other (playback,
+    /// export). Seeking and dragging the playhead go elsewhere, and the stills would wait on
+    /// the GPU for nothing.
+    upload: bool,
 }
 
 enum Prefetched {
@@ -54,7 +58,7 @@ struct Prefetcher {
 }
 
 impl Prefetcher {
-    fn new() -> Prefetcher {
+    fn new(uploader: Uploader) -> Prefetcher {
         let (job_tx, job_rx) = std::sync::mpsc::channel::<PrefetchJob>();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let worker = std::thread::Builder::new()
@@ -64,7 +68,12 @@ impl Prefetcher {
                     // Report failures too: the render thread may be waiting for this job.
                     let done = if job.still {
                         match load_still(Path::new(&job.path)) {
-                            Ok(img) => Prefetched::Still(job.path, img),
+                            Ok(img) => {
+                                if job.upload {
+                                    uploader.upload(still_key(&job.path), &img);
+                                }
+                                Prefetched::Still(job.path, img)
+                            }
                             Err(_) => Prefetched::Failed(job.path),
                         }
                     } else {
@@ -242,6 +251,12 @@ fn key_of(v: impl std::hash::Hash) -> u64 {
     h.finish()
 }
 
+/// The compositor's key for the still at `path` (the threads that write stills to the GPU
+/// ahead of time file them under it).
+pub(crate) fn still_key(path: &str) -> u64 {
+    key_of(path)
+}
+
 struct OpenDecoder {
     decoder: VideoDecoder,
     last_used: u64,
@@ -289,14 +304,17 @@ pub struct PreviewEngine {
     stickers: crate::sticker::Stickers,
     prefetch: Prefetcher,
     tick: u64,
+    /// The time of the last frame gathered.
+    last_time: Option<Micros>,
 }
 
 impl PreviewEngine {
     pub fn new(project: Project) -> Result<Self, PreviewError> {
         openrip_media::warm_up();
+        let compositor = Compositor::new()?;
+        let uploader = compositor.uploader();
         Ok(PreviewEngine {
             project,
-            compositor: Compositor::new()?,
             decoders: HashMap::new(),
             images: HashMap::new(),
             fonts: HashMap::new(),
@@ -305,7 +323,7 @@ impl PreviewEngine {
             shapes: HashMap::new(),
             last_text_block: None,
             scrubbing: false,
-            scrub: crate::scrub::ScrubAhead::new(),
+            scrub: crate::scrub::ScrubAhead::new(Some(uploader.clone())),
             measure_only: false,
             mattes: HashMap::new(),
             matte_times: HashMap::new(),
@@ -315,8 +333,10 @@ impl PreviewEngine {
             stickers: Default::default(),
             font_files: HashMap::new(),
             prepared: HashMap::new(),
-            prefetch: Prefetcher::new(),
+            prefetch: Prefetcher::new(uploader),
+            compositor,
             tick: 0,
+            last_time: None,
         })
     }
 
@@ -368,9 +388,19 @@ impl PreviewEngine {
 
     /// Render the frame at `t` and read it back.
     pub fn render_image(&mut self, t: Micros, width: u32, height: u32) -> Result<(RgbaImage, FrameReport), PreviewError> {
+        let t0 = std::time::Instant::now();
         let (pixels, report) = self.gather(t, width, height);
+        let t1 = std::time::Instant::now();
         let layers = self.layers(&pixels, t, width, height);
-        Ok((self.compositor.render(width, height, [0, 0, 0], &layers), report))
+        let t2 = std::time::Instant::now();
+        let written = self.compositor.pixels_written();
+        let frame = self.compositor.render(width, height, [0, 0, 0], &layers);
+        if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 30 {
+            let ms = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1e3;
+            let mp = (self.compositor.pixels_written() - written) as f64 / 1e6;
+            eprintln!("[preview] t={:.3}s {width}x{height}: gather {:.1} ms, layers {:.1} ms, composite and read back {:.1} ms ({} layers, {mp:.1} MP written to the GPU)", t.as_secs_f64(), ms(t0, t1), ms(t1, t2), ms(t2, std::time::Instant::now()), layers.len());
+        }
+        Ok((frame, report))
     }
 
     /// Render the frame at `t` into an IOSurface-backed BGRA pixel buffer (see
@@ -383,11 +413,13 @@ impl PreviewEngine {
         let t1 = std::time::Instant::now();
         let layers = self.layers(&pixels, t, w, h);
         let t2 = std::time::Instant::now();
+        let written = self.compositor.pixels_written();
         self.compositor.render_to_surface(target, [0, 0, 0], &layers)?;
         if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 30 {
             let ms = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1e3;
             let now = std::time::Instant::now();
-            eprintln!("[preview] t={:.3}s {w}x{h}: gather {:.1} ms, layers {:.1} ms, composite {:.1} ms ({} layers)", t.as_secs_f64(), ms(t0, t1), ms(t1, t2), ms(t2, now), layers.len());
+            let mp = (self.compositor.pixels_written() - written) as f64 / 1e6;
+            eprintln!("[preview] t={:.3}s {w}x{h}: gather {:.1} ms, layers {:.1} ms, composite {:.1} ms ({} layers, {mp:.1} MP written to the GPU)", t.as_secs_f64(), ms(t0, t1), ms(t1, t2), ms(t2, now), layers.len());
         }
         Ok(report)
     }
@@ -453,8 +485,9 @@ impl PreviewEngine {
         }
     }
 
-    /// Adopt decoders the prefetcher has finished, and queue clips starting soon after `t`.
-    fn run_prefetch(&mut self, t: Micros) {
+    /// Adopt decoders the prefetcher has finished, and queue clips starting soon after `t`
+    /// (`upload`: writing their stills to the GPU too).
+    fn run_prefetch(&mut self, t: Micros, upload: bool) {
         while let Ok(done) = self.prefetch.ready.try_recv() {
             self.adopt(done);
         }
@@ -469,7 +502,7 @@ impl PreviewEngine {
                 if ready || self.prefetch.pending.contains(&key) || self.failed.contains_key(&media.path) {
                     continue;
                 }
-                let job = PrefetchJob { segment: seg.id.clone(), path: media.path.clone(), at: seg.source_time(seg.target.start).unwrap_or(Micros::ZERO), still };
+                let job = PrefetchJob { segment: seg.id.clone(), path: media.path.clone(), at: seg.source_time(seg.target.start).unwrap_or(Micros::ZERO), still, upload };
                 if jobs.send(job).is_ok() {
                     self.prefetch.pending.insert(key);
                 }
@@ -479,7 +512,10 @@ impl PreviewEngine {
 
     fn gather(&mut self, t: Micros, w: u32, h: u32) -> (Vec<(Segment, Pixels)>, FrameReport) {
         self.tick += 1;
-        self.run_prefetch(t);
+        // Frames following each other: playing or exporting.
+        let following = self.last_time.is_some_and(|last| t > last && t.0 - last.0 <= 250_000);
+        self.last_time = Some(t);
+        self.run_prefetch(t, following && !self.scrubbing);
         if self.scrubbing {
             self.scrub.moved(&self.project, t, w.max(h), &self.failed);
         }
@@ -956,7 +992,10 @@ impl PreviewEngine {
             }
             self.await_prefetch(&media.path);
             let img = match self.still(&media.path) {
-                Some(img) => img,
+                Some(img) => {
+                    self.scrub.uploading(&media.path);
+                    img
+                }
                 None => match self.scrub.full(&media.path) {
                     Some(img) => {
                         self.images.insert(media.path.clone(), (img.clone(), self.tick));
@@ -966,7 +1005,7 @@ impl PreviewEngine {
                 },
             };
             let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), None);
-            return Ok(Some(Pixels::Image(img, key_of(&media.path), mattes)));
+            return Ok(Some(Pixels::Image(img, still_key(&media.path), mattes)));
         }
         let key = seg.id.clone();
         self.await_prefetch(&key);
@@ -1077,21 +1116,27 @@ impl PreviewEngine {
         Some(m)
     }
 
-    /// Start decoding the stills a frame needs that aren't decoded or on their way, on the
-    /// scrub workers, so they decode beside the frame's video and each other (worth it with
-    /// more than one thing to decode).
+    /// Start getting the stills a frame needs ready on the scrub workers, so they get ready
+    /// beside the frame's video and each other (worth it with more than one thing to do):
+    /// decoding those that aren't decoded or on their way, and writing to the GPU those
+    /// decoded before that aren't on it any more.
     fn load_stills_beside(&mut self, active: &[Segment]) {
-        let (mut stills, mut videos) = (Vec::new(), 0);
+        let (mut stills, mut uploads, mut videos) = (Vec::new(), Vec::new(), 0);
         for seg in active {
             let Some(m) = self.project.materials.media.iter().find(|m| m.id == seg.material && m.kind != MediaKind::Audio) else { continue };
             if m.kind != MediaKind::Photo {
                 videos += 1;
-            } else if !self.images.contains_key(&m.path) && !self.failed.contains_key(&m.path) && !self.prefetch.pending.contains(&m.path) && !stills.contains(&m.path) {
+            } else if let Some((img, _)) = self.images.get(&m.path) {
+                if !self.compositor.holds(still_key(&m.path)) && !uploads.iter().any(|(p, _)| p == &m.path) {
+                    uploads.push((m.path.clone(), img.clone()));
+                }
+            } else if !self.failed.contains_key(&m.path) && !self.prefetch.pending.contains(&m.path) && !stills.contains(&m.path) {
                 stills.push(m.path.clone());
             }
         }
-        if !stills.is_empty() && stills.len() + videos > 1 {
+        if stills.len() + uploads.len() + videos > 1 {
             self.scrub.load_full(stills);
+            self.scrub.upload(uploads);
         }
     }
 

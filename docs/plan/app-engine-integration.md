@@ -163,7 +163,44 @@ In the calmest runs both builds play at 24.0–24.2 fps with no gap over 100 ms;
 
 `seek-bench --scrub` now also drags in real time: the playhead crosses 80% of the project in 2 s, and each frame renders into a preview surface wherever the playhead is when the last one is done, as in the app.
 
-Left: exact frames still upload 4K stills whole (~25 ms each); premultiplying them off the render thread would take that off seeks and the frame on release.
+### Exact frames with new stills
+
+Done (2026-10-17). Scrubbing showed stand-ins; every exact frame (a seek, the frame on release, playback, export, an edit) still drew its stills whole. On the 222-clip draft each subtitle is a 2160×3840 PNG, and two change about once a second. Where a new still's time went in the compositor, on the render thread (`openrip-dev still-bench` and a trace of the upload):
+
+- **Premultiplying, ~15 ms.** The compositor copied the picture (33 MB) and premultiplied it pixel by pixel on the CPU.
+- **Writing it to the GPU, ~5 ms.** `Queue::write_texture` copies the picture into a staging buffer, row by row.
+- **The GPU, 2–4 ms.** Copying it into the texture, shrinking it to the frame (area average and sharpen, CapCut's model) and placing it. A frame with nothing new takes ~1.5 ms.
+- Decoding the PNG was already off the render thread: on the scrub workers for exact frames, on the prefetch thread for playback and export.
+
+What changed (`engine/crates/render/src/upload.rs`, and where the engine decodes stills):
+
+- **Premultiplied on the GPU.** Pixels are written as they are and a pass premultiplies them, rounding exactly as the CPU did, (c·a + 127) / 255 in integers, so every pass after it sees the same 8-bit values. Nothing is copied or premultiplied on the CPU.
+- **Written by the threads that decode them.** The prefetch thread (playback, export) and the scrub workers (an exact frame's stills) write each still they decode to the GPU and premultiply it there, through an `Uploader` the compositor hands out; the frame that first draws it finds it ready. Stills decoded earlier that are no longer on the GPU (seeking back) are written by the workers beside the frame's video. The workers copy into a mapped buffer of their own, one still at a time, and wait for their own upload: `write_texture` holds the queue's lock for its whole copy, which held up the render thread's submissions. Frames wait for their own submission only. Playback's prefetch writes stills only while frames follow each other (playing, exporting): after a seek or while dragging they would wait on the GPU for nothing.
+- **Kept on the GPU while drawn at new sizes.** A premultiplied still stays until the end of the frame after the one that last resampled it, and one written ahead until it's drawn, within 192 MB (drawn ones out first): a still whose scale is dragged is resampled frame after frame without being written again.
+- **Not done, on evidence.** Uploading a smaller picture shrunk on the CPU can't give the same pixels: the area average reads fractional footprints of the full picture (2160 → 506 pixels is a factor of 4.27), and the GPU shrinks a 4K still in ~1.5 ms anyway. Mipmaps would change pixels too. Exports already shrink on the GPU from the full picture at their own size.
+- With `OPENRIP_TRACE` set, each slow frame says how many megapixels it wrote to the GPU itself.
+
+Pixels are unchanged: five frames of every local draft (325 frames, 65 drafts) are byte-identical to main's, `cover-parity` prints the same numbers, the 32 drafts that round-trip give 138.1 dB, and exports of the 222-clip draft (at its size and at 720×1280) and of the 211-clip draft decode to the same frames (MD5 of each) as main's. New tests check the premultiply against the CPU's rounding for every colour at every alpha, that a still written ahead, or drawn the frame before at another size, draws exactly as one written by its frame, and the GPU budget and expiry.
+
+Measured on the 222-clip draft, main's build and this one alternating (load average 8–20; ranges over the runs):
+
+| | before | after |
+|---|---|---|
+| a new 4K still in the compositor, preview (540×960) | 18–19 ms | 10 ms written by the frame, 2.4–2.6 ms written ahead |
+| ... into an export frame (1080×1920) | 17–18 ms | 9–10 ms, 3.8–4.1 ms written ahead |
+| ... its scale being dragged | 17–18 ms a frame | 2.5–3.9 ms |
+| `seek-bench`, 24 seeks | p50 71–72 ms (warm 65–66), p90 77–89 ms | p50 44–45 ms (warm 42–43), p90 49–60 ms |
+| real-time playthrough (30 s), frames where a clip starts | p50 44–48 ms, p95 66–114 ms; 19–24 frames over budget | p50 6–9 ms, p95 13–21 ms; 1–3 frames over budget |
+| export, 63 s at 1080×1920 | 9.6–9.8 s | 8.2–8.5 s |
+| seek in the app (`perf` step: click to frame) | p50 119–131 ms, p95 196–248 ms | p50 79–123 ms, p95 171–244 ms |
+| playback in the app | 24.1–24.2 fps, no gap over 100 ms | 24.1–24.2 fps, no gap over 100 ms |
+| scrub in the app | 81–100 frames/s | 81–97 frames/s |
+| an edit reaching the picture (a clip moved: its stills are on the GPU already) | 50–58 ms | 26–55 ms |
+| peak memory (footprint): playthrough / `seek-bench` | 885 / 1197 MB | 924 / 1288 MB |
+
+A frame with a new still now spends ~6 ms compositing (read back included); the rest of a seek is the video's decode (25–55 ms from its keyframe). `pipeline-bench` shows no difference (0 frames dropped in both, longest gap 54–87 ms), nor does the real-time drag of `seek-bench --scrub` (456–518 against 457–492 frames/s). Earlier runs against the previous build, with the machine at load 25–100, gave the same picture: a new still 22–35 ms before, 10–17 ms written by the frame, 3–5 ms written ahead.
+
+`openrip-dev still-bench <draft>` is new: a project's stills drawn full-frame as new stills, written ahead, again from the GPU cache and with their scale dragged, into a preview surface and an NV12 export buffer; then frames drawn while another thread writes stills.
 
 ## Undo and redo
 
