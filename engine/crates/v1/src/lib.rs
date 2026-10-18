@@ -508,6 +508,9 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
     if seg.source.is_some() && differs("reverse") {
         seg.reverse = b(clip, "reverse");
     }
+    if seg.source.is_some() && differs("changePitch") {
+        seg.change_pitch = b(clip, "changePitch");
+    }
     if seg.source.is_some() && differs("speedCurve") {
         // The app's curve replaces the draft's speed (CapCut attaches one to every clip).
         seg.attachments.retain(|id| !materials.speeds.iter().any(|m| &m.id == id));
@@ -962,7 +965,8 @@ fn convert_clip(
         target,
         speed,
         reverse,
-        change_pitch: false,
+        // The Speed tab's Change audio pitch.
+        change_pitch: is_av && freeze.is_none() && b(clip, "changePitch"),
         visible: true,
         render_index: 0,
         transform,

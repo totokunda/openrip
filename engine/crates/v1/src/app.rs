@@ -392,6 +392,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                 };
                 clip.insert("speed".into(), json!(speed));
                 clip.insert("reverse".into(), json!(seg.reverse));
+                clip.insert("changePitch".into(), json!(seg.change_pitch));
                 clip.insert(
                     "speedCurve".into(),
                     curve.map_or(Value::Null, |c| json!({ "preset": c.preset, "points": c.curve.iter().map(|(x, y)| json!({ "x": x, "y": y })).collect::<Vec<_>>() })),
@@ -560,7 +561,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
     // What the engine needs to draw it as it was, and the app's fields as written, so an
     // import can tell what the app changed.
     let base_keys = [
-        "startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "reverse", "speedCurve", "freeze", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color",
+        "startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "reverse", "changePitch", "speedCurve", "freeze", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color",
         "animationIn", "animationOut", "animationCombo", "animationLoop", "captionStyle", "transitionOut", "keyframes", "textEffect",
     ];
     let base: Map<String, Value> = base_keys
@@ -1356,9 +1357,10 @@ mod tests {
         clip["reverse"] = json!(true);
         clip["speedCurve"] = montage();
         clip["speed"] = json!(average);
+        clip["changePitch"] = json!(true);
         let back = import_v1_json(&doc).unwrap().project;
         let v = segment(&back, "v");
-        assert!(v.reverse);
+        assert!(v.reverse && v.change_pitch);
         // Its trims count from the media's end, as it plays: the draft's 1 s in-point, now at
         // the curve's mean speed, is that far before the 10 s media's end.
         let src = v.source.unwrap();
@@ -1396,7 +1398,7 @@ mod tests {
         let shown = doc["timeline"]["clips"].as_array().unwrap().iter().find(|c| c["clipId"] == "v").unwrap().clone();
         assert_eq!(shown["speedCurve"]["preset"], "Flash In");
         assert!((shown["speed"].as_f64().unwrap() - remap.average()).abs() < 1e-3);
-        assert_eq!(shown["reverse"], false);
+        assert_eq!((&shown["reverse"], &shown["changePitch"]), (&json!(false), &json!(false)));
         let back = import_v1_json(&doc).unwrap().project;
         assert_eq!(segment(&back, "v"), segment(&p, "v"));
         // A reversed one too, and trimmed in the app it keeps its out-point (where it starts
@@ -1414,14 +1416,16 @@ mod tests {
         // (Within a frame at its speed: the app keeps trims in whole frames.)
         assert!((now.end().0 - was.end().0).abs() < 70_000 && now.duration < was.duration, "{was:?} → {now:?}");
 
-        // Reversed in the app, and the curve swapped for Montage: the draft's own speed goes.
+        // Reversed in the app, its pitch to change with the speed, and the curve swapped for
+        // Montage: the draft's own speed goes.
         let mut doc = doc.clone();
         let clip = clip_mut(&mut doc, "v");
         clip["reverse"] = json!(true);
+        clip["changePitch"] = json!(true);
         clip["speedCurve"] = montage();
         let back = import_v1_json(&doc).unwrap().project;
         let v = segment(&back, "v");
-        assert!(v.reverse);
+        assert!(v.reverse && v.change_pitch);
         assert!(!v.attachments.contains(&MaterialId("cs".into())));
         assert_eq!(v.speed_curve(&back.materials).unwrap().preset.as_deref(), Some("Montage"));
 
