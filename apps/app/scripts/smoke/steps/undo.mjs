@@ -42,15 +42,10 @@ export default async (ctx) => {
     },
     mask: async () => {
       await pick("video", 0, 6);
-      // The Mask tab's rectangle (the player has no tool row).
+      // The Mask tab's Rectangle tile: a rectangle mask centred on the picture, as CapCut adds
+      // one (the player has no tool row).
       await openTab(win, "Mask");
-      await win.locator("[data-testid=add-mask-rectangle]").click();
-      await win.waitForTimeout(300);
-      // A rectangle in the picture's lower half, inside it whatever the player's size (a mask
-      // that runs off the clip isn't made).
-      await drag(win, mid.x - 70, mid.y + p.h * 0.12, mid.x + 70, mid.y + p.h * 0.42);
-      await win.waitForTimeout(500);
-      await settled(win, () => win.keyboard.press("v"));
+      await settled(win, () => win.locator("[data-testid=mask-shape-rectangle]").click());
     },
     // Text and its style.
     uppercase: async () => {

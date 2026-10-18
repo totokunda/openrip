@@ -1,7 +1,8 @@
 // The canvas tools with no tool row on the player (after import timeline): the player's
 // header holds only its name and its menu; the zoom popover; Stickers ▸ Shapes adding a
 // rectangle at the playhead; no freehand drawing (CapCut has none: no Draw section, D does
-// nothing); T and V; and the Mask tab's picker starting a rectangle mask dragged on the clip.
+// nothing); T and V; and the Mask tab's Rectangle
+// adding a mask and its Brush painting one, ended by the chip.
 import { drag, previewRect, rulerMap, seek, settled, tab } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject, select } from "./_anim.mjs";
 
@@ -68,12 +69,16 @@ export default async (ctx) => {
   await win.waitForTimeout(150);
   check("V goes back to select", (await chipTool()) === null, await chipTool());
 
-  // The Mask tab's picker: a rectangle dragged on the video.
+  // The Mask tab's tiles: Rectangle adds a rectangle mask on the video at once (as CapCut's);
+  // Brush turns the canvas's mask brush on, a stroke is painted, the chip's Done ends it.
   const video = clipsWhere(doc, (c) => c.type === "video" || c.type === "image")[0];
   await select(ctx, doc, video.clipId);
   await tab(win, "Mask");
-  await win.locator("[data-testid=add-mask-rectangle]").click();
-  check("Rectangle turns the mask tool on", (await chipTool()) === "mask", await chipTool());
+  await settled(win, () => win.locator("[data-testid=mask-shape-rectangle]").click());
+  check("Rectangle adds a mask without a tool", (await chipTool()) === null, await chipTool());
+  await win.locator("[data-testid=mask-shape-brush]").click();
+  await win.waitForTimeout(200);
+  check("Brush turns the mask tool on", (await chipTool()) === "mask", await chipTool());
   await settled(win, () => drag(win, p.x + p.w * 0.35, p.y + p.h * 0.35, p.x + p.w * 0.65, p.y + p.h * 0.65));
   await shot("ct4-mask");
   await win.locator("[data-testid=tool-chip-done]").click();
@@ -81,6 +86,6 @@ export default async (ctx) => {
   check("Done goes back to select", (await chipTool()) === null, await chipTool());
   doc = await savedProject(win, udDir);
   const masks = doc.timeline.clips.find((c) => c.clipId === video.clipId)?.masks ?? [];
-  check("the video has a rectangle mask", masks.length >= 1 && masks.some((m) => m.tool === "shape"), JSON.stringify(masks.map((m) => m.tool)));
+  check("the video has a rectangle mask and a brush mask", masks.some((m) => m.tool === "shape") && masks.some((m) => m.tool === "draw"), JSON.stringify(masks.map((m) => m.tool)));
   return report();
 };

@@ -120,7 +120,9 @@ export default async (ctx) => {
     brushTool === "mask/draw" && brushed.length === 1 && Object.values(brushed[0].keyframes)[0].brushStrokes?.length === 2,
     `${brushTool}; ${brushed.length} brush masks, ${brushed[0] && Object.values(brushed[0].keyframes)[0].brushStrokes?.length} strokes`,
   );
-  await click(win, "[data-testid=mask-drawing-done]");
+  // The canvas's tool chip ends the brush.
+  await win.locator("[data-testid=tool-chip-done]").click();
+  await win.waitForTimeout(300);
   check("Done brings the pointer back", (await tools()).startsWith("pointer"), await tools());
   return report();
 };

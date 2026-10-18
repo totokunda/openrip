@@ -107,7 +107,6 @@ const MaskPropertiesPanel: React.FC<{ clipId: string }> = ({ clipId }) => {
     count.current = masks.length;
   }, [masks.length, drawing]);
   if (!clip?.transform) return null;
-  const finishDrawing = () => useViewportStore.getState().setTool("pointer");
 
   const store = () => useClipStore.getState();
   const now = () => store().getClipById(clipId) as Media;
@@ -129,6 +128,8 @@ const MaskPropertiesPanel: React.FC<{ clipId: string }> = ({ clipId }) => {
       useMaskStore.getState().setTool(id === "lasso" ? "lasso" : "draw");
       useViewportStore.getState().setTool("mask");
       if (id === "lasso" || mask?.tool !== "draw") setSelectedMaskId(null);
+      // The brush mask the strokes go on: the selected one, else the first stroke's new one.
+      useMaskStore.getState().setActiveMaskId(id === "brush" && mask?.tool === "draw" ? mask.id : null);
       setAdding(false);
       return;
     }
@@ -260,20 +261,11 @@ const MaskPropertiesPanel: React.FC<{ clipId: string }> = ({ clipId }) => {
             );
           })}
         </div>
+        {/* The canvas's tool chip says the tool is on and ends it (Done, Esc or V). */}
         {drawing && (
-          <div className="mt-3 flex flex-row items-start gap-3" data-testid="mask-drawing">
-            <p className="flex-1 text-[12px] text-[#949494] text-start">
-              {drawing === "lasso" ? "Draw the outline on the picture; it closes when you let go." : "Paint on the picture; hold ⌥ (or turn on Eraser) to erase."}
-            </p>
-            <button
-              type="button"
-              data-testid="mask-drawing-done"
-              onClick={finishDrawing}
-              className="h-[22px] px-3 rounded-[4px] bg-brand-button hover:bg-brand-hover text-[12px] font-semibold text-brand-lighter shrink-0"
-            >
-              Done
-            </button>
-          </div>
+          <p className="mt-3 text-[12px] text-[#949494] text-start" data-testid="mask-drawing">
+            {drawing === "lasso" ? "Draw the outline on the picture; it closes when you let go." : "Paint on the picture; hold ⌥ (or turn on Eraser) to erase."}
+          </p>
         )}
       </Section>
       {(drawing === "brush" || mask?.tool === "draw") && (

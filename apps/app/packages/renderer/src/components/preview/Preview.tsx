@@ -1638,7 +1638,12 @@ const Preview: React.FC<PreviewProps> = () => {
         const stroke = { points: normalizeFlatPointsForRotation(points, clipTransform), size: maskBrushSize, ...(erase ? { erase: true } : {}) };
         const f = maskFrame(targetClip, focusFrame);
         const masks = targetClip.masks || [];
-        const current = masks.find((m) => m.id === useControlsStore.getState().selectedMaskId && m.tool === "draw");
+        // The brush mask being painted (kept in the mask store, so an undo and redo of a stroke
+        // finds it again), else the selected brush mask, else a new one.
+        const painting = useMaskStore.getState().activeMaskId;
+        const current =
+          masks.find((m) => m.id === painting && m.tool === "draw") ??
+          masks.find((m) => m.id === useControlsStore.getState().selectedMaskId && m.tool === "draw");
         if (current) {
           const next = editMaskPose(current, f, useControlsStore.getState().fps || 24, (p) => ({ ...p, brushStrokes: [...(p.brushStrokes ?? []), stroke] }));
           updateClip(targetClip.clipId, { masks: masks.map((m) => (m.id === current.id ? next : m)) });
@@ -1647,6 +1652,7 @@ const Preview: React.FC<PreviewProps> = () => {
         const brush = { ...newShapeMask(targetClip, "rectangle", f), tool: "draw" as const, keyframes: { [f]: { brushStrokes: [stroke] } }, transform: clipTransform ? { ...clipTransform } : undefined };
         updateClip(targetClip.clipId, { masks: [...masks, brush] });
         setSelectedMaskId(brush.id);
+        useMaskStore.getState().setActiveMaskId(brush.id);
         return;
       }
 
