@@ -749,6 +749,7 @@ Screenshots are in `03-editor-overview/` unless a path says otherwise.
 | Layout menu: Default, Media, Attributes, Vertical | `04-top-bar/001-layout-menu-default.png`, `03-editor-overview/004-media-layout.png`–`006-vertical-layout.png` | partly (three presets, no Vertical) |
 | Reset current layout | `04-top-bar/001-layout-menu-default.png` | missing |
 | Resizable panels (gutters as splitters), sizes remembered per preset | inferred from "Reset current layout" | partly (resizable panels exist) |
+| Panels in windows of their own (the player on a second display) | not in the references | has (OpenRip's: a header dragged out or Pop out, Dock back in a 34 px window strip, places kept per panel) |
 | Keyboard shortcuts button | `003-base-timeline-built.png` | partly (read-only list in the Topbar) |
 | Export button | `003-base-timeline-built.png` | has |
 
