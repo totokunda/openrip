@@ -31,7 +31,7 @@ export class EngineCanvasSink {
       canvas.height = Math.max(1, Math.round(this.height));
       const ctx = canvas.getContext("2d");
       if (!ctx) continue;
-      const pixels = new ImageData(new Uint8ClampedArray(t.rgba.buffer, t.rgba.byteOffset, t.rgba.byteLength), t.width, t.height);
+      const pixels = new ImageData(new Uint8ClampedArray(t.rgba.buffer as ArrayBuffer, t.rgba.byteOffset, t.rgba.byteLength), t.width, t.height);
       if (t.width === canvas.width && t.height === canvas.height) {
         ctx.putImageData(pixels, 0, 0);
       } else {
