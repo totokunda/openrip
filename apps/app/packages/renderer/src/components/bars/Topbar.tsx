@@ -6,6 +6,7 @@ import {
   LuFolder,
   LuFolderPlus,
   LuFolderInput,
+  LuHouse,
   LuSearch,
   LuTrash2,
 } from "react-icons/lu";
@@ -55,6 +56,7 @@ import { SettingsModal } from "../dialogs/SettingsModal";
 import { CapCutImportDialog } from "../dialogs/CapCutImportDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SHORTCUT_SECTIONS } from "@/lib/shortcuts";
+import { goHome, openProject } from "@/lib/project-actions";
 
 interface TopBarProps {
 
@@ -487,10 +489,21 @@ const TopBar: React.FC<TopBarProps> = () => {
           onOpenChange={setCapcutOpen}
           onImported={(created) => {
             if (!projects.some((p) => p.id === created.id)) addProject(created);
-            setActiveProjectId(created.id);
+            openProject(created.id);
             setProjectSearch("");
           }}
         />
+        <button
+          type="button"
+          data-testid="go-home"
+          title={isExporting ? "Wait for the export to finish" : "Back to your projects"}
+          disabled={isExporting}
+          onClick={() => void goHome()}
+          className="text-brand-light/90 dark h-[34px] flex items-center gap-x-2 px-3 font-medium border border-brand-light/10 hover:text-brand-light bg-brand hover:bg-brand-light/10 rounded-[6px] transition-all duration-300 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <LuHouse className="w-4 h-4" />
+          <span className="text-[11px]">Home</span>
+        </button>
         <DropdownMenu>
           <DropdownMenuTrigger className="text-brand-light/90 dark max-w-[220px] h-[34px] flex items-center space-x-2 px-3 font-medium border border-brand-light/10 hover:text-brand-light bg-brand hover:bg-brand-light/10 rounded-[6px] py-[7px] transition-all duration-300 cursor-pointer">
             <LuFolder className="w-4 h-4 shrink-0" />

@@ -23,6 +23,23 @@ import { useContextMenuStore } from "@/lib/context-menu";
 import { useUpdateToasts } from "@/hooks/use-update-toasts";
 import { initEnginePreview } from "@/lib/engine-preview";
 import { initHistory } from "@/lib/history";
+import { useShellStore } from "@/lib/shell";
+import HomeScreen from "./home/HomeScreen";
+
+/** The window while the projects (first) or a project (later) are loading. */
+const Loading: React.FC<{ title: string; note: string }> = ({ title, note }) => (
+  <main className="w-full h-screen flex flex-col bg-brand-background-dark text-center font-poppins">
+    <div className="relative flex-1 overflow-hidden">
+      <div className="relative z-10 h-full w-full flex flex-col items-center justify-center gap-5">
+        <div className="text-[12px] text-brand-light/50">{title}</div>
+        <div className="text-2xl font-semibold tracking-tight text-brand-light">OpenRip</div>
+        <div className="h-9 w-9 rounded-full border-2 border-brand-light/15 border-t-brand-accent-shade animate-spin" />
+        <p className="max-w-sm text-[11px] text-brand-light/40 leading-relaxed">{note}</p>
+      </div>
+    </div>
+    <Toaster />
+  </main>
+);
 
 const App: React.FC = () => {
   useUpdateToasts();
@@ -36,8 +53,14 @@ const App: React.FC = () => {
   }, []);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const layout = useLayoutConfigStore((s) => s.layout);
+  const view = useShellStore((s) => s.view);
   const { ghostInStage, clips} = useClipStore();
   const projectsLoaded = useProjectsStore((s) => s.projectsLoaded);
+  // The home screen waits for the first load only: it lists the projects from then on.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (projectsLoaded) setReady(true);
+  }, [projectsLoaded]);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const [activeDragItem, setActiveDragItem] = useState<MediaItem | null>(
     null,
@@ -157,30 +180,19 @@ const App: React.FC = () => {
     setActiveDragItem(null);
   };
 
-  const isBootstrapping = !projectsLoaded || !activeProject;
-
-  if (isBootstrapping) {
+  if (!ready) {
+    return <Loading title="Preparing workspace" note="Loading projects and initializing timeline..." />;
+  }
+  if (view === "home") {
     return (
-      <main className="w-full h-screen flex flex-col bg-black text-center font-poppins">
-        <div className="relative flex-1 overflow-hidden">
-          <div className="absolute inset-0 bg-linear-to-br from-slate-950 via-black to-slate-900" />
-          <div className="absolute inset-0 backdrop-blur-md bg-black/50" />
-          <div className="relative z-10 h-full w-full flex flex-col items-center justify-center gap-6">
-            <div className="text-xs uppercase tracking-[0.35em] text-slate-400">
-              Preparing workspace
-            </div>
-            <div className="text-3xl font-semibold tracking-tight text-slate-50">
-              OpenRip
-            </div>
-            <div className="h-12 w-12 rounded-full border-2 border-slate-600 border-t-brand-accent-shade animate-spin" />
-            <p className="max-w-sm text-xs text-slate-400 leading-relaxed">
-              Loading projects and initializing timeline...
-            </p>
-          </div>
-        </div>
+      <>
+        <HomeScreen />
         <Toaster />
-      </main>
+      </>
     );
+  }
+  if (!projectsLoaded || !activeProject) {
+    return <Loading title="Opening project" note={activeProject?.name ?? ""} />;
   }
 
   return (
@@ -202,6 +214,7 @@ const App: React.FC = () => {
     >
       <main
         ref={containerRef}
+        data-testid="editor"
         className="w-full text-center font-poppins bg-black h-screen flex flex-col"
       >
         <Topbar />

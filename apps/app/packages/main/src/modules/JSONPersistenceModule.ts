@@ -123,7 +123,8 @@ export async function createProject(
   projectsDir: string,
   name: string,
   fps: number,
-  appVersion: string | undefined
+  appVersion: string | undefined,
+  aspectRatio: { width: number; height: number; id: string } = { width: 16, height: 9, id: "16:9" },
 ) {
   if (!Number.isFinite(fps) || fps <= 0) {
     throw new Error("FPS must be a positive number");
@@ -160,11 +161,7 @@ export async function createProject(
     },
     settings: {
       fps,
-      aspectRatio: {
-        width: 16,
-        height: 9,
-        id: "16:9",
-      },
+      aspectRatio,
       defaultClipLength: 5,
     },
     editorState: {},
@@ -194,15 +191,12 @@ export async function createProject(
     "utf8",
   );
 
-  const aspectRatio =
-    (baseDoc.settings as any)?.aspectRatio ?? undefined;
-
   return {
     id,
     name: baseDoc.meta.name,
     fps: baseDoc.settings.fps,
     folderUuid,
-    aspectRatio,
+    aspectRatio: (baseDoc.settings as any)?.aspectRatio ?? undefined,
     filePath
   };
 }
@@ -1111,7 +1105,7 @@ export class JSONPersistenceModule implements AppModule {
       "projects:create-json",
       async (
         _event,
-        payload: { name: string; fps: number },
+        payload: { name: string; fps: number; aspectRatio?: { width: number; height: number; id: string } },
       ): Promise<
         JsonResponse<{
           id: number;
@@ -1125,7 +1119,13 @@ export class JSONPersistenceModule implements AppModule {
           const name = String(payload?.name ?? "").trim() || "Project 1";
           const fps = Number(payload?.fps ?? 24);
 
-          const result = await createProject(this.projectsDir, name, fps, this.#appVersion);
+          // A size picked on the home screen; anything malformed falls back to 16:9.
+          const a = payload?.aspectRatio;
+          const aspectRatio =
+            a && Number(a.width) > 0 && Number(a.height) > 0
+              ? { width: Number(a.width), height: Number(a.height), id: String(a.id || `${a.width}:${a.height}`) }
+              : undefined;
+          const result = await createProject(this.projectsDir, name, fps, this.#appVersion, aspectRatio);
 
           return {
             success: true,

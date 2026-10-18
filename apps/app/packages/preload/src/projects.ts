@@ -9,6 +9,8 @@ async function listProjects<T = any>(): Promise<ConfigResponse<T[]>> {
 async function createProject<T = any>(payload: {
   name: string;
   fps: number;
+  /** The canvas; 16:9 when not given. */
+  aspectRatio?: { width: number; height: number; id: string };
 }): Promise<ConfigResponse<T>> {
   return await ipcRenderer.invoke("projects:create-json", payload);
 }
