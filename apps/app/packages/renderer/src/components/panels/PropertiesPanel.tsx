@@ -1,61 +1,34 @@
-import React, { useRef, useEffect, useState } from "react";
+import React from "react";
 import { ResizablePanel } from "../ui/resizable";
 import EmptyPropertiesPanel from "../properties/EmptyPropertiesPanel";
 import ClipPropertiesPanel from "./ClipPropertiesPanel";
 import { useControlsStore } from "@/lib/control";
-import { ImperativePanelHandle } from "react-resizable-panels";
 
 interface PropertiesPanelProps {
+  id?: string;
   order?: number;
   defaultSize?: number;
   minSize?: number;
 }
 
+/** The right inspector: the selected clip's tabs, or the project's details with nothing selected. */
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
+  id = "inspector",
   order,
-  defaultSize = 25,
-  minSize = 25,
+  defaultSize = 28,
+  minSize = 18,
 }) => {
-  const { selectedClipIds } = useControlsStore();
-  const [panelSize, setPanelSize] = useState(0);
-  const panelRef = useRef<ImperativePanelHandle>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const width = entry.contentRect.width;
-        setPanelSize(width);
-      }
-    });
-
-    resizeObserver.observe(containerRef.current);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, []);
-
+  const hasSelection = useControlsStore((s) => s.selectedClipIds.length > 0);
   return (
     <ResizablePanel
-      ref={panelRef}
+      id={id}
       minSize={minSize}
       defaultSize={defaultSize}
       order={order}
-      className="bg-brand flex flex-col rounded-lg shadow border-brand-light/10 min-w-0"
+      data-testid="inspector"
+      className="bg-brand-background rounded-md flex flex-col min-w-0 overflow-hidden"
     >
-      <div
-        ref={containerRef}
-        className="bg-brand-background rounded-lg h-full overflow-hidden min-w-0"
-      >
-        {selectedClipIds.length > 0 ? (
-          <ClipPropertiesPanel panelSize={panelSize} />
-        ) : (
-          <EmptyPropertiesPanel />
-        )}
-      </div>
+      {hasSelection ? <ClipPropertiesPanel /> : <EmptyPropertiesPanel />}
     </ResizablePanel>
   );
 };

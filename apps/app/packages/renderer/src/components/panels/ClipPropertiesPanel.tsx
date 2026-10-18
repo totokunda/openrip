@@ -1,7 +1,7 @@
 import { useClipStore } from '@/lib/clip'
 import { useControlsStore } from '@/lib/control'
 import AudioProperties from '../properties/AudioProperties'
-import { useMemo, useRef, useEffect, useState } from 'react'
+import React, { useMemo, useEffect } from 'react'
 import { getMediaInfoCached } from '@/lib/media/utils'
 import DurationProperties from '../properties/DurationProperties'
 import PositionProperties from '../properties/PositionProperties'
@@ -10,229 +10,199 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import AppearanceProperties from '../properties/AppearanceProperties'
 import AdjustProperties from '../properties/AdjustProperties'
-import {LuChevronRight, LuChevronLeft} from 'react-icons/lu'
 import { cn } from '@/lib/utils'
 import TextProperties from '../properties/TextProperties'
 import LineProperties from '../properties/LineProperties'
 import { useDrawingStore } from '@/lib/drawing';
-import { useViewportStore } from '@/lib/viewport';
 import MaskPropertiesPanel from '../properties/mask/MaskPropertiesPanel';
 import AnimationProperties from '../properties/AnimationProperties'
 import FilterProperties from '../properties/FilterProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
+import { useInspectorStore } from '@/lib/inspector'
 
-interface PropertiesPanelProps {
-    panelSize: number;
+/**
+ * The inspector for the selected clip (the last one selected), grouped as CapCut groups it:
+ * a row of tabs by what's edited (Video, Audio, Speed, Animation, Adjust for a video; Text,
+ * Animation, Duration for a text) and, inside a tab, sub-tabs (Basic, Mask). Each section is
+ * one of the existing property panels.
+ */
+
+interface Section {
+  id: string;
+  label: string;
+  content: React.ReactNode;
 }
 
-const ClipPropertiesPanel:React.FC<PropertiesPanelProps> = ({panelSize}) => {
-  const {selectedClipIds, selectedMaskId} = useControlsStore();
+interface InspectorTab {
+  id: string;
+  label: string;
+  /** Shown as sub-tabs when there's more than one. */
+  sections: Section[];
+}
+
+const stack = (...parts: React.ReactNode[]) => (
+  <div className="min-w-0 divide-y divide-brand-light/[0.06]">{parts}</div>
+);
+
+const ClipPropertiesPanel: React.FC = () => {
+  const selectedClipIds = useControlsStore((s) => s.selectedClipIds);
+  const selectedMaskId = useControlsStore((s) => s.selectedMaskId);
   const selectedLineId = useDrawingStore((s) => s.selectedLineId);
-  const tool = useViewportStore((s) => s.tool);
   const clipId = useMemo(() => selectedClipIds[selectedClipIds.length - 1], [selectedClipIds]);
-  const getClipById = useClipStore((s) => s.getClipById);
-  const clip = getClipById(clipId);
-
-  const clipType = clip?.type;
-  const tabRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-  const [selectedTab, setSelectedTab] = useState<string>(clip?.type === 'text' ? "text" : "transform");
-
-  const hasDuration = true;
-
-  const hasFilter = useMemo(() => {
-    return clip?.type === 'filter';
-  }, [clip?.type]);
+  const clip = useClipStore((s) => s.getClipById(clipId));
+  const type = clip?.type;
+  const tab = useInspectorStore((s) => s.tab);
+  const subs = useInspectorStore((s) => s.sub);
+  const setTab = useInspectorStore((s) => s.setTab);
+  const setSub = useInspectorStore((s) => s.setSub);
 
   const hasAudio = useMemo(() => {
-    if (clip?.type === 'audio') return true;
-    if (clip?.type === 'video') {
-      const mediaInfo = getMediaInfoCached(clip?.assetId)
-      return mediaInfo?.audio !== null
+    if (type === 'audio') return true;
+    if (type === 'video') return getMediaInfoCached((clip as VideoClipProps)?.assetId)?.audio !== null;
+    return false;
+  }, [type, (clip as VideoClipProps | ImageClipProps)?.assetId]);
+
+  const tabs = useMemo<InspectorTab[]>(() => {
+    if (!clip) return [];
+    const position = <PositionProperties key="position" clipId={clipId} />;
+    const layout = <LayoutProperties key="layout" clipId={clipId} />;
+    const appearance = <AppearanceProperties key="appearance" clipId={clipId} />;
+    const duration = (label: string): InspectorTab => ({
+      id: 'duration',
+      label,
+      sections: [{ id: 'duration', label, content: <DurationProperties clipId={clipId} /> }],
+    });
+    const animation: InspectorTab = {
+      id: 'animation',
+      label: 'Animation',
+      sections: [{ id: 'animation', label: 'Animation', content: <AnimationProperties clipId={clipId} /> }],
+    };
+    switch (type) {
+      case 'video':
+      case 'image':
+        return [
+          {
+            id: 'video',
+            label: type === 'video' ? 'Video' : 'Image',
+            sections: [
+              { id: 'basic', label: 'Basic', content: stack(position, layout, appearance) },
+              { id: 'mask', label: 'Mask', content: <MaskPropertiesPanel clipId={clipId} /> },
+            ],
+          },
+          ...(hasAudio ? [{ id: 'audio', label: 'Audio', sections: [{ id: 'audio', label: 'Audio', content: <AudioProperties clipId={clipId} /> }] }] : []),
+          duration(type === 'video' ? 'Speed' : 'Duration'),
+          animation,
+          { id: 'adjust', label: 'Adjust', sections: [{ id: 'adjust', label: 'Adjust', content: <AdjustProperties clipId={clipId} /> }] },
+        ];
+      case 'text':
+        return [
+          {
+            id: 'text',
+            label: 'Text',
+            sections: [
+              { id: 'basic', label: 'Basic', content: <TextProperties clipId={clipId} /> },
+              { id: 'transform', label: 'Transform', content: stack(position, layout, appearance) },
+            ],
+          },
+          animation,
+          duration('Duration'),
+        ];
+      case 'shape':
+        return [
+          {
+            id: 'shape',
+            label: 'Shape',
+            sections: [
+              { id: 'basic', label: 'Basic', content: appearance },
+              { id: 'transform', label: 'Transform', content: stack(position, layout) },
+            ],
+          },
+          duration('Duration'),
+        ];
+      case 'audio':
+        return [
+          { id: 'audio', label: 'Audio', sections: [{ id: 'audio', label: 'Audio', content: <AudioProperties clipId={clipId} /> }] },
+          duration('Speed'),
+        ];
+      case 'filter':
+        return [
+          {
+            id: 'filter',
+            label: 'Filter',
+            sections: [{ id: 'filter', label: 'Filter', content: stack(<FilterProperties key="filter" clipId={clipId} />, <DurationProperties key="duration" clipId={clipId} />) }],
+          },
+        ];
+      case 'draw':
+        return [
+          ...(selectedLineId ? [{ id: 'line', label: 'Line', sections: [{ id: 'line', label: 'Line', content: <LineProperties clipId={clipId} /> }] }] : []),
+          duration('Duration'),
+        ];
+      default:
+        return [duration('Duration')];
     }
-    return false;
-  }, [clipType, (clip as VideoClipProps | ImageClipProps)?.assetId]);
+  }, [clip, clipId, type, hasAudio, selectedLineId]);
 
-  const hasAppearance = useMemo(() => {
-    if (clip?.type === 'image' || clip?.type === 'video' || clip?.type === 'shape' || clip?.type === 'text') return true;
-    return false;
-  }, [clip?.type]);
-
-  const hasTransform = useMemo(() => {
-    if (clip?.type === 'image' || clip?.type === 'video' || clip?.type === 'shape' || clip?.type === 'text') return true;
-    return false;
-  }, [clip?.type]);
-
-  const hasText = useMemo(() => {
-    if (clip?.type === 'text') return true;
-    return false;
-  }, [clip?.type]);
-
-  const hasAdjust = useMemo(() => {
-    if (clip?.type === 'image' || clip?.type === 'video') return true;
-    return false;
-  }, [clip?.type]);
-
-  // In animations and caption styles for text, transitions for video and photos.
-  const hasAnimation = useMemo(() => {
-    return clip?.type === 'text' || clip?.type === 'video' || clip?.type === 'image';
-  }, [clip?.type]);
-
-  const hasLine = useMemo(() => {
-    if (clip?.type === 'draw' && selectedLineId) return true;
-    return false;
-  }, [clip?.type, selectedLineId]);
-
-  const hasMask = useMemo(() => {
-    // Show mask panel if a mask is selected OR if we're in mask tool mode
-
-    if ((clip?.type === 'video' || clip?.type === 'image')) return true;
-    return false;
-  }, [selectedMaskId, tool, clip?.type]);
-
-  const numVisibleTabs = useMemo(() => {
-    let tabTotal = 0;
-    if (hasLine) tabTotal++;
-    if (hasMask) tabTotal++;
-    if (hasTransform) tabTotal++;
-    if (hasAudio) tabTotal++;
-    if (hasDuration || hasFilter) tabTotal++;
-    if (hasAppearance) tabTotal++;
-    if (hasAdjust) tabTotal++;
-    if (hasAnimation) tabTotal++;
-    return tabTotal;
-  }, [hasLine, hasMask, hasTransform, hasAudio, hasDuration, hasFilter, hasAppearance, hasAdjust, hasAnimation]);
-
-
+  // A selected line or mask brings up its tab.
   useEffect(() => {
-    // Automatically switch to line tab when a line is selected
-    if (hasLine && selectedLineId) {
-      setSelectedTab('line');
-    }
-  }, [selectedLineId, hasLine]);
-
+    if (selectedLineId && tabs.some((t) => t.id === 'line')) setTab('line');
+  }, [selectedLineId, tabs.length]);
   useEffect(() => {
-    // Automatically switch to mask tab when a mask is selected
-    if (hasMask && selectedMaskId) {
-      setSelectedTab('mask');
-    }
-  }, [selectedMaskId, hasMask]);
+    if (selectedMaskId && tabs.some((t) => t.id === 'video')) setTab('video', 'mask');
+  }, [selectedMaskId, tabs.length]);
 
-  const checkScrollButtons = () => {
-    if (tabRef.current) {
-      const { scrollLeft, scrollWidth, clientWidth } = tabRef.current;
-      setCanScrollLeft(scrollLeft > 0);
-      setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 1);
-    }
-  };
+  const current = tabs.find((t) => t.id === tab) ?? tabs[0];
+  if (!current) return null;
+  const section = current.sections.find((s) => s.id === subs[current.id]) ?? current.sections[0];
 
-  useEffect(() => {
-    checkScrollButtons();
-    const handleScroll = () => checkScrollButtons();
-    const tabElement = tabRef.current;
-    if (tabElement) {
-      tabElement.addEventListener('scroll', handleScroll);
-      return () => tabElement.removeEventListener('scroll', handleScroll);
-    }
-  }, [panelSize, numVisibleTabs]);
-
-
-  const getValidTab = (currentTab: string) => {
-    // Check if current tab is valid for this clip type
-
-    if (currentTab === "line" && hasLine) return "line";
-
-    if (currentTab === "text" && hasText) return "text";
-    if (currentTab === "transform" && hasTransform) return "transform";
-    if (currentTab === "mask" && hasMask) return "mask";
-    if (currentTab === "audio" && hasAudio) return "audio";
-    if (currentTab === "duration" && (hasDuration || hasFilter)) return "duration";
-    if (currentTab === "appearance" && hasAppearance) return "appearance";
-    if (currentTab === "adjust" && hasAdjust) return "adjust";
-    if (currentTab === "animation" && hasAnimation) return "animation";
-    // If current tab is invalid, return first available tab
-    if (hasLine) return "line";
-    if (hasTransform) return "transform";
-    if (hasMask) return "mask";
-    if (hasAudio) return "audio";
-    if (hasAppearance) return "appearance";
-    if (hasAdjust) return "adjust";
-    return "duration"; // fallback
-  };
-
-  useEffect(() => {
-    const validTab = getValidTab(selectedTab);
-    if (validTab !== selectedTab) {
-      setSelectedTab(validTab);
-    }
-  }, [clipId, hasLine, hasMask, hasTransform, hasAudio, hasDuration, hasAppearance, hasAdjust, hasAnimation, tool]);
-
+  const trigger =
+    "relative h-9 px-3 shrink-0 whitespace-nowrap rounded-none bg-transparent text-[11.5px] text-brand-light/55 hover:text-brand-light data-[state=active]:text-brand-light data-[state=active]:bg-transparent after:absolute after:left-3 after:right-3 after:bottom-0 after:h-[2px] after:rounded-full after:bg-transparent data-[state=active]:after:bg-brand-accent";
 
   return (
-    <div className="h-full w-full min-w-0 flex flex-col" style={{ position: 'relative', overflow: 'hidden' }}>
-      <div className="overflow-hidden" style={{ height: '100%' }}>
-        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="min-w-0 relative flex flex-col h-full">
-        <div className="relative shrink-0 ">
-          <LuChevronLeft onClick={() => {
-            if (tabRef.current) {
-              tabRef.current.scrollBy({ left: -96, behavior: 'smooth' });
-            }
-          }} className={cn("text-brand-light h-6 w-6 bg-brand-background-dark/90  backdrop-blur-sm border border-brand-light/10 hover:bg-brand-background z-50 transition-all duration-200 rounded-full absolute left-0 top-1/2 -translate-y-1/2 p-1 cursor-pointer ", canScrollLeft ? "block" : "hidden")} />
-          <TabsList ref={tabRef} style={{scrollbarWidth: 'none', msOverflowStyle: 'none'}} className={cn("bg-brand w-full rounded-b-none p-0 min-w-0 shrink overflow-x-auto [&::-webkit-scrollbar]:hidden")}>
-            {(hasLine) && <TabsTrigger value="line" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Line</TabsTrigger>}
-            {(hasText) && <TabsTrigger value="text" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Text</TabsTrigger>}
-            {(hasTransform) && <TabsTrigger value="transform" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Transform</TabsTrigger>}
-            {(hasAnimation) && <TabsTrigger value="animation" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Animation</TabsTrigger>}
-            {(hasMask) && <TabsTrigger value="mask" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Mask</TabsTrigger>}
-            {(hasAudio) && <TabsTrigger value="audio" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Audio</TabsTrigger>}
-            {(hasDuration || hasFilter) && <TabsTrigger value="duration" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">
-              {hasFilter ? 'Filter' : 'Duration'}
-              </TabsTrigger>}
-            {(hasAdjust) && <TabsTrigger value="adjust" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Adjust</TabsTrigger>}
-            {(hasAppearance) && <TabsTrigger value="appearance" className="text-brand-light text-[11px] h-9 shrink-0 px-4.5 whitespace-nowrap">Appearance</TabsTrigger>}
-          </TabsList>
-          <LuChevronRight onClick={() => {
-            if (tabRef.current) {
-              tabRef.current.scrollBy({ left: 96, behavior: 'smooth' });
-            }
-          }} className={cn("text-brand-light h-6 w-6 border border-brand-light/10 bg-brand-background-dark/90 backdrop-blur-sm hover:bg-brand-background z-10 transition-all duration-200 rounded-full absolute right-0 top-1/2 -translate-y-1/2 p-1 cursor-pointer ", canScrollRight ? "block" : "hidden")} />
-        </div>
-        <ScrollArea className="flex-1 overflow-y-auto">
-          <div>
-          {(hasLine) && <TabsContent value="line" className="min-w-0 m-0">
-            <LineProperties clipId={clipId} />
-          </TabsContent>}
-          {(hasText) && <TabsContent value="text" className="min-w-0 m-0">  <TextProperties clipId={clipId} /> </TabsContent>}
-          {(hasTransform) && <TabsContent  value="transform" className="min-w-0 divide-y divide-brand-light/10 m-0">
-            <PositionProperties clipId={clipId}  />
-            <LayoutProperties clipId={clipId}  />
-          </TabsContent>}
-          {(hasAnimation) && <TabsContent value="animation" className="min-w-0 m-0">
-            <AnimationProperties clipId={clipId} />
-          </TabsContent>}
-          {(hasMask) && <TabsContent value="mask" className="min-w-0 m-0">
-            <MaskPropertiesPanel clipId={clipId} />
-          </TabsContent>}
-          {(hasAudio) && <TabsContent value="audio" className="min-w-0 m-0">
-            <AudioProperties clipId={clipId} />
-          </TabsContent>}
-          {(hasDuration || hasFilter) && <TabsContent value="duration" className="min-w-0 m-0">
-            {hasFilter && <FilterProperties clipId={clipId} />}
-            <DurationProperties clipId={clipId} />
-          </TabsContent>}
-          {(hasAdjust) && <TabsContent value="adjust" className="min-w-0 m-0">
-            <AdjustProperties clipId={clipId} />
-          </TabsContent>}
-          {(hasAppearance) && <TabsContent value="appearance" className="min-w-0 m-0">
-            <AppearanceProperties clipId={clipId} />
-          </TabsContent>}
-          </div>
-        </ScrollArea>
-      </Tabs>
-      </div>
-    </div>
-  )
+    <Tabs value={current.id} onValueChange={(v) => setTab(v)} className="h-full w-full min-w-0 flex flex-col overflow-hidden">
+      <TabsList
+        data-testid="inspector-tabs"
+        style={{ scrollbarWidth: 'none' }}
+        className="w-full justify-start shrink-0 h-9 p-0 px-1 gap-0 rounded-none bg-transparent border-b border-brand-light/[0.06] overflow-x-auto [&::-webkit-scrollbar]:hidden"
+      >
+        {tabs.map((t) => (
+          <TabsTrigger key={t.id} value={t.id} className={trigger}>
+            {t.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      {tabs.map((t) => (
+        <TabsContent key={t.id} value={t.id} className="flex-1 min-h-0 m-0 flex flex-col">
+          {t.id === current.id && (
+            <Tabs value={section.id} onValueChange={(v) => setSub(t.id, v)} className="flex-1 min-h-0 flex flex-col">
+              {t.sections.length > 1 && (
+                <TabsList className="shrink-0 mx-4 mt-3 mb-1 h-7 p-0.5 gap-0.5 rounded-[6px] bg-brand-background-dark/70 justify-start w-fit">
+                  {t.sections.map((s) => (
+                    <TabsTrigger
+                      key={s.id}
+                      value={s.id}
+                      className={cn(
+                        "h-6 px-3 rounded-[5px] text-[11px] text-brand-light/55 hover:text-brand-light",
+                        "data-[state=active]:bg-brand-background-light data-[state=active]:text-brand-light",
+                      )}
+                    >
+                      {s.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              )}
+              <ScrollArea className="flex-1 min-h-0">
+                {t.sections.map((s) => (
+                  <TabsContent key={s.id} value={s.id} className="min-w-0 m-0">
+                    {s.content}
+                  </TabsContent>
+                ))}
+              </ScrollArea>
+            </Tabs>
+          )}
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
 }
 
 export default ClipPropertiesPanel
