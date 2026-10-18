@@ -11,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import AppearanceProperties from '../properties/AppearanceProperties'
 import AdjustProperties from '../properties/AdjustProperties'
 import { cn } from '@/lib/utils'
-import TextProperties from '../properties/TextProperties'
+import TextBasicProperties from '../properties/text/TextBasicProperties'
+import TextEffectsProperties from '../properties/text/TextEffectsProperties'
 import LineProperties from '../properties/LineProperties'
 import { useDrawingStore } from '@/lib/drawing';
 import MaskPropertiesPanel from '../properties/mask/MaskPropertiesPanel';
@@ -108,13 +109,15 @@ const ClipPropertiesPanel: React.FC = () => {
           { id: 'adjust', label: 'Adjust', sections: [{ id: 'adjust', label: 'Adjust', content: <AdjustProperties clipId={clipId} /> }] },
         ];
       case 'text':
+        // CapCut's Text tab: Basic (with the clip's Transform and Blend among its sections)
+        // and Effects. Its Bubble tab is CapCut's downloaded content, which OpenRip doesn't have.
         return [
           {
             id: 'text',
             label: 'Text',
             sections: [
-              { id: 'basic', label: 'Basic', content: <TextProperties clipId={clipId} /> },
-              { id: 'transform', label: 'Transform', content: stack(position, layout, appearance) },
+              { id: 'basic', label: 'Basic', content: <TextBasicProperties clipId={clipId} transform={stack(position, layout, appearance)} /> },
+              { id: 'effects', label: 'Effects', content: <TextEffectsProperties clipId={clipId} /> },
             ],
           },
           animation,
