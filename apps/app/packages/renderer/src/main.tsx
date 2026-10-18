@@ -1,3 +1,6 @@
+// First: panels can live in windows of their own, and the listeners added from here on must
+// reach those windows too (Konva adds its drag listeners as it loads).
+import "@/lib/window-group";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./components/App";

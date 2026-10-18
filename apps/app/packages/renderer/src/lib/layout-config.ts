@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { dockAllPanels } from "./panel-windows";
 
 /**
  * The editor's layouts, as CapCut's: Default; Media (the left panel full height); the
@@ -13,7 +14,10 @@ export const layoutStorageKey = (layout: AppLayoutId) => `openrip:layout:${layou
 interface LayoutConfigState {
   layout: AppLayoutId;
   setLayout: (layout: AppLayoutId) => void;
-  /** Bumped by "Reset current layout": the panels mount again at their default sizes. */
+  /**
+   * Bumped by "Reset current layout": the panels mount again at their default sizes, and any
+   * in windows of their own come back into the editor.
+   */
   resetCount: number;
   resetLayout: () => void;
 }
@@ -32,6 +36,7 @@ export const useLayoutConfigStore = create<LayoutConfigState>()(
             if (key.startsWith(prefix)) window.localStorage.removeItem(key);
           }
         } catch {}
+        dockAllPanels();
         set((s) => ({ resetCount: s.resetCount + 1 }));
       },
     }),

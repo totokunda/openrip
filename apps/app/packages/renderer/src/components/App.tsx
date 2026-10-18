@@ -1,15 +1,10 @@
 import React, { useRef, useEffect, useState } from "react";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
+import { createPortal } from "react-dom";
 import { Toaster } from "@/components/ui/sonner";
-import MediaModelPanel from "./panels/MediaModelPanel";
-import PreviewPanel from "./panels/PreviewPanel";
-import TimelinePanel from "./panels/TimelinePanel";
-import PropertiesPanel from "./panels/PropertiesPanel";
-import { layoutStorageKey, useLayoutConfigStore } from "@/lib/layout-config";
+import EditorLayout from "./panels/EditorLayout";
+import PanelWindows from "./panels/PanelWindows";
+import { useLayoutConfigStore } from "@/lib/layout-config";
+import { betweenWindows, usePanelWindowsStore } from "@/lib/panel-windows";
 import Topbar from "./bars/Topbar";
 import { DndContext, DragEndEvent, DragOverlay } from "@dnd-kit/core";
 import { MediaItem, MediaThumb } from "@/components/media/Item";
@@ -46,12 +41,8 @@ const Loading: React.FC<{ title: string; note: string }> = ({ title, note }) => 
   </main>
 );
 
-/**
- * The gaps between panels (7 px between columns, 6 px between rows, as CapCut's), which are
- * also the handles that resize them. Each layout's groups save their sizes (autoSaveId, in
- * localStorage) so a layout opens as it was left; "Reset current layout" clears them.
- */
-const handle = "bg-transparent data-[panel-group-direction=horizontal]:w-[7px] data-[panel-group-direction=vertical]:h-[6px]";
+/** `node` rendered into `container` (another window's body), or here without one. */
+const portalInto = (container: HTMLElement | undefined, node: React.ReactNode) => (container ? createPortal(node, container) : node);
 
 const App: React.FC = () => {
   useUpdateToasts();
@@ -70,6 +61,8 @@ const App: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const layout = useLayoutConfigStore((s) => s.layout);
   const resetCount = useLayoutConfigStore((s) => s.resetCount);
+  // The timeline's own window, when it's out of the editor (drops land there).
+  const timelineWindow = usePanelWindowsStore((s) => s.open.timeline?.window);
   const view = useShellStore((s) => s.view);
   const { ghostInStage, clips} = useClipStore();
   const projectsLoaded = useProjectsStore((s) => s.projectsLoaded);
@@ -220,6 +213,8 @@ const App: React.FC = () => {
     <QueryClientProvider client={queryClient}>
     <DndContext
       autoScroll={false}
+      // Media dragged from a panel in one window onto the timeline in another.
+      modifiers={[betweenWindows]}
       onDragStart={(event) => {
         const data = event?.active?.data?.current as unknown as
           | MediaItem
@@ -248,102 +243,38 @@ const App: React.FC = () => {
       >
         <Topbar />
         <Toaster />
-        {/* The panels, 8 px from the window's edges. Sizes are CapCut's Default, Media,
-            Attributes and Vertical layouts as shares of the window (capcut-ui-spec.md §1). */}
+        {/* The panels, 8 px from the window's edges, in CapCut's Default, Media, Attributes or
+            Vertical layout; each layout keeps its sizes (localStorage), which "Reset current
+            layout" clears. Panels pulled out into windows of their own leave the layout and
+            are rendered into their windows (PanelWindows). */}
         <div key={`${layout}-${resetCount}`} className="flex flex-1 min-h-0 w-full px-2 pb-2">
-          {layout === "default" && (
-            <ResizablePanelGroup direction="vertical" autoSaveId={layoutStorageKey("default")} className="flex-1 overflow-hidden">
-              <ResizablePanel id="upper" order={1} defaultSize={55} minSize={30} maxSize={75}>
-                <ResizablePanelGroup direction="horizontal" autoSaveId={`${layoutStorageKey("default")}:upper`} className="overflow-hidden">
-                  <MediaModelPanel order={1} defaultSize={34.6} />
-                  <ResizableHandle className={handle} />
-                  <PreviewPanel order={2} defaultSize={38.4} />
-                  <ResizableHandle className={handle} />
-                  <PropertiesPanel order={3} defaultSize={27} />
-                </ResizablePanelGroup>
-              </ResizablePanel>
-              <ResizableHandle className={handle} />
-              <TimelinePanel order={2} defaultSize={45} />
-            </ResizablePanelGroup>
-          )}
-          {layout === "media" && (
-            <ResizablePanelGroup direction="horizontal" autoSaveId={layoutStorageKey("media")} className="flex-1">
-              <MediaModelPanel order={1} defaultSize={32.5} minSize={20} maxSize={50} />
-              <ResizableHandle className={handle} />
-              <ResizablePanel id="rest" order={2} defaultSize={67.5} minSize={30}>
-                <ResizablePanelGroup direction="vertical" autoSaveId={`${layoutStorageKey("media")}:rest`}>
-                  <ResizablePanel id="upper" order={1} defaultSize={54} minSize={30}>
-                    <ResizablePanelGroup direction="horizontal" autoSaveId={`${layoutStorageKey("media")}:upper`}>
-                      <PreviewPanel order={1} defaultSize={63} minSize={30} />
-                      <ResizableHandle className={handle} />
-                      <PropertiesPanel order={2} defaultSize={37} minSize={25} />
-                    </ResizablePanelGroup>
-                  </ResizablePanel>
-                  <ResizableHandle className={handle} />
-                  <TimelinePanel order={2} defaultSize={46} />
-                </ResizablePanelGroup>
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          )}
-          {layout === "properties" && (
-            <ResizablePanelGroup direction="horizontal" autoSaveId={layoutStorageKey("properties")} className="flex-1">
-              <ResizablePanel id="rest" order={1} defaultSize={75.4} minSize={40}>
-                <ResizablePanelGroup direction="vertical" autoSaveId={`${layoutStorageKey("properties")}:rest`}>
-                  <ResizablePanel id="upper" order={1} defaultSize={54} minSize={30}>
-                    <ResizablePanelGroup direction="horizontal" autoSaveId={`${layoutStorageKey("properties")}:upper`}>
-                      <MediaModelPanel order={1} defaultSize={40} minSize={22} />
-                      <ResizableHandle className={handle} />
-                      <PreviewPanel order={2} defaultSize={60} minSize={30} />
-                    </ResizablePanelGroup>
-                  </ResizablePanel>
-                  <ResizableHandle className={handle} />
-                  <TimelinePanel order={2} defaultSize={46} />
-                </ResizablePanelGroup>
-              </ResizablePanel>
-              <ResizableHandle className={handle} />
-              <PropertiesPanel order={2} defaultSize={24.6} minSize={18} />
-            </ResizablePanelGroup>
-          )}
-          {layout === "vertical" && (
-            <ResizablePanelGroup direction="horizontal" autoSaveId={layoutStorageKey("vertical")} className="flex-1">
-              <ResizablePanel id="rest" order={1} defaultSize={73.4} minSize={40}>
-                <ResizablePanelGroup direction="vertical" autoSaveId={`${layoutStorageKey("vertical")}:rest`}>
-                  <ResizablePanel id="upper" order={1} defaultSize={54} minSize={30}>
-                    <ResizablePanelGroup direction="horizontal" autoSaveId={`${layoutStorageKey("vertical")}:upper`}>
-                      <MediaModelPanel order={1} defaultSize={66} minSize={30} />
-                      <ResizableHandle className={handle} />
-                      <PropertiesPanel order={2} defaultSize={34} minSize={25} />
-                    </ResizablePanelGroup>
-                  </ResizablePanel>
-                  <ResizableHandle className={handle} />
-                  <TimelinePanel order={2} defaultSize={46} />
-                </ResizablePanelGroup>
-              </ResizablePanel>
-              <ResizableHandle className={handle} />
-              <PreviewPanel order={2} defaultSize={26.6} minSize={18} />
-            </ResizablePanelGroup>
-          )}
+          <EditorLayout layout={layout} />
         </div>
       </main>
+      <PanelWindows />
       <GlobalContextMenu />
       <AppDialogs />
       <AnalysisPill />
-      <DragOverlay dropAnimation={null}>
-        {activeDragItem ? (
-          <div
-            className={cn(
-              "w-44 aspect-video rounded-md overflow-hidden bg-brand opacity-100",
-              {
-                "opacity-0": ghostInStage && clips.length > 0,
-              },
-            )}
-          >
-            <MediaThumb item={activeDragItem} isDragging={true} />
-          </div>
-        ) : dragTransition ? (
-          <TransitionDragTile type={dragTransition} />
-        ) : null}
-      </DragOverlay>
+      {/* The dragged picture, in the timeline's window (it can have one of its own). */}
+      {portalInto(
+        timelineWindow?.document.body,
+        <DragOverlay dropAnimation={null}>
+          {activeDragItem ? (
+            <div
+              className={cn(
+                "w-44 aspect-video rounded-md overflow-hidden bg-brand opacity-100",
+                {
+                  "opacity-0": ghostInStage && clips.length > 0,
+                },
+              )}
+            >
+              <MediaThumb item={activeDragItem} isDragging={true} />
+            </div>
+          ) : dragTransition ? (
+            <TransitionDragTile type={dragTransition} />
+          ) : null}
+        </DragOverlay>,
+      )}
     </DndContext>
     </QueryClientProvider>
   );

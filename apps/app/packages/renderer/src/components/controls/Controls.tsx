@@ -118,6 +118,7 @@ const TimelineZoom = () => {
       />
       <div
         ref={barRef}
+        data-no-popout
         onMouseDown={(e) => hasClips && handleMouseDown(e)}
         onMouseEnter={() => hasClips && setIsHovering(true)}
         onMouseLeave={() => hasClips && setIsHovering(false)}

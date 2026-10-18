@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { inputDocument } from "./window-group";
+import type { PanelId } from "./panel-windows";
 
 export type ContextMenuAction =
   | "copy"
@@ -28,6 +30,9 @@ export type ContextMenuAction =
   | "splitScenes"
   | "autoAdjust"
   | "colorMatch"
+  /** A panel's header: out into a window of its own, or back into the editor. */
+  | "popOutPanel"
+  | "dockPanel"
   /** A row that only opens its submenu. */
   | "none"
   /** The item's own `run` does it. */
@@ -42,7 +47,9 @@ export type ContextTarget =
   /** The transition on the cut after this clip. */
   | { type: "transition"; clipId: string }
   /** The keys at a clip-local frame of a clip (its diamond on the timeline). */
-  | { type: "keyframe"; clipId: string; frame: number };
+  | { type: "keyframe"; clipId: string; frame: number }
+  /** A panel's header strip (lib/panel-windows.ts). */
+  | { type: "panel"; panel: PanelId };
 
 export interface ContextMenuItem {
   id: string;
@@ -72,6 +79,8 @@ interface ContextMenuState {
   items: ContextMenuItem[];
   groups: ContextMenuGroup[] | null;
   target: ContextTarget | null;
+  /** The document the menu opens in: the window it was asked for in (a panel can have its own). */
+  doc: Document;
   openMenu: (args: {
     position: { x: number; y: number };
     items?: ContextMenuItem[];
@@ -88,8 +97,9 @@ export const useContextMenuStore = create<ContextMenuState>((set) => ({
   items: [],
   groups: null,
   target: null,
+  doc: document,
   openMenu: ({ position, items = [], groups, target }) =>
-    set({ open: true, position, items, groups: groups ?? null, target }),
+    set({ open: true, position, items, groups: groups ?? null, target, doc: inputDocument() }),
   closeMenu: () => set({ open: false, items: [], groups: null, target: null }),
   setPosition: (position) => set({ position }),
 }));

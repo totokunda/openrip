@@ -5,6 +5,8 @@ import { useClipStore } from "@/lib/clip";
 import { addGuide, clearGuides } from "@/lib/guides";
 import { exportStillFrame } from "@/lib/still";
 import { handleTimelineKey } from "@/lib/timeline-shortcuts";
+import { usePanelDetached } from "@/lib/panel-windows";
+import { panelWindowAction } from "../panels/PanelShell";
 import { ChevronGlyph, Keys, MENU_CHECK_ROW, MENU_PANEL, MENU_ROW, MENU_SEPARATOR, MenuGlyph, TickGlyph, useOwnerDocument } from "./player-ui";
 
 const SCOPE_NAMES: Record<ScopeKind, string> = { parade: "RGB parade", waveform: "Waveform", vectorscope: "Vectorscope" };
@@ -65,6 +67,7 @@ const PlayerMenu: React.FC = () => {
   const hasClips = useClipStore((s) => s.clips.length > 0);
   const container = doc?.body;
   const sub = `${MENU_PANEL} min-w-[200px]`;
+  const popOut = panelWindowAction("player", usePanelDetached("player"));
 
   return (
     <Menu.Root modal={false}>
@@ -135,6 +138,11 @@ const PlayerMenu: React.FC = () => {
           </Menu.Sub>
           <Menu.Item data-testid="export-still" disabled={!hasClips} onSelect={() => void exportStillFrame()} className={MENU_ROW}>
             Export still frames
+          </Menu.Item>
+          {/* OpenRip's own: the player in a window of its own (lib/panel-windows.ts). */}
+          <Menu.Separator className={MENU_SEPARATOR} />
+          <Menu.Item data-testid={popOut.testId} onSelect={popOut.run} className={MENU_ROW}>
+            {popOut.label}
           </Menu.Item>
         </Menu.Content>
       </Menu.Portal>

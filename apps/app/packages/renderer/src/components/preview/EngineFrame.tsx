@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Image as KonvaImage } from "react-konva";
 import Konva from "konva";
 import { engineRender, ENGINE_FRAME_CANVAS_ID, ENGINE_FRAME_EVENT } from "@app/preload";
@@ -51,16 +51,27 @@ const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: numb
     return () => canvas.removeEventListener(ENGINE_FRAME_EVENT, onFrame);
   }, [canvas]);
 
+  // The pixel density of the screen it's on: the player can be in a window of its own, on
+  // another display (lib/panel-windows.ts).
+  const [dpr, setDpr] = useState(() => window.devicePixelRatio || 1);
+  useEffect(() => {
+    const view = nodeRef.current?.getStage()?.container().ownerDocument.defaultView;
+    if (!view) return;
+    const update = () => setDpr(view.devicePixelRatio || 1);
+    update();
+    view.addEventListener("resize", update);
+    return () => view.removeEventListener("resize", update);
+  }, [draws]);
+
   // The size it's shown at on screen: paused frames render at it, playback at the quality's
   // fraction of it.
   const sized = (k: number) => {
-    const dpr = window.devicePixelRatio || 1;
     const [w, h] = [rectWidth * scale * dpr * k, rectHeight * scale * dpr * k];
     const fit = Math.min(1, MAX_SIDE / Math.max(w, h));
     return { width: Math.max(2, Math.round(w * fit)), height: Math.max(2, Math.round(h * fit)) };
   };
-  const size = useMemo(() => sized(1), [rectWidth, rectHeight, scale]);
-  const playSize = useMemo(() => sized(playScale), [rectWidth, rectHeight, scale, playScale]);
+  const size = useMemo(() => sized(1), [rectWidth, rectHeight, scale, dpr]);
+  const playSize = useMemo(() => sized(playScale), [rectWidth, rectHeight, scale, playScale, dpr]);
   useEffect(() => setEnginePreviewSize(playSize.width, playSize.height), [playSize]);
 
   // Paused: ask for the frame at the playhead. Playing, the engine sends frames by itself.

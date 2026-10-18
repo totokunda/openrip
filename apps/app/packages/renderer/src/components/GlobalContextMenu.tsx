@@ -17,6 +17,7 @@ import { getMediaInfoCached } from "@/lib/media/utils";
 import { exportSequence, exportClip } from "@app/export-renderer";
 import { saveImageToPath } from "@app/preload";
 import { useMarkerEditorStore } from "@/components/timeline/Markers";
+import { dockPanel, popOutPanel } from "@/lib/panel-windows";
 import ClipExportModal, {
   ClipExportSettings,
 } from "@/components/dialogs/ClipExportModal";
@@ -78,8 +79,10 @@ const MenuRow: React.FC<{
 };
 
 const GlobalContextMenu: React.FC = () => {
-  const { open, position, items, groups, closeMenu, setPosition, target } =
+  const { open, position, items, groups, closeMenu, setPosition, target, doc } =
     useContextMenuStore();
+  // The window the menu opens in (a panel pulled out into its own window has its own).
+  const view = doc.defaultView ?? window;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const clipsStore = useClipStore();
   const timelines = useClipStore((s) => s.timelines);
@@ -152,13 +155,13 @@ const GlobalContextMenu: React.FC = () => {
     let nx = position.x,
       ny = position.y;
     const BOTTOM_MARGIN = 10; // ensure some space from bottom edge
-    if (rect.right > window.innerWidth) nx -= rect.right - window.innerWidth;
-    if (rect.bottom > window.innerHeight - BOTTOM_MARGIN)
-      ny -= rect.bottom - (window.innerHeight - BOTTOM_MARGIN);
+    if (rect.right > view.innerWidth) nx -= rect.right - view.innerWidth;
+    if (rect.bottom > view.innerHeight - BOTTOM_MARGIN)
+      ny -= rect.bottom - (view.innerHeight - BOTTOM_MARGIN);
     if (rect.left < 0) nx += -rect.left;
     if (rect.top < 0) ny += -rect.top;
     if (nx !== position.x || ny !== position.y) setPosition({ x: nx, y: ny });
-  }, [shouldShowMenu, position.x, position.y, setPosition]);
+  }, [shouldShowMenu, position.x, position.y, setPosition, view]);
 
   const handleExport = useCallback(
     async (settings: ClipExportSettings) => {
@@ -414,6 +417,12 @@ const GlobalContextMenu: React.FC = () => {
 
   const onSelect = (action: string, value?: string) => {
     if (action === "none") return;
+    if (target?.type === "panel") {
+      closeMenu();
+      if (action === "popOutPanel") popOutPanel(target.panel);
+      else if (action === "dockPanel") dockPanel(target.panel);
+      return;
+    }
     if (target?.type === "transition") {
       if (action === "deleteTransition") removeTransition(target.clipId);
       closeMenu();
@@ -575,7 +584,7 @@ const GlobalContextMenu: React.FC = () => {
           >
             {content}
           </div>,
-          document.body,
+          doc.body,
         )}
       {exportKind && (
         <ClipExportModal

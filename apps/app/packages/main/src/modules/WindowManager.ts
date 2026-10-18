@@ -2,6 +2,7 @@ import type { AppModule } from "../AppModule.js";
 import { ModuleContext } from "../ModuleContext.js";
 import { BrowserWindow } from "electron";
 import type { AppInitConfig } from "../AppInitConfig.js";
+import { attachPanelWindows } from "./PanelWindows.js";
 
 class WindowManager implements AppModule {
   readonly #preload: { path: string };
@@ -112,6 +113,8 @@ class WindowManager implements AppModule {
       },
     });
     this.#enableWindowsFullscreenEscapeHatch(browserWindow);
+    // The editor's panels can open in windows of their own.
+    attachPanelWindows(browserWindow);
     if (process.platform === "win32") {
       try {
         browserWindow.setMenuBarVisibility(false);

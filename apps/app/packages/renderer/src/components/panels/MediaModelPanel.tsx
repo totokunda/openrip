@@ -16,7 +16,7 @@ import {
   LuChevronUp,
 } from "react-icons/lu";
 import { MdPhotoFilter } from "react-icons/md";
-import { ResizablePanel } from "@/components/ui/resizable";
+import { PanelShell, panelHeaderHandlers } from "./PanelShell";
 import { cn } from "@/lib/utils";
 import { useSidebarStore } from "@/lib/sidebar";
 import { useClipStore } from "@/lib/clip";
@@ -38,6 +38,8 @@ interface MediaModelPanelProps {
   defaultSize?: number;
   minSize?: number;
   maxSize?: number;
+  /** In a window of its own (lib/panel-windows.ts). */
+  detached?: boolean;
 }
 
 /** The left panel's tabs, in CapCut's order. */
@@ -179,6 +181,7 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   defaultSize = 33,
   minSize = 20,
   maxSize,
+  detached = false,
 }) => {
   const section = useSidebarStore((s) => s.section) ?? "media";
   const openSection = useSidebarStore((s) => s.openSection);
@@ -214,8 +217,9 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   };
 
   return (
-    <ResizablePanel
+    <PanelShell
       id={id}
+      detached={detached}
       minSize={minSize}
       maxSize={maxSize}
       defaultSize={defaultSize}
@@ -224,8 +228,9 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
       className="bg-brand-background rounded-lg overflow-hidden flex flex-col"
     >
       {/* The tab row on the panel's header strip; it scrolls sideways when the panel is
-          narrower than the tabs, with buttons at the ends. */}
-      <div className="relative h-[42px] shrink-0 bg-brand-header border-b-[0.5px] border-brand-hairline">
+          narrower than the tabs, with buttons at the ends. Dragged out of the window, the
+          panel goes into a window of its own (lib/panel-windows.ts). */}
+      <div {...panelHeaderHandlers("assets", detached)} className="relative h-[42px] shrink-0 bg-brand-header border-b-[0.5px] border-brand-hairline">
         <nav
           ref={tabsRef}
           aria-label="Libraries"
@@ -266,7 +271,7 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
           {content()}
         </div>
       </div>
-    </ResizablePanel>
+    </PanelShell>
   );
 };
 

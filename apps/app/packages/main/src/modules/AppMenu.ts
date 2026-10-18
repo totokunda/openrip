@@ -13,6 +13,7 @@
 import { BrowserWindow, Menu, ipcMain, type MenuItemConstructorOptions } from "electron";
 import { AppModule } from "../AppModule.js";
 import { ModuleContext } from "../ModuleContext.js";
+import { editorWindowFor } from "./PanelWindows.js";
 
 type MenuState = {
   /** The window's screen: Back to home page only works from the editor. */
@@ -24,8 +25,9 @@ type MenuState = {
 
 let state: MenuState = { view: "home", undo: "CmdOrCtrl+Z", redo: "Shift+CmdOrCtrl+Z" };
 
+// A panel's own window sends it to the editor it belongs to (it has no page of its own).
 const target = (win?: Electron.BaseWindow) =>
-  (win instanceof BrowserWindow ? win : null) ?? BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  editorWindowFor((win instanceof BrowserWindow ? win : null) ?? BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]);
 
 const sendEdit = (cmd: "undo" | "redo") => (_item: unknown, win?: Electron.BaseWindow) => {
   target(win)?.webContents.send("menu:edit", cmd);

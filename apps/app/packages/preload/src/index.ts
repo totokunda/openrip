@@ -8,6 +8,7 @@ export { versions } from "./versions.js";
 // CapCut drafts as projects
 export { capcutListDrafts, capcutPickDraft, capcutImport } from "./capcut.js";
 export { onMenuEdit, onMenuCommand, setMenuState } from "./menu.js";
+export { onPanelWindowClosed, movePanelWindow } from "./windows.js";
 export type { CapCutDraft, CapCutImportResult } from "./capcut.js";
 
 // The Rust engine in the main process

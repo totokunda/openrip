@@ -1,8 +1,8 @@
 import React from "react";
-import { ResizablePanel } from "../ui/resizable";
 import PlayerBar from "../preview/PlayerBar";
 import PlayerMenu from "../preview/PlayerMenu";
 import PlayerStage from "../preview/PlayerStage";
+import { PanelShell, panelHeaderHandlers } from "./PanelShell";
 import { useProjectsStore } from "@/lib/projects";
 
 interface PreviewPanelProps {
@@ -10,6 +10,8 @@ interface PreviewPanelProps {
   order?: number;
   defaultSize?: number;
   minSize?: number;
+  /** In a window of its own (lib/panel-windows.ts). */
+  detached?: boolean;
 }
 
 /**
@@ -24,20 +26,23 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({
   order,
   defaultSize = 40,
   minSize = 25,
+  detached = false,
 }) => {
   const projectName = useProjectsStore((s) => s.getActiveProject()?.name ?? "");
 
   return (
-    <ResizablePanel
+    <PanelShell
       id={id}
+      detached={detached}
       defaultSize={defaultSize}
       minSize={minSize}
       order={order}
       data-testid="player"
       className="flex flex-col w-full bg-brand-background relative overflow-hidden rounded-lg"
     >
-      {/* The header strip: the player's name and its menu. */}
-      <div className="h-[42px] shrink-0 flex items-center gap-2 pl-3 pr-2.5 bg-brand-header border-b-[0.5px] border-brand-hairline">
+      {/* The header strip: the player's name and its menu. Dragged out of the window, the
+          player goes into a window of its own (lib/panel-windows.ts). */}
+      <div {...panelHeaderHandlers("player", detached)} className="h-[42px] shrink-0 flex items-center gap-2 pl-3 pr-2.5 bg-brand-header border-b-[0.5px] border-brand-hairline">
         <span className="flex-1 min-w-0 truncate text-left text-[13px] text-white" title={projectName}>
           Player<span className="text-brand-light/45">-{projectName}</span>
         </span>
@@ -46,7 +51,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({
       {/* The canvas area (rulers, guides, overlays) and the scopes: preview/PlayerStage.tsx. */}
       <PlayerStage />
       <PlayerBar />
-    </ResizablePanel>
+    </PanelShell>
   );
 };
 

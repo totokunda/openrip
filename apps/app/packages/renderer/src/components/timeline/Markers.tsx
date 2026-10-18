@@ -208,9 +208,12 @@ export const MarkerEditor: React.FC<{ anchor: React.RefObject<HTMLDivElement | n
 
   if (!markerId || !marker || !anchor.current) return null;
   const rect = anchor.current.getBoundingClientRect();
+  // The timeline's own window (it can be pulled out into one of its own).
+  const doc = anchor.current.ownerDocument;
+  const view = doc.defaultView ?? window;
   const x = rect.left + startPadding + ((marker.frame - start) / Math.max(1, end - start)) * stageWidth;
   const width = 340;
-  const left = Math.max(8, Math.min(window.innerWidth - width - 8, x - width / 2));
+  const left = Math.max(8, Math.min(view.innerWidth - width - 8, x - width / 2));
   const keys = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") done();
     else if (e.key === "Escape") close();
@@ -222,7 +225,7 @@ export const MarkerEditor: React.FC<{ anchor: React.RefObject<HTMLDivElement | n
     <div
       ref={boxRef}
       data-marker-editor
-      style={{ position: "fixed", left, bottom: window.innerHeight - rect.top + 6, width, zIndex: 100 }}
+      style={{ position: "fixed", left, bottom: view.innerHeight - rect.top + 6, width, zIndex: 100 }}
       className="rounded-lg border border-black/60 bg-brand-background-light shadow-xl px-4 pt-4 pb-3 text-brand-light"
     >
       <input autoFocus aria-label="Marker name" value={note} placeholder="Name" onChange={(e) => setNote(e.target.value)} onKeyDown={keys} className={field} />
@@ -252,6 +255,6 @@ export const MarkerEditor: React.FC<{ anchor: React.RefObject<HTMLDivElement | n
         </button>
       </div>
     </div>,
-    document.body,
+    doc.body,
   );
 };
