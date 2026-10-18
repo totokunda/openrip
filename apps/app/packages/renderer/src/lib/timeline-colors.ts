@@ -28,6 +28,19 @@ export const TIMELINE_COLORS = {
   /** The app's shapes (CapCut's shapes are stickers) and older drawings. */
   shape: "#c08a3e",
   drawing: "#6a4f8a",
+  /** Label chips: each body with 9% white over it, as CapCut's (#2f5b62 on its #1d4950). */
+  videoChip: "#453f5c",
+  fromVideoChip: "#3f3b57",
+  musicChip: "#364369",
+  voiceoverChip: "#364369",
+  /**
+   * The volume line across a waveform: white at 27%, a lighter tint of whichever body it's on
+   * (CapCut's #597f84 on its teal; #67647a on `fromVideoBg`, #606a88 on `music`), lighter still
+   * where it crosses a bar.
+   */
+  waveLine: "rgba(255,255,255,0.27)",
+  /** Beat markers on a clip (CapCut's yellow dots). */
+  beat: "#f2c94c",
 } as const;
 
 export type TimelineColorRole = keyof typeof TIMELINE_COLORS;

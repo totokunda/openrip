@@ -8,6 +8,7 @@ import { fileOf } from "@/lib/audio-tools";
 import { useWaveform } from "@/lib/waveform-source";
 import { AUDIO_SCALE, BAND_SCALE, SOUND_COLORS, mediaBands, scaleFor, soundKindOf } from "@/lib/waveform";
 import { ClipChips, Waveform } from "./Waveform";
+import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 
 /**
  * Audio and media clips' faces on the timeline, as CapCut's (docs/plan/capcut-ui-spec.md §4.11):
@@ -18,8 +19,8 @@ import { ClipChips, Waveform } from "./Waveform";
  * band rects take the clip's clicks and drags (its group has no hit area but its children's).
  */
 
-const VIDEO_BODY = "#1e4c51";
-const VIDEO_CHIP = "#2f5e63";
+const VIDEO_BODY = TIMELINE_COLORS.video;
+const VIDEO_CHIP = TIMELINE_COLORS.videoChip;
 /** The default heights the waveforms' scale is measured at: an audio clip, a main and an overlay video's bands. */
 const AUDIO_HEIGHT = 50;
 
@@ -137,7 +138,7 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
           y={top}
           height={bands.sound}
           scale={scaleFor(BAND_SCALE, bands.sound, 16, size)}
-          color={SOUND_COLORS.extracted.bar}
+          color={TIMELINE_COLORS.fromVideoWave}
           snap={snap}
         />
       )}

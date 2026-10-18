@@ -3,10 +3,11 @@ import { Circle, Group } from "react-konva";
 import type { AnyClipProps, AudioClipProps } from "@/lib/types";
 import { useControlsStore } from "@/lib/control";
 import { beatFrames } from "@/lib/beats";
+import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 import { fetchBeatGrid, knownBeatGrid, mediaSecondsOf } from "@/lib/audio-tools";
 
-/** The markers' colour: CapCut's beat dots are yellow on the clip, whatever its colour. */
-export const BEAT_COLOR = "#f2c94c";
+/** The markers' colour (lib/timeline-colors.ts): CapCut's beat dots are yellow whatever the clip's colour. */
+export const BEAT_COLOR = TIMELINE_COLORS.beat;
 
 /**
  * A clip's beat markers (lib/beats.ts), as CapCut draws them on music: a small yellow dot near

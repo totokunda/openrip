@@ -16,6 +16,7 @@
 import type { AnyClipProps, Asset, AudioClipProps, VideoClipProps } from "./types";
 import { sourceTimeAt } from "./speed.ts";
 import { listKeyframes, sampleKeyframes } from "./keyframes.ts";
+import { TIMELINE_COLORS } from "./timeline-colors.ts";
 
 /** Buckets a second asked of the engine (5 ms: finer than a 2 px bar at any zoom but the deepest). */
 export const WAVEFORM_PER_SECOND = 200;
@@ -58,18 +59,18 @@ export const scaleFor = (base: WaveScale, height: number, defaultHeight: number,
 export type SoundKind = "extracted" | "music" | "voiceover";
 
 /**
- * CapCut's colours by kind: a video's sound keeps the video's teal (003); other sound is the
- * blue of the Linkage legend's Audio (31-dialogs/038), which has no category of its own for a
- * recorded voiceover.
+ * Each kind's colours (lib/timeline-colors.ts, OpenRip's family): a video's sound keeps the
+ * video's hue, as CapCut's keeps its teal (003); music and voiceovers their blue (CapCut's
+ * Linkage legend, 31-dialogs/038, has no category of its own for a recorded voiceover).
  */
 export const SOUND_COLORS: Record<SoundKind, { body: string; chip: string; bar: string }> = {
-  extracted: { body: "#1d4950", chip: "#2f5b62", bar: "#33757d" },
-  music: { body: "#182f55", chip: "#2e4466", bar: "#3a7faf" },
-  voiceover: { body: "#182f55", chip: "#2e4466", bar: "#3a7faf" },
+  extracted: { body: TIMELINE_COLORS.fromVideoBg, chip: TIMELINE_COLORS.fromVideoChip, bar: TIMELINE_COLORS.fromVideoWave },
+  music: { body: TIMELINE_COLORS.music, chip: TIMELINE_COLORS.musicChip, bar: TIMELINE_COLORS.musicWave },
+  voiceover: { body: TIMELINE_COLORS.voiceover, chip: TIMELINE_COLORS.voiceoverChip, bar: TIMELINE_COLORS.voiceoverWave },
 };
 
-/** The volume line: white at 27% (#597f84 over the teal). */
-export const LINE_COLOR = "rgba(255,255,255,0.27)";
+/** The volume line's colour, a lighter tint of the body under it. */
+export const LINE_COLOR = TIMELINE_COLORS.waveLine;
 
 /** What a clip's sound is, from its asset: a video's (`…#audio`, or the video file itself), a voiceover take, or music. */
 export const soundKindOf = (asset: Pick<Asset, "path" | "type"> | undefined): SoundKind => {
