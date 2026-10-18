@@ -6,6 +6,7 @@
 
 The bundle's `config.json` orders its features. A clip's colour grade runs in that order, each step only when the clip uses it:
 
+0. **A LUT on the clip** (since 2026-10-18; [compositing.md](compositing.md)), after its chroma key if it has one.
 1. **HSL and curves:** one pass, `fs_colour` in `render/src/grade.wgsl`.
 2. **Primary wheels and the Adjust sliders:** the Adjust pass. Fade is part of it, between temperature/tint and exposure, as in CapCut's shader.
 3. **Sharpen.**
@@ -81,6 +82,31 @@ These are marked drawn in the Adjust tab (`draftAdjustments`):
 - curves are listed and can be taken off, but not set (CapCut edits them on a curve).
 
 An edit goes on a copy of the draft's material for that clip, as for the other sliders.
+
+## The app's own clips
+
+Since 2026-10-18 the app's own videos and photos have the same tools, drawn through the same passes: `color` on the clip (ClipColor in lib/types.ts) holds CapCut's Basic sliders on CapCut's scale, the eight HSL ranges, curves as points, the primary wheels and a LUT, and the importer (`engine/crates/v1/src/color.rs`) turns them into the materials a draft would have:
+
+- **Sliders:** one Adjust effect each, the value divided by CapCut's scale (50, or 100 for sharpen, clarity, vignette and fade) as the draft keeps it. Exposure and fade read their tables from a colour bundle: a draft's own, else the one that ships with CapCut (`Resources/DefaultAdjustBundle/merge_all_adjust_color`, the same three files byte for byte as the downloaded bundle). Without CapCut installed they're left out, as for a draft whose bundle is missing.
+- **HSL:** one material per range set (`hsl_color_type` 1–8).
+- **Curves:** the app keeps points; the handles are CapCut's. Read off the drafts' curves: each inner point's handles lie along the line between its neighbours, a sixth of it either way; an end's handle is halfway to its neighbour's near handle; two points alone make a straight line (handles a third of the way). `v1/src/color.rs` reproduces a draft's three-point red curve and two-point luma curve to 1e-9.
+- **Wheels:** CapCut's values and strength, as the draft keeps them. Log wheels aren't drawn yet, for drafts or the app.
+- **LUT:** a `.cube` file or a Hald image, a filter on the clip, drawn first ([compositing.md](compositing.md)).
+
+All but curves are keyframeable (`adjust:<slider>`, `hsl:<range>:<part>`, `wheels:intensity`, `lut:intensity`), as CapCut keyframes them. Checked by the v1 crate's tests (fields to materials, keys, a converted clip) and the harness step `compositing`: exposure +40 lightens the standard clip from 0.507 to 0.684, saturation −100 on every range greys it, an inverting `.cube` inverts it.
+
+### The old sliders
+
+The app's first sliders (brightness, contrast, hue, saturation, blur, sharpness, noise, vignette on its own scales, the engine's `v1:` effects) still draw as its WebGL filters drew them, so old projects look the same. New edits go in `color`. `migrateLegacyAdjustments` (lib/color.ts) moves the ones with a counterpart onto CapCut's set at the value whose picture comes closest, measured on the engine over a ramp of greys and hues (least squares, the draft's value in 0.01 steps):
+
+| Old slider | CapCut's (draft value) | rms difference left |
+|---|---|---|
+| contrast −25 / 25 / 50 / 100 | contrast −0.72 / 0.49 / 0.76 / 0.97 | 2.7 / 6.0 / 8.2 / 9.9 levels |
+| saturation −50 / 50 / 100 | saturation −0.38 / 0.39 / 0.55 | 9.0 / 9.0 / 11.5 |
+| vignette 25 / 50 / 100 | vignette 0.15 / 0.37 / 0.67 | 6.1 / 4.9 / 3.3 |
+| sharpness 25 / 50 / 100 | sharpen 0.25 / 0.56 / 1.0 | 3.0 / 5.9 / 11.7 |
+
+Brightness has none (an offset: +25 is still 25 levels off at CapCut's strongest brightness), nor do hue, blur and noise; they stay as they are, as do keyframed sliders. In the app, contrast 25 moved this way changes the clip's mean lightness from 0.508 to 0.535.
 
 ## Not drawn
 

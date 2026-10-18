@@ -198,7 +198,7 @@ See [§10](#10-performance-features). Proxies are per-asset transcodes at a chos
 
 ### 3.2 Blend modes
 
-There are 11 blend modes: Normal plus 10 from `MixMode/MixMode.json` `[bundle]`. The mapping from the internal IDs is inferred from the Chinese-origin names:
+There are 11 blend modes: Default (Normal) plus 10 from `MixMode/MixMode.json` `[bundle]`. CapCut 9.5's menu, in order: Default, Color dodge, Linear burn, Hard light, Multiply, Color burn, Overlay, Brighten, Darken, Soft light, Screen `[known]` (reference screenshots). The internal IDs are the `po` file's message ids for those names:
 
 | Internal ID | UI name |
 |---|---|
@@ -206,14 +206,14 @@ There are 11 blend modes: Normal plus 10 from `MixMode/MixMode.json` `[bundle]`.
 | `color_filter` | Screen |
 | `over_lay` | Overlay |
 | `multiply_blend_mode` | Multiply |
-| `bright_en` | Lighten |
+| `bright_en` | Brighten (Lighten) |
 | `glare_pc` | Hard light |
 | `soft_light` | Soft light |
 | `linear_deepening` | Linear burn |
 | `darken_color` | Color burn |
 | `color_dodge` | Color dodge |
 
-Each mode is an effect package linked as an `InfoSticker` pass. **Engine implication:** blending reads the composite of *all lower layers*, so it can't be a pairwise clip-to-clip operation. The compositor needs a running accumulation buffer, and that buffer must be in linear or float space for predictable results.
+Each mode is an effect package linked as an `InfoSticker` pass; its shader blends the clip over `baseTex` (the composite below) by source-over with a separable blend function. OpenRip draws all of them since 2026-10-18 ([compositing.md](../parity/compositing.md)). **Engine implication:** blending reads the composite of *all lower layers*, so it can't be a pairwise clip-to-clip operation. The compositor needs a running accumulation buffer, and that buffer must be in linear or float space for predictable results.
 
 ### 3.3 Keyframes
 
@@ -225,7 +225,7 @@ Each mode is an effect package linked as an `InfoSticker` pass. **Engine implica
   - effect parameters ("Try keyframes on effects!" `[bundle]`)
   - text transform and opacity
   - shape fill colour (solid and gradient only), shape scale and position, shape corner radius `[bundle]`
-  - chroma key and canvas parameters `[unsure]`
+  - chroma key intensity, shadow, edge smoothing and spill (`KFTypeChroma*`) `[bundle]`; canvas parameters aren't
 - **Interpolation** `[bundle]`. Preset curves are Linear, Ease in, Ease out and Easing, with "Show all presets" for more. Keyframes can be moved on the track. "Advanced keyframe value graphs" exist ("Show/Hide keyframe graphs"). A keyframe panel can be toggled with Option+K `[known]`.
 - **Curved motion paths** `[unsure]`. Position paths are probably linear in space.
 - Keyframes block "Apply to all" when other clips are keyframed `[bundle]`.
@@ -256,7 +256,7 @@ Parameters come from the shader parameter names `[bundle]`:
 
 The UI shows Intensity and Shadow (plus newer edge controls) `[known]`.
 
-**Engine implication.** A chroma-distance key in YCbCr or a perceptual space, then an alpha blur (two separable passes), then despill. The resulting alpha flows into blending.
+**Engine implication.** A chroma-distance key in YCbCr or a perceptual space, then an alpha blur (two separable passes), then despill. The resulting alpha flows into blending. OpenRip draws the `Chroma2` bundle's three passes since 2026-10-18 ([compositing.md](../parity/compositing.md)).
 
 ### 3.6 Stabilization
 

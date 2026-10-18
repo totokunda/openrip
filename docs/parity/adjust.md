@@ -48,9 +48,7 @@ The primary colour wheels run before these, in the same pass:
 
 Clarity, vignette, fade, HSL and curves are drawn too; see [colour.md](colour.md).
 
-Not drawn yet:
-- log wheels, which no local draft uses;
-- LUT filters applied to a single clip (filter tracks are drawn; see below), which no local draft uses either.
+Not drawn yet: log wheels, which no local draft uses. LUT filters on a single clip are drawn since 2026-10-18 (filter tracks were already; see below and [compositing.md](compositing.md)); no local draft has one.
 
 ## Filter tracks
 

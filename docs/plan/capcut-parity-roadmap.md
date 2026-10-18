@@ -23,6 +23,8 @@ Agreed 2026-10-16. What the engine draws next is chosen from two sources: what r
 | Voice effects | 8, 5 drafts | ✅ Deep, Low, Voice Crisper, Demonized; Deep 2 without its reverb ([voice-effects.md](../parity/voice-effects.md)) |
 | Masks | 2 drafts | ✅ Rectangle, matching both covers ([masks.md](../parity/masks.md)); circle, linear, mirror and heart from their bundles, the star if its bundle is the heart's kind (no local use to check against); ❌ pen |
 | Stickers | 11, 4 drafts (1 shown; the rest on hidden tracks) | ✅ PNG and GIF stickers from CapCut's cache (2026-10-17, [stickers.md](../parity/stickers.md)); their size is provisional, unchecked against CapCut |
+| Blend modes, chroma key | 0 | ✅ all eleven modes and the chroma key from the bundles CapCut ships, checked against their shaders' formulas (2026-10-18, [compositing.md](../parity/compositing.md)) |
+| Canvas fills, flips | 909 canvases (all black), 1 flip (on a hidden track) | ✅ colour, image, and blur (its strength provisional) for the main track's clip, also inside transitions; flips, sideways video too |
 | Video effects | 1 | ❌ its bundle isn't in CapCut's cache |
 | AI features (matting, smart crop, AI denoise) | 1–29 | No models in OpenRip; background removal draws from the masks CapCut saved in the draft ([cutouts.md](../parity/cutouts.md)) |
 
@@ -38,8 +40,8 @@ CapCut's effects, transitions, stickers, text styles and templates are content i
 2. **Motion and compositing.**
    - Transitions: a built-in set, plus CapCut's from its cache.
    - Masks (rectangle, circle, linear, mirror, heart, star; feather, invert).
-   - Blend modes, canvas backgrounds (blur, colour, image), speed curves.
-   - Chroma key, freeze frame.
+   - Blend modes and canvas backgrounds (blur, colour, image): done 2026-10-18; speed curves.
+   - Chroma key (done 2026-10-18), freeze frame.
 3. **Effects and stickers.** Built-in effects (shake, glitch, blur, grain, …), CapCut's effects from its cache, and image, GIF and animated stickers.
 4. **Audio.** Voice effects (pitch, formant), noise reduction by DSP, beat markers.
 5. **Stabilisation**, by classical feature tracking.
