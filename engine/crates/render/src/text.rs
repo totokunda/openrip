@@ -1096,42 +1096,38 @@ const GLOW_WEIGHT: f32 = 0.058767;
 /// Put a glow ([`Glow`]) under premultiplied text pixels `ink` (`w` × `h`), the block of lines
 /// at `block` (left, top, width, height).
 ///
-/// Each pixel takes the text's light along the line to the glow's middle, in [`GLOW_STEPS`]
-/// steps of [`GLOW_STEP`] × the spread × its distance from the middle, each weighing
-/// [`GLOW_DECAY`] of the one before, the first a random fraction of a step out (which dithers
-/// the steps). The sum, lifted by a power of the strength, goes under the text (at 70% of the
-/// text's alpha), the two are softened together, and the text goes on top, a quarter less
-/// saturated and 2% darker: CapCut's order and constants (docs/parity/text-styles.md). The
-/// light is worked out at half the resolution, being soft.
+/// Each pixel takes the text's light along the line to the glow's middle, in steps of
+/// [`GLOW_STEP`] × the spread × its distance from the middle, each weighing [`GLOW_DECAY`] of
+/// the one before, the first a random fraction of a step out (which dithers the steps). The sum,
+/// lifted by a power of the strength, goes under the text (at 70% of the text's alpha), the two
+/// are softened together, and the text goes on top, a quarter less saturated and 2% darker:
+/// CapCut's order and constants (docs/parity/text-styles.md). Of CapCut's 64 steps the last 16,
+/// together under 0.7% of the weight, are left out. The light is soft, so it's worked out on a
+/// coarser grid: 2 px for a line up to 60 px tall, up to 4 px for taller text, which keeps its
+/// cost about the same whatever the text's size.
 fn glow_under(ink: &mut [[f32; 4]], w: usize, h: usize, block: [f32; 4], g: &Glow) {
     let spread = g.spread();
     let light = g.strength.clamp(0.01, 1.0).powf(0.2) * 1.5;
     for p in ink.iter_mut() {
         *p = dimmed(*p);
     }
-    // The text at half resolution.
-    let (hw, hh) = (w.div_ceil(2), h.div_ceil(2));
-    let half: Vec<[f32; 4]> = (0..hw * hh)
-        .map(|i| {
-            let (x, y) = (i % hw * 2, i / hw * 2);
-            let mut sum = [0f32; 4];
-            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                if x + dx < w && y + dy < h {
-                    let p = ink[(y + dy) * w + x + dx];
-                    sum = std::array::from_fn(|k| sum[k] + p[k] / 4.0);
-                }
-            }
-            sum
-        })
-        .collect();
+    // The text on the coarse grid: each cell the mean of its k × k pixels.
+    let k = ((block[3] / 30.0).round() as usize).clamp(2, 4);
+    let kf = k as f32;
+    let (lw, lh) = (w.div_ceil(k), h.div_ceil(k));
+    let mut low = vec![[0f32; 4]; lw * lh];
+    for (i, p) in ink.iter().enumerate() {
+        let c = &mut low[(i / w / k) * lw + (i % w) / k];
+        *c = std::array::from_fn(|n| c[n] + p[n] / (kf * kf));
+    }
     // Bilinear, at full-resolution coordinates; nothing outside.
     let sample = |x: f32, y: f32| -> [f32; 4] {
-        let (x, y) = (x / 2.0 - 0.5, y / 2.0 - 0.5);
+        let (x, y) = (x / kf - 0.5, y / kf - 0.5);
         let (x0, y0) = (x.floor(), y.floor());
         let (fx, fy) = (x - x0, y - y0);
-        let at = |xi: f32, yi: f32| if xi < 0.0 || yi < 0.0 || xi >= hw as f32 || yi >= hh as f32 { [0.0; 4] } else { half[yi as usize * hw + xi as usize] };
+        let at = |xi: f32, yi: f32| if xi < 0.0 || yi < 0.0 || xi >= lw as f32 || yi >= lh as f32 { [0.0; 4] } else { low[yi as usize * lw + xi as usize] };
         let (a, b, c, d) = (at(x0, y0), at(x0 + 1.0, y0), at(x0, y0 + 1.0), at(x0 + 1.0, y0 + 1.0));
-        std::array::from_fn(|k| (a[k] * (1.0 - fx) + b[k] * fx) * (1.0 - fy) + (c[k] * (1.0 - fx) + d[k] * fx) * fy)
+        std::array::from_fn(|n| (a[n] * (1.0 - fx) + b[n] * fx) * (1.0 - fy) + (c[n] * (1.0 - fx) + d[n] * fx) * fy)
     };
     let middle = [block[0] + (1.0 - g.direction[0]) * block[2], block[1] + (1.0 - g.direction[1]) * block[3]];
     let weights: Vec<f32> = (0..GLOW_STEPS).map(|i| GLOW_WEIGHT * GLOW_DECAY.powi(i as i32)).collect();
@@ -1145,21 +1141,21 @@ fn glow_under(ink: &mut [[f32; 4]], w: usize, h: usize, block: [f32; 4], g: &Glo
         let t = ((r - 1.0 - reach / 2.0) / (reach / 2.0).max(1e-3)).clamp(0.0, 1.0);
         1.0 - t * t * (3.0 - 2.0 * t)
     };
-    let rays: Vec<[f32; 4]> = (0..hw * hh)
+    let rays: Vec<[f32; 4]> = (0..lw * lh)
         .map(|i| {
-            let (hx, hy) = (i % hw, i / hw);
-            let (x, y) = (hx as f32 * 2.0 + 1.0, hy as f32 * 2.0 + 1.0);
+            let (cx, cy) = (i % lw, i / lw);
+            let (x, y) = ((cx as f32 + 0.5) * kf, (cy as f32 + 0.5) * kf);
             let kept = fade(x, y);
             if kept <= 0.0 {
                 return [0.0; 4];
             }
             let step = [(x - middle[0]) * GLOW_STEP * spread, (y - middle[1]) * GLOW_STEP * spread];
-            let start = jitter(hx, hy);
+            let start = jitter(cx, cy);
             let mut sum = [0f32; 4];
-            for (k, wk) in weights.iter().enumerate() {
-                let t = k as f32 + 1.0 - start;
+            for (n, wn) in weights.iter().take(GLOW_SAMPLED).enumerate() {
+                let t = n as f32 + 1.0 - start;
                 let s = sample(x - step[0] * t, y - step[1] * t);
-                sum = std::array::from_fn(|c| sum[c] + s[c] * wk);
+                sum = std::array::from_fn(|c| sum[c] + s[c] * wn);
             }
             // A colour of its own replaces the text's, by the light's alpha.
             if let Some(c) = g.color {
@@ -1171,16 +1167,16 @@ fn glow_under(ink: &mut [[f32; 4]], w: usize, h: usize, block: [f32; 4], g: &Glo
     // The text (at 70% of its alpha) with the light under it, softened.
     let mut field: Vec<[f32; 4]> = (0..w * h)
         .map(|i| {
-            let (hx, hy) = (((i % w) as f32 + 0.5) / 2.0 - 0.5, ((i / w) as f32 + 0.5) / 2.0 - 0.5);
-            let (x0, y0) = (hx.floor().max(0.0), hy.floor().max(0.0));
-            let (fx, fy) = ((hx - x0).clamp(0.0, 1.0), (hy - y0).clamp(0.0, 1.0));
-            let at = |xi: usize, yi: usize| rays[yi.min(hh - 1) * hw + xi.min(hw - 1)];
+            let (gx, gy) = (((i % w) as f32 + 0.5) / kf - 0.5, ((i / w) as f32 + 0.5) / kf - 0.5);
+            let (x0, y0) = (gx.floor().max(0.0), gy.floor().max(0.0));
+            let (fx, fy) = ((gx - x0).clamp(0.0, 1.0), (gy - y0).clamp(0.0, 1.0));
+            let at = |xi: usize, yi: usize| rays[yi.min(lh - 1) * lw + xi.min(lw - 1)];
             let (x0, y0) = (x0 as usize, y0 as usize);
             let (a, b, c, d) = (at(x0, y0), at(x0 + 1, y0), at(x0, y0 + 1), at(x0 + 1, y0 + 1));
-            let ray: [f32; 4] = std::array::from_fn(|k| (a[k] * (1.0 - fx) + b[k] * fx) * (1.0 - fy) + (c[k] * (1.0 - fx) + d[k] * fx) * fy);
+            let ray: [f32; 4] = std::array::from_fn(|n| (a[n] * (1.0 - fx) + b[n] * fx) * (1.0 - fy) + (c[n] * (1.0 - fx) + d[n] * fx) * fy);
             let p = ink[i];
             let under = [p[0], p[1], p[2], p[3] * 0.7];
-            std::array::from_fn(|k| (under[k] + ray[k] * (1.0 - under[3])).min(1.0))
+            std::array::from_fn(|n| (under[n] + ray[n] * (1.0 - under[3])).min(1.0))
         })
         .collect();
     if g.soften >= 0.5 {
@@ -1192,6 +1188,9 @@ fn glow_under(ink: &mut [[f32; 4]], w: usize, h: usize, block: [f32; 4], g: &Glo
         *p = over(*p, f);
     }
 }
+
+/// How many of the [`GLOW_STEPS`] are sampled: the rest weigh too little to show.
+const GLOW_SAMPLED: usize = 48;
 
 /// A premultiplied colour a quarter less saturated and 2% darker (in HSV), as CapCut draws text
 /// that glows.
