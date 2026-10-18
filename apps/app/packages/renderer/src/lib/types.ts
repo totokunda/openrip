@@ -709,8 +709,10 @@ export type SidebarSection =
   | "stickers"
   | "effects"
   | "transitions"
+  | "captions"
   | "filters"
-  | "adjustment";
+  | "adjustment"
+  | "templates";
 
 export interface Filter {
   id: string;

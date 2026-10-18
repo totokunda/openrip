@@ -28,58 +28,66 @@ const presetStyle = (p: TextPreset): React.CSSProperties => {
 };
 
 /**
- * The Text tab: a text added at the playhead in one of the app's styles, and the In
- * animations the Animation tab offers, given to the selected text.
+ * The Text tab: a text added at the playhead in one of the app's styles ("styles"), or the
+ * In animations the Animation tab offers, given to the selected text ("animations").
  */
-const TextMenu: React.FC = () => {
+const TextMenu: React.FC<{ part?: "styles" | "animations" }> = ({ part = "styles" }) => {
   const lastSelected = useControlsStore((s) => s.selectedClipIds[s.selectedClipIds.length - 1]);
   const clip = useClipStore((s) => s.getClipById(lastSelected));
   const selectedText = clip?.type === "text" ? clip : null;
   const current = selectedText?.animationIn?.type ?? null;
 
+  const styles = (
+    <>
+      <button
+        type="button"
+        data-testid="add-text"
+        onClick={() => addPresetText(TEXT_PRESETS[0])}
+        className="h-9 w-full rounded-[6px] bg-brand-accent-shade hover:bg-brand-accent-two-shade text-brand-lighter text-[12px] font-medium flex items-center justify-center gap-2 transition-colors"
+      >
+        <LuPlus className="w-4 h-4" /> Add text
+      </button>
+      <AssetSection title="Styles" note="Added at the playhead, on a new track at the top.">
+        {TEXT_PRESETS.map((p) => (
+          <AssetTile key={p.id} label={p.name} onClick={() => addPresetText(p)} testId={`text-preset-${p.id}`}>
+            <span className="text-[17px] leading-none whitespace-nowrap" style={presetStyle(p)}>
+              {p.props.text === "Default Text" || !p.props.text ? "Text" : p.props.text}
+            </span>
+          </AssetTile>
+        ))}
+      </AssetSection>
+    </>
+  );
+
+  const animations = (
+    <AssetSection
+      title="Animations"
+      note={selectedText ? "An In animation for the selected text. Its duration is in the Animation tab." : "Select a text on the timeline to animate it."}
+    >
+      {IN_ANIMATIONS.map((a) => (
+        <AssetTile
+          key={a.value}
+          label={a.label}
+          testId={`text-animation-${a.value}`}
+          active={current === a.value}
+          disabled={!selectedText}
+          onClick={() => {
+            if (!selectedText) return;
+            applyInAnimation(selectedText.clipId, a.value);
+            useInspectorStore.getState().setTab("animation");
+          }}
+        >
+          <span className="text-[15px] font-medium tracking-wide text-brand-light/80">
+            {a.value === "typewriter" ? "Ty|" : a.value === "type_2" ? "T y p" : "Typ"}
+          </span>
+        </AssetTile>
+      ))}
+    </AssetSection>
+  );
+
   return (
     <ScrollArea className="h-full">
-      <div className="flex flex-col gap-5 p-3 pb-8">
-        <button
-          type="button"
-          data-testid="add-text"
-          onClick={() => addPresetText(TEXT_PRESETS[0])}
-          className="h-9 w-full rounded-[6px] bg-brand-accent-shade hover:bg-brand-accent-two-shade text-brand-lighter text-[12px] font-medium flex items-center justify-center gap-2 transition-colors"
-        >
-          <LuPlus className="w-4 h-4" /> Add text
-        </button>
-        <AssetSection title="Styles" note="Added at the playhead, on a new track at the top.">
-          {TEXT_PRESETS.map((p) => (
-            <AssetTile key={p.id} label={p.name} onClick={() => addPresetText(p)} testId={`text-preset-${p.id}`}>
-              <span className="text-[17px] leading-none whitespace-nowrap" style={presetStyle(p)}>
-                {p.props.text === "Default Text" || !p.props.text ? "Text" : p.props.text}
-              </span>
-            </AssetTile>
-          ))}
-        </AssetSection>
-        <AssetSection
-          title="Animations"
-          note={selectedText ? "An In animation for the selected text. Its duration is in the Animation tab." : "Select a text on the timeline to animate it."}
-        >
-          {IN_ANIMATIONS.map((a) => (
-            <AssetTile
-              key={a.value}
-              label={a.label}
-              active={current === a.value}
-              disabled={!selectedText}
-              onClick={() => {
-                if (!selectedText) return;
-                applyInAnimation(selectedText.clipId, a.value);
-                useInspectorStore.getState().setTab("animation");
-              }}
-            >
-              <span className="text-[15px] font-medium tracking-wide text-brand-light/80">
-                {a.value === "typewriter" ? "Ty|" : a.value === "type_2" ? "T y p" : "Typ"}
-              </span>
-            </AssetTile>
-          ))}
-        </AssetSection>
-      </div>
+      <div className="flex flex-col gap-5 p-3 pb-8">{part === "animations" ? animations : styles}</div>
     </ScrollArea>
   );
 };

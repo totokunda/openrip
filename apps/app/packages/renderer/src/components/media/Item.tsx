@@ -118,6 +118,10 @@ interface ItemProps {
   onRemoveProxy?: (item: MediaItem) => void;
   isCreatingProxy?: boolean;
   showName?: boolean;
+  /** On the timeline already: shown with an "Added" badge, as in CapCut. */
+  added?: boolean;
+  /** A card (thumbnail over name) or a row (a small thumbnail beside it). */
+  layout?: "card" | "row";
 }
 
 function fileURLToPathInWorker(raw: string): string {
@@ -362,8 +366,11 @@ const Item: React.FC<ItemProps> = ({
   onRemoveProxy,
   isCreatingProxy,
   showName = true,
+  added = false,
+  layout = "card",
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const row = layout === "row";
   return (
     <Draggable
       id={item.name}
@@ -378,13 +385,14 @@ const Item: React.FC<ItemProps> = ({
       <div
         key={item.name}
         className={cn(
-          "group rounded-md transition-colors p-2.5  hover:bg-brand-light/5 ",
+          "group rounded-md transition-colors hover:bg-brand-light/5",
+          row ? "flex items-center gap-2.5 p-1" : "p-1.5",
           {
             "bg-brand-light/5": renamingItem === item.name,
           },
         )}
       >
-        <div className="relative">
+        <div className={cn("relative", row && "w-16 shrink-0")}>
           <div
             className={cn(
               "w-full aspect-video overflow-hidden  rounded-md bg-brand relative",
@@ -395,6 +403,11 @@ const Item: React.FC<ItemProps> = ({
             )}
           >
             <MediaThumb item={item} />
+            {added && (
+              <span className="absolute top-1 left-1 z-10 text-[9.5px] leading-none px-1.5 py-[3px] rounded-[4px] bg-brand-accent/90 text-white">
+                Added
+              </span>
+            )}
             {item.hasProxy && !isCreatingProxy && (
               <span
                 className="absolute bottom-1 right-1 text-[8.5px] bg-brand-background/90 text-brand-light/90 px-1.5 py-1 rounded border border-brand-light/10 shadow"
@@ -495,7 +508,7 @@ const Item: React.FC<ItemProps> = ({
           </DropdownMenu>
         </div>
         {renamingItem === item.name ? (
-          <div ref={renameContainerRef} className="px-0 pt-2">
+          <div ref={renameContainerRef} className={cn("px-0", row ? "flex-1 min-w-0" : "pt-1.5")}>
             <Input
               ref={renameInputRef}
               autoFocus
@@ -514,7 +527,7 @@ const Item: React.FC<ItemProps> = ({
             />
           </div>
         ) : (
-          <div className="px-0 pt-2 text-[10.5px] cursor-pointer text-brand-light/90 text-start truncate">
+          <div className={cn("px-0 text-[11.5px] cursor-pointer text-brand-light/85 text-start truncate", row ? "flex-1 min-w-0" : "pt-1.5")}>
             {showName ? item.name : ""}
           </div>
         )}

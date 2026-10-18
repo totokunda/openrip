@@ -6,6 +6,10 @@ import {
   LuLoader,
   LuFolder,
   LuUpload,
+  LuMic,
+  LuSearch,
+  LuLayoutGrid,
+  LuList,
 } from "react-icons/lu";
 import { LuCloudUpload } from "react-icons/lu";
 import { toast } from "sonner";
@@ -47,6 +51,11 @@ import {
   bumpMediaLibraryVersion,
 } from "@/lib/media/library";
 import { HiFilm } from "react-icons/hi";
+import { useClipStore } from "@/lib/clip";
+import { useShellStore } from "@/lib/shell";
+
+/** The library's grid or list, kept between sessions. */
+const LAYOUT_KEY = "openrip:media-layout";
 
 function isSupported(p: string) {
   try {
@@ -193,7 +202,6 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const listContainerRef = useRef<HTMLDivElement | null>(null);
   const uploadBarRef = useRef<HTMLDivElement | null>(null);
-  const [menuWidth, setMenuWidth] = useState<number>(0);
   const [deleteAlertOpen, setDeleteAlertOpen] = useState(false);
   const [renamingItem, setRenamingItem] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState<string>("");
@@ -205,6 +213,23 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [layout, setLayoutState] = useState<"grid" | "list">(() => {
+    try {
+      return window.localStorage.getItem(LAYOUT_KEY) === "list" ? "list" : "grid";
+    } catch {
+      return "grid";
+    }
+  });
+  const setLayout = (l: "grid" | "list") => {
+    setLayoutState(l);
+    try {
+      window.localStorage.setItem(LAYOUT_KEY, l);
+    } catch {}
+  };
+  // What's on the timeline: an asset is kept while a clip uses it (clip.ts prunes the rest).
+  const assets = useClipStore((s) => s.assets);
+  const onTimeline = useMemo(() => new Set(Object.values(assets).map((a) => a?.path)), [assets]);
   const [durationCache, setDurationCache] = useState<
     Record<string, number | undefined>
   >(() => ({}));
@@ -278,20 +303,6 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
       void queryClient.invalidateQueries({ queryKey: mediaQueryKey });
     }
   }, [mediaLibraryVersion, queryClient, mediaQueryKey]);
-
-  useEffect(() => {
-    const el = uploadBarRef.current;
-    if (!el) return;
-    const update = () => setMenuWidth(el.clientWidth);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    window.addEventListener("resize", update);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, []);
 
   const handleUpload = async (directory: boolean = false) => {
     // Dismissed when everything is done: dismissing a toast right after showing it (the
@@ -738,9 +749,24 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   }, [sortKey, items]);
 
   const displayItems = useMemo(() => {
-    const f = filterMediaItems(items, selectedTypes);
+    const q = search.trim().toLowerCase();
+    const f = filterMediaItems(items, selectedTypes).filter((it) => !q || it.name.toLowerCase().includes(q));
     return sortMediaItems(f, sortKey, sortOrder, durationCache);
-  }, [items, selectedTypes, sortKey, sortOrder, durationCache]);
+  }, [items, selectedTypes, sortKey, sortOrder, durationCache, search]);
+
+  // The home screen's Import media: the picker opens as soon as the new project's library shows.
+  const importOnOpen = useShellStore((s) => s.importOnOpen);
+  useEffect(() => {
+    if (!importOnOpen) return;
+    useShellStore.getState().setImportOnOpen(false);
+    void handleUpload(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importOnOpen]);
+
+  const heading =
+    selectedTypes.size === 0
+      ? "All"
+      : [...selectedTypes].map((t) => ({ video: "Videos", image: "Images", audio: "Audio" })[t] ?? t).join(", ");
 
   return (
     <div ref={panelRef} className="h-full w-full flex flex-col">
@@ -748,95 +774,73 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         <DropdownMenu>
           <div
             ref={uploadBarRef}
-            className="flex-1 min-w-0 h-8 bg-brand-accent-shade flex flex-row items-center text-brand-lighter text-[12px] font-medium rounded-[6px] transition-colors cursor-pointer"
+            className="h-8 shrink-0 bg-brand flex flex-row items-center text-brand-lighter text-[12px] rounded-[6px] transition-colors cursor-pointer"
           >
             <span
               data-testid="media-import"
               onClick={() => handleUpload(false)}
-              className="h-full px-3 flex flex-row gap-x-2 rounded-l-[6px] items-center justify-center hover:bg-brand-accent-two-shade border-r border-brand-light/25 w-full"
+              className="h-full pl-2.5 pr-2 flex flex-row gap-x-1.5 rounded-l-[6px] items-center justify-center hover:bg-brand-light/10"
             >
               {isUploading ? (
-                <LuLoader className="w-4 h-4 animate-spin" />
+                <LuLoader className="w-4 h-4 animate-spin text-brand-accent" />
               ) : (
-                <LuCloudUpload className="w-4 h-4 stroke-2" />
+                <LuCloudUpload className="w-4 h-4 stroke-2 text-brand-accent" />
               )}
               <span>{isUploading ? "Importing…" : "Import"}</span>
             </span>
-            <DropdownMenuTrigger aria-label="More ways to import" className="h-full px-1 flex items-center justify-center w-8 hover:bg-brand-accent-two-shade rounded-r-[6px]">
-              <LuChevronDown className="w-4 h-4 stroke-2" />
+            <DropdownMenuTrigger aria-label="More ways to import" className="h-full px-1 flex items-center justify-center w-6 hover:bg-brand-light/10 rounded-r-[6px] border-l border-brand-light/10">
+              <LuChevronDown className="w-3.5 h-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
-              align="end"
+              align="start"
               sideOffset={2}
-              style={{ width: menuWidth, maxWidth: menuWidth }}
-              className="dark mt-1 flex flex-col text-brand-light bg-brand-background"
+              className="dark mt-1 w-44 flex flex-col text-brand-light bg-brand-background"
             >
               <DropdownMenuItem
                 onClick={() => handleUpload(false)}
                 className="w-full cursor-pointer py-2"
               >
                 <TbFileUpload className="w-4 h-4 stroke-2" />
-                <span className="text-[11.5px] font-medium">Import files</span>
+                <span className="text-[12px]">Import files</span>
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => handleUpload(true)}
                 className="w-full cursor-pointer py-2"
               >
                 <TbFolderUp className="w-4 h-4 stroke-2" />
-                <span className="text-[11.5px] font-medium">Import a folder</span>
+                <span className="text-[12px]">Import a folder</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </div>
         </DropdownMenu>
-        <DropdownMenu open={filterOpen} onOpenChange={setFilterOpen}>
-          <DropdownMenuTrigger asChild>
-            <button
-              className={cn(
-                "h-8 w-8 shrink-0 rounded-[6px] text-brand-light/80 flex items-center justify-center bg-brand transition-colors hover:bg-brand-light/10 hover:text-brand-light",
-                (filterOpen || selectedTypes.size > 0) && "bg-brand-light/10 text-brand-light",
-              )}
-              title="Filter"
-              aria-label="Filter"
-            >
-              <BsFilter className="w-4 h-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="dark w-44 flex flex-col text-brand-light bg-brand-background font-poppins text-[12px]"
-          >
-            <DropdownMenuCheckboxItem
-              className="text-[11px] font-medium"
-              checked={selectedTypes.size === 0}
-              onCheckedChange={(checked) => {
-                if (checked) setSelectedTypes(new Set());
-              }}
-            >
-              All
-            </DropdownMenuCheckboxItem>
-            {([
-              ["video", "Videos"],
-              ["image", "Images"],
-              ["audio", "Audio"],
-            ] as const).map(([type, label]) => (
-              <DropdownMenuCheckboxItem
-                key={type}
-                className="text-[11px] font-medium"
-                checked={selectedTypes.has(type)}
-                onCheckedChange={(checked) => {
-                  setSelectedTypes((prev) => {
-                    const next = new Set(prev);
-                    if (checked) next.add(type);
-                    else next.delete(type);
-                    return next;
-                  });
-                }}
-              >
-                {label}
-              </DropdownMenuCheckboxItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <button
+          type="button"
+          disabled
+          title="Record: recording a voiceover isn't here yet"
+          aria-label="Record"
+          className="h-8 w-8 shrink-0 flex items-center justify-center rounded-[6px] bg-brand text-brand-light/35 cursor-not-allowed"
+        >
+          <LuMic className="w-4 h-4" />
+        </button>
+        <div className="relative flex-1 min-w-0">
+          <LuSearch className="w-3.5 h-3.5 text-brand-light/40 absolute left-2 top-1/2 -translate-y-1/2" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search"
+            data-testid="media-search"
+            className="w-full h-8 rounded-[6px] pl-7 pr-2 text-[12px] bg-brand text-brand-light/90 placeholder:text-brand-light/35 border border-transparent focus:border-brand-light/20"
+          />
+        </div>
+        <button
+          type="button"
+          title={layout === "grid" ? "Show as a list" : "Show as a grid"}
+          data-testid="media-layout"
+          onClick={() => setLayout(layout === "grid" ? "list" : "grid")}
+          className="h-8 w-8 shrink-0 rounded-[6px] text-brand-light/80 flex items-center justify-center bg-brand transition-colors hover:bg-brand-light/10 hover:text-brand-light"
+        >
+          {layout === "grid" ? <LuList className="w-4 h-4" /> : <LuLayoutGrid className="w-4 h-4" />}
+        </button>
         <DropdownMenu open={sortOpen} onOpenChange={setSortOpen}>
           <DropdownMenuTrigger asChild>
             <button
@@ -904,6 +908,55 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <DropdownMenu open={filterOpen} onOpenChange={setFilterOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              className={cn(
+                "h-8 w-8 shrink-0 rounded-[6px] text-brand-light/80 flex items-center justify-center bg-brand transition-colors hover:bg-brand-light/10 hover:text-brand-light",
+                (filterOpen || selectedTypes.size > 0) && "bg-brand-light/10 text-brand-light",
+              )}
+              title="Filter"
+              aria-label="Filter"
+            >
+              <BsFilter className="w-4 h-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="dark w-44 flex flex-col text-brand-light bg-brand-background font-poppins text-[12px]"
+          >
+            <DropdownMenuCheckboxItem
+              className="text-[11px] font-medium"
+              checked={selectedTypes.size === 0}
+              onCheckedChange={(checked) => {
+                if (checked) setSelectedTypes(new Set());
+              }}
+            >
+              All
+            </DropdownMenuCheckboxItem>
+            {([
+              ["video", "Videos"],
+              ["image", "Images"],
+              ["audio", "Audio"],
+            ] as const).map(([type, label]) => (
+              <DropdownMenuCheckboxItem
+                key={type}
+                className="text-[11px] font-medium"
+                checked={selectedTypes.has(type)}
+                onCheckedChange={(checked) => {
+                  setSelectedTypes((prev) => {
+                    const next = new Set(prev);
+                    if (checked) next.add(type);
+                    else next.delete(type);
+                    return next;
+                  });
+                }}
+              >
+                {label}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <div
         ref={listContainerRef}
@@ -940,10 +993,11 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         {/* Keep showing the grid even while background reloads happen. */}
         {items.length > 0 && (
           <ScrollArea className="h-full px-3 pb-3 pt-1 dark">
+            <div className="text-[12px] text-brand-light/80 text-left px-0.5 pb-1.5">{heading}</div>
             <div
-              className="grid gap-2 w-full"
+              className={cn("grid w-full", layout === "grid" ? "gap-2" : "gap-0.5")}
               style={{
-                gridTemplateColumns: "repeat(auto-fill, minmax(112px, 1fr))",
+                gridTemplateColumns: layout === "grid" ? "repeat(auto-fill, minmax(104px, 1fr))" : "1fr",
               }}
             >
               {displayItems.map((item) => (
@@ -966,6 +1020,8 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
                   onCreateProxy={handleCreateProxy}
                   onRemoveProxy={handleRemoveProxy}
                   isCreatingProxy={creatingProxies.has(item.name)}
+                  added={onTimeline.has(item.assetUrl)}
+                  layout={layout === "list" ? "row" : "card"}
                 />
               ))}
             </div>

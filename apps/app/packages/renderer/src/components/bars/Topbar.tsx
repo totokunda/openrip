@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   LuChevronDown,
-  LuChevronUp,
-  LuCheck,
   LuChevronLeft,
   LuFolderPlus,
   LuFolderInput,
@@ -79,7 +77,6 @@ const ShortcutRow: React.FC<{ action: string; keys: string[] }> = ({
 const TopBar: React.FC<TopBarProps> = () => {
   const layout = useLayoutConfigStore((s) => s.layout);
   const setLayout = useLayoutConfigStore((s) => s.setLayout);
-  const [layoutOpen, setLayoutOpen] = useState(false);
   const aspectRatio = useViewportStore((s) => s.aspectRatio);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -462,34 +459,25 @@ const TopBar: React.FC<TopBarProps> = () => {
       )}
 
       <div className="flex items-center justify-end gap-1 z-10">
-        <DropdownMenu open={layoutOpen} onOpenChange={setLayoutOpen}>
-          <DropdownMenuTrigger title="Layout" data-testid="layout-menu" className={button}>
-            <LayoutIcon type={layout as any} className="scale-[0.7]" />
-            <span>{LAYOUTS.find((l) => l.id === layout)?.label}</span>
-            {layoutOpen ? <LuChevronUp className="w-3 h-3" /> : <LuChevronDown className="w-3 h-3 opacity-70" />}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="dark w-48 font-poppins bg-brand-background/95 backdrop-blur-md border border-brand-light/10 rounded-[8px]"
-          >
-            {LAYOUTS.map((l, i) => (
-              <React.Fragment key={l.id}>
-                {i > 0 && <DropdownMenuSeparator />}
-                <DropdownMenuItem
-                  className="dark text-[11px] font-medium flex items-center gap-x-2"
-                  onClick={() => {
-                    setLayout(l.id);
-                    setLayoutOpen(false);
-                  }}
-                >
-                  <LayoutIcon type={l.id} />
-                  <span>{l.label}</span>
-                  {layout === l.id && <LuCheck className="w-4 h-4 ml-auto text-brand-light" />}
-                </DropdownMenuItem>
-              </React.Fragment>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* The layouts, as CapCut's toggles: each keeps its own panel sizes. */}
+        <div className="h-7 p-0.5 flex items-center rounded-[6px] bg-brand-light/[0.04] mr-1" role="group" aria-label="Layout">
+          {LAYOUTS.map((l) => (
+            <button
+              key={l.id}
+              type="button"
+              title={`${l.label} layout`}
+              aria-pressed={layout === l.id}
+              data-testid={`layout-${l.id}`}
+              onClick={() => setLayout(l.id)}
+              className={cn(
+                "h-6 w-7 flex items-center justify-center rounded-[4px] transition-colors cursor-pointer",
+                layout === l.id ? "bg-brand-light/12 opacity-100" : "opacity-45 hover:opacity-90",
+              )}
+            >
+              <LayoutIcon type={l.id} className="scale-[0.7]" />
+            </button>
+          ))}
+        </div>
         <DropdownMenu open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
           <DropdownMenuTrigger title="Keyboard shortcuts" className={button}>
             <span className="text-brand-light/60">⌘</span>

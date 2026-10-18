@@ -4,6 +4,7 @@ import Konva from "konva";
 import { engineRender, ENGINE_FRAME_CANVAS_ID, ENGINE_FRAME_EVENT } from "@app/preload";
 import { setEnginePreviewSize, useEnginePreviewStore, useEngineDraws } from "@/lib/engine-preview";
 import { useControlsStore } from "@/lib/control";
+import { usePlayerStore } from "@/lib/player";
 
 /** Longest side the engine renders the preview at. */
 const MAX_SIDE = 3840;
@@ -39,6 +40,8 @@ const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: numb
   const accurate = useControlsStore((s) => s.isAccurateSeekNeeded);
   const nodeRef = useRef<Konva.Image>(null);
   const canvas = useMemo(frameCanvas, []);
+  // The player's quality: Half and Quarter render at that fraction of the screen's size.
+  const quality = usePlayerStore((s) => s.quality);
 
   // Each frame the preload draws: redraw the layer.
   useEffect(() => {
@@ -50,10 +53,10 @@ const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: numb
   // The size it's shown at on screen: paused frames and playback render at it.
   const size = useMemo(() => {
     const dpr = window.devicePixelRatio || 1;
-    const [w, h] = [rectWidth * scale * dpr, rectHeight * scale * dpr];
+    const [w, h] = [rectWidth * scale * dpr * quality, rectHeight * scale * dpr * quality];
     const fit = Math.min(1, MAX_SIDE / Math.max(w, h));
     return { width: Math.round(w * fit), height: Math.round(h * fit) };
-  }, [rectWidth, rectHeight, scale]);
+  }, [rectWidth, rectHeight, scale, quality]);
   useEffect(() => setEnginePreviewSize(size.width, size.height), [size]);
 
   // Paused: ask for the frame at the playhead. Playing, the engine sends frames by itself.
