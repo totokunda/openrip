@@ -8,6 +8,7 @@ import MaskOperationsProperties from "./MaskOperationsProperties";
 import { cn } from "@/lib/utils";
 import { LuX } from "react-icons/lu";
 import AddMaskTools from "./AddMaskTools";
+import TrackMaskSection from "./TrackMaskSection";
 
 interface MaskPropertiesPanelProps {
   clipId: string;
@@ -149,6 +150,8 @@ const MaskPropertiesPanel: React.FC<MaskPropertiesPanelProps> = ({
             )}
           </>
         )}
+
+        {mask && <TrackMaskSection clipId={clipId} mask={mask} />}
 
         {/* Operations Properties */}
         {mask && <MaskOperationsProperties mask={mask} clipId={clipId} />}

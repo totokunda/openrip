@@ -191,6 +191,39 @@ export interface ClipProps {
    * move, trim, split and delete together until unlinked.
    */
   linkId?: string;
+  /** The Tracking tab's settings (lib/tracking.ts); the keys a track wrote are in `keyframes`. */
+  tracking?: TrackingSettings;
+}
+
+/** Which way motion tracking goes from the frame its region was drawn on. */
+export type TrackDirection = "both" | "forward" | "backward";
+
+/** A rotated rectangle on the canvas, in world units (y down), its turn in degrees clockwise. */
+export interface WorldRegion {
+  cx: number;
+  cy: number;
+  width: number;
+  height: number;
+  rotation: number;
+}
+
+/** A clip's Tracking tab, as it saves it (`tracking` on the clip). */
+export interface TrackingSettings {
+  /** The tab's checkbox. */
+  enabled: boolean;
+  /** CapCut's tiles: None or Motion tracking. */
+  mode: "none" | "motion";
+  direction: TrackDirection;
+  /** Follow the tracked object's scale, its distance (the clip's offset from it scaling with
+   * it) and, beyond CapCut's options, its turn. */
+  scale: boolean;
+  distance: boolean;
+  rotation: boolean;
+  /** The region tracked, where it was drawn, at `frame` (a timeline frame). */
+  region?: WorldRegion;
+  frame?: number;
+  /** The video clip tracked, once the clip's keys come from it. */
+  video?: string;
 }
 
 export interface TimelineProps {
@@ -322,6 +355,16 @@ export type SpeedProps = {
    * staying as it was. A curve's sound always follows it.
    */
   changePitch?: boolean;
+  /**
+   * Speed › Smooth slow-mo (CapCut's `complement_frame_config`): while the clip plays slower
+   * than its source, frames between its own are made from them, by optical flow or blended.
+   */
+  smoothSlowMo?: { mode: "optical_flow" | "frame_blending" } | null;
+  /**
+   * Video › Basic › Optical flow (CapCut's `smart_complement_frame`): the clip's frames made
+   * up to `fps` by motion interpolation whatever its speed.
+   */
+  opticalFlow?: { fps: number } | null;
 };
 
 /**

@@ -23,6 +23,8 @@ import SpeedProperties from '../properties/SpeedProperties'
 import FilterProperties from '../properties/FilterProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
 import { useInspectorStore } from '@/lib/inspector'
+import TrackingProperties from '../properties/TrackingProperties'
+import OpticalFlowProperties from '../properties/OpticalFlowProperties'
 
 /**
  * The inspector for the selected clip (the last one selected), grouped as CapCut groups it:
@@ -87,6 +89,12 @@ const ClipPropertiesPanel: React.FC = () => {
       label: 'Animation',
       sections: animationKinds(type!).map((kind) => ({ id: kind, label: KIND_LABEL[kind], own: true, content: <AnimationProperties clipId={clipId} kind={kind} /> })),
     };
+    // Motion tracking (a text's, sticker's or photo's), as CapCut's Tracking tab.
+    const tracking: InspectorTab = {
+      id: 'tracking',
+      label: 'Tracking',
+      sections: [{ id: 'tracking', label: 'Tracking', own: true, content: <TrackingProperties clipId={clipId} /> }],
+    };
     // A video's or a sound's Speed: Standard and Curve (a sound's has Standard only).
     const speed = (curve: boolean): InspectorTab => ({
       id: 'duration',
@@ -108,13 +116,14 @@ const ClipPropertiesPanel: React.FC = () => {
             id: 'video',
             label: type === 'video' ? 'Video' : 'Image',
             sections: [
-              { id: 'basic', label: 'Basic', content: stack(position, layout, appearance) },
+              { id: 'basic', label: 'Basic', content: type === 'video' ? stack(position, layout, appearance, <OpticalFlowProperties key="optical-flow" clipId={clipId} />) : stack(position, layout, appearance) },
               { id: 'mask', label: 'Mask', content: <MaskPropertiesPanel clipId={clipId} /> },
             ],
           },
           ...(hasAudio ? [{ id: 'audio', label: 'Audio', sections: separated ? [audioBasic] : [audioBasic, voiceChanger] }] : []),
           type === 'video' ? speed(true) : duration('Duration'),
           animation,
+          ...(type === 'image' ? [tracking] : []),
           { id: 'adjust', label: 'Adjust', sections: [{ id: 'adjust', label: 'Adjust', content: <AdjustProperties clipId={clipId} /> }] },
         ];
       case 'text':
@@ -130,6 +139,7 @@ const ClipPropertiesPanel: React.FC = () => {
             ],
           },
           animation,
+          tracking,
           duration('Duration'),
         ];
       case 'shape':
@@ -158,6 +168,8 @@ const ClipPropertiesPanel: React.FC = () => {
             label: 'Filter',
             sections: [{ id: 'filter', label: 'Filter', content: stack(<FilterProperties key="filter" clipId={clipId} />, <DurationProperties key="duration" clipId={clipId} />) }],
           },
+          // A draft's sticker tracks as CapCut's do.
+          ...((clip as any).draftKind === 'sticker' ? [tracking] : []),
         ];
       case 'draw':
         return [

@@ -31,6 +31,7 @@ import ImagePreview from "./clips/ImagePreview";
 import ShapePreview from "./clips/ShapePreview";
 import TextPreview from "./clips/TextPreview";
 import EngineFrame from "./EngineFrame";
+import TrackingRegion from "./TrackingRegion";
 import { useEngineDraws } from "@/lib/engine-preview";
 import DrawingPreview from "./clips/DrawingPreview";
 import MaskPreview from "./clips/MaskPreview";
@@ -2809,6 +2810,8 @@ const Preview: React.FC<PreviewProps> = () => {
               </Layer>
             )}
           </Stage>
+          {/* The Tracking tab's region, over the canvas. */}
+          <TrackingRegion />
           {/* Full screen is under the player (PlayerBar). */}
         </div>
       )}
