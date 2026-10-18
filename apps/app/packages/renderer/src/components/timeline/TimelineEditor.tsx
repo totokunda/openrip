@@ -41,6 +41,8 @@ import { useViewportStore } from "@/lib/viewport";
 import { insertionFrame, mainTrackOf, mainTrackPreview } from "@/lib/timeline-edit";
 import { MarkerEditor, MarkerFlags } from "./Markers";
 import { RULER_HEIGHT, TIME_ZERO_X } from "@/lib/timeline-geometry";
+import { applyTransition, cutsOn, useTransitionDropStore } from "@/lib/transitions";
+import type { TransitionDrag } from "../menus/TransitionMenu";
 import KeyframeGraph from "./KeyframeGraph";
 
 interface TimelineEditorProps {}
@@ -331,12 +333,35 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     return 8;
   };
 
+  // A transition card dragged from the Transitions tab: the cut under the pointer (on the track
+  // under it, the nearest cut within 24 px), by the id of the clip leaving it.
+  const cutUnder = (event: { activatorEvent: Event | null; delta: { x: number; y: number } }): string | null => {
+    const start = event.activatorEvent as PointerEvent | null;
+    const el = containerRef.current;
+    if (!start || !el || typeof start.clientX !== "number") return null;
+    const r = el.getBoundingClientRect();
+    const x = start.clientX + event.delta.x - r.left;
+    const y = start.clientY + event.delta.y - r.top + clampedScroll;
+    const track = timelines.find((t) => y >= (t.timelineY ?? 0) + 32 && y <= (t.timelineY ?? 0) + (t.timelineHeight ?? 0) + 24);
+    if (!track || x < 0 || x > r.width) return null;
+    const [vs, ve] = controlStore.timelineDuration;
+    const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
+    const frame = vs + (x - TIME_ZERO_X) * perPx;
+    let best: string | null = null;
+    let gap = 24 * perPx;
+    for (const { clip } of cutsOn(clips, track.timelineId)) {
+      const d = Math.abs(clip.endFrame - frame);
+      if (d <= gap) [best, gap] = [clip.clipId, d];
+    }
+    return best;
+  };
+
   useDndMonitor({
     onDragStart: (event) => {
       const data = event.active?.data?.current as unknown as
         | MediaItem
         | undefined;
-      if (!data) return;
+      if (!data || (data as unknown as TransitionDrag).type === "transition") return;
 
       setIsDragging(true);
 
@@ -375,6 +400,10 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         | undefined;
 
       if (clips.length === 0) return;
+      if ((data as unknown as TransitionDrag)?.type === "transition") {
+        useTransitionDropStore.getState().setTarget(cutUnder(event));
+        return;
+      }
 
       if (container) {
         const rect = container.getBoundingClientRect();
@@ -414,6 +443,15 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         setIsDragging(false);
         return;
       }
+      // A transition dropped on a cut goes onto it (a press without a move is the card's click,
+      // which the Transitions tab handles).
+      const drag = data as unknown as TransitionDrag;
+      if (drag.type === "transition") {
+        const target = Math.hypot(event.delta.x, event.delta.y) > 3 ? cutUnder(event) : null;
+        useTransitionDropStore.getState().setTarget(null);
+        if (target) applyTransition(target, drag.transition);
+        return;
+      }
 
       if (
         data?.type === "image" ||
@@ -428,6 +466,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     },
     // A drag given up (Escape): the main track goes back to how it is.
     onDragCancel: () => {
+      useTransitionDropStore.getState().setTarget(null);
       insertAtRef.current = null;
       useClipStore.getState().setMainPreview(null);
       setGhostTimelineId(null);

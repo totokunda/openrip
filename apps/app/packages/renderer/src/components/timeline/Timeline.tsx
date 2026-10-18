@@ -4,6 +4,7 @@ import { TimelineProps } from "@/lib/types";
 import { useClipStore, getTimelineX } from "@/lib/clip";
 import TimelineClip from "./clips/TimelineClip";
 import GhostTimeline from "./clips/GhostTimeline";
+import TransitionMarkers from "./clips/TransitionMarkers";
 import { useControlsStore } from "@/lib/control";
 import { useContextMenuStore } from "@/lib/context-menu";
 import { calculateFrameFromX } from "@/lib/zoom";
@@ -232,6 +233,16 @@ const Timeline: React.FC<
           assetMode={assetMode}
         />
       ))}
+      {/* The transitions on the track's cuts, over its clips. */}
+      {!assetMode && (
+        <TransitionMarkers
+          timelineId={timelineId}
+          timelineWidth={timelineWidth!}
+          timelinePadding={timelinePadding}
+          bottom={timelineBottomY}
+          height={renderedTimelineHeight}
+        />
+      )}
       <GhostTimeline
         timelineId={timelineId}
         timelineY={timelineBottomY}

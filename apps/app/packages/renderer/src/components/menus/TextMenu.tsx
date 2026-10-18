@@ -2,7 +2,9 @@ import React from "react";
 import { LuPlus } from "react-icons/lu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TEXT_PRESETS, addPresetText, type TextPreset } from "@/lib/text-presets";
-import { IN_ANIMATIONS, applyInAnimation } from "@/components/properties/AnimationProperties";
+import { applyAnimation } from "@/components/properties/AnimationProperties";
+import { AnimationPreview } from "@/components/motion/Previews";
+import { animationsFor } from "@/lib/animations";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
 import { useInspectorStore } from "@/lib/inspector";
@@ -64,22 +66,22 @@ const TextMenu: React.FC<{ part?: "styles" | "animations" }> = ({ part = "styles
       title="Animations"
       note={selectedText ? "An In animation for the selected text. Its duration is in the Animation tab." : "Select a text on the timeline to animate it."}
     >
-      {IN_ANIMATIONS.map((a) => (
+      {animationsFor("text", "in").map((a) => (
         <AssetTile
-          key={a.value}
-          label={a.label}
-          testId={`text-animation-${a.value}`}
-          active={current === a.value}
+          key={a.type}
+          label={a.name}
+          testId={`text-animation-${a.type}`}
+          active={current === a.type}
           disabled={!selectedText}
           onClick={() => {
             if (!selectedText) return;
-            applyInAnimation(selectedText.clipId, a.value);
-            useInspectorStore.getState().setTab("animation");
+            applyAnimation(selectedText.clipId, "in", a.type);
+            useInspectorStore.getState().setTab("animation", "in");
           }}
         >
-          <span className="text-[15px] font-medium tracking-wide text-brand-light/80">
-            {a.value === "typewriter" ? "Ty|" : a.value === "type_2" ? "T y p" : "Typ"}
-          </span>
+          <div className="relative w-full h-full">
+            <AnimationPreview subject="text" kind="in" type={a.type} direction={a.params?.[0]?.default} playing={current === a.type} />
+          </div>
         </AssetTile>
       ))}
     </AssetSection>

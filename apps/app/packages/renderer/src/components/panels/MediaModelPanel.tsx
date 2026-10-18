@@ -19,6 +19,8 @@ import { MdPhotoFilter } from "react-icons/md";
 import { ResizablePanel } from "@/components/ui/resizable";
 import { cn } from "@/lib/utils";
 import { useSidebarStore } from "@/lib/sidebar";
+import { useClipStore } from "@/lib/clip";
+import { projectBlink, transitionCategories } from "@/lib/transitions";
 import type { SidebarSection } from "@/lib/types";
 import MediaMenu from "@/components/menus/MediaMenu";
 import FilterMenu from "../menus/FilterMenu";
@@ -73,7 +75,6 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
     { id: "shapes", label: "Shapes" },
   ],
   effects: [{ id: "effects", label: "Video effects" }],
-  transitions: [{ id: "transitions", label: "Transitions" }],
   captions: [{ id: "captions", label: "Captions" }],
   adjustment: [{ id: "adjustment", label: "Adjustment" }],
   templates: [{ id: "templates", label: "Templates" }],
@@ -174,7 +175,10 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   const tabsRef = useRef<HTMLElement | null>(null);
   const overflow = useOverflow(tabsRef);
   const scrollTabs = (dx: number) => tabsRef.current?.scrollBy({ left: dx, behavior: "smooth" });
-  const sections = SECTIONS[section];
+  // Transitions' column is its categories under one heading, as CapCut's (Basic only when the
+  // project has Blink's images).
+  const blink = useClipStore((s) => projectBlink(s.clips));
+  const sections = section === "transitions" ? transitionCategories(blink).map((c) => ({ id: c, label: c, under: "Transitions" })) : SECTIONS[section];
   const sub = picked[section] ?? sections?.[0]?.id ?? "";
 
   const content = () => {
@@ -186,7 +190,7 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
       case "text":
         return <TextMenu part={sub === "animations" ? "animations" : "styles"} />;
       case "transitions":
-        return <TransitionMenu />;
+        return <TransitionMenu category={sub || undefined} />;
       case "stickers":
         return sub === "draw" || sub === "shapes" ? <CanvasToolsMenu part={sub} /> : <PendingMenu section="stickers" />;
       default:

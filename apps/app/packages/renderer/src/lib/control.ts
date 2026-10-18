@@ -123,6 +123,13 @@ interface ControlStore {
   /** The marker last clicked on the ruler (Delete removes it). */
   selectedMarkerId: string | null;
   setSelectedMarkerId: (id: string | null) => void;
+  /**
+   * The transition last clicked on the timeline, by the id of the clip it leaves (its
+   * `transitionOut`): the inspector shows it and Delete removes it. Selecting a clip drops it,
+   * as CapCut selects one or the other.
+   */
+  selectedTransitionId: string | null;
+  setSelectedTransitionId: (id: string | null) => void;
 }
 
 export const useControlsStore = create<ControlStore>((set, get) => ({
@@ -297,10 +304,10 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
   setFocusAnchorRatio: (ratio) =>
     set({ focusAnchorRatio: Math.max(0, Math.min(1, ratio)) }),
   selectedClipIds: [],
-  setSelectedClipIds: (clipIds) => set({ selectedClipIds: clipIds }),
+  setSelectedClipIds: (clipIds) => set(clipIds.length ? { selectedClipIds: clipIds, selectedTransitionId: null } : { selectedClipIds: clipIds }),
   addClipSelection: (clipId) =>
     set((state) => {
-      return { selectedClipIds: _.uniq([...state.selectedClipIds, clipId]) };
+      return { selectedClipIds: _.uniq([...state.selectedClipIds, clipId]), selectedTransitionId: null };
     }),
   removeClipSelection: (clipId) =>
     set((state) => {
@@ -321,14 +328,14 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
           };
         } else {
           // Add to selection
-          return { selectedClipIds: [...state.selectedClipIds, clipId] };
+          return { selectedClipIds: [...state.selectedClipIds, clipId], selectedTransitionId: null };
         }
       } else {
         // Regular click - select only this clip
-        return { selectedClipIds: [clipId] };
+        return { selectedClipIds: [clipId], selectedTransitionId: null };
       }
     }),
-  clearSelection: () => set({ selectedClipIds: [] }),
+  clearSelection: () => set({ selectedClipIds: [], selectedTransitionId: null }),
   play: () => {
     const state = get();
     const clips = useClipStore.getState();
@@ -379,4 +386,6 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
   setLinkage: (on) => set({ linkage: on }),
   selectedMarkerId: null,
   setSelectedMarkerId: (id) => set({ selectedMarkerId: id }),
+  selectedTransitionId: null,
+  setSelectedTransitionId: (id) => set(id ? { selectedTransitionId: id, selectedClipIds: [] } : { selectedTransitionId: null }),
 }));

@@ -20,6 +20,7 @@ export type ContextMenuAction =
   | "deleteTrack"
   | "freeze"
   | "reverse"
+  | "deleteTransition"
   | "deleteKeyframe"
   | "keyframeEase"
   | "keyframeGraph"
@@ -32,6 +33,8 @@ export type ContextTarget =
   | { type: "track"; timelineId: string }
   | { type: "marker"; markerId: string }
   | { type: "textSelection" }
+  /** The transition on the cut after this clip. */
+  | { type: "transition"; clipId: string }
   /** The keys at a clip-local frame of a clip (its diamond on the timeline). */
   | { type: "keyframe"; clipId: string; frame: number };
 

@@ -13,6 +13,7 @@ import { layoutStorageKey, useLayoutConfigStore } from "@/lib/layout-config";
 import Topbar from "./bars/Topbar";
 import { DndContext, DragEndEvent, DragOverlay } from "@dnd-kit/core";
 import { MediaItem, MediaThumb } from "@/components/media/Item";
+import { TransitionDragTile } from "@/components/menus/TransitionMenu";
 import { cn } from "@/lib/utils";
 import { useClipStore } from "@/lib/clip";
 import GlobalContextMenu from "@/components/GlobalContextMenu";
@@ -73,6 +74,8 @@ const App: React.FC = () => {
   const [activeDragItem, setActiveDragItem] = useState<MediaItem | null>(
     null,
   );
+  // The transition card being dragged onto a cut, by its type.
+  const [dragTransition, setDragTransition] = useState<string | null>(null);
 
   // Disable scrolling while dragging
   useEffect(() => {
@@ -186,6 +189,7 @@ const App: React.FC = () => {
 
   const handleDragEnd = (_e: DragEndEvent) => {
     setActiveDragItem(null);
+    setDragTransition(null);
   };
 
   if (!ready) {
@@ -212,13 +216,21 @@ const App: React.FC = () => {
           | MediaItem
           | undefined;
         if (!data) return;
+        // A transition card shows its own picture while it's dragged.
+        if ((data as any).type === "transition") {
+          setDragTransition((data as any).transition);
+          return;
+        }
         // Accept media items (MediaItem has ClipType in data.type)
         if ((data as any).name) {
           setActiveDragItem(data as any);
         }
       }}
       onDragEnd={handleDragEnd}
-      onDragCancel={() => setActiveDragItem(null)}
+      onDragCancel={() => {
+        setActiveDragItem(null);
+        setDragTransition(null);
+      }}
     >
       <main
         ref={containerRef}
@@ -317,6 +329,8 @@ const App: React.FC = () => {
           >
             <MediaThumb item={activeDragItem} isDragging={true} />
           </div>
+        ) : dragTransition ? (
+          <TransitionDragTile type={dragTransition} />
         ) : null}
       </DragOverlay>
     </DndContext>

@@ -15,7 +15,7 @@ import TextProperties from '../properties/TextProperties'
 import LineProperties from '../properties/LineProperties'
 import { useDrawingStore } from '@/lib/drawing';
 import MaskPropertiesPanel from '../properties/mask/MaskPropertiesPanel';
-import AnimationProperties from '../properties/AnimationProperties'
+import AnimationProperties, { KIND_LABEL, animationKinds } from '../properties/AnimationProperties'
 import FilterProperties from '../properties/FilterProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
 import { useInspectorStore } from '@/lib/inspector'
@@ -31,6 +31,8 @@ interface Section {
   id: string;
   label: string;
   content: React.ReactNode;
+  /** Fills the tab's height and scrolls itself (for a footer pinned at the bottom). */
+  own?: boolean;
 }
 
 interface InspectorTab {
@@ -72,10 +74,11 @@ const ClipPropertiesPanel: React.FC = () => {
       label,
       sections: [{ id: 'duration', label, content: <DurationProperties clipId={clipId} /> }],
     });
+    // CapCut's sub-tabs: In, Out and Combo (In, Out and Loop on a text).
     const animation: InspectorTab = {
       id: 'animation',
       label: 'Animation',
-      sections: [{ id: 'animation', label: 'Animation', content: <AnimationProperties clipId={clipId} /> }],
+      sections: animationKinds(type!).map((kind) => ({ id: kind, label: KIND_LABEL[kind], own: true, content: <AnimationProperties clipId={clipId} kind={kind} /> })),
     };
     switch (type) {
       case 'video':
@@ -194,13 +197,21 @@ const ClipPropertiesPanel: React.FC = () => {
                   </TabsList>
                 </div>
               )}
-              <ScrollArea className="flex-1 min-h-0">
-                {t.sections.map((s) => (
-                  <TabsContent key={s.id} value={s.id} className="min-w-0 m-0">
+              {section.own ? (
+                t.sections.map((s) => (
+                  <TabsContent key={s.id} value={s.id} className="flex-1 min-h-0 min-w-0 m-0 flex flex-col">
                     {s.content}
                   </TabsContent>
-                ))}
-              </ScrollArea>
+                ))
+              ) : (
+                <ScrollArea className="flex-1 min-h-0">
+                  {t.sections.map((s) => (
+                    <TabsContent key={s.id} value={s.id} className="min-w-0 m-0">
+                      {s.content}
+                    </TabsContent>
+                  ))}
+                </ScrollArea>
+              )}
             </Tabs>
           )}
         </TabsContent>

@@ -17,6 +17,7 @@ import { useMaskStore } from "@/lib/mask";
 import { useViewportStore } from "@/lib/viewport";
 import { undo, redo } from "@/lib/history";
 import { handleTimelineKey, zoomTimelineTo } from "@/lib/timeline-shortcuts";
+import { removeTransition } from "@/lib/transitions";
 import {
   AddMarkerButton,
   DeleteLeftButton,
@@ -291,6 +292,12 @@ const Controls = () => {
           });
           // update the clip to remove the line
           drawingStore.setSelectedLineId(null);
+          return;
+        }
+        // A transition selected on the timeline (selecting it drops the clips' selection).
+        if (controls.selectedTransitionId && selectedIds.length === 0) {
+          e.preventDefault();
+          removeTransition(controls.selectedTransitionId);
           return;
         }
         // A marker selected on the ruler (with no clips selected).

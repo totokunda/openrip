@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useContextMenuStore, type ContextMenuItem } from "@/lib/context-menu";
 import { LuCheck, LuChevronRight } from "react-icons/lu";
+import { removeTransition } from "@/lib/transitions";
 import { freezeAtPlayhead, toggleReverse } from "@/lib/timeline-motion";
 import { easeKeysAt, removeKeysAt, useKeyframeGraphStore } from "@/lib/timeline-keyframes";
 import type { KeyframePreset } from "@/lib/types";
@@ -403,6 +404,11 @@ const GlobalContextMenu: React.FC = () => {
 
   const onSelect = (action: string, value?: string) => {
     if (action === "none") return;
+    if (target?.type === "transition") {
+      if (action === "deleteTransition") removeTransition(target.clipId);
+      closeMenu();
+      return;
+    }
     if (target?.type === "keyframe") {
       const clip = clipsStore.getClipById(target.clipId);
       if (clip && action === "deleteKeyframe") clipsStore.updateClip(target.clipId, { keyframes: removeKeysAt(clip.keyframes, target.frame) });
