@@ -411,6 +411,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                 let fade = seg.attachments.iter().find_map(|id| project.materials.audio_fades.iter().find(|f| &f.id == id));
                 clip.insert("fadeIn".into(), num(fade.map_or(0.0, |f| f.fade_in.as_secs_f64())));
                 clip.insert("fadeOut".into(), num(fade.map_or(0.0, |f| f.fade_out.as_secs_f64())));
+                crate::audio::emit(project, seg, &mut clip);
             }
             if ty != "audio" {
                 // CapCut's own adjustments stay as they are; the app's sliders start at zero.
@@ -566,9 +567,9 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
         .iter()
         .chain(TEXT_STYLE_KEYS.iter())
         .chain(ADJUST_KEYS.iter())
-        // The draft's own adjustments, a filter bar's strength, and the colour and compositing
-        // fields.
-        .chain(["draftAdjustments", "intensity", "color", "blendMode", "chroma", "canvas", "flip"].iter())
+        // The draft's own adjustments, a filter bar's strength, the colour and compositing
+        // fields, and the Audio tab's.
+        .chain(["draftAdjustments", "intensity", "color", "blendMode", "chroma", "canvas", "flip", "audioEffects", "loudness", "channel", "beats"].iter())
         .filter_map(|k| clip.get(*k).map(|v| (k.to_string(), v.clone())))
         .collect();
     clip.insert(

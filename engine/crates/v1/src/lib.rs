@@ -8,7 +8,9 @@
 //!   by the top-left of the unrotated box, rotating media/text/rect/line about that
 //!   corner and ellipse/polygon/star about the centre. This is converted to the
 //!   model's centred, normalised, +y-up transform.
-//! - **Audio.** v1 volume is dB; the model stores linear gain. Fades become materials.
+//! - **Audio.** v1 volume is dB; the model stores linear gain. Fades become materials, and so
+//!   do the Audio tab's voice effects, loudness normalisation, channel fill and beat markers
+//!   (`audio.rs`).
 //! - **Tracks.** v1 lists tracks top row first; the model lists them bottom first.
 //!
 //! - **Keyframes.** A clip's `keyframes` (clip-local frames, values in its fields' units) become
@@ -28,6 +30,7 @@ const APP: &str = "openrip-v1";
 pub(crate) const WORLD_H: f64 = 600.0;
 
 mod app;
+mod audio;
 mod color;
 mod compositing;
 mod keys;
@@ -526,6 +529,23 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
         seg.attachments.retain(|id| !materials.audio_fades.iter().any(|m| &m.id == id));
         attach_fade(&seg.id.clone(), clip, materials, &mut seg.attachments);
     }
+    // The Audio tab's voice effects, loudness normalisation, channel fill and beat markers
+    // replace the draft's.
+    if matches!(ty, "video" | "audio") {
+        let id = seg.id.clone();
+        if differs("audioEffects") {
+            audio::set_effects(&id, clip.get("audioEffects"), materials, &mut seg.attachments);
+        }
+        if differs("loudness") {
+            audio::set_loudness(&id, clip.get("loudness"), materials, &mut seg.attachments);
+        }
+        if differs("channel") {
+            audio::set_channel(&id, clip.get("channel"), materials, &mut seg.attachments);
+        }
+        if differs("beats") {
+            audio::set_beats(&id, clip.get("beats"), materials, &mut seg.attachments);
+        }
+    }
     if matches!(ty, "video" | "image") {
         // The app's adjustments and masks go on top of the draft's own.
         if app::ADJUST_KEYS.into_iter().any(differs) {
@@ -851,11 +871,12 @@ fn convert_clip(
         (s, _) => s,
     };
 
-    // Audio: dB → linear, fades → material.
+    // Audio: dB → linear, fades → material, and the Audio tab's other fields.
     let mut volume = Animated::constant(1.0f32);
     if is_av {
         volume = Animated::constant(10f64.powf(f(clip, "volume", 0.0) / 20.0) as f32);
         attach_fade(&id, clip, materials, &mut attachments);
+        audio::attach(&id, clip, materials, &mut attachments);
     }
     // The Speed tab's curve: a speed the clip plays by (its `speed` is the curve's average).
     if is_av && freeze.is_none() {
