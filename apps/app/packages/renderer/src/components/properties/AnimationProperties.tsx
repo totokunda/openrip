@@ -70,7 +70,8 @@ export function applyAnimation(clipId: string, kind: AnimationKind, type: string
   if (!builtin) return;
   const max = Math.max(MIN, maxAnimationDuration(clip, kind, fps));
   const next = animationOf(clip, kind, type, {
-    duration: within(was?.type ? was.duration : builtin.defaultDuration, max),
+    // The duration the clip's animation of this kind had (a draft's undrawn one's too).
+    duration: within(was ? was.duration : builtin.defaultDuration, max),
     params: was?.params?.direction && builtin.params?.length ? { direction: was.params.direction } : undefined,
     fps,
   });
