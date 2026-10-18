@@ -429,14 +429,7 @@ fn text_style(bundle: &Path) -> Option<TextEffect> {
                     alpha: f(t, "alpha", 1.0) as f32,
                 })
             }
-            // Gradients are drawn with their first colour for now.
-            "gradient" => {
-                let g = content.get("gradient")?;
-                let c = g.get("color")?.get(0)?;
-                let ch = |k: usize| c.get(k).and_then(Value::as_f64).unwrap_or(0.0) as f32;
-                let a = g.get("alpha").and_then(|a| a.get(0)).and_then(Value::as_f64).unwrap_or(1.0) as f32;
-                PaintKind::Solid(Rgba { r: ch(0), g: ch(1), b: ch(2), a })
-            }
+            "gradient" => PaintKind::Gradient(gradient(content.get("gradient")?)?),
             _ => {
                 let solid = content.get("solid")?;
                 let c = solid.get("color")?;
@@ -473,6 +466,55 @@ fn text_style(bundle: &Path) -> Option<TextEffect> {
             .collect(),
         sharp_edges: false,
         glow: None,
+    })
+}
+
+/// A rich-text gradient (`{"color": [[r, g, b], …], "alpha": […], "percent": […], "angle",
+/// "mode", "style"}`), as CapCut keeps one in a text's fill or a text style's layer. Stops
+/// missing from `percent` spread evenly. Only linear gradients are drawn (a radial one is drawn
+/// linear).
+fn gradient(g: &Value) -> Option<Gradient> {
+    let colors: Vec<Rgba> = arr(g, "color")
+        .iter()
+        .enumerate()
+        .filter_map(|(k, c)| {
+            let c = rgb_array(c)?;
+            Some(Rgba { a: g.get("alpha").and_then(|a| a.get(k)).and_then(Value::as_f64).map_or(c.a, |a| a as f32), ..c })
+        })
+        .collect();
+    if colors.is_empty() {
+        return None;
+    }
+    let n = colors.len();
+    let stops = (0..n).map(|k| g.get("percent").and_then(|p| p.get(k)).and_then(Value::as_f64).map_or(if n > 1 { k as f32 / (n - 1) as f32 } else { 0.0 }, |v| v as f32)).collect();
+    // CapCut's renderer has three spans (its gradient modes 0–2); drafts seen name "character".
+    let span = match s(g, "mode").as_str() {
+        "line" | "row" => GradientSpan::Line,
+        "text" | "whole" | "overall" | "all" => GradientSpan::Text,
+        _ => GradientSpan::Character,
+    };
+    Some(Gradient { colors, stops, angle_deg: f(g, "angle", 0.0) as f32, span })
+}
+
+/// A text's glow from its rich-text style's `bloom` (`{"enable", "id", "path", "color",
+/// "colorCustomized", "strength", "range", "dirX", "dirY"}`; the same names, prefixed with
+/// `bloom`, in a text template's parameters), when it's on.
+fn glow(style: &Value) -> Option<TextGlow> {
+    let g = style.get("bloom")?;
+    let on = g.get("enable").and_then(Value::as_bool).unwrap_or(g.get("strength").is_some());
+    if !on {
+        return None;
+    }
+    let num = |k: &str, default: f64| g.get(k).and_then(Value::as_f64).unwrap_or(default) as f32;
+    let color = b(g, "colorCustomized", false).then(|| g.get("color").and_then(rgb_array)).flatten().map(|c| Rgba { a: c.a * num("alpha", 1.0), ..c });
+    let id = s(g, "id");
+    Some(TextGlow {
+        color,
+        // CapCut's defaults for its first glow style (its bundle's settings).
+        strength: num("strength", 0.3),
+        range: num("range", 0.2),
+        direction: [num("dirX", 0.5), num("dirY", 0.5)],
+        style: (!id.is_empty()).then(|| LibraryRef { app: APP.into(), resource_id: id, name: "Glow".into(), category: "text_glow".into() }),
     })
 }
 
@@ -631,7 +673,7 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                     true
                 }
                 "texts" => {
-                    out.texts.push(import_text(id, m));
+                    out.texts.push(import_text(id, m, report));
                     true
                 }
                 "speeds" => {
@@ -930,7 +972,9 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
 
 /// CapCut text materials embed the rich text as a JSON string in `content`:
 /// `{"text": "...", "styles": [{"range": [s, e], "size", "font": {...}, "fill": {...}, "strokes": [...]}]}`.
-fn import_text(id: MaterialId, m: &Value) -> Text {
+/// A style's fill may be a gradient and its strokes several; its `bloom` is the text's glow.
+/// What the engine doesn't draw goes in the report's `unmapped_library`.
+fn import_text(id: MaterialId, m: &Value, report: &mut ImportReport) -> Text {
     let content: Value = m
         .get("content")
         .and_then(Value::as_str)
@@ -938,15 +982,36 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
         .unwrap_or(Value::Null);
     let text = if content.is_null() { s(m, "content") } else { s(&content, "text") };
     let solid = |v: &Value| v.pointer("/content/solid/color").and_then(rgb_array);
+    // A stroke's colour with its opacity (the layer's and its colour's; 1 in every local draft).
+    let stroke_of = |sk: &Value| {
+        let alpha = f(sk, "alpha", 1.0) as f32 * sk.pointer("/content/solid/alpha").and_then(Value::as_f64).unwrap_or(1.0) as f32;
+        let c = solid(sk).unwrap_or(Rgba::BLACK);
+        Stroke { color: Rgba { a: c.a * alpha, ..c }, width: f(sk, "width", 0.0) as f32 }
+    };
+    for st in arr(&content, "styles") {
+        if !arr(st, "inner_shadows").is_empty() {
+            bump(&mut report.unmapped_library, "text: inner shadow".to_string());
+        }
+        if arr(st, "shadows").len() > 1 {
+            bump(&mut report.unmapped_library, "text: more than one shadow (the first is drawn)".to_string());
+        }
+        if st.pointer("/fill/content/render_type").and_then(Value::as_str) == Some("gradient") && s(st.pointer("/fill/content/gradient").unwrap_or(&Value::Null), "style") == "radial" {
+            bump(&mut report.unmapped_library, "text: radial gradient (drawn linear)".to_string());
+        }
+        if st.pointer("/fill/content/render_type").and_then(Value::as_str) == Some("texture") {
+            bump(&mut report.unmapped_library, "text: texture fill".to_string());
+        }
+    }
     let runs = arr(&content, "styles")
         .iter()
         .map(|st| {
             let range = st.get("range").and_then(Value::as_array);
             let r = |k: usize| range.and_then(|a| a.get(k)).and_then(Value::as_u64).unwrap_or(0) as u32;
-            let stroke = arr(st, "strokes").first().map(|sk| Stroke {
-                color: solid(sk).unwrap_or(Rgba::BLACK),
-                width: f(sk, "width", 0.0) as f32,
-            });
+            let strokes = arr(st, "strokes");
+            let stroke = strokes.first().map(stroke_of);
+            let more_strokes = strokes.iter().skip(1).map(stroke_of).filter(|s| s.width > 0.0).collect();
+            let fill = st.get("fill").unwrap_or(&Value::Null);
+            let gradient = (fill.pointer("/content/render_type").and_then(Value::as_str) == Some("gradient")).then(|| fill.pointer("/content/gradient").and_then(gradient)).flatten();
             TextRun {
                 range: (r(0), r(1)),
                 font: FontRef {
@@ -956,9 +1021,9 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
                 size: f(st, "size", f(m, "font_size", 15.0)) as f32,
                 size_unit: SizeUnit::CapCut,
                 fill: st.get("fill").and_then(solid).unwrap_or(Rgba::WHITE),
-                gradient: None,
+                gradient,
                 stroke,
-                more_strokes: Vec::new(),
+                more_strokes,
                 bold: b(st, "bold", false),
                 italic: b(st, "italic", false),
                 underline: b(st, "underline", false),
@@ -1015,7 +1080,7 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             kerning: false,
             background,
             shadow,
-            glow: None,
+            glow: arr(&content, "styles").first().and_then(glow),
             // A box with a fixed width wraps at a width proportional to `fixed_width`, scaled
             // with the clip and independent of the font size; an auto-sized box (`fixed_width`
             // -1) doesn't wrap (calibration session 5; docs/parity/text-wrap.md).
@@ -1353,7 +1418,53 @@ mod tests {
         assert_eq!(paper.width, 0.4);
         assert!(matches!(&paper.paint.kind, PaintKind::Texture(t) if t.columns == 4 && (t.scale - 0.44).abs() < 1e-6));
         assert!(text_style(&dir.join("missing")).is_none());
+        // A gradient layer is drawn as a gradient (it had been its first colour).
+        let style = json!({"fill": {"alpha": 0.5, "content": {"render_type": "gradient", "gradient": {"alpha": [1.0, 0.5], "angle": 90.0, "color": [[1, 1, 1], [0, 0, 1]], "mode": "character", "percent": [0.0, 1.0], "style": "linear"}}}});
+        std::fs::write(dir.join("effectStyle.json"), style.to_string()).unwrap();
+        let fill = text_style(&dir).unwrap().fill.unwrap();
+        let PaintKind::Gradient(g) = &fill.kind else { panic!("fill is a gradient") };
+        assert_eq!((fill.alpha, g.angle_deg, g.span, g.stops.clone()), (0.5, 90.0, GradientSpan::Character, vec![0.0, 1.0]));
+        assert_eq!(g.colors[1], Rgba { r: 0.0, g: 0.0, b: 1.0, a: 0.5 });
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn imports_a_texts_gradient_strokes_glow_and_spacing() {
+        let content = json!({"text": "Glow", "styles": [{
+            "range": [0, 4], "size": 15,
+            "fill": {"alpha": 1.0, "content": {"render_type": "gradient", "solid": {"color": [1, 1, 1]},
+                "gradient": {"alpha": [1, 1, 1], "angle": 45, "color": [[1, 0, 0], [1, 1, 0], [0, 0, 1]], "mode": "line", "percent": [0, 0.5, 1], "style": "linear"}}},
+            "strokes": [
+                {"alpha": 1.0, "width": 0.06, "content": {"render_type": "solid", "solid": {"alpha": 1.0, "color": [0, 0, 0]}}},
+                {"alpha": 0.5, "width": 0.15, "content": {"render_type": "solid", "solid": {"alpha": 1.0, "color": [1, 1, 1]}}},
+                {"alpha": 1.0, "width": 0.0, "content": {"render_type": "solid", "solid": {"color": [1, 0, 0]}}}],
+            "bloom": {"enable": true, "id": "7194814374001775105", "path": "/cache/glow", "colorCustomized": true, "color": [0, 1, 0], "strength": 0.4, "range": 0.25, "dirX": 0.3, "dirY": 0.6},
+            "inner_shadows": [{"alpha": 1.0}]
+        }]});
+        let m = json!({"id": "T", "font_name": "", "alignment": 1, "letter_spacing": 0.05, "line_spacing": 0.12, "content": content.to_string()});
+        let mut report = ImportReport::default();
+        let t = import_text(MaterialId("T".into()), &m, &mut report);
+        let run = &t.runs[0];
+        let g = run.gradient.as_ref().unwrap();
+        assert_eq!((g.colors.len(), g.stops.clone(), g.angle_deg, g.span), (3, vec![0.0, 0.5, 1.0], 45.0, GradientSpan::Line));
+        assert_eq!(run.fill, Rgba::WHITE);
+        // The first stroke is the outline; the rest (with a width) more of them, with their opacity.
+        assert_eq!(run.stroke.map(|s| s.width), Some(0.06));
+        assert_eq!(run.more_strokes.len(), 1);
+        assert_eq!((run.more_strokes[0].width, run.more_strokes[0].color.a), (0.15, 0.5));
+        let glow = t.layout.glow.as_ref().unwrap();
+        assert_eq!((glow.strength, glow.range, glow.direction), (0.4, 0.25, [0.3, 0.6]));
+        assert_eq!(glow.color, Some(Rgba { r: 0.0, g: 1.0, b: 0.0, a: 1.0 }));
+        assert_eq!(glow.style.as_ref().map(|s| s.resource_id.as_str()), Some("7194814374001775105"));
+        assert_eq!((t.layout.letter_spacing, t.layout.line_spacing), (0.05, 0.12));
+        assert_eq!(report.unmapped_library.get("text: inner shadow"), Some(&1));
+        // A glow that's off, or a plain text, imports none; the glow's own colour only when picked.
+        let off = json!({"text": "x", "styles": [{"range": [0, 1], "bloom": {"enable": false, "id": "", "path": ""}}]});
+        assert!(import_text(MaterialId("U".into()), &json!({"content": off.to_string()}), &mut report).layout.glow.is_none());
+        let own = json!({"text": "x", "styles": [{"range": [0, 1], "bloom": {"enable": true, "colorCustomized": false, "color": [0, 1, 0], "strength": 0.5}}]});
+        let own = import_text(MaterialId("V".into()), &json!({"content": own.to_string()}), &mut report);
+        assert_eq!(own.layout.glow.as_ref().map(|g| (g.color, g.range, g.direction)), Some((None, 0.2, [0.5, 0.5])));
+        assert!(own.runs[0].gradient.is_none() && own.runs[0].more_strokes.is_empty());
     }
 
     #[test]

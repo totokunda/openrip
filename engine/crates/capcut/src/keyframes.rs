@@ -78,6 +78,13 @@ const TEXT_KEYS: &[(&str, &[Param], f64)] = &[
     ("KFTypeBackgroundWidth", &[Param::BackgroundWidth], 1.0),
     ("KFTypeBackgroundHeight", &[Param::BackgroundHeight], 1.0),
     ("KFTypeTextCurveAngle", &[Param::TextCurve], 1.0),
+    // The glow, in the units of its rich-text `bloom` (0…1).
+    ("KFTypeBloomColor", &[Param::GlowRed, Param::GlowGreen, Param::GlowBlue], 1.0),
+    ("KFTypeBloomAlpha", &[Param::GlowAlpha], 1.0),
+    ("KFTypeBloomStrength", &[Param::GlowStrength], 1.0),
+    ("KFTypeBloomRange", &[Param::GlowRange], 1.0),
+    ("KFTypeBloomDirX", &[Param::GlowDirX], 1.0),
+    ("KFTypeBloomDirY", &[Param::GlowDirY], 1.0),
 ];
 
 /// Mask keyframe types (in the units of the mask's `config`).
