@@ -24,10 +24,18 @@ const savedAt = (ctx) => {
 // The engine's frame (its hash) and the saved project, once both have settled. With `since`
 // (a time in ms), the project as written after it: the autosave can take a few seconds when
 // the app is busy, so it waits for a write after the action (up to 8 s; an action that
-// changes nothing writes nothing, and then it's the file as it was).
+// changes nothing writes nothing, and then it's the file as it was), then for the writes to
+// stop for 0.8 s, since another save (the cover's, one queued before the action) can land
+// first.
 export const state = async (ctx, since) => {
   if (since != null) {
     for (let i = 0; i < 40 && savedAt(ctx) <= since; i++) await ctx.win.waitForTimeout(200);
+    for (let i = 0, last = savedAt(ctx), quiet = 0; i < 40 && quiet < 4; i++) {
+      await ctx.win.waitForTimeout(200);
+      const t = savedAt(ctx);
+      quiet = t === last ? quiet + 1 : 0;
+      last = t;
+    }
   }
   return { frame: (await engineFrame(ctx.win)).sum, doc: docOf(await savedProject(ctx.win, ctx.udDir)) };
 };
