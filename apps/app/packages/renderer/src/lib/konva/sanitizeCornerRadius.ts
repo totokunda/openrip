@@ -5,6 +5,8 @@ export type KonvaCornerRadius = number | number[];
  * This clamps cornerRadius to:
  * - >= 0
  * - <= min(width, height) / 2 (when dimensions are provided)
+ * - 0 when a given dimension is zero, negative or not a number: Konva clamps the radius to
+ *   half the rect's size itself, which for a negative width is a negative radius.
  *
  * Accepts both number and array forms used by Konva (e.g. [tl, tr, br, bl]).
  */
@@ -15,7 +17,8 @@ export function sanitizeCornerRadius(
 ): KonvaCornerRadius {
   const wOk = typeof width === "number" && Number.isFinite(width) && width > 0;
   const hOk = typeof height === "number" && Number.isFinite(height) && height > 0;
-  const maxR = wOk && hOk ? Math.min(width!, height!) / 2 : undefined;
+  const degenerate = (width !== undefined && !wOk) || (height !== undefined && !hOk);
+  const maxR = degenerate ? 0 : wOk && hOk ? Math.min(width!, height!) / 2 : undefined;
 
   const clampOne = (v: unknown): number => {
     const n = typeof v === "number" ? v : Number(v);
