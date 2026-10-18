@@ -235,7 +235,7 @@ Done (2026-10-18): the data model, the library files and the engine for the Text
   - CapCut's colour picker on desktop has no gradient; the gradient field is for imported drafts, the Effects styles and a gradient picker if wanted.
   - The engine draws the app's own text in a system font when its family isn't installed (Arial, else Helvetica), never CapCut's; the bundled web fonts (Poppins, Montserrat…) aren't font files it reads, so they draw in Arial.
   - Bubbles aren't done: CapCut's are downloaded image bundles ([text-styles.md](../parity/text-styles.md)).
-- **Checked:** `tests/captions.test.ts` and `tests/text-styles.test.ts` (`node --test`), the v1 and importer crates' tests, the render tests, and the harness step `textstyles` (README; 13/13).
+- **Checked:** `tests/captions.test.ts` and `tests/text-styles.test.ts` (`node --test`), the v1 and importer crates' tests, the render tests, and the harness steps `textstyles` (README; 13/13) and `captextstyle` (a converted caption, 5/5).
 
 ## Speed on large projects
 
