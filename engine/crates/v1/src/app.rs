@@ -205,6 +205,84 @@ fn app_box(world: &World, center: Vec2, size: [f64; 2], rotation: f64) -> Map<St
     m
 }
 
+/// A video or photo's masks from the draft as the app's (`masks`, lib/mask-shapes.ts), for
+/// the Mask tab: CapCut's rectangle (with its round corners), circle, linear, mirror and its
+/// heart and star (their bundle's picture kept in `picture`), in world units from the clip's
+/// top-left at its box `b`, with `draftMask` naming the material. A mask with keyframes gets a
+/// pose at each of its keys' times (in the clip's source frames for a video, as the app keys
+/// masks). Shapes the panel can't show (CapCut's pen) aren't listed and stay the draft's.
+fn draft_masks(project: &Project, seg: &Segment, b: &Map<String, Value>, fps: f64) -> Vec<Value> {
+    let get = |k: &str, d: f64| b.get(k).and_then(Value::as_f64).unwrap_or(d);
+    let (bw, bh) = (get("width", 0.0) * get("scaleX", 1.0), get("height", 0.0) * get("scaleY", 1.0));
+    let video = seg.source.is_some();
+    // A segment-local time as the app's mask frame.
+    let frame = |t: Micros| -> f64 {
+        let us = if video { seg.source.map_or(0, |s| s.start.0) as f64 + t.0 as f64 * seg.speed } else { t.0 as f64 };
+        (us * fps / 1e6 * 1000.0).round() / 1000.0
+    };
+    let mut out = Vec::new();
+    for id in &seg.attachments {
+        let Some(MaterialRef::Mask(m)) = project.materials.get(id) else { continue };
+        let (shape_type, picture) = match &m.shape {
+            MaskShape::Rectangle { .. } => ("rectangle", None),
+            MaskShape::Circle => ("circle", None),
+            MaskShape::Ellipse => ("ellipse", None),
+            MaskShape::Linear => ("linear", None),
+            MaskShape::Mirror => ("mirror", None),
+            MaskShape::Picture { name, path } => (if name.contains("heart") { "heart" } else { "star" }, Some(path.clone())),
+            _ => continue,
+        };
+        let mut times: Vec<Micros> = seg.keyframes.iter().filter(|k| k.material == m.id).flat_map(|k| k.keys.iter().map(|x| x.at)).collect();
+        times.sort();
+        times.dedup();
+        let keyed = !times.is_empty();
+        let poses: Vec<(f64, Mask)> = if keyed { times.iter().map(|&t| (frame(t), seg.mask_at(m, t))).collect() } else { vec![(frame(Micros::ZERO), m.clone())] };
+        let mut keyframes = Map::new();
+        for (f, p) in poses {
+            let (cx, cy) = ((1.0 + p.center[0] as f64) / 2.0 * bw, (1.0 - p.center[1] as f64) / 2.0 * bh);
+            let (w, h) = (p.size[0] as f64 * bw, p.size[1] as f64 * bh);
+            let rotation = p.rotation as f64;
+            // A rectangle keeps its turned top-left corner; the others their box's.
+            let (x, y) = if shape_type == "rectangle" {
+                let (sn, cs) = rotation.to_radians().sin_cos();
+                (cx - (cs * w / 2.0 - sn * h / 2.0), cy - (sn * w / 2.0 + cs * h / 2.0))
+            } else {
+                (cx - w / 2.0, cy - h / 2.0)
+            };
+            let mut bounds = json!({"x": x, "y": y, "width": w, "height": h, "rotation": rotation, "scaleX": 1, "scaleY": 1, "shapeType": shape_type});
+            if let MaskShape::Rectangle { round_corner } = p.shape {
+                bounds["cornerRadius"] = json!(round_corner as f64 * 100.0);
+            }
+            if let Some(path) = &picture {
+                bounds["picture"] = json!(path);
+            }
+            let mut data = json!({ "shapeBounds": bounds });
+            if keyed {
+                data["featherAmount"] = json!(p.feather as f64 * 100.0);
+            }
+            keyframes.insert(format!("{f}"), data);
+        }
+        out.push(json!({
+            "id": format!("draft-{}", m.id.0),
+            "clipId": seg.id,
+            "tool": "shape",
+            "featherAmount": m.feather as f64 * 100.0,
+            "inverted": m.invert,
+            "keyed": keyed,
+            "keyframes": keyframes,
+            "transform": b,
+            "createdAt": 0,
+            "lastModified": 0,
+            "maskColorEnabled": false,
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "backgroundColorEnabled": true,
+            "draftMask": m.id.0,
+        }));
+    }
+    out
+}
+
 /// A video or photo's own adjustments from the draft, for the Adjust tab, in the clip's order:
 /// CapCut's Adjust sliders (on CapCut's scale), colour wheels, and the HSL, curves, filters
 /// and effects on the clip. The app's sliders (`v1:`) have the Adjust panel's own fields,
@@ -458,6 +536,8 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                 let mut original = b.clone();
                 original.insert("x".into(), json!(0.0));
                 original.insert("y".into(), json!(0.0));
+                // The draft's masks, for the Mask tab (the ones it can show).
+                clip.insert("masks".into(), Value::Array(draft_masks(project, seg, &b, ticks.fps)));
                 clip.insert("transform".into(), Value::Object(b));
                 clip.insert("originalTransform".into(), Value::Object(original));
                 clip.insert("draftAdjustments".into(), Value::Array(draft_adjustments(project, seg)));
@@ -577,7 +657,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
         .chain(ADJUST_KEYS.iter())
         // The draft's own adjustments, a filter bar's strength, the colour and compositing
         // fields, and the Audio tab's.
-        .chain(["draftAdjustments", "intensity", "color", "blendMode", "chroma", "canvas", "flip", "audioEffects", "loudness", "channel", "beats"].iter())
+        .chain(["draftAdjustments", "masks", "intensity", "color", "blendMode", "chroma", "canvas", "flip", "audioEffects", "loudness", "channel", "beats"].iter())
         .filter_map(|k| clip.get(*k).map(|v| (k.to_string(), v.clone())))
         .collect();
     clip.insert(
@@ -1120,6 +1200,51 @@ mod tests {
         let v = p.tracks.iter_mut().flat_map(|t| &mut t.segments).find(|s| s.id == "v").unwrap();
         v.attachments.extend(["br", "cl", "wh", "h1", "h2", "cu"].map(MaterialId::from));
         p
+    }
+
+    /// A draft's masks show in the Mask tab; unedited they stay the draft's own, and an edit
+    /// puts the app's in their place.
+    #[test]
+    fn the_drafts_masks_show_and_edits_replace_them() {
+        let mut p = adjusted();
+        p.materials.masks.push(Mask {
+            id: MaterialId("mk".into()),
+            shape: MaskShape::Rectangle { round_corner: 0.25 },
+            center: [0.0, 0.0],
+            size: [0.5, 0.5],
+            rotation: 0.0,
+            feather: 0.1,
+            expansion: 0.0,
+            invert: true,
+            inside: MaskPaint::Clip,
+            outside: MaskPaint::clear(),
+            keys: Vec::new(),
+            library: None,
+        });
+        p.tracks.iter_mut().flat_map(|t| &mut t.segments).find(|s| s.id == "v").unwrap().attachments.push(MaterialId::from("mk"));
+        let doc = to_app_project(&p, &mut |_| None);
+        let v = doc["timeline"]["clips"].as_array().unwrap().iter().find(|c| c["clipId"] == "v").unwrap();
+        let masks = v["masks"].as_array().unwrap();
+        assert_eq!(masks.len(), 1);
+        let m = &masks[0];
+        assert_eq!((m["draftMask"].as_str(), m["inverted"].as_bool(), m["featherAmount"].as_f64().map(|f| (f * 1000.0).round() / 1000.0)), (Some("mk"), Some(true), Some(10.0)));
+        let b = &m["keyframes"].as_object().unwrap().values().next().unwrap()["shapeBounds"];
+        assert_eq!((b["shapeType"].as_str(), b["cornerRadius"].as_f64()), (Some("rectangle"), Some(25.0)));
+        // Unedited: the draft's own mask.
+        let back = import_v1_json(&doc).unwrap().project;
+        assert!(segment(&back, "v").attachments.contains(&MaterialId::from("mk")));
+        // Moved in the app: the app's mask in its place, centred where it was moved to.
+        let mut doc = doc.clone();
+        let clip = clip_mut(&mut doc, "v");
+        let key = clip["masks"][0]["keyframes"].as_object().unwrap().keys().next().unwrap().clone();
+        let x = clip["masks"][0]["keyframes"][&key]["shapeBounds"]["x"].as_f64().unwrap();
+        clip["masks"][0]["keyframes"][&key]["shapeBounds"]["x"] = json!(x + 10.0);
+        let back = import_v1_json(&doc).unwrap().project;
+        let v = segment(&back, "v");
+        assert!(!v.attachments.contains(&MaterialId::from("mk")) && v.attachments.iter().any(|a| a.0 == "v-mask0"));
+        let m = back.materials.masks.iter().find(|m| m.id.0 == "v-mask0").unwrap();
+        assert_eq!((m.shape.clone(), m.invert), (MaskShape::Rectangle { round_corner: 0.25 }, true));
+        assert!(m.center[0] > 0.0 && (m.feather - 0.1).abs() < 1e-6, "{m:?}");
     }
 
     #[test]

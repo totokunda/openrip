@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn a_mask_moves_with_its_keys() {
         let s = segment(vec![keys("m", Param::MaskCenterX, &[(0, -0.5), (1_000_000, 0.5)]), keys("m", Param::MaskRoundCorner, &[(0, 0.2)])]);
-        let m = Mask { id: MaterialId("m".into()), shape: MaskShape::Rectangle { round_corner: 0.0 }, center: [0.0, 0.3], size: [0.5, 0.5], rotation: 0.0, feather: 0.0, invert: false, inside: MaskPaint::Clip, outside: MaskPaint::clear(), keys: Vec::new(), library: None };
+        let m = Mask { id: MaterialId("m".into()), shape: MaskShape::Rectangle { round_corner: 0.0 }, center: [0.0, 0.3], size: [0.5, 0.5], rotation: 0.0, feather: 0.0, expansion: 0.0, invert: false, inside: MaskPaint::Clip, outside: MaskPaint::clear(), keys: Vec::new(), library: None };
         let at = s.mask_at(&m, Micros(750_000));
         assert_eq!((at.center, at.shape), ([0.25, 0.3], MaskShape::Rectangle { round_corner: 0.2 }));
     }

@@ -847,6 +847,9 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         size: [f(c, "width", 1.0) as f32, f(c, "height", 1.0) as f32],
                         rotation: f(c, "rotation", 0.0) as f32,
                         feather: f(c, "feather", 0.0) as f32,
+                        // CapCut's `expansion` goes with its pen, which isn't drawn yet; its
+                        // scale is unchecked, so it isn't read.
+                        expansion: 0.0,
                         invert: b(c, "invert", false),
                         inside: MaskPaint::Clip,
                         outside: MaskPaint::clear(),

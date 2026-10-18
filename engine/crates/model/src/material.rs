@@ -524,6 +524,10 @@ pub struct Mask {
     /// shape draws it; the app's shapes soften the same way (docs/parity/masks.md).
     #[serde(default)]
     pub feather: f32,
+    /// How far the edge moves out (in, below 0) from the shape, as a fraction of the
+    /// picture's height (CapCut's Expansion on a brush or pen mask).
+    #[serde(default)]
+    pub expansion: f32,
     #[serde(default)]
     pub invert: bool,
     #[serde(default = "MaskPaint::clip")]
@@ -552,6 +556,9 @@ pub struct MaskKey {
     /// The feather at this pose (the mask's own when missing); it travels with the place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feather: Option<f32>,
+    /// The expansion at this pose (the mask's own when missing), travelling likewise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expansion: Option<f32>,
     /// How the pose travels to the next key's.
     #[serde(default)]
     pub ease: crate::animated::Easing,
@@ -610,8 +617,40 @@ pub enum MaskShape {
     /// from its top-left; an erasing stroke takes away what's under it. `center`, `size`
     /// and `rotation` don't apply.
     Brush { strokes: Vec<BrushStroke> },
+    /// A text's glyphs (CapCut's Text mask): laid out and centred on the centre, turned by
+    /// the rotation; `size` doesn't apply.
+    Text(MaskText),
     /// A shape not drawn yet, by CapCut's name for it (`contour`, …).
     Other { name: String },
+}
+
+/// The words and style of a text mask.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MaskText {
+    pub text: String,
+    /// A font family (a system font's name; empty for the app's default).
+    #[serde(default)]
+    pub font: String,
+    /// The em size, as a fraction of the picture's height.
+    pub size: f32,
+    #[serde(default)]
+    pub bold: bool,
+    #[serde(default)]
+    pub italic: bool,
+    #[serde(default)]
+    pub underline: bool,
+    /// Extra space between characters and between lines, as fractions of the em.
+    #[serde(default)]
+    pub letter_spacing: f32,
+    #[serde(default)]
+    pub line_spacing: f32,
+    /// 0 = left, 1 = centre, 2 = right.
+    #[serde(default = "centre_align")]
+    pub align: u8,
+}
+
+fn centre_align() -> u8 {
+    1
 }
 
 /// One stroke of the app's brush mask.

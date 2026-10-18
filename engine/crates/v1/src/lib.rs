@@ -565,13 +565,25 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
         }
     }
     if matches!(ty, "video" | "image") {
-        // The app's adjustments and masks go on top of the draft's own.
+        // The app's adjustments go on top of the draft's own.
         if app::ADJUST_KEYS.into_iter().any(differs) {
             attach_adjustments(&seg.id.clone(), clip, materials, &mut seg.attachments);
         }
-        for m in convert_masks(&seg.id, clip, clock.fps.as_f64(), report) {
-            seg.attachments.push(m.id.clone());
-            materials.masks.push(m);
+        // The draft's masks are the Mask tab's (`masks`, each naming its material in
+        // `draftMask`): unedited, the draft's own stay as CapCut had them, keys and all;
+        // edited, the app's replace the ones the tab showed (any it couldn't show stay). A
+        // project converted before the tab showed them puts the app's on top.
+        let replace = match base.get("masks") {
+            Some(_) => differs("masks"),
+            None => true,
+        };
+        if replace {
+            let shown: Vec<String> = base.get("masks").and_then(Value::as_array).into_iter().flatten().map(|m| s(m, "draftMask")).filter(|id| !id.is_empty()).collect();
+            seg.attachments.retain(|id| !shown.contains(&id.0));
+            for m in convert_masks(&seg.id, clip, clock.fps.as_f64(), report) {
+                seg.attachments.push(m.id.clone());
+                materials.masks.push(m);
+            }
         }
     }
     // The Animation tab's fields the app changed replace the draft's animations of their kind.
@@ -1295,7 +1307,7 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
     let mut out = Vec::new();
     for (index, m) in masks.iter().enumerate() {
         let tool = s(m, "tool");
-        if !matches!(tool.as_str(), "shape" | "lasso" | "draw") {
+        if !matches!(tool.as_str(), "shape" | "lasso" | "draw" | "pen") {
             continue;
         }
         let mt = [m.get("transform"), clip.get("originalTransform"), clip.get("transform")].into_iter().flatten().find(|v| v.is_object()).cloned().unwrap_or(Value::Null);
@@ -1323,7 +1335,28 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
                 if strokes.is_empty() {
                     continue;
                 }
-                keys.push(MaskKey { at, shape: MaskShape::Brush { strokes }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, feather: key_feather(data), ease: Easing::Linear });
+                keys.push(MaskKey { at, shape: MaskShape::Brush { strokes }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, feather: key_feather(data), expansion: key_expansion(data), ease: Easing::Linear });
+                eases.push(ease);
+                continue;
+            }
+            if tool == "pen" {
+                // CapCut's pen: a closed path of cubic beziers through its anchors (each with
+                // the handles it leaves and arrives by), drawn as the polygon of the curve.
+                let anchors: Vec<[f64; 6]> = data
+                    .pointer("/penPath/points")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|p| {
+                        let (x, y) = (f(p, "x", 0.0), f(p, "y", 0.0));
+                        [x, y, f(p, "ix", x), f(p, "iy", y), f(p, "ox", x), f(p, "oy", y)]
+                    })
+                    .collect();
+                if anchors.len() < 3 {
+                    continue;
+                }
+                let points: Vec<[f32; 2]> = pen_points(&anchors).into_iter().map(|[px, py]| [(px / bw) as f32, (py / bh) as f32]).collect();
+                keys.push(MaskKey { at, shape: MaskShape::Polygon { points }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, feather: key_feather(data), expansion: key_expansion(data), ease: Easing::Linear });
                 eases.push(ease);
                 continue;
             }
@@ -1335,7 +1368,7 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
                     continue;
                 };
                 let points: Vec<[f32; 2]> = pts.iter().filter_map(Value::as_f64).collect::<Vec<_>>().chunks_exact(2).map(|p| [(p[0] / bw) as f32, (p[1] / bh) as f32]).collect();
-                keys.push(MaskKey { at, shape: MaskShape::Polygon { points }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, feather: key_feather(data), ease: Easing::Linear });
+                keys.push(MaskKey { at, shape: MaskShape::Polygon { points }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, feather: key_feather(data), expansion: key_expansion(data), ease: Easing::Linear });
                 eases.push(ease);
                 continue;
             }
@@ -1344,19 +1377,43 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
             let rotation = f(b, "rotation", 0.0);
             let (x, y) = (f(b, "x", 0.0), f(b, "y", 0.0));
             let shape_type = s(b, "shapeType");
-            let (cx, cy) = if matches!(shape_type.as_str(), "ellipse" | "polygon" | "star" | "heart" | "linear" | "mirror") {
+            let (cx, cy) = if matches!(shape_type.as_str(), "ellipse" | "circle" | "polygon" | "star" | "heart" | "linear" | "mirror" | "text") {
                 (x + w / 2.0, y + h / 2.0)
             } else {
                 let (sn, cs) = rotation.to_radians().sin_cos();
                 (x + cs * w / 2.0 - sn * h / 2.0, y + sn * w / 2.0 + cs * h / 2.0)
             };
+            // A draft's heart or star keeps CapCut's own picture (`picture`), drawn as CapCut
+            // draws it while that's on this machine.
+            let picture = s(b, "picture");
             let shape = match shape_type.as_str() {
+                "heart" | "star" if !picture.is_empty() => MaskShape::Picture { name: if shape_type == "heart" { "heart".into() } else { "pentagram".into() }, path: picture },
+                "circle" => MaskShape::Circle,
                 "ellipse" => MaskShape::Ellipse,
                 "polygon" => MaskShape::Triangle,
                 "star" => MaskShape::Star,
                 "linear" => MaskShape::Linear,
                 "mirror" => MaskShape::Mirror,
                 "heart" => MaskShape::Polygon { points: heart_points(cx, cy, w, h, rotation).into_iter().map(|[px, py]| [(px / bw) as f32, (py / bh) as f32]).collect() },
+                // A text mask: its words and style; the size in world units at the mask's scale.
+                "text" => {
+                    let t = data.get("text").unwrap_or(&Value::Null);
+                    MaskShape::Text(MaskText {
+                        text: s(t, "content"),
+                        font: s(t, "font"),
+                        size: (f(t, "size", 40.0) / bh) as f32,
+                        bold: t.get("bold").and_then(Value::as_bool).unwrap_or(false),
+                        italic: t.get("italic").and_then(Value::as_bool).unwrap_or(false),
+                        underline: t.get("underline").and_then(Value::as_bool).unwrap_or(false),
+                        letter_spacing: f(t, "letterSpacing", 0.0) as f32,
+                        line_spacing: f(t, "lineSpacing", 0.0) as f32,
+                        align: match s(t, "align").as_str() {
+                            "left" => 0,
+                            "right" => 2,
+                            _ => 1,
+                        },
+                    })
+                }
                 _ => MaskShape::Rectangle { round_corner: (f(b, "cornerRadius", 0.0) / 100.0).clamp(0.0, 1.0) as f32 },
             };
             keys.push(MaskKey {
@@ -1366,6 +1423,7 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
                 size: [(w / bw) as f32, (h / bh) as f32],
                 rotation: rotation as f32,
                 feather: key_feather(data),
+                expansion: key_expansion(data),
                 ease: Easing::Linear,
             });
             eases.push(ease);
@@ -1387,9 +1445,12 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
             size: first.size,
             rotation: first.rotation,
             feather: (f(m, "featherAmount", 0.0) / 100.0).clamp(0.0, 1.0) as f32,
+            expansion: expansion_of(m.get("expansion")).unwrap_or(0.0),
             invert: b(m, "inverted"),
             inside: paint(m.get("maskColorEnabled").and_then(Value::as_bool).unwrap_or(false), &s(m, "maskColor"), "#ffffff", f(m, "maskOpacity", 100.0)),
-            outside: paint(index == 0 && m.get("backgroundColorEnabled").and_then(Value::as_bool).unwrap_or(false), &s(m, "backgroundColor"), "#000000", f(m, "backgroundOpacity", 100.0)),
+            // A mask that cuts the clip (a clear outside, as the Mask tab makes them) cuts it
+            // wherever it is in the list, as each of a CapCut draft's masks does.
+            outside: paint((index == 0 || f(m, "backgroundOpacity", 100.0) == 0.0) && m.get("backgroundColorEnabled").and_then(Value::as_bool).unwrap_or(false), &s(m, "backgroundColor"), "#000000", f(m, "backgroundOpacity", 100.0)),
             keys: if keys.len() > 1 { keys } else { Vec::new() },
             library: None,
         });
@@ -1400,6 +1461,37 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
 /// A mask key's own feather (`featherAmount`, 0–100), when it has one.
 fn key_feather(data: &Value) -> Option<f32> {
     data.get("featherAmount").and_then(Value::as_f64).map(|v| (v / 100.0).clamp(0.0, 1.0) as f32)
+}
+
+/// The Mask tab's Expansion (−100…100) as the engine's: a tenth of the picture's height at
+/// either end of the slider (OpenRip's own scale; CapCut's isn't measured).
+fn expansion_of(v: Option<&Value>) -> Option<f32> {
+    v.and_then(Value::as_f64).map(|v| (v.clamp(-100.0, 100.0) / 100.0 * 0.1) as f32)
+}
+
+/// A mask key's own expansion, when it has one.
+fn key_expansion(data: &Value) -> Option<f32> {
+    expansion_of(data.get("expansion"))
+}
+
+/// The polygon of a closed pen path: each anchor `[x, y, in x, in y, out x, out y]` (its
+/// handles absolute), the curve from one anchor to the next a cubic bezier through the first's
+/// out handle and the next's in handle, 16 points a span.
+fn pen_points(anchors: &[[f64; 6]]) -> Vec<[f64; 2]> {
+    const STEPS: usize = 16;
+    let n = anchors.len();
+    let mut out = Vec::with_capacity(n * STEPS);
+    for i in 0..n {
+        let (a, b) = (anchors[i], anchors[(i + 1) % n]);
+        let p = [[a[0], a[1]], [a[4], a[5]], [b[2], b[3]], [b[0], b[1]]];
+        for k in 0..STEPS {
+            let t = k as f64 / STEPS as f64;
+            let u = 1.0 - t;
+            let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+            out.push([0, 1].map(|c| (0..4).map(|j| w[j] * p[j][c]).sum::<f64>()));
+        }
+    }
+    out
 }
 
 /// The app's heart mask: the classic heart curve (x = 16 sin³t, y = 13 cos t − 5 cos 2t −
@@ -1906,6 +1998,37 @@ mod tests {
         let r = m("3");
         assert_eq!((r.keys[0].shape.clone(), r.keys[1].shape.clone()), (MaskShape::Rectangle { round_corner: 0.4 }, MaskShape::Rectangle { round_corner: 0.8 }));
         assert_eq!((r.feather, r.keys[0].feather, r.keys[1].feather), (0.1, Some(0.0), Some(0.5)));
+    }
+
+    /// The Mask tab's Text, Pen and Brush: a text's words and style, a pen's closed bezier
+    /// path as its polygon, the expansion; and a second mask that cuts the clip cuts it too.
+    #[test]
+    fn text_pen_expansion_and_a_second_cutting_mask() {
+        let mut d = doc();
+        let clip = &mut d["timeline"]["clips"][0];
+        let tr = json!({"x": 0, "y": 0, "width": 1066.6666666666667, "height": 600, "scaleX": 1, "scaleY": 1});
+        clip["masks"] = json!([
+            {"id": "t", "tool": "shape", "featherAmount": 0, "transform": tr, "backgroundColorEnabled": true, "backgroundOpacity": 0,
+             "keyframes": {"0": {"shapeBounds": {"x": 433.3333333333333, "y": 250, "width": 200, "height": 100, "rotation": 15, "shapeType": "text"},
+                                 "text": {"content": "Hello", "font": "Georgia", "size": 60, "bold": true, "underline": true, "letterSpacing": 0.1, "align": "left"}}}},
+            {"id": "p", "tool": "pen", "featherAmount": 0, "expansion": 50, "transform": tr, "backgroundColorEnabled": true, "backgroundOpacity": 0,
+             "keyframes": {"0": {"penPath": {"closed": true, "points": [
+                {"x": 100, "y": 100, "ix": 100, "iy": 100, "ox": 100, "oy": 100},
+                {"x": 300, "y": 100, "ix": 300, "iy": 100, "ox": 300, "oy": 100},
+                {"x": 300, "y": 300, "ix": 300, "iy": 300, "ox": 300, "oy": 300}]}}}}
+        ]);
+        let Imported { project, .. } = import_v1_json(&d).unwrap();
+        let m = |id: &str| project.materials.masks.iter().find(|m| m.id.0 == format!("v1-mask{id}")).unwrap();
+        let MaskShape::Text(t) = &m("0").shape else { panic!("a text mask") };
+        assert_eq!((t.text.as_str(), t.font.as_str(), t.bold, t.underline, t.align, t.letter_spacing), ("Hello", "Georgia", true, true, 0, 0.1));
+        assert!((t.size - 0.1).abs() < 1e-6 && m("0").center[0].abs() < 1e-5 && m("0").rotation == 15.0);
+        // The pen's straight spans: 16 points each, the corners on it.
+        let MaskShape::Polygon { points } = &m("1").shape else { panic!("a pen polygon") };
+        assert_eq!(points.len(), 48);
+        assert!((points[16][0] - 300.0 / 1066.6666666666667).abs() < 1e-5 && (points[16][1] - 100.0 / 600.0).abs() < 1e-5);
+        assert!((m("1").expansion - 0.05).abs() < 1e-6);
+        // Both cut the clip: a clear outside, the second's too.
+        assert!(m("1").outside == MaskPaint::Color(Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
     }
 
     #[test]

@@ -1559,7 +1559,8 @@ impl PreviewEngine {
                 // Shapes not drawn yet leave the picture as it is.
                 None => {
                     let field = self.mask_field(&m.shape);
-                    let Some(c) = crate::mask::coverage(m, at, w, h, field.as_deref()) else { continue };
+                    let glyphs = crate::mask::text_at(m, at).and_then(|t| self.mask_glyphs(&t, h));
+                    let Some(c) = crate::mask::coverage(m, at, w, h, field.as_deref(), glyphs.as_ref()) else { continue };
                     let img = std::sync::Arc::new(turn_to_stored(&c, w, h, orientation));
                     self.mattes.insert(key, (img.clone(), tick));
                     img
@@ -1568,6 +1569,53 @@ impl PreviewEngine {
             out.push((image, paint(m.inside), paint(m.outside)));
         }
         out
+    }
+
+    /// A text mask's glyphs for a picture `h` pixels tall: laid out in its font (a system
+    /// font by name, else the app's default, as the app's own text falls back) at its em size,
+    /// white, with a synthetic bold and italic as the app's text has them, and the text's
+    /// underline (at the font's own position).
+    fn mask_glyphs(&mut self, t: &openrip_model::MaskText, h: u32) -> Option<crate::mask::Glyphs> {
+        let key = format!("app:{}", t.font);
+        let path = self.font_files.entry(key).or_insert_with(|| font_file_for(&t.font, false)).clone();
+        if !self.fonts.contains_key(&path) {
+            let font = Font::from_file(Path::new(&path)).ok()?;
+            self.fonts.insert(path.clone(), font);
+        }
+        let font = &self.fonts[&path];
+        let em = (t.size * h as f32).max(1.0);
+        let style = TextStyle {
+            font,
+            size: em,
+            color: [255, 255, 255, 255],
+            align: match t.align {
+                0 => Align::Left,
+                2 => Align::Right,
+                _ => Align::Center,
+            },
+            letter_spacing: t.letter_spacing,
+            line_spacing: t.line_spacing,
+            line_height: None,
+            kerning: true,
+            stroke: None,
+            more_strokes: &[],
+            gradient: None,
+            glow: None,
+            background: None,
+            shadow: None,
+            max_width: None,
+            bold: if t.bold { em * 0.03 } else { 0.0 },
+            italic: if t.italic { 12.0 } else { 0.0 },
+            effect: None,
+            curve: 0.0,
+            char_colors: None,
+            underline: t.underline,
+        };
+        let layout = text::layout(&t.text, &style);
+        let r = layout.rasterize(&style, [0.0, 0.0]);
+        let (gw, gh) = (r.image.width, r.image.height);
+        let alpha: Vec<u8> = r.image.data.chunks_exact(4).map(|p| p[3]).collect();
+        Some(crate::mask::Glyphs { w: gw, h: gh, alpha, center: r.center })
     }
 
     /// A picture mask's distance field (CapCut's heart and star), read from its bundle once.

@@ -18,14 +18,24 @@ struct Pose {
     rotation: f64,
     /// A key's own feather (the app's masks keyframe it with the place), else the mask's.
     feather: f64,
+    /// Likewise its expansion (a fraction of the picture's height).
+    expansion: f64,
 }
 
 fn pose(m: &Mask, at: Micros) -> Pose {
     let feather_of = |k: &MaskKey| k.feather.unwrap_or(m.feather);
-    let own = |k: &MaskKey| Pose { shape: k.shape.clone(), center: k.center.map(f64::from), size: k.size.map(f64::from), rotation: k.rotation as f64, feather: feather_of(k) as f64 };
+    let expansion_of = |k: &MaskKey| k.expansion.unwrap_or(m.expansion);
+    let own = |k: &MaskKey| Pose {
+        shape: k.shape.clone(),
+        center: k.center.map(f64::from),
+        size: k.size.map(f64::from),
+        rotation: k.rotation as f64,
+        feather: feather_of(k) as f64,
+        expansion: expansion_of(k) as f64,
+    };
     let keys = &m.keys;
     let Some(first) = keys.first() else {
-        return Pose { shape: m.shape.clone(), center: m.center.map(f64::from), size: m.size.map(f64::from), rotation: m.rotation as f64, feather: m.feather as f64 };
+        return Pose { shape: m.shape.clone(), center: m.center.map(f64::from), size: m.size.map(f64::from), rotation: m.rotation as f64, feather: m.feather as f64, expansion: m.expansion as f64 };
     };
     if at <= first.at {
         return own(first);
@@ -52,7 +62,17 @@ fn pose(m: &Mask, at: Micros) -> Pose {
         size: [mix(a.size[0], b.size[0]), mix(a.size[1], b.size[1])],
         rotation: mix(a.rotation, b.rotation),
         feather: mix(feather_of(a), feather_of(b)),
+        expansion: mix(expansion_of(a), expansion_of(b)),
     }
+}
+
+/// A text mask's glyphs, rendered for a picture of the coverage's height: their coverage
+/// (0–255, row 0 at the top) and where the centre of the block of line boxes is in it.
+pub struct Glyphs {
+    pub w: u32,
+    pub h: u32,
+    pub alpha: Vec<u8>,
+    pub center: [f64; 2],
 }
 
 /// A shape picture's distance field (CapCut's heart and star bundles), decoded from its red
@@ -85,29 +105,40 @@ impl Field {
     }
 }
 
+/// The words and style of a text mask at `at` (its pose's), to render its glyphs by.
+pub fn text_at(m: &Mask, at: Micros) -> Option<openrip_model::MaskText> {
+    match pose(m, at).shape {
+        MaskShape::Text(t) => Some(t),
+        _ => None,
+    }
+}
+
 /// A key for everything that changes the coverage at `at`.
 pub fn coverage_key(m: &Mask, at: Micros) -> String {
     let p = pose(m, at);
-    format!("{:?}{:?}{:?}{}{}{}", p.shape, p.center, p.size, p.rotation, p.feather, m.invert)
+    format!("{:?}{:?}{:?}{}{}{}{}", p.shape, p.center, p.size, p.rotation, p.feather, p.expansion, m.invert)
 }
 
 /// Coverage of `mask` at `at` over an upright picture of `w`×`h` pixels, or `None` for a
-/// shape not drawn yet (or a picture shape without its `field`).
-pub fn coverage(mask: &Mask, at: Micros, w: u32, h: u32, field: Option<&Field>) -> Option<Vec<u8>> {
+/// shape not drawn yet (a picture shape without its `field`, a text without its `glyphs`).
+pub fn coverage(mask: &Mask, at: Micros, w: u32, h: u32, field: Option<&Field>, glyphs: Option<&Glyphs>) -> Option<Vec<u8>> {
     let p = pose(mask, at);
     let feather = p.feather.max(0.0);
+    // The expansion in pixels: brush strokes widen by it, a lasso's or pen's outline moves out.
+    let grow = p.expansion * h as f64;
     let mut out = match &p.shape {
         MaskShape::Rectangle { round_corner } => rectangle(&p, *round_corner as f64, feather, w, h),
         MaskShape::Circle => circle(&p, feather, w, h),
         MaskShape::Linear => line(&p, feather, w, h, false),
         MaskShape::Mirror => line(&p, feather, w, h, true),
         MaskShape::Picture { .. } => picture(&p, field?, feather, w, h),
-        MaskShape::Brush { strokes } => brush(strokes, feather, w, h),
+        MaskShape::Brush { strokes } => brush(strokes, feather, grow, w, h),
+        MaskShape::Text(_) => text(&p, glyphs?, feather, w, h),
         MaskShape::Other { .. } => return None,
         MaskShape::Polygon { points } => {
             let pts: Vec<[f64; 2]> = points.iter().map(|q| [q[0] as f64 * w as f64, q[1] as f64 * h as f64]).collect();
-            if feather > 0.0 {
-                soft_polygon(&pts, feather, w, h)
+            if feather > 0.0 || grow != 0.0 {
+                soft_polygon(&pts, feather, grow, w, h)
             } else {
                 hard_edged(w, h, |x, y| in_polygon(&pts, x, y))
             }
@@ -218,7 +249,7 @@ fn gauge(outline: &[[f64; 2]], x: f64, y: f64) -> f64 {
 
 /// A lasso softened by the feather: a smoothstep across the outline, 6 × the feather of half
 /// its shorter side either way (CapCut's rectangle's band, in the lasso's own size).
-fn soft_polygon(pts: &[[f64; 2]], feather: f64, w: u32, h: u32) -> Vec<u8> {
+fn soft_polygon(pts: &[[f64; 2]], feather: f64, grow: f64, w: u32, h: u32) -> Vec<u8> {
     if pts.len() < 3 {
         return vec![0u8; (w * h) as usize];
     }
@@ -227,12 +258,66 @@ fn soft_polygon(pts: &[[f64; 2]], feather: f64, w: u32, h: u32) -> Vec<u8> {
         lo = [lo[0].min(p[0]), lo[1].min(p[1])];
         hi = [hi[0].max(p[0]), hi[1].max(p[1])];
     }
-    let band = (6.0 * feather * (hi[0] - lo[0]).min(hi[1] - lo[1]) / 2.0).max(1e-6);
+    // Unfeathered but expanded: an edge half a pixel soft either side of the moved outline.
+    let band = if feather > 0.0 { (6.0 * feather * (hi[0] - lo[0]).min(hi[1] - lo[1]) / 2.0).max(1e-6) } else { 0.5 };
     soft(w, h, |x, y| {
         let d = (0..pts.len()).map(|i| segment_distance(pts[i], pts[(i + 1) % pts.len()], x, y)).fold(f64::INFINITY, f64::min);
         let signed = if in_polygon(pts, x, y) { -d } else { d };
-        1.0 - smoothstep(-band, band, signed)
+        1.0 - smoothstep(-band, band, signed - grow)
     })
+}
+
+/// A text mask: its glyphs' coverage, centred on the pose's centre and turned clockwise by
+/// its rotation, sampled bilinearly; a feather blurs it over up to a twentieth of the
+/// picture's height.
+fn text(p: &Pose, g: &Glyphs, feather: f64, w: u32, h: u32) -> Vec<u8> {
+    let (cx, cy) = ((1.0 + p.center[0]) / 2.0 * w as f64, (1.0 - p.center[1]) / 2.0 * h as f64);
+    let (sn, cs) = (-p.rotation.to_radians()).sin_cos();
+    let at = |i: i64, j: i64| -> f64 {
+        if i < 0 || j < 0 || i >= g.w as i64 || j >= g.h as i64 {
+            return 0.0;
+        }
+        g.alpha[(j as u32 * g.w + i as u32) as usize] as f64 / 255.0
+    };
+    let mut out: Vec<f64> = vec![0.0; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy) = (x as f64 + 0.5 - cx, y as f64 + 0.5 - cy);
+            let (u, v) = (cs * dx - sn * dy + g.center[0] - 0.5, sn * dx + cs * dy + g.center[1] - 0.5);
+            let (i, j) = (u.floor(), v.floor());
+            let (fx, fy) = (u - i, v - j);
+            let (i, j) = (i as i64, j as i64);
+            let top = at(i, j) * (1.0 - fx) + at(i + 1, j) * fx;
+            let bottom = at(i, j + 1) * (1.0 - fx) + at(i + 1, j + 1) * fx;
+            out[(y * w + x) as usize] = top * (1.0 - fy) + bottom * fy;
+        }
+    }
+    let r = (feather * 0.05 * h as f64).round() as i64;
+    if r > 0 {
+        // Two passes of a box blur each way: close to a gaussian.
+        for _ in 0..2 {
+            out = box_blur(&out, w, h, r, true);
+            out = box_blur(&out, w, h, r, false);
+        }
+    }
+    out.into_iter().map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8).collect()
+}
+
+/// A box blur of radius `r` along rows (`across`) or columns, edges clamped.
+fn box_blur(src: &[f64], w: u32, h: u32, r: i64, across: bool) -> Vec<f64> {
+    let (w, h) = (w as i64, h as i64);
+    let (len, lines) = if across { (w, h) } else { (h, w) };
+    let idx = |line: i64, k: i64| -> usize { if across { (line * w + k) as usize } else { (k * w + line) as usize } };
+    let mut out = vec![0.0; src.len()];
+    let n = (2 * r + 1) as f64;
+    for line in 0..lines {
+        let mut sum: f64 = (-r..=r).map(|k| src[idx(line, k.clamp(0, len - 1))]).sum();
+        for k in 0..len {
+            out[idx(line, k)] = sum / n;
+            sum += src[idx(line, (k + r + 1).min(len - 1))] - src[idx(line, (k - r).max(0))];
+        }
+    }
+    out
 }
 
 fn segment_distance(a: [f64; 2], b: [f64; 2], x: f64, y: f64) -> f64 {
@@ -246,10 +331,11 @@ fn segment_distance(a: [f64; 2], b: [f64; 2], x: f64, y: f64) -> f64 {
 /// (an erasing stroke clearing instead), its edge at pixel centres or, feathered, softened over
 /// 6 × the feather of the stroke's half-width either side. Only the pixels near each stroke
 /// are visited.
-fn brush(strokes: &[BrushStroke], feather: f64, w: u32, h: u32) -> Vec<u8> {
+fn brush(strokes: &[BrushStroke], feather: f64, grow: f64, w: u32, h: u32) -> Vec<u8> {
     let mut cov = vec![0f32; (w * h) as usize];
     for s in strokes {
-        let r = s.width.max(0.0) as f64 * h as f64 / 2.0;
+        // The expansion widens every stroke (narrows it below 0).
+        let r = (s.width.max(0.0) as f64 * h as f64 / 2.0 + grow).max(0.0);
         let band = 6.0 * feather * r;
         let pts: Vec<[f64; 2]> = s.points.iter().map(|p| [p[0] as f64 * w as f64, p[1] as f64 * h as f64]).collect();
         let Some(&first) = pts.first() else { continue };
@@ -479,18 +565,18 @@ mod tests {
     use openrip_model::{Handle, MaskPaint, MaterialId};
 
     fn rect(center: [f32; 2], size: [f32; 2]) -> Mask {
-        Mask { id: MaterialId("m".into()), shape: MaskShape::Rectangle { round_corner: 0.0 }, center, size, rotation: 0.0, feather: 0.0, invert: false, inside: MaskPaint::Clip, outside: MaskPaint::clear(), keys: Vec::new(), library: None }
+        Mask { id: MaterialId("m".into()), shape: MaskShape::Rectangle { round_corner: 0.0 }, center, size, rotation: 0.0, feather: 0.0, expansion: 0.0, invert: false, inside: MaskPaint::Clip, outside: MaskPaint::clear(), keys: Vec::new(), library: None }
     }
 
     fn mkey(at: i64, shape: MaskShape, center: [f32; 2], size: [f32; 2], ease: Easing) -> MaskKey {
-        MaskKey { at: Micros(at), shape, center, size, rotation: 0.0, feather: None, ease }
+        MaskKey { at: Micros(at), shape, center, size, rotation: 0.0, feather: None, expansion: None, ease }
     }
 
     #[test]
     fn a_rectangle_covers_its_share_of_the_picture_above_centre_for_positive_y() {
         // Half the width and a quarter of the height, a quarter of the half-height up.
         let (w, h) = (200, 400);
-        let c = coverage(&rect([0.0, 0.25], [0.5, 0.25]), Micros::ZERO, w, h, None).unwrap();
+        let c = coverage(&rect([0.0, 0.25], [0.5, 0.25]), Micros::ZERO, w, h, None, None).unwrap();
         let at = |x: u32, y: u32| c[(y * w + x) as usize];
         // Centre row: 400/2 − 0.25·200 = 150; rows 100..200 and columns 50..150 are inside.
         assert_eq!((at(100, 150), at(51, 101), at(148, 198)), (255, 255, 255));
@@ -501,9 +587,9 @@ mod tests {
     #[test]
     fn inverting_swaps_inside_and_out() {
         let mut m = rect([0.0, 0.0], [0.5, 0.5]);
-        let a = coverage(&m, Micros::ZERO, 64, 64, None).unwrap();
+        let a = coverage(&m, Micros::ZERO, 64, 64, None, None).unwrap();
         m.invert = true;
-        let b = coverage(&m, Micros::ZERO, 64, 64, None).unwrap();
+        let b = coverage(&m, Micros::ZERO, 64, 64, None, None).unwrap();
         assert!(a.iter().zip(&b).all(|(x, y)| *x as u16 + *y as u16 == 255));
     }
 
@@ -516,10 +602,10 @@ mod tests {
         m.keys.push(mkey(0, MaskShape::Ellipse, [0.0, 0.0], [1.0, 1.0], Easing::Linear));
         m.keys.push(mkey(1_000_000, MaskShape::Triangle, [-0.5, 0.5], [0.5, 0.5], Easing::Linear));
         let (w, h) = (100, 100);
-        let e = coverage(&m, Micros(999_999), w, h, None).unwrap();
+        let e = coverage(&m, Micros(999_999), w, h, None, None).unwrap();
         let at = |c: &[u8], x: u32, y: u32| c[(y * w + x) as usize];
         assert_eq!((at(&e, 50, 50), at(&e, 2, 2), at(&e, 50, 1)), (255, 0, 255));
-        let t = coverage(&m, Micros(1_000_000), w, h, None).unwrap();
+        let t = coverage(&m, Micros(1_000_000), w, h, None, None).unwrap();
         // Box 0..50 square; apex at (25, 0 − 50/6), base at y = 50 − 50/6 ≈ 41.7.
         assert_eq!((at(&t, 25, 20), at(&t, 25, 43), at(&t, 75, 75), at(&t, 1, 30)), (255, 0, 0, 0));
     }
@@ -555,10 +641,10 @@ mod tests {
         for shape in [MaskShape::Ellipse, MaskShape::Triangle, MaskShape::Star, MaskShape::Polygon { points: vec![[0.2, 0.2], [0.8, 0.2], [0.8, 0.8], [0.2, 0.8]] }] {
             let mut m = rect([0.0, 0.0], [0.6, 0.6]);
             m.shape = shape.clone();
-            let hard = coverage(&m, Micros::ZERO, w, h, None).unwrap();
+            let hard = coverage(&m, Micros::ZERO, w, h, None, None).unwrap();
             assert!(hard.iter().all(|&v| v == 0 || v == 255), "{shape:?}");
             m.feather = 0.02;
-            let soft = coverage(&m, Micros::ZERO, w, h, None).unwrap();
+            let soft = coverage(&m, Micros::ZERO, w, h, None, None).unwrap();
             let partial = soft.iter().filter(|&&v| v > 0 && v < 255).count();
             assert!(partial > 50, "{shape:?}: {partial}");
             // The middle stays, far outside stays clear.
@@ -578,13 +664,54 @@ mod tests {
         m.keys = vec![a, b];
         assert_eq!((pose(&m, Micros::ZERO).feather, pose(&m, Micros(2_000_000)).feather as f32), (0.0, 0.02));
         assert!((pose(&m, Micros(500_000)).feather - 0.01).abs() < 1e-6);
-        let hard = coverage(&m, Micros::ZERO, 100, 100, None).unwrap();
+        let hard = coverage(&m, Micros::ZERO, 100, 100, None, None).unwrap();
         assert!(hard.iter().all(|&v| v == 0 || v == 255));
         m.keys[1].feather = None;
         assert!((pose(&m, Micros(1_000_000)).feather - 0.3).abs() < 1e-6);
     }
 
     /// The brush paints round-ended strokes; an eraser takes away what's under it.
+    /// Expansion moves a lasso's outline out (in, below 0) and widens a brush's strokes.
+    #[test]
+    fn expansion_grows_and_shrinks() {
+        let (w, h) = (100, 100);
+        let count = |c: &[u8]| c.iter().filter(|&&v| v >= 128).count();
+        let mut m = rect([0.0, 0.0], [1.0, 1.0]);
+        m.shape = MaskShape::Polygon { points: vec![[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]] };
+        let plain = count(&coverage(&m, Micros::ZERO, w, h, None, None).unwrap());
+        m.expansion = 0.05;
+        let grown = count(&coverage(&m, Micros::ZERO, w, h, None, None).unwrap());
+        m.expansion = -0.05;
+        let shrunk = count(&coverage(&m, Micros::ZERO, w, h, None, None).unwrap());
+        // 40 px square: 50 px out, 30 px in.
+        assert!((plain as i64 - 1600).abs() < 60 && (grown as i64 - 2500).abs() < 120 && (shrunk as i64 - 900).abs() < 60, "{plain} {grown} {shrunk}");
+        let mut b = rect([0.0, 0.0], [1.0, 1.0]);
+        b.shape = MaskShape::Brush { strokes: vec![BrushStroke { points: vec![[0.2, 0.5], [0.8, 0.5]], width: 0.1, erase: false }] };
+        let thin = count(&coverage(&b, Micros::ZERO, w, h, None, None).unwrap());
+        b.expansion = 0.05;
+        let thick = count(&coverage(&b, Micros::ZERO, w, h, None, None).unwrap());
+        assert!(thick > thin * 18 / 10, "{thin} → {thick}");
+    }
+
+    /// A text mask places its glyphs centred on its centre, turned by its rotation.
+    #[test]
+    fn a_text_mask_places_its_glyphs() {
+        // Glyphs: a 20×10 block, its centre in the middle.
+        let g = Glyphs { w: 20, h: 10, alpha: vec![255; 200], center: [10.0, 5.0] };
+        let mut m = rect([0.5, 0.0], [0.0, 0.0]);
+        m.shape = MaskShape::Text(openrip_model::MaskText { text: "x".into(), font: String::new(), size: 0.1, bold: false, italic: false, underline: false, letter_spacing: 0.0, line_spacing: 0.0, align: 1 });
+        let (w, h) = (100, 100);
+        assert!(coverage(&m, Micros::ZERO, w, h, None, None).is_none(), "no glyphs, nothing drawn");
+        let c = coverage(&m, Micros::ZERO, w, h, None, Some(&g)).unwrap();
+        let at = |x: u32, y: u32| c[(y * w + x) as usize];
+        // Centred at (75, 50): 20 wide, 10 tall.
+        assert_eq!((at(75, 50), at(67, 47), at(83, 52), at(75, 58), at(60, 50)), (255, 255, 255, 0, 0));
+        m.rotation = 90.0;
+        let t = coverage(&m, Micros::ZERO, w, h, None, Some(&g)).unwrap();
+        let at = |x: u32, y: u32| t[(y * w + x) as usize];
+        assert_eq!((at(75, 58), at(83, 50)), (255, 0));
+    }
+
     #[test]
     fn the_brush_paints_and_erases() {
         let (w, h) = (100, 100);
@@ -595,7 +722,7 @@ mod tests {
                 BrushStroke { points: vec![[0.5, 0.5]], width: 0.1, erase: true },
             ],
         };
-        let c = coverage(&m, Micros::ZERO, w, h, None).unwrap();
+        let c = coverage(&m, Micros::ZERO, w, h, None, None).unwrap();
         let at = |x: u32, y: u32| c[(y * w + x) as usize];
         // 10 px either side of the line, ends rounded; a 5 px hole in the middle.
         assert_eq!((at(20, 50), at(20, 41), at(20, 38), at(5, 50), at(50, 50), at(50, 57)), (255, 255, 0, 255, 0, 255));
@@ -623,8 +750,8 @@ mod tests {
         let mut m = rect([0.0, 0.0], [0.5, 0.5]);
         m.shape = MaskShape::Picture { name: "heart".into(), path: String::new() };
         let (w, h) = (100, 100);
-        assert!(coverage(&m, Micros::ZERO, w, h, None).is_none());
-        let c = coverage(&m, Micros::ZERO, w, h, Some(&field)).unwrap();
+        assert!(coverage(&m, Micros::ZERO, w, h, None, None).is_none());
+        let c = coverage(&m, Micros::ZERO, w, h, Some(&field), None).unwrap();
         let at = |x: u32, y: u32| c[(y * w + x) as usize];
         // A disc of radius 25 px about the middle.
         assert_eq!((at(50, 50), at(50, 28), at(50, 21), at(72, 50), at(79, 50)), (255, 255, 0, 255, 0));
@@ -646,7 +773,7 @@ mod tests {
         let mut m = rect([0.0, 0.0], [0.5, 0.5]);
         m.shape = MaskShape::Picture { name: "heart".into(), path: String::new() };
         let (w, h) = (400u32, 400u32);
-        let c = coverage(&m, Micros::ZERO, w, h, Some(&field)).unwrap();
+        let c = coverage(&m, Micros::ZERO, w, h, Some(&field), None).unwrap();
         let rows: Vec<u32> = (0..h).map(|y| (0..w).filter(|&x| c[(y * w + x) as usize] >= 128).count() as u32).collect();
         let cols: Vec<u32> = (0..w).map(|x| (0..h).filter(|&y| c[(y * w + x) as usize] >= 128).count() as u32).collect();
         let span = |v: &[u32]| (v.iter().position(|&n| n > 0).unwrap(), v.iter().rposition(|&n| n > 0).unwrap());
@@ -660,7 +787,7 @@ mod tests {
         assert!(rows[y0 + 10] > 60 && rows[y1 - 2] < 12, "top {} bottom {}", rows[y0 + 10], rows[y1 - 2]);
         // Turned 90° clockwise, the point is on the left.
         m.rotation = 90.0;
-        let c = coverage(&m, Micros::ZERO, w, h, Some(&field)).unwrap();
+        let c = coverage(&m, Micros::ZERO, w, h, Some(&field), None).unwrap();
         let cols: Vec<u32> = (0..w).map(|x| (0..h).filter(|&y| c[(y * w + x) as usize] >= 128).count() as u32).collect();
         let (x0, x1) = span(&cols);
         assert!(cols[x0 + 2] < 12 && cols[x1 - 10] > 60, "left {} right {}", cols[x0 + 2], cols[x1 - 10]);
@@ -673,11 +800,11 @@ mod tests {
         let mut m = rect([0.0, 0.0], [0.5, 0.5]);
         m.shape = MaskShape::Circle;
         let (w, h) = (100, 100);
-        let c = coverage(&m, Micros::ZERO, w, h, None).unwrap();
+        let c = coverage(&m, Micros::ZERO, w, h, None, None).unwrap();
         let at = |c: &[u8], x: u32, y: u32| c[(y * w + x) as usize];
         assert_eq!((at(&c, 50, 50), at(&c, 50, 26), at(&c, 50, 23), at(&c, 74, 50), at(&c, 77, 50), at(&c, 65, 65), at(&c, 70, 70)), (255, 255, 0, 255, 0, 255, 0));
         m.feather = 0.02;
-        let soft = coverage(&m, Micros::ZERO, w, h, None).unwrap();
+        let soft = coverage(&m, Micros::ZERO, w, h, None, None).unwrap();
         let edge = at(&soft, 75, 50);
         assert!(edge > 40 && edge < 215, "{edge}");
     }
@@ -690,17 +817,17 @@ mod tests {
         m.shape = MaskShape::Linear;
         let (w, h) = (100, 100);
         let at = |c: &[u8], x: u32, y: u32| c[(y * w + x) as usize];
-        let c = coverage(&m, Micros::ZERO, w, h, None).unwrap();
+        let c = coverage(&m, Micros::ZERO, w, h, None, None).unwrap();
         assert_eq!((at(&c, 50, 10), at(&c, 50, 90)), (255, 0));
         // Turned 90° clockwise, "up" points left... or right: the kept side moves sideways.
         m.rotation = 90.0;
-        let c = coverage(&m, Micros::ZERO, w, h, None).unwrap();
+        let c = coverage(&m, Micros::ZERO, w, h, None, None).unwrap();
         assert_ne!(at(&c, 10, 50), at(&c, 90, 50));
         assert_eq!(at(&c, 10, 50).max(at(&c, 90, 50)), 255);
         m.rotation = 0.0;
         m.shape = MaskShape::Mirror;
         // A band 0.25 half-heights either side: rows 37.5..62.5.
-        let c = coverage(&m, Micros::ZERO, w, h, None).unwrap();
+        let c = coverage(&m, Micros::ZERO, w, h, None, None).unwrap();
         assert_eq!((at(&c, 50, 50), at(&c, 50, 40), at(&c, 50, 36), at(&c, 50, 64)), (255, 255, 0, 0));
     }
 
@@ -708,7 +835,7 @@ mod tests {
     fn a_lasso_is_its_polygon() {
         let mut m = rect([0.0, 0.0], [1.0, 1.0]);
         m.shape = MaskShape::Polygon { points: vec![[0.1, 0.1], [0.9, 0.1], [0.1, 0.9]] };
-        let c = coverage(&m, Micros::ZERO, 10, 10, None).unwrap();
+        let c = coverage(&m, Micros::ZERO, 10, 10, None, None).unwrap();
         assert_eq!((c[2 * 10 + 2], c[8 * 10 + 8]), (255, 0));
     }
 }
