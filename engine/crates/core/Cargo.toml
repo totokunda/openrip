@@ -18,6 +18,8 @@ openrip-render.workspace = true
 openrip-export.workspace = true
 openrip-platform.workspace = true
 serde_json.workspace = true
+# Still frames saved as PNG (pure Rust).
+png = "0.18"
 thiserror.workspace = true
 
 [features]

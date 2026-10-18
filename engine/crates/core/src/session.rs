@@ -52,6 +52,29 @@ impl Renderer {
     }
 }
 
+impl Image {
+    /// The image as a PNG file's bytes (8-bit RGBA): a still frame to save. Pure Rust, so it
+    /// works wherever the engine does; writing the file is the client's.
+    pub fn to_png(&self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut out, self.width, self.height);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            // A still is saved once: a good size matters more than a few ms.
+            enc.set_compression(png::Compression::Balanced);
+            enc.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
+            let mut w = enc.write_header().map_err(png_error)?;
+            w.write_image_data(&self.data).map_err(png_error)?;
+        }
+        Ok(out)
+    }
+}
+
+fn png_error(e: png::EncodingError) -> Error {
+    Error::Io(std::io::Error::other(e.to_string()))
+}
+
 impl Session {
     /// Open `project` for preview, with an audio output if there is a device.
     pub fn open(project: Project, source: Source) -> Result<(Session, ProjectInfo)> {
@@ -155,6 +178,12 @@ impl Session {
         if let Some(p) = &self.player {
             p.set_volume(volume);
         }
+    }
+
+    /// The left and right peaks (0..1) of the mix played since the last call, before the
+    /// output gain, for a level meter; zero while paused, `None` without audio output.
+    pub fn output_levels(&self) -> Option<[f32; 2]> {
+        self.player.as_ref().map(|p| p.take_levels())
     }
 }
 
@@ -328,5 +357,23 @@ impl Session {
             time_us: f.time.0,
             render_ms: f.render_ms,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Image;
+
+    /// A still's PNG decodes back to its pixels.
+    #[test]
+    fn png_round_trip() {
+        let (width, height) = (3u32, 2u32);
+        let data: Vec<u8> = (0..width * height * 4).map(|i| (i * 37 % 256) as u8).collect();
+        let png = Image { width, height, data: data.clone() }.to_png().unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(png)).read_info().unwrap();
+        let mut back = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut back).unwrap();
+        assert_eq!((info.width, info.height, info.color_type), (width, height, png::ColorType::Rgba));
+        assert_eq!(&back[..info.buffer_size()], &data[..]);
     }
 }

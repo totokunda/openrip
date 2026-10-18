@@ -5,6 +5,10 @@
 //! that count minus the device's output latency: video frames are chosen by it, so picture
 //! follows sound, as in CapCut and every NLE. With nothing to play (silence) the same
 //! clock still runs, because the mix is silence rather than nothing.
+//!
+//! The device callback also keeps each channel's peak since the last [`Player::take_levels`]:
+//! a level meter's reading of what is being heard, for free (it already touches every
+//! sample it plays).
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
@@ -55,7 +59,28 @@ struct Shared {
     /// Output latency (device buffer to speaker), microseconds.
     latency_us: AtomicI64,
     volume: AtomicU32,
+    /// Each channel's largest absolute sample played since the last `take_levels` (f32 bits;
+    /// for non-negative floats the bits order as the values do, so `fetch_max` keeps the peak).
+    peaks: [AtomicU32; 2],
     quit: AtomicBool,
+}
+
+impl Shared {
+    fn new() -> Shared {
+        Shared {
+            state: Mutex::new(State { ring: VecDeque::new(), ring_start: 0, next_mix: 0, playing: false, generation: 0, project: None }),
+            cond: Condvar::new(),
+            played: AtomicI64::new(0),
+            latency_us: AtomicI64::new(0),
+            volume: AtomicU32::new(1.0f32.to_bits()),
+            peaks: [AtomicU32::new(0), AtomicU32::new(0)],
+            quit: AtomicBool::new(false),
+        }
+    }
+
+    fn take_levels(&self) -> [f32; 2] {
+        self.peaks.each_ref().map(|p| f32::from_bits(p.swap(0, Ordering::Relaxed)))
+    }
 }
 
 pub struct Player {
@@ -75,14 +100,7 @@ impl Player {
 
     /// Like [`Player::new`], on `output`.
     pub fn with_output(project: Project, output: &dyn AudioOutput) -> Result<Player, PlayerError> {
-        let shared = Arc::new(Shared {
-            state: Mutex::new(State { ring: VecDeque::new(), ring_start: 0, next_mix: 0, playing: false, generation: 0, project: None }),
-            cond: Condvar::new(),
-            played: AtomicI64::new(0),
-            latency_us: AtomicI64::new(0),
-            volume: AtomicU32::new(1.0f32.to_bits()),
-            quit: AtomicBool::new(false),
-        });
+        let shared = Arc::new(Shared::new());
         let (out, rate) = {
             let shared = shared.clone();
             output.start(Box::new(move |out, channels, latency| fill(&shared, out, channels, latency)))?
@@ -142,6 +160,13 @@ impl Player {
     pub fn sample_rate(&self) -> u32 {
         self.rate
     }
+
+    /// The left and right peaks (0..1, larger when the mix clips) of what was played since
+    /// the last call, before the output volume: the mix's level, which a meter shows whether
+    /// or not the speakers are muted. Zero while paused.
+    pub fn take_levels(&self) -> [f32; 2] {
+        self.shared.take_levels()
+    }
 }
 
 impl Drop for Player {
@@ -167,10 +192,19 @@ fn fill(shared: &Shared, out: &mut [f32], channels: usize, latency: Duration) {
     }
     let have = st.ring.len() / CHANNELS;
     let n = have.min(frames);
+    let (mut peak_l, mut peak_r) = (0f32, 0f32);
     for f in 0..frames {
         let (l, r) = if f < n { (st.ring[f * 2], st.ring[f * 2 + 1]) } else { (0.0, 0.0) };
+        peak_l = peak_l.max(l.abs());
+        peak_r = peak_r.max(r.abs());
         for c in 0..channels {
             out[f * channels + c] = gain * if c % 2 == 0 { l } else { r };
+        }
+    }
+    // NaN never reaches a meter as a peak.
+    for (p, v) in shared.peaks.iter().zip([peak_l, peak_r]) {
+        if v.is_finite() {
+            p.fetch_max(v.to_bits(), Ordering::Relaxed);
         }
     }
     st.ring.drain(..n * CHANNELS);
@@ -209,5 +243,33 @@ fn run_mixer(mut mixer: Mixer, shared: &Shared, rate: u32) {
             st.ring.extend(&block);
             st.next_mix += BLOCK as i64;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The tap reads each channel's peak of what was played, before the output volume, and
+    /// starts again from zero after each read.
+    #[test]
+    fn levels_are_the_peaks_played_since_the_last_read() {
+        let shared = Shared::new();
+        shared.volume.store(0f32.to_bits(), Ordering::Relaxed);
+        {
+            let mut st = shared.state.lock().unwrap();
+            st.playing = true;
+            // Left 0.5 then -0.8, right 0.25 then 0.1.
+            st.ring.extend([0.5, 0.25, -0.8, 0.1]);
+        }
+        let mut out = [1f32; 8];
+        fill(&shared, &mut out, 2, Duration::ZERO);
+        assert!(out.iter().all(|&v| v == 0.0), "muted output: {out:?}");
+        assert_eq!(shared.take_levels(), [0.8, 0.25]);
+        assert_eq!(shared.take_levels(), [0.0, 0.0]);
+        // Paused: silence, nothing measured.
+        shared.state.lock().unwrap().playing = false;
+        fill(&shared, &mut out, 2, Duration::ZERO);
+        assert_eq!(shared.take_levels(), [0.0, 0.0]);
     }
 }

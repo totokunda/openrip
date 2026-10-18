@@ -1211,6 +1211,7 @@ dependencies = [
  "openrip-playback",
  "openrip-render",
  "openrip-v1",
+ "png",
  "serde_json",
  "thiserror 2.0.21",
 ]

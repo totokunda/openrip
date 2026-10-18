@@ -219,6 +219,60 @@ pub fn set_volume(volume: f64) {
     }
 }
 
+#[napi(object)]
+pub struct OutputLevels {
+    /// Each channel's peak (0..1) of the mix played since the last call, before the volume.
+    pub left: f64,
+    pub right: f64,
+}
+
+/// The playing mix's level since the last call, for the player's meter; zero while paused,
+/// `null` without an audio output (or a project).
+#[napi]
+pub fn output_levels() -> Option<OutputLevels> {
+    let [left, right] = session().lock().unwrap().as_ref()?.output_levels()?;
+    Some(OutputLevels { left: left as f64, right: right as f64 })
+}
+
+#[napi(object)]
+pub struct StillFrame {
+    pub width: u32,
+    pub height: u32,
+    /// The file's size in bytes.
+    pub bytes: f64,
+}
+
+pub struct StillTask {
+    time: Micros,
+    width: u32,
+    height: u32,
+    path: String,
+}
+
+impl Task for StillTask {
+    type Output = StillFrame;
+    type JsValue = StillFrame;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let renderer = session().lock().unwrap().as_ref().map(Session::renderer).ok_or_else(|| err(openrip_core::Error::NoProject))?;
+        let img = renderer.render_image(self.time, self.width, self.height).map_err(err)?;
+        let png = img.to_png().map_err(err)?;
+        std::fs::write(&self.path, &png).map_err(err)?;
+        Ok(StillFrame { width: img.width, height: img.height, bytes: png.len() as f64 })
+    }
+
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<StillFrame> {
+        Ok(out)
+    }
+}
+
+/// Render the open project's frame at `timeUs` at `width`×`height` and save it as a PNG at
+/// `path`, on a worker thread (the player's Export still frames).
+#[napi]
+pub fn export_still(time_us: i64, width: u32, height: u32, path: String) -> AsyncTask<StillTask> {
+    AsyncTask::new(StillTask { time: Micros(time_us), width, height, path })
+}
+
 // ---- Render-ahead preview (what the app's preview uses) ----
 
 /// Size of the preview surfaces; creates the pipeline on first call.
