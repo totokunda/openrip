@@ -36,4 +36,6 @@ for (const [name, { clip, CLIP_NAME: label }, steps] of CASES) {
   const r = spawnSync("node", ["session.mjs", appDir, out, `${out}-profile`, clip, ...steps.split(" ")], { env: { ...rest, CLIP_NAME: label }, encoding: "utf8" });
   const lines = (r.stdout || "").split("\n").filter((l) => /^STEP|^\s+(PASS|FAIL)/.test(l));
   console.log(lines.join("\n"));
+  // A profile holds the media's copies and caches (about 250 MB); no case reuses one.
+  fs.rmSync(`${out}-profile`, { recursive: true, force: true });
 }
