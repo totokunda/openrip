@@ -260,11 +260,41 @@ fn soft_polygon(pts: &[[f64; 2]], feather: f64, grow: f64, w: u32, h: u32) -> Ve
     }
     // Unfeathered but expanded: an edge half a pixel soft either side of the moved outline.
     let band = if feather > 0.0 { (6.0 * feather * (hi[0] - lo[0]).min(hi[1] - lo[1]) / 2.0).max(1e-6) } else { 0.5 };
-    soft(w, h, |x, y| {
+    // A wide soft edge is smooth: sampled every few pixels and filled in between, as a pen
+    // or lasso with a feather is otherwise slow to draw (every edge measured at every pixel).
+    let step = ((band / 8.0).floor() as u32).clamp(1, 4);
+    soft_sampled(w, h, step, |x, y| {
         let d = (0..pts.len()).map(|i| segment_distance(pts[i], pts[(i + 1) % pts.len()], x, y)).fold(f64::INFINITY, f64::min);
         let signed = if in_polygon(pts, x, y) { -d } else { d };
         1.0 - smoothstep(-band, band, signed - grow)
     })
+}
+
+/// `soft` measured every `step` pixels each way and interpolated bilinearly between (each
+/// pixel's own value when `step` is 1).
+fn soft_sampled(w: u32, h: u32, step: u32, kept: impl Fn(f64, f64) -> f64) -> Vec<u8> {
+    if step <= 1 {
+        return soft(w, h, kept);
+    }
+    let (gw, gh) = (w.div_ceil(step) + 1, h.div_ceil(step) + 1);
+    let mut grid = vec![0.0f64; (gw * gh) as usize];
+    for j in 0..gh {
+        for i in 0..gw {
+            grid[(j * gw + i) as usize] = kept((i * step) as f64 + 0.5, (j * step) as f64 + 0.5).clamp(0.0, 1.0);
+        }
+    }
+    let mut out = vec![0u8; (w * h) as usize];
+    for y in 0..h {
+        let (j, fy) = (y / step, (y % step) as f64 / step as f64);
+        for x in 0..w {
+            let (i, fx) = (x / step, (x % step) as f64 / step as f64);
+            let g = |i: u32, j: u32| grid[(j * gw + i) as usize];
+            let top = g(i, j) * (1.0 - fx) + g(i + 1, j) * fx;
+            let bottom = g(i, j + 1) * (1.0 - fx) + g(i + 1, j + 1) * fx;
+            out[(y * w + x) as usize] = ((top * (1.0 - fy) + bottom * fy) * 255.0).round() as u8;
+        }
+    }
+    out
 }
 
 /// A text mask: its glyphs' coverage, centred on the pose's centre and turned clockwise by
@@ -691,6 +721,23 @@ mod tests {
         b.expansion = 0.05;
         let thick = count(&coverage(&b, Micros::ZERO, w, h, None, None).unwrap());
         assert!(thick > thin * 18 / 10, "{thin} → {thick}");
+    }
+
+    /// A wide feather on a polygon, sampled every few pixels, is within a level or two of
+    /// every pixel measured.
+    #[test]
+    fn a_feathered_polygon_sampled_matches_every_pixel() {
+        let (w, h) = (300, 200);
+        let pts: Vec<[f64; 2]> = vec![[60.0, 40.0], [250.0, 70.0], [120.0, 180.0]];
+        let band = 6.0 * 0.3 * 70.0;
+        let exact = soft(w, h, |x, y| {
+            let d = (0..pts.len()).map(|i| segment_distance(pts[i], pts[(i + 1) % pts.len()], x, y)).fold(f64::INFINITY, f64::min);
+            let signed = if in_polygon(&pts, x, y) { -d } else { d };
+            1.0 - smoothstep(-band, band, signed)
+        });
+        let sampled = soft_polygon(&pts, 0.3, 0.0, w, h);
+        let worst = exact.iter().zip(&sampled).map(|(a, b)| (*a as i32 - *b as i32).abs()).max().unwrap();
+        assert!(worst <= 3, "{worst}");
     }
 
     /// A text mask places its glyphs centred on its centre, turned by its rotation.

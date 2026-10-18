@@ -573,10 +573,12 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
         // `draftMask`): unedited, the draft's own stay as CapCut had them, keys and all;
         // edited, the app's replace the ones the tab showed (any it couldn't show stay). A
         // project converted before the tab showed them puts the app's on top.
-        let replace = match base.get("masks") {
-            Some(_) => differs("masks"),
-            None => true,
-        };
+        // Masks switched off (`masksOff`) take the draft's away too.
+        let replace = masks_off(clip)
+            || match base.get("masks") {
+                Some(_) => differs("masks"),
+                None => true,
+            };
         if replace {
             let shown: Vec<String> = base.get("masks").and_then(Value::as_array).into_iter().flatten().map(|m| s(m, "draftMask")).filter(|id| !id.is_empty()).collect();
             seg.attachments.retain(|id| !shown.contains(&id.0));
@@ -1287,11 +1289,12 @@ fn fit_animations(seg: &mut Segment, from: Micros, materials: &mut Materials) {
 /// times its opacity, at the opacity squared (it blends the alpha too). Only the first mask
 /// paints outside itself. The feather (`featherAmount`, 0–100 as CapCut's slider) softens the
 /// edge as CapCut's shapes do, and `inverted` swaps inside and out. Crops are left out.
+/// `masksOff` (the Mask section's checkbox, unticked) keeps the masks but draws none.
 fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) -> Vec<Mask> {
     let t = clip.get("transform").cloned().unwrap_or(Value::Null);
     let (cw, ch) = (f(&t, "width", 0.0), f(&t, "height", 0.0));
     let masks = clip.get("masks").and_then(Value::as_array).cloned().unwrap_or_default();
-    if cw <= 0.0 || ch <= 0.0 {
+    if cw <= 0.0 || ch <= 0.0 || masks_off(clip) {
         return Vec::new();
     }
     // JavaScript's `x || 1`.
@@ -1456,6 +1459,11 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
         });
     }
     out
+}
+
+/// Whether the clip's masks are switched off (the Mask section's checkbox).
+fn masks_off(clip: &Value) -> bool {
+    clip.get("masksOff").and_then(Value::as_bool).unwrap_or(false)
 }
 
 /// A mask key's own feather (`featherAmount`, 0–100), when it has one.
@@ -1966,6 +1974,10 @@ mod tests {
         let lasso = &project.materials.masks[1];
         assert_eq!(lasso.shape, MaskShape::Polygon { points: vec![[0.0, 0.0], [0.5, 0.0], [0.0, 0.5]] });
         assert_eq!((lasso.inside, lasso.outside), (MaskPaint::Clip, MaskPaint::Clip));
+        // The Mask section's checkbox unticked: the masks stay on the clip, none is drawn.
+        d["timeline"]["clips"][0]["masksOff"] = json!(true);
+        let Imported { project, .. } = import_v1_json(&d).unwrap();
+        assert!(project.materials.masks.is_empty());
     }
 
     /// The inspector's CapCut shapes: Split and Filmstrip as CapCut's linear and mirror, a
