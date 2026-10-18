@@ -147,11 +147,16 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
 
 Match CapCut's layout and workflows. Don't copy its assets.
 
-- **Home screen:** project grid with covers, recents, new-project aspect presets
+- **Home screen ✅:** project grid with covers, sorted by last edited (or newest, or name) with a search; new projects at 16:9, 9:16, 1:1, 4:3, 4:5, 21:9 or 2:3; Open a CapCut project. The editor's top bar goes back home, and the engine's frame becomes the project's cover. Still to do: the first clip dropped on an empty timeline sets the canvas to its own ratio even when the project was made at a chosen size (CapCut keeps a chosen ratio).
 - **Left panel tabs:** Media, Audio, Text, Stickers, Effects, Transitions, Filters, Adjustment, Templates
+  - Done: the tab row; Media, Filters, Text (add text in eight styles, In animations) and Transitions (the engine's transitions on the selected clip) work; Audio, Stickers, Effects and Adjustment say what's coming. Still to do: their libraries, Templates, a detachable panel.
 - **Center:** player with canvas and ratio controls, safe areas, fullscreen
+  - Done: canvas tools and zoom in the player's header; time, transport, ratio menu, safe-area guides and full screen under it.
 - **Right inspector:** Video / Audio / Speed / Animation / Adjust tabs
+  - Done: CapCut's tabs and sub-tabs (Video ▸ Basic / Mask, Audio, Speed, Animation, Adjust; Text ▸ Basic / Transform, Animation, Duration) over the existing panels; the project's details with nothing selected.
+- **Layout ✅:** top bar (Home, Menu, project name, layout, shortcuts, settings, Export), CapCut's panel arrangement and proportions, Default / Media / Inspector layouts that keep their panel sizes between sessions.
 - **Bottom timeline:** magnetic main track, keyframe diamonds, split/freeze/reverse, speed curves, linked audio
+  - Done: CapCut's toolbar arrangement (undo/redo, then the edit tools; the zoom on the right, with room for the timeline's switches).
 - **New non-AI features:**
   - transitions
   - keyframes for every animatable property

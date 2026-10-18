@@ -1126,15 +1126,17 @@ type ClipJson = Omit<AnyClipProps, "startFrame"|"endFrame"|"trimStart"|"trimEnd"
 
 | Operation | Behavior | Cite |
 |---|---|---|
+| Where | The home screen (renderer/src/components/home/HomeScreen.tsx; actions in renderer/src/lib/project-actions.ts), which the app opens on. The editor's top bar has Home, and Menu ▸ New project / Open a CapCut project…. Since the Phase 4 shell (2026-10-17) | — |
 | Store | zustand `useProjectsStore`: `{projects: ProjectSettings[], activeProjectId, projectsLoaded}`. `ProjectSettings = {id, name, fps, folderUuid, aspectRatio, createdAt?, lastModified?, coverPath?}`. The JP middleware wraps it | renderer/src/lib/projects.ts:4-72 |
 | Active id | Persisted only in electron-store `activeProjectId`, through IPC `settings:get/set-active-project-id` | main/src/modules/SettingsModule.ts:30-54; preload/src/settings.ts:3-9 |
 | First run | Main creates "Project 1" at 24 fps if there is no active id and no `project-*.json`. The renderer creates the same as a fallback when the list is empty | JPM:226-256; JP:1073-1112 |
-| List | `projects:list-json` reads every `project-<N>.json` and returns `{id,name,fps,folderUuid,aspectRatio,createdAt,lastModified,coverPath}`, sorted by `lastModified` descending. The Topbar dropdown filters by case-insensitive name substring | JPM:979-1104; Topbar.tsx:378-381 |
-| Create | Name is `Project <k>` with k the smallest unused integer, at the current fps. Main allocates id = max existing N + 1 and writes a doc with `aspectRatio 16:9` and `defaultClipLength 5`. The renderer then calls `addProject` and `setActiveProjectId` | Topbar.tsx:134-180; JPM:119-205,1107-1151 |
-| Switch | Click a dropdown row → `setActiveProjectId` → the switch flow in 11.4. The loader persists the id to electron-store, loads the JSON and hydrates the stores. `projectsLoaded` is set to `true` 1000 ms after the load finishes, and the UI shows "Preparing workspace" until it does | Topbar.tsx:499; JP:1013-1220; renderer/src/components/App.tsx:150-170 |
+| List | `projects:list-json` reads every `project-<N>.json` and returns `{id,name,fps,folderUuid,aspectRatio,createdAt,lastModified,coverPath}`, sorted by `lastModified` descending. The home screen shows them as cards (cover, name, "Edited 5 min ago", ratio), sorted by last edited (or newest, or name), with a name search | JPM:979-1104; HomeScreen.tsx |
+| Create | Name is `Project <k>` with k the smallest unused integer, at the current fps. From the home screen's New project (16:9) or a size tile (16:9, 9:16, 1:1, 4:3, 4:5, 21:9, 2:3), passed to `projects:create-json` as `aspectRatio`. Main allocates id = max existing N + 1 and writes a doc with that `aspectRatio` (16:9 when none) and `defaultClipLength 5`. The renderer calls `addProject`, `setActiveProjectId` and opens the editor. The first video or photo dropped on an empty timeline still sets the canvas to its own ratio, whatever the project was created at (TimelineEditor.tsx:774-799) | project-actions.ts; JPM:119-205,1107-1151 |
+| Switch | Click a card → `setActiveProjectId` (if it isn't the loaded one) → the switch flow in 11.4, and the editor shows. The loader persists the id to electron-store, loads the JSON and hydrates the stores. `projectsLoaded` is set to `true` 1000 ms after the load finishes; the window shows "Preparing workspace" until the first load, then the home screen; opening another project shows "Opening project" until it's loaded. The last project opened is loaded at start-up behind the home screen and marked on its card | project-actions.ts; JP:1013-1220; renderer/src/components/App.tsx |
+| Home and covers | The top bar's Home pauses playback and saves the engine's frame at the playhead as the project's cover (`projects:save-cover`, JPEG ≤ 720 px tall), so drafts and ProRes projects get covers too. The cover is also still made from frame 0 by the old export path 1 s after clips change (JP:486-640) | project-actions.ts |
 | Missing JSON | A missing `project-<N>.json` loads as blank stores: viewport reset to scale 0.75 with the pointer tool, `focusFrame` 0 | JP:1122-1203 |
-| Rename | Inline input in the Topbar; commits on blur or Enter. `updateProject({name})` triggers an autosave, which writes `meta.name`. There is no rename IPC | Topbar.tsx:182-194,566-576 |
-| Delete | Only non-active projects show the delete button, behind a confirmation dialog. `projects:delete-json` unlinks the JSON and runs `rm -rf <userData>/media/<sanitized folderUuid>`, which removes only symlinks and proxies, not the user's originals. The store then calls `removeProject` | Topbar.tsx:196-225,508; JPM:1154-1233; projects.ts:52-60 |
+| Rename | The open project: the name field in the middle of the top bar; commits on blur or Enter. `updateProject({name})` triggers an autosave, which writes `meta.name`. Any project: a card's ⋯ ▸ Rename; one that isn't loaded is read with `projects:load-json`, given the name and written with `projects:save-json` (only the loaded project is autosaved). There is no rename IPC | Topbar.tsx; project-actions.ts |
+| Delete | A card's ⋯ ▸ Delete, behind a confirmation dialog. The loaded project is first swapped for the most recent other one (or a new empty one), so the switch's save of the outgoing project can't write it back. `projects:delete-json` unlinks the JSON and runs `rm -rf <userData>/media/<sanitized folderUuid>`, which removes only symlinks and proxies, not the user's originals. The store then calls `removeProject` | project-actions.ts; JPM:1154-1233; projects.ts:52-60 |
 
 ### 11.6 Settings
 
@@ -1144,7 +1146,9 @@ type ClipJson = Omit<AnyClipProps, "startFrame"|"endFrame"|"trimStart"|"trimEnd"
 | `settings.fps` | project JSON | number | 24 | Select 24/25/30/48/60. Save calls `setFpsWithRescale`, which rescales clip start, end and trim by `round(f/old*new)` and then runs `resolveOverlaps` | SettingsModal.tsx:225-258,389-394; control.ts:210-243; clip.ts:150-160,2026-2047 |
 | `settings.defaultClipLength` | project JSON | number, seconds | 5 | Select 3/5/10/15/30. Clamped to `max(1, round(x))` | SettingsModal.tsx:264-296,395-398; control.ts:244-246 |
 | `settings.aspectRatio` | project JSON | `{width,height,id}` | 16:9 | From the viewport store | JPM:160-164; viewport.ts:59 |
-| `layout` | renderer localStorage `openrip:layout-config` (zustand `persist`) | `"default"\|"media"\|"properties"` | `default` | UI only | renderer/src/lib/layout-config.ts:4-19 |
+| `layout` | renderer localStorage `openrip:layout-config` (zustand `persist`) | `"default"\|"media"\|"properties"` | `default` | UI only; the top bar's layout menu calls them Default, Media and Inspector | renderer/src/lib/layout-config.ts:4-19 |
+| Panel sizes | renderer localStorage `react-resizable-panels:openrip:layout:<layout>[:<group>]` | panel sizes per group | the layout's defaults | Each layout's groups keep their own sizes (`autoSaveId`) | renderer/src/components/App.tsx |
+| Safe areas | renderer localStorage `openrip:safe-areas` | `"1"\|"0"` | off | The player's guides toggle | renderer/src/components/panels/PreviewPanel.tsx |
 | Sidebar collapsed | localStorage `CategorySidebar:<title>` / `sidebar:filter` | `"1"\|"0"` | expanded | UI only | renderer/src/components/menus/CategorySidebar.tsx:25-42; FilterMenu.tsx:420 |
 | Update toast | localStorage `apex:lastShown:app-update` | epoch ms string | none | Remind every 24 h | renderer/src/hooks/use-update-toasts.ts:20,152 |
 
@@ -1192,21 +1196,42 @@ Every edit the store makes then follows the timeline's rules (`withTimelineRules
 
 ## 13. UI-level features (brief; UI stays in TS)
 
-**Layouts:** three presets, persisted in localStorage `openrip:layout-config` (renderer/src/lib/layout-config.ts:4-18; renderer/src/components/App.tsx:200-283):
-- `default`: media | preview | properties on top, timeline below
-- `media`: media column on the left
-- `properties`: properties column on the right
+**Shell (Phase 4, 2026-10-17).** The app opens on a home screen (§11.5); the editor is laid out as CapCut's: a top bar, a left panel, the player in the middle, the inspector on the right and the timeline across the bottom, separated by 3 px gaps that are also the resize handles. Dark panels (`brand-background` #151517) on `brand-background-dark`, the timeline on `brand` (#222124, what its canvas draws on), the app's lavender accent for what's active, Poppins at 10–13 px. Icons are react-icons (Lucide).
 
-**Panels:** MediaModelPanel (Media and Filters tabs), PreviewPanel (FloatingBar + Preview), PropertiesPanel (tabs per §1), TimelinePanel (Controls + TimelineEditor). `SidebarSection` also lists templates, transitions and effects, but these have no UI (types.ts:348-353).
+**Layouts:** three presets, persisted in localStorage `openrip:layout-config` (renderer/src/lib/layout-config.ts:4-18; renderer/src/components/App.tsx), each keeping its panels' sizes (§11.6):
+- `default` (Default): left panel | player | inspector on top (27/45/28 %, 58 % of the height), timeline below
+- `media` (Media): the left panel full height on the left
+- `properties` (Inspector): the inspector full height on the right
 
-**Tools:** chosen in FloatingBar (renderer/src/components/preview/clips/FloatingBar.tsx:221-710).
+**Top bar** (renderer/src/components/bars/Topbar.tsx): Home (back to the projects; disabled while exporting) and Menu (New project, Open a CapCut project…, Settings…) on the left; the project's name in the middle, renamed in place; the layout menu, the shortcuts list, Settings and Export on the right, with the export's progress in Export's place while it runs.
+
+**Left panel** (renderer/src/components/panels/MediaModelPanel.tsx): a row of tabs, Media, Audio, Text, Stickers, Effects, Transitions, Filters, Adjustment (`SidebarSection`, types.ts), over the tab's library. Media is the media library; Filters the LUT packs. Text adds a text at the playhead (3 s, centred, on a new top track, selected on its Text tab) in one of eight styles made of the text panel's own settings (renderer/src/lib/text-presets.ts), and gives the selected text one of the Animation tab's In animations. Transitions gives the selected video or photo one of the Animation tab's transitions (`applyTransition`, AnimationProperties.tsx) and shows the Animation tab. Audio, Stickers, Effects and Adjustment say what's coming and what to use meanwhile (renderer/src/components/menus/PendingMenu.tsx).
+
+**Player** (renderer/src/components/panels/PreviewPanel.tsx): a header with the canvas tools and the zoom menu (FloatingBar), the canvas (Preview), and a bar under it (renderer/src/components/preview/PlayerBar.tsx) with the time (`MM:SS.ss / MM:SS.ss`), the transport, the canvas's ratio menu (the presets and Custom; RatioMenu.tsx), safe-area guides (action- and title-safe boxes, SafeAreaGuides.tsx) and full screen.
+
+**Inspector** (renderer/src/components/panels/ClipPropertiesPanel.tsx): the selected clip's tabs, grouped as CapCut groups them, each a set of the existing property panels; the tab stays from one clip to the next (renderer/src/lib/inspector.ts). With nothing selected it shows the project's name, canvas, frame rate, length and clip count.
+
+| Clip | Tabs (sub-tabs) |
+|---|---|
+| video / image | Video or Image (Basic: Position, Layout, Appearance; Mask), Audio (video with sound), Speed or Duration, Animation, Adjust |
+| text | Text (Basic: the text panel; Transform: Position, Layout, Appearance), Animation, Duration |
+| shape | Shape (Basic: Appearance; Transform: Position, Layout), Duration |
+| audio | Audio, Speed |
+| filter (and a draft's filters and stickers) | Filter (the filter panel and Duration) |
+| drawing | Line (with a line selected), Duration |
+
+A selected mask opens Video ▸ Mask; a selected line opens Line.
+
+**Timeline toolbar** (renderer/src/components/controls/Controls.tsx): Undo, Redo, then Split, Delete, Detach audio and Crop on the left; the zoom slider on the right, with room before it for the timeline's own switches. The transport moved under the player.
+
+**Tools:** chosen in the player's header (FloatingBar, renderer/src/components/preview/clips/FloatingBar.tsx).
 - `ViewTool`: pointer, hand, mask, draw, shape, text
 - shape sub-tools: rect, ellipse, polygon, line, star
 - mask sub-tools: lasso, shape, draw (stub)
 - draw sub-tools: brush, highlighter, eraser
 - preview zoom: 0.1–4 (viewport.ts:48-49), with Fit, 50, 100 and 200 %
 
-**Transport:** go to start, ±5 s (`fps·5` frames), and play/pause, which restarts from 0 when at the end (Buttons.tsx:23-101; control.ts:302-316). Time is shown as `MM:SS.ss`. `ExtendTimelineButton` and `ReduceTimelineButton` exist but are never rendered.
+**Transport:** under the player: go to start, ±5 s (`fps·5` frames), and play/pause, which restarts from 0 when at the end (Buttons.tsx:23-101; control.ts:302-316). Time is shown as `MM:SS.ss`. `ExtendTimelineButton` and `ReduceTimelineButton` exist but are never rendered.
 
 **Timeline toolbar** (Controls.tsx): Undo, Redo, Split, Delete left, Delete right, Delete, Add marker, Crop, Detach audio on the left, in CapCut's order; Main track magnet, Auto snapping and Linkage (toggles: on, the glyph in the accent on a dark 24×23 chip), a divider, Zoom to fit and the zoom slider on the right. The timeline's buttons and toggles are standalone components in renderer/src/components/timeline/TimelineTools.tsx, each tooltip naming its shortcut.
 
@@ -1247,18 +1272,12 @@ Shortcuts that do **not** exist: J/K/L, CapCut's select/split modes (A/B), enabl
 - **Marker** (right-click its flag): Edit marker, Delete marker, Delete all markers in timeline.
 - **Selected DOM text:** Copy.
 
-**Topbar** (renderer/src/components/bars/Topbar.tsx):
-- project switcher with search, switch, delete and New Project (:468-542)
-- inline rename (:545-580)
-- Size menu: aspect presets 16:9, 9:16, 1:1, 4:3, 4:5, 21:9, 2:3, plus Custom (:688-787)
-- Layout menu, Shortcuts list (:607-685), Export (:850-858)
-
 **Media library** (renderer/src/components/menus/MediaMenu.tsx; renderer/src/components/media/Item.tsx):
-- upload a file or directory, or drop files from the OS (:469-478,750-767)
+- Import a file or a folder, or drop files from the OS
 - type filter; sort by name, duration or date
 - item menu: Create/Remove Proxy (video only), Rename, Open File Location, Delete (Item.tsx:425-482)
 
-**Settings modal** (renderer/src/components/dialogs/SettingsModal.tsx): FPS 24/25/30/48/60, default clip length 3/5/10/15/30 s, and an Updates tab. **The modal cannot be opened**, because `setSettingsOpen(true)` is never called (Topbar.tsx:384,451).
+**Settings modal** (renderer/src/components/dialogs/SettingsModal.tsx): FPS 24/25/30/48/60, default clip length 3/5/10/15/30 s, the engine preview switch and an Updates tab. Opened from the top bar's gear or Menu ▸ Settings….
 
 ## 14. Known gaps / bugs noticed (facts only)
 
