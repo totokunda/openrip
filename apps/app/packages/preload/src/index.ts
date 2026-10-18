@@ -25,13 +25,15 @@ export {
   engineThumbnails,
   engineBeats,
   engineLoudness,
+  engineRegisterFonts,
+  engineFontFamilies,
   onEngineExportProgress,
   getEnginePreviewEnabled,
   setEnginePreviewEnabled,
   ENGINE_FRAME_CANVAS_ID,
   ENGINE_FRAME_EVENT,
 } from "./engine.js";
-export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult, EngineThumbnail, EngineBeats } from "./engine.js";
+export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult, EngineThumbnail, EngineBeats, EngineFontFace, EngineFontFamily } from "./engine.js";
 
 // Voiceover recording (the main process's VoiceoverModule)
 export { voiceoverStatus, voiceoverStart, voiceoverStop, voiceoverCancel, onVoiceoverLevel } from "./voiceover.js";

@@ -27,6 +27,7 @@ import { useProjectsStore } from "./projects";
 import { getActiveProjectJsonSnapshot } from "./middlewares/json-persistence";
 import { withoutHistory } from "./history";
 import { BASE_LONG_SIDE } from "./settings";
+import { registerBundledFonts } from "./fonts";
 
 type EnginePreviewState = {
   /** The user's setting. */
@@ -104,6 +105,8 @@ async function syncNow() {
     // The engine reads originals (ProRes included) where the app uses proxies or playable
     // copies.
     const snapshot = withoutMasksWhileEditing(await withOriginalMedia(snap.snapshot));
+    // Its text in the bundled fonts from the first frame.
+    await registerBundledFonts();
     const r = await engineSyncProject(snap.projectId, snapshot);
     if (r.ok) {
       useEnginePreviewStore.setState((s) => ({ project: r.project, version: s.version + 1, error: null }));
@@ -205,6 +208,8 @@ export function initEnginePreview() {
   initialized = true;
   void Promise.all([engineInfo(), getEnginePreviewEnabled()]).then(([info, enabled]) => {
     useEnginePreviewStore.setState({ info, enabled });
+    // The engine draws text in the app's bundled fonts and lists the installed ones.
+    if (info.available) void registerBundledFonts();
     if (enabled && info.available) scheduleSync(0);
   });
   // Whatever the autosave would write changes the engine's copy too. Stores replace what
@@ -307,6 +312,7 @@ export async function engineExportProject(request: EngineExportRequest, onProgre
   const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any);
   if (!snap) return { ok: false, error: "no project open" };
   const snapshot = await withOriginalMedia(snap.snapshot);
+  await registerBundledFonts();
   const off = onEngineExportProgress((done, total) => onProgress(total > 0 ? done / total : 0));
   try {
     const { path, ...options } = request;

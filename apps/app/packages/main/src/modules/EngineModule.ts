@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app, ipcMain, sharedTexture } from "electron";
 import { AppModule } from "../AppModule.js";
@@ -67,7 +68,15 @@ export type EngineAddon = {
   stopRecording(): { path: string; durationUs: number; rate: number; channels: number } | null;
   /** Record a stand-in microphone that hears a tone (automated tests). */
   useToneInput(): void;
+  registerFonts(faces: { family: string; weight: number; italic: boolean; path: string; unicodeRange?: string }[]): void;
+  fontFamilies(): FontFamily[];
 };
+
+/** A family the engine draws text in: the app's bundled fonts, then the installed ones. */
+export type FontFamily = { name: string; weights: number[]; italic: boolean; bundled: boolean };
+
+/** A font face the page has (an `@font-face` rule), its file as the page loads it. */
+export type PageFontFace = { family: string; weight: number; italic: boolean; url: string; unicodeRange?: string };
 
 /** A frame from the engine's thumbnailer: RGBA, `width * height * 4` bytes. */
 export type Thumbnail = { index: number; timeUs: number; exact: boolean; width: number; height: number; rgba: Buffer };
@@ -135,6 +144,34 @@ function load(): EngineInfo {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * The file behind a font the page loads: a file URL in the built app; in development the dev
+ * server's `/@fs/` path to the file, or else a copy fetched from the server into
+ * `<userData>/engine-fonts`. Null if it can't be had.
+ */
+async function fontFile(url: string): Promise<string | null> {
+  try {
+    const u = new URL(url);
+    if (u.protocol === "file:") return fileURLToPath(u);
+    if (u.pathname.startsWith("/@fs/")) {
+      const path = decodeURIComponent(u.pathname.slice(4));
+      if (existsSync(path)) return path;
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    const dir = join(app.getPath("userData"), "engine-fonts");
+    const file = join(dir, decodeURIComponent(u.pathname).replace(/[^\w.-]+/g, "_"));
+    if (!existsSync(file)) {
+      const res = await fetch(u);
+      if (!res.ok) return null;
+      await mkdir(dir, { recursive: true });
+      await writeFile(file, Buffer.from(await res.arrayBuffer()));
+    }
+    return file;
+  } catch {
+    return null;
+  }
+}
 
 /** Hand a rendered surface to a window as a shared texture; the engine gets it back once released. */
 async function sendFrame(engine: EngineAddon, sender: Electron.WebContents, f: { id: number; ioSurface: Buffer; width: number; height: number; timeUs: number }) {
@@ -322,7 +359,7 @@ export class EngineModule implements AppModule {
     }
     // Exact thumbnails are kept across runs.
     if (addon) addon.setThumbnailCacheDir(join(app.getPath("userData"), "engine-thumbnails"));
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:beats", "engine:loudness"]) {
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -362,6 +399,36 @@ export class EngineModule implements AppModule {
       } catch (e) {
         console.warn("[engine] loudness failed:", message(e));
         return null;
+      }
+    });
+
+    // The page's bundled fonts (its @font-face files), so the engine draws text in the
+    // fonts the font menu shows. Returns how many faces it registered.
+    ipcMain.handle("engine:register-fonts", async (_event, faces: PageFontFace[]) => {
+      if (!addon || !Array.isArray(faces)) return 0;
+      const files = await Promise.all(faces.map((f) => fontFile(String(f.url))));
+      const found = faces.flatMap((f, i) => {
+        const path = files[i];
+        return path ? [{ family: String(f.family), weight: Number(f.weight) || 400, italic: !!f.italic, path, unicodeRange: f.unicodeRange || undefined }] : [];
+      });
+      try {
+        addon.registerFonts(found);
+      } catch (e) {
+        console.warn("[engine] registering fonts failed:", message(e));
+        return 0;
+      }
+      return found.length;
+    });
+
+    // The families the engine draws text in, for the font menu: the bundled ones, then the
+    // installed ones.
+    ipcMain.handle("engine:font-families", () => {
+      if (!addon) return [];
+      try {
+        return addon.fontFamilies();
+      } catch (e) {
+        console.warn("[engine] font families failed:", message(e));
+        return [];
       }
     });
 

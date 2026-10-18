@@ -137,6 +137,25 @@ export function engineClose(): Promise<void> {
   return ipcRenderer.invoke("engine:close");
 }
 
+/** A font face the page has (an `@font-face` rule), its file as the page loads it. */
+export type EngineFontFace = { family: string; weight: number; italic: boolean; url: string; unicodeRange?: string };
+
+/** A family the engine draws text in. `bundled`: one of the app's own fonts, else installed. */
+export type EngineFontFamily = { name: string; weights: number[]; italic: boolean; bundled: boolean };
+
+/**
+ * Give the engine the page's bundled fonts, so it draws text in the fonts the font menu shows.
+ * Resolves to how many faces it took (0 without the engine).
+ */
+export function engineRegisterFonts(faces: EngineFontFace[]): Promise<number> {
+  return ipcRenderer.invoke("engine:register-fonts", faces);
+}
+
+/** The families the engine draws text in: the bundled ones, then the installed ones. Empty without the engine. */
+export function engineFontFamilies(): Promise<EngineFontFamily[]> {
+  return ipcRenderer.invoke("engine:font-families");
+}
+
 export function getEnginePreviewEnabled(): Promise<boolean> {
   return ipcRenderer.invoke("settings:get-engine-preview");
 }
