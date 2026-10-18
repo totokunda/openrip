@@ -5,6 +5,7 @@ import {
   LuFolderInput,
   LuFolderOpen,
   LuHouse,
+  LuChevronDown,
   LuLayoutGrid,
   LuLayoutTemplate,
   LuList,
@@ -57,6 +58,9 @@ import { cn } from "@/lib/utils";
 
 type SortKey = "edited" | "name" | "created";
 type ViewKind = "grid" | "list";
+
+const menu = "dark p-1 bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] text-brand-light";
+const menuRow = "dark h-8 px-2.5 gap-2.5 rounded-[4px] text-[13px] cursor-pointer focus:bg-brand-hover";
 
 const VIEW_KEY = "openrip:home-view";
 
@@ -141,21 +145,21 @@ const ProjectMenu: React.FC<{
     >
       <LuEllipsis className="w-3.5 h-3.5" />
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="end" className="dark w-44 bg-brand-background border border-brand-light/10 rounded-[8px]">
-      <DropdownMenuItem className="dark text-[12px] gap-2" onClick={onOpen}>
-        <LuPlay className="w-3.5 h-3.5" /> Open
+    <DropdownMenuContent align="end" className={cn(menu, "w-44")}>
+      <DropdownMenuItem className={menuRow} onClick={onOpen}>
+        <LuPlay className="w-4 h-4" /> Open
       </DropdownMenuItem>
-      <DropdownMenuItem className="dark text-[12px] gap-2" onClick={onRename}>
-        <LuPencil className="w-3.5 h-3.5" /> Rename
+      <DropdownMenuItem className={menuRow} onClick={onRename}>
+        <LuPencil className="w-4 h-4" /> Rename
       </DropdownMenuItem>
       {project.filePath && (
-        <DropdownMenuItem className="dark text-[12px] gap-2" onClick={() => void revealPathInFolder(project.filePath!)}>
-          <LuFolderOpen className="w-3.5 h-3.5" /> Show the file
+        <DropdownMenuItem className={menuRow} onClick={() => void revealPathInFolder(project.filePath!)}>
+          <LuFolderOpen className="w-4 h-4" /> Show the file
         </DropdownMenuItem>
       )}
-      <DropdownMenuSeparator />
-      <DropdownMenuItem className="dark text-[12px] gap-2 text-red-400 focus:text-red-300" onClick={onDelete}>
-        <LuTrash2 className="w-3.5 h-3.5" /> Delete
+      <DropdownMenuSeparator className="bg-brand-hover mx-1" />
+      <DropdownMenuItem className={cn(menuRow, "text-red-400 focus:text-red-300")} onClick={onDelete}>
+        <LuTrash2 className="w-4 h-4" /> Delete
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
@@ -211,13 +215,13 @@ const ProjectCard: React.FC<CardProps> = ({ project, active, onOpen, onDelete })
   const { renaming, start, field } = useRename(project);
   const length = useLength(project, active);
   return (
-    <div data-testid="project-card" data-project-id={project.id} data-active={active ? "true" : "false"} className="group flex flex-col gap-2 min-w-0">
+    <div data-testid="project-card" data-project-id={project.id} data-active={active ? "true" : "false"} className="group w-[124px] flex flex-col gap-1.5 min-w-0">
       <div className="relative">
         <button
           type="button"
           onClick={onOpen}
           title={`Open ${project.name}`}
-          className="w-full aspect-[1/1] rounded-lg overflow-hidden bg-brand-background border border-transparent flex items-center justify-center text-brand-light/25 transition-colors group-hover:border-brand-light/25 focus-visible:border-brand-accent focus-visible:outline-none cursor-pointer"
+          className="w-[124px] h-[123px] rounded-[6px] overflow-hidden bg-brand-background flex items-center justify-center text-brand-light/25 transition-[filter] group-hover:brightness-125 focus-visible:ring-2 focus-visible:ring-brand-accent focus-visible:outline-none cursor-pointer"
         >
           <Cover project={project} frame={48} />
         </button>
@@ -229,15 +233,15 @@ const ProjectCard: React.FC<CardProps> = ({ project, active, onOpen, onDelete })
           className="absolute top-1.5 right-1.5 bg-black/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 transition-opacity"
         />
       </div>
-      <div className="flex flex-col min-w-0 text-left px-0.5 gap-0.5">
+      <div className="flex flex-col min-w-0 text-left gap-0.5">
         {renaming ? (
           field
         ) : (
-          <span className="text-[12px] text-brand-light/90 whitespace-nowrap" title={project.name} data-testid="project-name">
-            {middle(project.name, 24)}
+          <span className="text-[13px] text-[#cccccc] whitespace-nowrap" title={project.name} data-testid="project-name">
+            {middle(project.name, 19)}
           </span>
         )}
-        <span className="text-[11px] text-brand-light/40 tabular-nums">
+        <span className="text-[11.5px] text-[#7a7a7a] tabular-nums">
           {sizeLabel(project.sizeBytes)} | {lengthLabel(length)}
         </span>
       </div>
@@ -254,13 +258,13 @@ const ProjectRow: React.FC<CardProps & { showPath?: boolean }> = ({ project, act
       data-testid="project-card"
       data-project-id={project.id}
       data-active={active ? "true" : "false"}
-      className="group grid grid-cols-[56px_minmax(0,2fr)_60px_70px_70px_minmax(0,1.2fr)_28px] items-center gap-3 px-2 py-1.5 rounded-md hover:bg-brand-light/[0.04] text-[12px] text-brand-light/80"
+      className="group grid grid-cols-[36px_minmax(0,2fr)_60px_70px_70px_minmax(0,1.2fr)_28px] items-center gap-3 px-2 h-[46px] rounded-[6px] hover:bg-brand text-[12px] text-[#cccccc]"
     >
       <button
         type="button"
         onClick={onOpen}
         title={`Open ${project.name}`}
-        className="w-14 h-9 rounded-[5px] overflow-hidden bg-brand-background flex items-center justify-center text-brand-light/25 cursor-pointer"
+        className="w-9 h-9 rounded-[4px] overflow-hidden bg-brand-background flex items-center justify-center text-brand-light/25 cursor-pointer"
       >
         <Cover project={project} frame={20} />
       </button>
@@ -296,11 +300,11 @@ const NavItem: React.FC<{ icon: IconType; label: string; active: boolean; onClic
     aria-pressed={active}
     onClick={onClick}
     className={cn(
-      "w-full h-9 flex items-center gap-3 px-3 rounded-lg text-[13px] transition-colors cursor-pointer",
-      active ? "bg-brand-light/[0.07] text-brand-light" : "text-brand-light/65 hover:text-brand-light hover:bg-brand-light/[0.04]",
+      "w-full h-8 flex items-center gap-3 px-2.5 rounded-[6px] text-[13px] transition-colors cursor-pointer",
+      active ? "bg-[#221b29] text-brand-light" : "text-[#cccccc] hover:text-brand-light hover:bg-white/[0.04]",
     )}
   >
-    <Icon className="w-4 h-4" />
+    <Icon className="w-3.5 h-3.5" />
     {label}
   </button>
 );
@@ -319,14 +323,14 @@ const QuickStart: React.FC<{ icon: IconType; title: string; note: string; onClic
     data-testid={testId}
     onClick={onClick}
     disabled={busy}
-    className="flex-1 min-w-[200px] h-[72px] flex items-center gap-3 px-4 rounded-lg bg-brand-background hover:bg-brand transition-colors text-left cursor-pointer disabled:cursor-wait"
+    className="w-[188px] h-[136px] shrink-0 flex flex-col justify-between p-3 rounded-[8px] bg-white/[0.035] hover:bg-white/[0.06] transition-colors text-left cursor-pointer disabled:cursor-wait"
   >
-    <span className="h-9 w-9 shrink-0 rounded-lg bg-brand-light/[0.06] flex items-center justify-center text-brand-accent">
+    <span className="h-9 w-9 rounded-[6px] bg-white/[0.06] flex items-center justify-center text-brand-light">
       {busy ? <LuLoader className="w-4 h-4 animate-spin" /> : <Icon className="w-4 h-4" />}
     </span>
-    <span className="flex flex-col min-w-0">
-      <span className="text-[13px] text-brand-light/90 truncate">{title}</span>
-      <span className="text-[11px] text-brand-light/40 truncate">{note}</span>
+    <span className="flex flex-col min-w-0 gap-0.5">
+      <span className="text-[14px] font-semibold text-brand-lighter truncate">{title}</span>
+      <span className="text-[12px] text-[#949494] line-clamp-2">{note}</span>
     </span>
   </button>
 );
@@ -347,6 +351,7 @@ const HomeScreen: React.FC = () => {
     }
   });
   const [creating, setCreating] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
   const [capcutOpen, setCapcutOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toDelete, setToDelete] = useState<ProjectSettings | null>(null);
@@ -412,14 +417,14 @@ const HomeScreen: React.FC = () => {
 
   const list = (items: ProjectSettings[], showPath = false) =>
     view === "grid" && !showPath ? (
-      <div className="grid gap-x-4 gap-y-5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))" }}>
+      <div className="grid gap-x-[22px] gap-y-4" style={{ gridTemplateColumns: "repeat(auto-fill, 124px)" }}>
         {items.map((p) => (
           <ProjectCard key={p.id} project={p} active={p.id === activeProjectId} onOpen={() => openProject(p.id)} onDelete={() => setToDelete(p)} />
         ))}
       </div>
     ) : (
       <div className="flex flex-col">
-        <div className="grid grid-cols-[56px_minmax(0,2fr)_60px_70px_70px_minmax(0,1.2fr)_28px] gap-3 px-2 pb-1.5 text-[11px] text-brand-light/35 text-left border-b border-brand-light/[0.06] mb-1">
+        <div className="grid grid-cols-[36px_minmax(0,2fr)_60px_70px_70px_minmax(0,1.2fr)_28px] gap-3 px-2 pb-1.5 text-[11.5px] text-[#7a7a7a] text-left border-b border-brand mb-1">
           <span />
           <span>Name</span>
           <span>Ratio</span>
@@ -434,42 +439,53 @@ const HomeScreen: React.FC = () => {
       </div>
     );
 
+  const tool = "h-6 px-1.5 flex items-center justify-center gap-1 rounded-[4px] bg-[#29292d] hover:bg-[#333338] text-brand-light/85 text-[12px] transition-colors cursor-pointer";
   const toolbar = (
     <div className="flex items-center gap-2">
-      <div className="relative">
-        <LuSearch className="w-3.5 h-3.5 text-brand-light/40 absolute left-2.5 top-1/2 -translate-y-1/2" />
+      {searching ? (
         <input
+          autoFocus
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search projects"
-          className="w-52 h-8 rounded-lg pl-8 pr-2 text-[12px] bg-brand-background border border-transparent text-brand-light/90 placeholder:text-brand-light/35 focus:border-brand-light/20"
+          onBlur={() => !search && setSearching(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setSearch("");
+              setSearching(false);
+            }
+          }}
+          placeholder="Search project name"
+          data-testid="home-search"
+          className="w-[252px] h-[26px] rounded-[4px] px-2 text-[12px] bg-brand-background-dark border-[0.5px] border-[#3a3a3a] text-brand-light placeholder:text-brand-light/35"
         />
-      </div>
+      ) : (
+        <button type="button" title="Search" data-testid="home-search-open" onClick={() => setSearching(true)} className={cn(tool, "w-[23px] px-0")}>
+          <LuSearch className="w-3.5 h-3.5" />
+        </button>
+      )}
       {section === "home" && (
-        <div className="h-8 p-0.5 flex rounded-lg bg-brand-background">
-          {([
-            ["grid", LuLayoutGrid, "Grid"],
-            ["list", LuList, "List"],
-          ] as const).map(([v, Icon, label]) => (
-            <button
-              key={v}
-              type="button"
-              title={label}
-              aria-pressed={view === v}
-              data-testid={`home-view-${v}`}
-              onClick={() => setView(v)}
-              className={cn("w-8 h-7 flex items-center justify-center rounded-md transition-colors cursor-pointer", view === v ? "bg-brand-light/10 text-brand-light" : "text-brand-light/50 hover:text-brand-light")}
-            >
-              <Icon className="w-3.5 h-3.5" />
-            </button>
-          ))}
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger title="View" data-testid="home-view" className={tool}>
+            {view === "grid" ? <LuLayoutGrid className="w-3.5 h-3.5" /> : <LuList className="w-3.5 h-3.5" />}
+            <LuChevronDown className="w-3 h-3 opacity-70" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className={cn(menu, "w-32")}>
+            {([
+              ["grid", LuLayoutGrid, "Grid"],
+              ["list", LuList, "List"],
+            ] as const).map(([v, Icon, label]) => (
+              <DropdownMenuItem key={v} data-testid={`home-view-${v}`} className={cn(menuRow, view === v && "text-brand-accent")} onClick={() => setView(v)}>
+                <Icon className="w-4 h-4" /> {label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
       <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
-        <SelectTrigger size="sm" className="w-32 !h-8 text-[12px] bg-brand-background border-transparent rounded-lg text-brand-light/80">
+        <SelectTrigger size="sm" className="w-[118px] !h-6 px-2 text-[12px] bg-[#29292d] border-transparent rounded-[4px] text-brand-light/85">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent className="dark bg-brand-background text-brand-light">
+        <SelectContent className="dark bg-brand-header text-brand-light">
           <SelectItem value="edited" className="text-[12px]">Last edited</SelectItem>
           <SelectItem value="created" className="text-[12px]">Newest first</SelectItem>
           <SelectItem value="name" className="text-[12px]">Name</SelectItem>
@@ -485,37 +501,42 @@ const HomeScreen: React.FC = () => {
   );
 
   return (
-    <div data-testid="home" className="w-full h-screen flex bg-brand-background-dark text-brand-light select-none">
-      <aside className="w-[260px] shrink-0 flex flex-col gap-1 px-3 pt-4 border-r border-brand-light/[0.05]">
-        <div className="h-9 px-3 flex items-center text-[15px] font-semibold tracking-tight mb-3">OpenRip</div>
+    <div
+      data-testid="home"
+      className="w-full h-screen flex text-brand-light select-none"
+      style={{ background: "linear-gradient(180deg, #16101b 0%, #0c0b0d 45%, #090909 100%)" }}
+    >
+      <aside className="w-[216px] shrink-0 flex flex-col gap-3 px-5 pt-5">
+        <div className="h-8 px-2.5 flex items-center text-[15px] font-semibold tracking-tight mb-2">OpenRip</div>
         <NavItem icon={LuHouse} label="Home" active={section === "home"} onClick={() => setSection("home")} testId="home-nav-home" />
         <NavItem icon={LuLayoutTemplate} label="Templates" active={section === "templates"} onClick={() => setSection("templates")} testId="home-nav-templates" />
-        <div className="px-3 pt-5 pb-1.5 text-[11px] text-brand-light/35 text-left">Management</div>
+        <div className="h-px bg-white/[0.06] my-1" />
+        <div className="px-2.5 text-[12px] text-[#949494] text-left">Management</div>
         <NavItem icon={LuLibrary} label="Library" active={section === "library"} onClick={() => setSection("library")} testId="home-nav-library" />
       </aside>
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <header className="h-11 shrink-0 flex items-center justify-end px-4">
+        <header className="h-11 shrink-0 flex items-center justify-end px-4 [&_button]:!w-6 [&_button]:!h-6 [&_button]:!border-0 [&_button]:!bg-transparent [&_button:hover]:!bg-white/[0.06]">
           <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
         </header>
         <main className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-          <div className="max-w-[1500px] mx-auto px-8 pb-16 flex flex-col gap-8">
+          <div className="pl-6 pr-[60px] pb-16 flex flex-col gap-7">
             {section === "home" && (
               <>
                 <section className="flex flex-col gap-3">
                   <div
-                    className="relative h-[200px] rounded-xl overflow-hidden flex flex-col items-center justify-center gap-4"
-                    style={{ background: "linear-gradient(120deg, #3b2a4f 0%, #6f4b93 45%, #ae81ce 100%)" }}
+                    className="relative h-[143px] rounded-[8px] overflow-hidden flex flex-col items-center justify-center gap-3"
+                    style={{ background: "linear-gradient(110deg, #6e4d8d 0%, #9a73bd 50%, #c3a3dc 100%)" }}
                   >
                     <button
                       type="button"
                       data-testid="new-project"
                       disabled={!!creating}
                       onClick={() => void create("default")}
-                      className="flex items-center gap-3 text-[22px] font-semibold text-white hover:scale-[1.02] transition-transform cursor-pointer disabled:cursor-wait"
+                      className="flex items-center gap-3 text-[26px] font-bold text-white cursor-pointer disabled:cursor-wait"
                     >
-                      <span className="h-10 w-10 rounded-full bg-white/20 flex items-center justify-center">
-                        {creating === "default" ? <LuLoader className="w-5 h-5 animate-spin" /> : <LuPlus className="w-5 h-5" />}
+                      <span className="h-7 w-7 rounded-[5px] bg-[#1b1320] text-white flex items-center justify-center">
+                        {creating === "default" ? <LuLoader className="w-4 h-4 animate-spin" /> : <LuPlus className="w-4 h-4 stroke-[3]" />}
                       </span>
                       Create project
                     </button>
@@ -529,7 +550,7 @@ const HomeScreen: React.FC = () => {
                           title={`New ${p.name.toLowerCase()} project (${p.id})`}
                           disabled={!!creating}
                           onClick={() => void create(p.id, { width: p.width, height: p.height, id: p.id })}
-                          className="h-8 pl-2 pr-2.5 flex items-center gap-1.5 rounded-full bg-black/20 hover:bg-black/35 text-white/85 hover:text-white text-[12px] tabular-nums transition-colors cursor-pointer disabled:cursor-wait"
+                          className="h-6 pl-1.5 pr-2 flex items-center gap-1.5 rounded-full bg-black/20 hover:bg-black/35 text-white/90 hover:text-white text-[12px] tabular-nums transition-colors cursor-pointer disabled:cursor-wait"
                         >
                           <span className="w-4 flex items-center justify-center">
                             {creating === p.id ? <LuLoader className="w-3 h-3 animate-spin" /> : <RatioFrame width={p.width} height={p.height} size={13} />}
@@ -538,8 +559,8 @@ const HomeScreen: React.FC = () => {
                         </button>
                       ))}
                     </div>
-                    <span className="absolute bottom-3 text-[11px] text-white/55">
-                      Create project sizes the canvas to the first clip you add; or pick a size.
+                    <span className="absolute bottom-2 text-[11px] text-white/65">
+                      Sized by the first clip you add, or pick a size.
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-3">
@@ -553,8 +574,8 @@ const HomeScreen: React.FC = () => {
 
                 <section className="flex flex-col gap-4">
                   <div className="flex items-center justify-between gap-4">
-                    <h2 className="text-[15px] font-semibold text-brand-light">
-                      Projects <span className="text-brand-light/35 font-normal tabular-nums ml-1 text-[13px]">{projects.length}</span>
+                    <h2 className="text-[16px] font-bold text-brand-light">
+                      Projects <span className="text-[#7a7a7a] font-normal tabular-nums ml-1 text-[13px]">{projects.length}</span>
                     </h2>
                     {toolbar}
                   </div>
