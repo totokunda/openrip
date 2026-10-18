@@ -129,11 +129,11 @@ export const ACTIONS: ShortcutAction[] = [
   a("selectAll", "basic", ["Mod+A"]),
   a("group", "basic", ["Mod+G"]),
   a("ungroup", "basic", ["Mod+Shift+G"]),
-  // Other: the preview's tools keep their letters (Controls.tsx handles them).
+  // Other: the preview's tools keep their letters (Controls.tsx handles them). There is no
+  // draw tool: CapCut draws no freehand lines (its drawing is Stickers ▸ Shapes and the Pen).
   a("resizeTextCenter", "other", [], missing),
   a("pointerTool", "other", ["V"], { fixed: true }),
   a("handTool", "other", ["H"], { fixed: true }),
-  a("drawTool", "other", ["D"], { fixed: true }),
   a("textTool", "other", ["T"], { fixed: true }),
   a("shapeTool", "other", ["S"], { fixed: true }),
 ];

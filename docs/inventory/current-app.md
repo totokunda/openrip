@@ -1292,7 +1292,7 @@ The Animation tab (renderer/src/components/properties/AnimationProperties.tsx) i
 | 1–5 (shape tool) | rect / ellipse / polygon / line / star | Controls.tsx:431-457 |
 | 1–3 (mask tool) | lasso / shape / draw | Controls.tsx:460-477 |
 | 1–3 (draw tool) | brush / highlighter / eraser | Controls.tsx:480-496 |
-| V H D T S | pointer / hand / draw / text / shape (M is now Add marker, as in CapCut; the mask tool is in the preview's toolbar) | Controls.tsx |
+| V H T S | pointer / hand / text / shape (no D: there is no freehand drawing; M is Add marker, as in CapCut; masks start from the Mask tab) | Controls.tsx |
 | Escape | close context menu; exit fullscreen; leave text edit | GlobalContextMenu.tsx:68-70; FullscreenPreview.tsx:327; TextPreview.tsx:788-797 |
 | Text-edit keys (Mod+A/C/X/V, Home, End, arrows, Delete, Backspace, Enter) | in-canvas text editor, entered by double-click | TextPreview.tsx:698-1092 |
 

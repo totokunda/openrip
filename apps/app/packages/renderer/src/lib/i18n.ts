@@ -205,7 +205,6 @@ const en = {
   "action.resizeTextCenter": "Resize the text box from the center",
   "action.pointerTool": "Pointer tool",
   "action.handTool": "Hand tool",
-  "action.drawTool": "Draw tool",
   "action.textTool": "Text tool",
   "action.shapeTool": "Shape tool",
   "key.scroll": "Scroll",
