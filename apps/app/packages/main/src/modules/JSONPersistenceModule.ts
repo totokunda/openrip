@@ -857,6 +857,8 @@ export class JSONPersistenceModule implements AppModule {
     if (to.startsWith(path.resolve(from) + path.sep)) throw new Error("Choose a folder outside the current projects folder");
     await fs.mkdir(to, { recursive: true });
     await fs.access(to, fsConstants.W_OK);
+    // Saves already on their way land first, so none writes the old folder after the move.
+    await Promise.all([...projectWrites.values()]);
     const entries = await fs.readdir(from).catch(() => [] as string[]);
     const files = entries.filter((e) => /^project-\d+\.json$/i.test(e));
     const there = new Set(await fs.readdir(to).catch(() => [] as string[]));
