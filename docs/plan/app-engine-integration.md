@@ -111,6 +111,8 @@ Done (2026-10-16): Projects ▸ Open CapCut Project… lists the drafts CapCut s
 
 Done (2026-10-18): the data model and the engine. The keyframe diamonds, the inspector's navigators and the keyframe graph are UI still to build on it ([keyframes.md](../parity/keyframes.md) has the engine side and how CapCut's curve was matched).
 
+The inspector's navigators are built (2026-10-18), on the video and photo panels: `KeyframeButton` in `PropertyRow`, `PropertiesSlider` and section headers (one property or a section's several), lib/keyframe-ui.ts (`useKeyedProperty`, `toggleKeysInStore`, and `useShownTransform` / `setShownTransform` for the clip's handles on the canvas) over pure edits in lib/inspector-edits.ts (`editProperties`, `keyNavOf`, `toggleKeys`, `transformAt`; `tests/inspector.test.ts`). A mask's poses are keyed the same way through lib/mask-shapes.ts. The timeline's diamonds and graph are still to build. Checked with `insp-suite.mjs` (scripts/smoke/README.md).
+
 - **On a clip.** `keyframes` (`lib/types.ts`) maps a property to its keys, sorted by frame. Each key is `{ frame, value, ease? }`:
   - `frame` is clip-local: 0 is where the clip starts on the timeline, at the project's rate. It can be fractional, so a CapCut key keeps its exact µs.
   - `value` is in the clip field's own units. `position` is the box's centre in world units (y down; the transform's `x`/`y` are its turned top-left corner). `scale` is `[scaleX, scaleY]`, `rotation` degrees about the centre, `opacity` 0–100 and `volume` dB. Then the Adjust sliders on their scale, `intensity` for a filter bar (a sticker bar's opacity), a text's `color` (`#rrggbb`), `fontSize`, `stroke`, `strokeWidth`, `strokeOpacity`, `shadowColor`, `shadowOpacity`, `shadowBlur`, `backgroundColor` and `backgroundOpacity`. And `draft:<id>` for one of a converted clip's `draftAdjustments` (CapCut's scale), or `draft:<id>:hue` (`:saturation`, `:lightness`) for an HSL range.
@@ -130,7 +132,7 @@ Done (2026-10-18): the data model and the engine. The keyframe diamonds, the ins
 - **CapCut clips.** `to_app_project` shows a converted clip's own keys in `keyframes`, for the properties above, and in `base`. When the project comes back, a property whose keys differ from `base` replaces the segment's keys for it; the others stay exactly CapCut's.
   - Keys the app doesn't show (a mask's, a text's shadow) stay on the media through a trim or speed change.
   - Unedited, a converted clip comes back exactly.
-- **Masks.** A mask keyframe takes an `ease` too: poses of the same shape travel by it, linear by default. `featherAmount` (0–100, CapCut's) and `inverted` are drawn. A brush mask's strokes go in `brushStrokes` (the brush tool doesn't save them yet). See [masks.md](../parity/masks.md).
+- **Masks.** A mask keyframe takes an `ease` too: poses of the same shape travel by it, linear by default. `featherAmount` (0–100, CapCut's) and `inverted` are drawn. A brush mask's strokes go in `brushStrokes`. See [masks.md](../parity/masks.md).
 - **Checked:**
   - the unit tests in `tests/keyframes.test.ts` (`node --test`) and the v1 crate;
   - the harness steps `keyframes` and `keyframescheck`: keys set through the store change the engine's frames over time; CapCut's rule; a split; save and reopen;
@@ -191,6 +193,8 @@ Done (2026-10-18): the data model, the store operations and the engine for CapCu
 ## Colour and compositing
 
 Done (2026-10-18): the data model, the library helpers and the engine. The Adjust tab (Basic, HSL, Curves, Color wheel, LUT), Video › Basic (Blend, Canvas, the transform presets, Mirror) and Remove BG › Chroma key are UI still to build on them ([colour.md](../parity/colour.md), [compositing.md](../parity/compositing.md)).
+
+The panels are built (2026-10-18) on these fields and helpers, every control checked in the engine's frame and by undo with `insp-suite.mjs` (docs/inventory/current-app.md §13). The draft's own adjustments stay in Adjust ▸ Basic as before; the old sliders show only on clips that use them, with the move onto CapCut's.
 
 - **On a video or photo** (`ClipLook` in `lib/types.ts`; every field optional, missing is neutral):
   - `color`: the Adjust tab's colour tools (`ClipColor`):

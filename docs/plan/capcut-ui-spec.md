@@ -624,13 +624,13 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.14 Left panel: Templates | 0 | 0 | 1 |
 | 6.15 Player | 12 | 1 | 0 |
 | 6.16 Inspector: project (nothing selected) | 1 | 3 | 7 |
-| 6.17 Inspector: video clip | 10 | 9 | 21 |
+| 6.17 Inspector: video clip | 21 | 7 | 12 |
 | 6.18 Inspector: photo clip | (see 6.17) | | |
 | 6.19 Inspector: audio clip | 2 | 2 | 3 |
 | 6.20 Inspector: text clip | 11 | 5 | 7 |
 | 6.21 Inspector: sticker clip | 1 | 0 | 1 |
 | 6.22 Inspector: effect, filter and transition clips | 1 | 1 | 4 |
-| 6.23 Inspector: adjustment layer (also the video Adjust tab) | 0 | 9 | 2 |
+| 6.23 Inspector: adjustment layer (also the video Adjust tab) | 6 | 4 | 1 |
 | 6.24 Inspector: caption clip | 0 | 1 | 3 |
 | 6.25 Inspector: multiple selection and compound clips | 0 | 2 | 4 |
 | 6.26 Timeline toolbar | 6 | 2 | 14 |
@@ -639,7 +639,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.29 Export dialog | 5 | 2 | 9 |
 | 6.30 Other dialogs | 2 | 0 | 4 |
 | 6.31 Classic-algorithm features brought into scope | 1 | 10 | 1 |
-| **Total (351 in-scope features)** | **107** | **84** | **160** |
+| **Total (351 in-scope features)** | **124** | **77** | **150** |
 
 The counts above are as written. A re-audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows (32.0% strict, 47.8% with partly as half); with the text, inspector and audio branches then in progress, 146 / 86 / 105 (43.3% / 56.1%). §6.31's 11 rows were added after it.
 
@@ -948,32 +948,32 @@ Tabs: Video (Basic, Remove BG, Mask, Retouch), Audio, Speed, Animation, Adjust, 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
 | Transform › Scale (slider, %, stepper) | `001-video-selected-basic-top.png` | has |
-| Transform › Uniform scale toggle | `001-video-selected-basic-top.png` | partly (separate X/Y scale) |
+| Transform › Uniform scale toggle | `001-video-selected-basic-top.png` | has |
 | Transform › Position X/Y | `001-video-selected-basic-top.png` | has |
 | Transform › Rotate (field + dial) | `001-video-selected-basic-top.png` | has |
 | Transform › align left/centre/right/top/middle/bottom | `001-video-selected-basic-top.png` | has |
-| Section reset (↺) | `001-video-selected-basic-top.png` | partly (reset size only) |
-| Keyframe navigator on every animatable property (‹ ◇ ›) | `001-video-selected-basic-top.png` | missing (mask geometry only) |
-| Blend › Mode: Default, Color dodge, Linear burn, Hard light, Multiply, Color burn, Overlay, Brighten, Darken, Soft light, Screen | `025-blend-mode-menu.png` | missing |
+| Section reset (↺) | `001-video-selected-basic-top.png` | has (video and photo sections) |
+| Keyframe navigator on every animatable property (‹ ◇ ›) | `001-video-selected-basic-top.png` | has (video and photo inspector; text and audio panels to come) |
+| Blend › Mode: Default, Color dodge, Linear burn, Hard light, Multiply, Color burn, Overlay, Brighten, Darken, Soft light, Screen | `025-blend-mode-menu.png` | has |
 | Blend › Opacity | `002-basic-blend-enhancement-controls.png` | has |
 | Stabilize › Level (classic stabilisation) | `005-stabilize-options-view.png` | missing |
 | Reduce image noise (classic denoise) | `004-basic-enhancement-sections.png` | missing |
 | Remove flickers (classic deflicker) | `006-basic-ai-canvas-lower.png` | missing |
 | Motion blur (frame blending) | `006-basic-ai-canvas-lower.png` | missing |
-| Canvas › None, Blur (4 strengths), Color (swatches) | `007-basic-bottom-canvas.png`, `008-canvas-type-menu.png`, `009-canvas-blur-options.png`, `010-canvas-color-options.png` | missing |
-| Canvas › Pattern (OpenRip's own patterns) | `011-canvas-pattern-options.png` | missing |
-| Canvas › Apply to all | `007-basic-bottom-canvas.png` | missing |
-| Remove BG › Chroma key (colour picker, strength, shadow; expanded controls not captured) | `012-remove-background-options.png` | missing |
-| Mask › Add mask, several masks per clip | `013-mask-default.png`, `25-inspector-adjustment-layer/024-multiple-masks.png` | partly |
+| Canvas › None, Blur (4 strengths), Color (swatches) | `007-basic-bottom-canvas.png`, `008-canvas-type-menu.png`, `009-canvas-blur-options.png`, `010-canvas-color-options.png` | has |
+| Canvas › Pattern (OpenRip's own patterns) | `011-canvas-pattern-options.png` | partly (an image from a file; no patterns of our own yet) |
+| Canvas › Apply to all | `007-basic-bottom-canvas.png` | has |
+| Remove BG › Chroma key (colour picker, strength, shadow; expanded controls not captured) | `012-remove-background-options.png` | has (eyedropper on the picture, intensity, shadow, edge smoothing, spill) |
+| Mask › Add mask, several masks per clip | `013-mask-default.png`, `25-inspector-adjustment-layer/024-multiple-masks.png` | has (several masks; the engine paints outside the first only) |
 | Mask shapes › Circle, Rectangle, Stars | `013-mask-default.png` | has (ellipse, rectangle, 5-point star) |
-| Mask shapes › Split (linear), Filmstrip (mirror) | `014-mask-split-controls.png` | partly (engine renders them from drafts; no UI) |
-| Mask shapes › Heart | `013-mask-default.png` | missing |
+| Mask shapes › Split (linear), Filmstrip (mirror) | `014-mask-split-controls.png` | has |
+| Mask shapes › Heart | `013-mask-default.png` | has |
 | Mask shapes › Text mask (content, font, size, B/U/I, spacing, alignment) | `015-mask-text-formatting.png` | missing |
 | Mask shapes › Brush (brush, eraser, size, feather, expansion) | `016-mask-brush-controls.png` | partly (stub) |
 | Mask shapes › Pen (free polygon) | `017-mask-pen-controls.png` | has (lasso) |
 | Mask settings › Position, Rotation, Size W/H with link | `25-inspector-adjustment-layer/025-mask-rectangle.png` | has |
-| Mask settings › Feather, Invert | `014-mask-split-controls.png`, `25-inspector-adjustment-layer/025-mask-rectangle.png` | partly (stored but not drawn) |
-| Mask settings › Round corners, Expansion | `016-mask-brush-controls.png`, `25-inspector-adjustment-layer/026-rectangle-mask-controls.png` | missing |
+| Mask settings › Feather, Invert | `014-mask-split-controls.png`, `25-inspector-adjustment-layer/025-mask-rectangle.png` | has |
+| Mask settings › Round corners, Expansion | `016-mask-brush-controls.png`, `25-inspector-adjustment-layer/026-rectangle-mask-controls.png` | partly (round corners; no expansion) |
 | Speed › Standard: speed slider (ticks) and 1.00x field | `020-speed-standard.png` | has (0.1–5×) |
 | Speed › Duration field (set length directly) | `020-speed-standard.png` | missing |
 | Speed › Change audio pitch toggle | `020-speed-standard.png` | partly (pitch always kept) |
@@ -986,7 +986,7 @@ Tabs: Video (Basic, Remove BG, Mask, Retouch), Audio, Speed, Animation, Adjust, 
 | Animation tab › In / Out / Combo with duration (OpenRip's own animations) | `21-inspector-text/020-animation-in-grid.png` (same layout) | missing (OpenRip's Animation tab sets a transition) |
 | Adjust tab (see 6.23) | `25-inspector-adjustment-layer/*` | partly |
 | Crop (from the timeline toolbar): ratio Free/…/16:9/9:16, rotation slider, Reset, Confirm | `31-dialogs/039-crop-dialog.png`, `31-dialogs/040-crop-ratio-menu.png` | partly (no rotation, different presets) |
-| Mirror (horizontal flip) | `30-timeline-toolbar/032-mirrored-video-state.png` | missing |
+| Mirror (horizontal flip) | `30-timeline-toolbar/032-mirrored-video-state.png` | partly (Mirror and Flip in Transform; not in the timeline toolbar) |
 
 Out of scope: Enhance quality, AI remove, AI expand, AI remix, Eye contact, Lip sync, Relight, Auto reframe, AI movement, Camera tracking, Remove BG › Auto removal and Custom removal, all of Retouch (`018-retouch-face-controls.png`, `019-retouch-features-controls.png`), AI stylize (`024-ai-stylize-form.png`), Velocity effects, Canvas › Brand backgrounds, CapCut canvas patterns.
 
@@ -1078,14 +1078,14 @@ Screenshots are in `25-inspector-adjustment-layer/` unless a path says otherwise
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
 | Adjustment layer clip that grades everything beneath it | `001-basic-top.png` | partly (filter clips act as applicators; adjustment layers only from drafts) |
-| LUT › Name (local .cube list), Intensity | `001-basic-top.png`, `002-lut-dropdown.png` | partly (LUTs are separate filter clips) |
-| Adjust › Color: Temp, Tint, Saturation | `003-basic-color.png` | partly (saturation, hue) |
-| Adjust › Lightness: Exposure, Contrast, Highlight, Shadow, Whites, Blacks, Brilliance | `004-basic-scroll-2.png` | partly (brightness, contrast) |
-| Adjust › Effects: Sharpen, Clarity, Particles, Fade, Vignette | `005-basic-scroll-3.png` | partly (sharpness, noise, blur, vignette) |
-| Keyframes on every slider | `003-basic-color.png` | missing |
-| HSL: 8 channels × Hue, Saturation, Brightness; eyedropper | `007-hsl-red.png` | partly (engine renders HSL from drafts; no UI) |
-| Curves: Luma, Red, Green, Blue; eyedropper | `015-curves-luma.png`, `029-curves-red-full.png` | partly (engine only) |
-| Color wheel: Primary (Shadows, Middle grey, Highlights, Offset) and Log (Shadow, Middle tone, Highlight, Offset) with Intensity and R/G/B fields | `019-color-wheel-primary.png`, `021-color-wheel-mode-dropdown.png`, `022-color-wheel-log.png`, `023-color-wheel-log-bottom.png`, `030-primary-wheels-lower-controls.png` | partly (engine renders wheel strengths from drafts; listed in Draft adjustments) |
+| LUT › Name (local .cube list), Intensity | `001-basic-top.png`, `002-lut-dropdown.png` | has (the project's LUTs and Import) |
+| Adjust › Color: Temp, Tint, Saturation | `003-basic-color.png` | has |
+| Adjust › Lightness: Exposure, Contrast, Highlight, Shadow, Whites, Blacks, Brilliance | `004-basic-scroll-2.png` | has |
+| Adjust › Effects: Sharpen, Clarity, Particles, Fade, Vignette | `005-basic-scroll-3.png` | partly (no Particles) |
+| Keyframes on every slider | `003-basic-color.png` | has |
+| HSL: 8 channels × Hue, Saturation, Brightness; eyedropper | `007-hsl-red.png` | has |
+| Curves: Luma, Red, Green, Blue; eyedropper | `015-curves-luma.png`, `029-curves-red-full.png` | has |
+| Color wheel: Primary (Shadows, Middle grey, Highlights, Offset) and Log (Shadow, Middle tone, Highlight, Offset) with Intensity and R/G/B fields | `019-color-wheel-primary.png`, `021-color-wheel-mode-dropdown.png`, `022-color-wheel-log.png`, `023-color-wheel-log-bottom.png`, `030-primary-wheels-lower-controls.png` | partly (Primary; Log not offered) |
 | Mask on an adjustment layer (several masks, shapes, settings) | `024-multiple-masks.png`–`026-rectangle-mask-controls.png` | partly |
 | Save as preset | `001-basic-top.png` | missing |
 

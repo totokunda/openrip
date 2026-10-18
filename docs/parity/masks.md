@@ -61,7 +61,18 @@ The star's bundle (`pentagram`) isn't on this machine. If it's the same kind (a 
   A feather of 0 is the hard edge as before. New masks start at 0; masks saved earlier carry the old default of 2, a light softening.
 - **Invert** swaps inside and out.
 - **Keys** of the same shape (or lassos with the same number of points) travel from one pose to the next by the first key's easing: linear by default, or CapCut's curve for the presets and custom handles. Poses of different shapes hold until the next key.
-- **The brush.** The app has a brush tool, but it doesn't save strokes yet. The data model takes them (`brushStrokes`: points and a width in world units, and whether a stroke erases). The engine draws them as round-ended strokes, unioned in order, with an eraser clearing what's under it, and softened by the feather (6 × the feather of the stroke's half-width).
+- **The brush.** The app's brush (the Mask tab's Brush, since 2026-10-18) saves its strokes on the selected brush mask or a new one, ⌥ or the tab's Eraser erasing. The data model takes them (`brushStrokes`: points and a width in world units, and whether a stroke erases). The engine draws them as round-ended strokes, unioned in order, with an eraser clearing what's under it, and softened by the feather (6 × the feather of the stroke's half-width).
+
+### CapCut's shapes on the app's clips (2026-10-18)
+
+The inspector's Mask tab offers CapCut's shapes on the app's own clips, and the importer (`v1/src/lib.rs`, `convert_masks`) draws them through the same shapes as a draft's:
+
+- **Split** (`shapeType: "linear"`) is CapCut's linear mask and **Filmstrip** (`"mirror"`) its mirror, about the box's centre, turned by its rotation; Filmstrip's band is the box's height.
+- **Heart** is a polygon of the classic heart curve (x = 16 sin³t, y = 13 cos t − 5 cos 2t − 2 cos 3t − cos 4t, 64 points) across the box's width and 0.9 of its height, as CapCut's heart fills its box; the app draws the same outline on the canvas (lib/mask-shapes.ts). CapCut's own heart (a distance field in its bundle) isn't needed, and keys of the same heart travel point by point.
+- **Round corners**: a rectangle's `cornerRadius` (0–100) is CapCut's `roundCorner` (of the shorter half-side); it travels between keys.
+- **A keyed feather**: a pose's own `featherAmount` keys the feather with the place (`MaskKey.feather` in the model; the playback mixes it between poses like the rest, a pose without one taking the mask's).
+
+Checked by the v1 crate's test `the_inspectors_mask_shapes_and_keyed_feather` (centres, a heart spanning its box, round corners and feathers per key), the playback test `a_keyed_feather_travels`, and in the app by `insp-suite.mjs`: every shape, feather, round corners, invert and a keyed pose change the engine's frame.
 
 ### Masks on adjustment layers
 
