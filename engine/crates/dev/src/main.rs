@@ -76,6 +76,9 @@
 //!       Play the file slowed through the preview engine with Smooth slow-mo off, blended and
 //!       by optical flow: time per frame and repeated frames; --holdout N rebuilds N real
 //!       frames from the frames either side of them and scores each method (PSNR).
+//!   openrip-dev track <video> --region cx,cy,w,h[,deg] [--at S] [--from S] [--to S] [--direction both|forward|backward] [--save DIR]
+//!       Motion-track a region (fractions of the upright picture) as the Tracking tab does:
+//!       speed, the path, where it was lost, and the drift of a round trip forward and back.
 //!   openrip-dev thumbs-bench <media-file> [--count N] [--height H]
 //!       Timeline thumbnails across the whole file (default 40 at 64 px): the quick pass
 //!       (one keyframe per GOP), the exact pass, and the exact pass again from the disk cache.
@@ -103,6 +106,7 @@ fn main() -> ExitCode {
         Some("v1-scan") if args.len() >= 2 => v1_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("probe") if args.len() >= 2 => probe(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("slowmo") if args.len() >= 2 => motion::slowmo(&args).map_err(|e| e.to_string()),
+        Some("track") if args.len() >= 2 => motion::track(&args).map_err(|e| e.to_string()),
         Some("render-frame") if args.len() >= 6 => render_frame(&args[1..]).map_err(|e| e.to_string()),
         Some("play-bench") if args.len() >= 2 => play_bench(&args[1..]).map_err(|e| e.to_string()),
         Some("preview-scan") if args.len() >= 2 => preview_scan(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),

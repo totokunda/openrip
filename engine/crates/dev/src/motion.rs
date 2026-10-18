@@ -108,6 +108,98 @@ pub fn slowmo(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// `openrip-dev track <video> --region cx,cy,w,h[,deg] [--at S] [--from S] [--to S] [--direction both|forward|backward] [--save DIR]`
+///
+/// Tracks the region (fractions of the upright picture) through the file as the Tracking tab
+/// does: frames per second, where it went, where tracking was lost, and the drift of a round
+/// trip (tracked forward to the end, then back from there to the start frame). `--save`
+/// writes every tenth frame with the region drawn.
+pub fn track(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_core::{track_region, TrackControl, TrackDirection, TrackRequest};
+    let path = args[1].clone();
+    let r: Vec<f64> = args.iter().position(|a| a == "--region").and_then(|i| args.get(i + 1)).ok_or("--region cx,cy,w,h")?.split(',').map(|v| v.parse()).collect::<Result<_, _>>()?;
+    let media = openrip_media::probe(Path::new(&path))?;
+    let duration = media.video.as_ref().map_or(media.duration, |v| if v.duration.0 > 0 { v.duration } else { media.duration });
+    let at = Micros::from_secs_f64(arg(args, "--at", 0.0));
+    let from = Micros::from_secs_f64(arg(args, "--from", 0.0));
+    let to = Micros::from_secs_f64(arg(args, "--to", duration.as_secs_f64()));
+    let direction = TrackDirection::named(&arg(args, "--direction", "both".to_string()));
+    let req = TrackRequest { path: path.clone(), at, from, to, center: [r[0], r[1]], size: [r[2], r[3]], rotation: r.get(4).copied().unwrap_or(0.0), direction };
+    let control = TrackControl::new();
+    let t0 = Instant::now();
+    let result = track_region(&req, &control)?;
+    let secs = t0.elapsed().as_secs_f64();
+    let n = result.samples.len();
+    println!("{n} frames tracked at {}x{} in {secs:.2} s = {:.1} fps; lost forward at {:?}, backward at {:?}", result.work_size.0, result.work_size.1, n as f64 / secs, result.lost_forward.map(|t| t.as_secs_f64()), result.lost_backward.map(|t| t.as_secs_f64()));
+    for s in result.samples.iter().step_by((n / 12).max(1)) {
+        println!("  {:6.3} s: centre ({:.4}, {:.4}) size ({:.4}, {:.4}) {:+.2}° scale {:.3} confidence {:.2}", s.time.as_secs_f64(), s.center[0], s.center[1], s.size[0], s.size[1], s.rotation, s.scale, s.confidence);
+    }
+    // Round trip: from the last frame tracked forward, back to the start frame.
+    let first = result.samples.iter().find(|s| s.time >= at).cloned();
+    let last = result.samples.last().cloned();
+    if let (Some(first), Some(last)) = (first, last) {
+        if last.time > first.time {
+            let back = TrackRequest { at: last.time, from: first.time, to: Micros(last.time.0 + 1), center: last.center, size: last.size, rotation: last.rotation, direction: TrackDirection::Backward, ..req.clone() };
+            let returned = track_region(&back, &control)?;
+            if let Some(home) = returned.samples.first().filter(|s| s.time == first.time) {
+                let (w, h) = result.work_size;
+                let info = media.video.as_ref().ok_or("no video")?;
+                let (uw, uh) = if info.rotation.rem_euclid(180) == 90 { (info.height, info.width) } else { (info.width, info.height) };
+                let px = ((home.center[0] - first.center[0]) * uw as f64).hypot((home.center[1] - first.center[1]) * uh as f64);
+                println!(
+                    "round trip over {:.2} s ({} frames each way): back {px:.1} source px from where it started ({:.2} px at {w}x{h}), scale {:.4}, {:+.2}°",
+                    (last.time.0 - first.time.0) as f64 / 1e6,
+                    returned.samples.len(),
+                    px * w as f64 / uw as f64,
+                    home.scale * last.scale,
+                    home.rotation - first.rotation
+                );
+            } else {
+                println!("round trip: lost on the way back at {:?}", returned.lost_backward.map(|t| t.as_secs_f64()));
+            }
+        }
+    }
+    if let Some(dir) = flag(args, "--save") {
+        save_tracked(&path, &result, &dir)?;
+    }
+    Ok(())
+}
+
+/// Every tenth tracked frame with its region drawn, at the working size.
+fn save_tracked(path: &str, result: &openrip_core::TrackResult, dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_media::{DecoderOptions, VideoDecoder};
+    std::fs::create_dir_all(dir)?;
+    let c = Compositor::new()?;
+    let mut d = VideoDecoder::open(Path::new(path), &DecoderOptions::default())?;
+    let orientation = d.info().rotation;
+    let (w, h) = result.work_size;
+    for (i, s) in result.samples.iter().enumerate().step_by(10) {
+        let Some(frame) = d.frame_at(Micros(s.time.0 + 1000))? else { continue };
+        let mut img = c.render(w, h, [0, 0, 0], &[Layer::from_model_oriented(Source::Video(&frame), [w, h], [0.0, 0.0], [1.0, 1.0], 0.0, orientation)]);
+        let (cx, cy) = (s.center[0] * w as f64, s.center[1] * h as f64);
+        let (hw, hh) = (s.size[0] * w as f64 / 2.0, s.size[1] * h as f64 / 2.0);
+        let (sn, cs) = s.rotation.to_radians().sin_cos();
+        for k in 0..2000 {
+            let u = k as f64 / 2000.0 * 4.0;
+            let (lx, ly) = match u as u32 {
+                0 => (-hw + 2.0 * hw * u.fract(), -hh),
+                1 => (hw, -hh + 2.0 * hh * u.fract()),
+                2 => (hw - 2.0 * hw * u.fract(), hh),
+                _ => (-hw, hh - 2.0 * hh * u.fract()),
+            };
+            for t in -1..=1 {
+                let (x, y) = ((cx + cs * lx - sn * ly) as i64 + t, (cy + sn * lx + cs * ly) as i64);
+                if x >= 0 && y >= 0 && (x as u32) < w && (y as u32) < h {
+                    let p = ((y as u32 * w + x as u32) * 4) as usize;
+                    img.data[p..p + 3].copy_from_slice(&[174, 129, 206]);
+                }
+            }
+        }
+        save_png(&dir.join(format!("track-{i:04}.png")), &img)?;
+    }
+    Ok(())
+}
+
 /// Frames k and k + 2 of the file, the frame half-way between them made by each method, against
 /// frame k + 1 itself, at `holdout` places through the file.
 fn holdout_psnr(path: &Path, info: &openrip_media::VideoInfo, duration: Micros, long: u32, places: usize) -> Result<(), Box<dyn std::error::Error>> {

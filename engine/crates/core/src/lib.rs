@@ -16,6 +16,8 @@
 //! - [`capcut_to_app`]: a CapCut draft converted to the app's project document.
 //! - [`register_fonts`] / [`font_families`]: the client's fonts (the app's bundled web
 //!   fonts) for text, and the families text can be drawn in.
+//! - [`track_region`]: a region of a video followed through its frames (motion tracking), with
+//!   progress and cancel.
 
 mod audio;
 mod capcut;
@@ -24,6 +26,7 @@ mod fonts;
 mod project;
 mod session;
 mod thumbs;
+mod track;
 
 use openrip_audio::AudioError;
 use openrip_export::ExportError;
@@ -37,6 +40,7 @@ pub use openrip_model::{Micros, Project};
 pub use project::{load_project, parse_project_json, ProjectInfo, Source, TextBlock};
 pub use session::{DisplayFrame, FrameHandle, FrameJob, Image, RenderedFrame, Renderer, Session, Surface};
 pub use thumbs::{Beats, Thumbnail, Thumbnails, Waveform};
+pub use track::{track_region, TrackControl, TrackDirection, TrackRequest, TrackResult, TrackSample};
 
 /// Everything the API can fail with. The messages are what a client shows (the app's
 /// promises reject with them), so they stay stable.
@@ -68,6 +72,9 @@ pub enum Error {
     Audio(#[from] AudioError),
     #[error(transparent)]
     Player(#[from] openrip_playback::PlayerError),
+    /// Motion tracking couldn't go on ("cancelled" when asked to stop).
+    #[error("{0}")]
+    Track(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

@@ -153,6 +153,51 @@ export function exportProgress(): { done: number; total: number }
 /** Stop the running export; the unfinished file is removed. */
 export function cancelExport(): void
 
+// Motion tracking.
+
+export interface TrackRequest {
+  path: string
+  /** Source time (µs) of the frame the region was drawn on, and the source range to track. */
+  atUs: number
+  fromUs: number
+  toUs: number
+  /** The region on the upright picture: centre and size in fractions of it, degrees clockwise. */
+  centerX: number
+  centerY: number
+  width: number
+  height: number
+  rotation: number
+  /** "forward", "backward" or "both". */
+  direction: string
+}
+
+export interface TrackSample {
+  timeUs: number
+  centerX: number
+  centerY: number
+  width: number
+  height: number
+  rotation: number
+  /** Its size against the region's where it was drawn. */
+  scale: number
+  confidence: number
+}
+
+export interface TrackResult {
+  /** One per frame tracked, in time order. */
+  samples: TrackSample[]
+  /** Source time where tracking was lost going forward, or back. */
+  lostForwardUs?: number | null
+  lostBackwardUs?: number | null
+}
+
+/** Follow a region of a video through its frames on a worker thread. Rejects with "cancelled" after cancelTrack(). */
+export function trackRegion(request: TrackRequest): Promise<TrackResult>
+/** The running (or last) track's frames done and total. */
+export function trackProgress(): { done: number; total: number }
+/** Stop the running track. */
+export function cancelTrack(): void
+
 
 // CapCut drafts as app projects.
 

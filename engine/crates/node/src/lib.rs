@@ -503,6 +503,104 @@ pub fn cancel_export() {
     EXPORT.cancel();
 }
 
+// ---- motion tracking -------------------------------------------------------------
+
+/// The running track's progress, and a request to stop it.
+static TRACK: openrip_core::TrackControl = openrip_core::TrackControl::new();
+
+#[napi(object)]
+pub struct TrackRequest {
+    pub path: String,
+    /// Source time (µs) of the frame the region was drawn on, and the source range to track.
+    pub at_us: f64,
+    pub from_us: f64,
+    pub to_us: f64,
+    /// The region on the upright picture: centre and size in fractions of it, degrees
+    /// clockwise.
+    pub center_x: f64,
+    pub center_y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub rotation: f64,
+    /// "forward", "backward" or "both".
+    pub direction: String,
+}
+
+#[napi(object)]
+pub struct TrackSample {
+    pub time_us: f64,
+    pub center_x: f64,
+    pub center_y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub rotation: f64,
+    pub scale: f64,
+    pub confidence: f64,
+}
+
+#[napi(object)]
+pub struct TrackResult {
+    pub samples: Vec<TrackSample>,
+    pub lost_forward_us: Option<f64>,
+    pub lost_backward_us: Option<f64>,
+}
+
+pub struct TrackTask {
+    request: openrip_core::TrackRequest,
+}
+
+impl Task for TrackTask {
+    type Output = openrip_core::TrackResult;
+    type JsValue = TrackResult;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        openrip_core::track_region(&self.request, &TRACK).map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, r: Self::Output) -> Result<TrackResult> {
+        Ok(TrackResult {
+            samples: r
+                .samples
+                .iter()
+                .map(|s| TrackSample { time_us: s.time.0 as f64, center_x: s.center[0], center_y: s.center[1], width: s.size[0], height: s.size[1], rotation: s.rotation, scale: s.scale, confidence: s.confidence })
+                .collect(),
+            lost_forward_us: r.lost_forward.map(|t| t.0 as f64),
+            lost_backward_us: r.lost_backward.map(|t| t.0 as f64),
+        })
+    }
+}
+
+/// Follow a region of a video through its frames on a worker thread (motion tracking).
+/// Rejects with "cancelled" after `cancelTrack()`.
+#[napi]
+pub fn track_region(request: TrackRequest) -> AsyncTask<TrackTask> {
+    let r = request;
+    let request = openrip_core::TrackRequest {
+        path: r.path,
+        at: Micros(r.at_us.round() as i64),
+        from: Micros(r.from_us.round() as i64),
+        to: Micros(r.to_us.round() as i64),
+        center: [r.center_x, r.center_y],
+        size: [r.width, r.height],
+        rotation: r.rotation,
+        direction: openrip_core::TrackDirection::named(&r.direction),
+    };
+    AsyncTask::new(TrackTask { request })
+}
+
+/// The running (or last) track's progress, in frames.
+#[napi]
+pub fn track_progress() -> ExportProgress {
+    let (done, total) = TRACK.progress();
+    ExportProgress { done: done as f64, total: total as f64 }
+}
+
+/// Stop the running track; its promise rejects with "cancelled".
+#[napi]
+pub fn cancel_track() {
+    TRACK.cancel();
+}
+
 // CapCut drafts as app projects.
 
 #[napi(object)]
