@@ -3,6 +3,8 @@
 // transform tools and the player's zoom. The keyboard handler in Controls.tsx passes keys here
 // first; which key is which action is lib/keymap.ts's (the Shortcuts window changes it).
 import { useClipStore } from "./clip";
+import { zoomFit, zoomIn, zoomOut } from "./player-zoom";
+import { usePlayerStore } from "./player";
 import { useControlsStore } from "./control";
 import { MIN_DURATION } from "./settings";
 import type { ZoomLevel } from "./types";
@@ -90,15 +92,6 @@ const selectBeside = (side: "left" | "right") => {
 const visualTarget = () => {
   const { selectedClipIds } = useControlsStore.getState();
   return useClipStore.getState().clips.find((c) => c.clipId === selectedClipIds[selectedClipIds.length - 1] && (c.type === "video" || c.type === "image"));
-};
-
-/** The player's zoom, stepped as CapCut's ⌥⇧+ and ⌥⇧− step it. */
-const PLAYER_ZOOM_STEPS = [10, 25, 33, 50, 67, 75, 100, 125, 150, 200, 300, 400, 600, 800];
-const stepPlayerZoom = (dir: 1 | -1) => {
-  const v = useViewportStore.getState();
-  const now = Math.round((v.scale || 1) * 100);
-  const next = dir > 0 ? PLAYER_ZOOM_STEPS.find((p) => p > now) : [...PLAYER_ZOOM_STEPS].reverse().find((p) => p < now);
-  if (next != null) v.setScalePercent(next);
 };
 
 /** The previous or next edit: a clip's start or end on any track. */
@@ -189,9 +182,18 @@ const RUN: Record<string, () => void> = {
     const c = useControlsStore.getState();
     c.setIsFullscreen(!c.isFullscreen);
   },
-  zoomInPlayer: () => stepPlayerZoom(1),
-  zoomOutPlayer: () => stepPlayerZoom(-1),
-  zoomFitPlayer: () => useViewportStore.getState().zoomToFit(),
+  // The zoom popover's steps (lib/player-zoom.ts): 10% of fit, 50–400%.
+  zoomInPlayer: () => zoomIn(),
+  zoomOutPlayer: () => zoomOut(),
+  zoomFitPlayer: () => zoomFit(),
+  showRulers: () => {
+    const p = usePlayerStore.getState();
+    p.setRulers(!p.rulers);
+  },
+  showGuides: () => {
+    const p = usePlayerStore.getState();
+    p.setShowGuides(!p.showGuides);
+  },
   zoom50Player: () => useViewportStore.getState().setScalePercent(50),
   zoom100Player: () => useViewportStore.getState().setScalePercent(100),
   zoom200Player: () => useViewportStore.getState().setScalePercent(200),

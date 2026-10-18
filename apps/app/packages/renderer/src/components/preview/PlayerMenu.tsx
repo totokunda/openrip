@@ -1,11 +1,10 @@
 import React, { useEffect } from "react";
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { usePlayerStore, SCOPE_KINDS, type ScopeKind } from "@/lib/player";
-import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
 import { addGuide, clearGuides } from "@/lib/guides";
-import { zoomFit, zoomIn, zoomOut } from "@/lib/player-zoom";
 import { exportStillFrame } from "@/lib/still";
+import { handleTimelineKey } from "@/lib/timeline-shortcuts";
 import { ChevronGlyph, Keys, MENU_CHECK_ROW, MENU_PANEL, MENU_ROW, MENU_SEPARATOR, MenuGlyph, TickGlyph, useOwnerDocument } from "./player-ui";
 
 const SCOPE_NAMES: Record<ScopeKind, string> = { parade: "RGB parade", waveform: "Waveform", vectorscope: "Vectorscope" };
@@ -16,33 +15,24 @@ const editable = (t: EventTarget | null) => {
 };
 
 /**
- * The player's keys, CapCut's (Shortcuts ▸ Player): ⌘⌥R rulers, ⌘; guides, ⌘⇧F full screen,
- * ⌥⇧+ / ⌥⇧− zoom, ⌥⇧Z zoom to fit. Listened for in the player's window and the editor's.
+ * The player's keys (Shortcuts ▸ Player: ⌘⌥R rulers, ⌘; guides, ⌘⇧F full screen, ⌥⇧+ / ⌥⇧−
+ * zoom, ⌥⇧Z fit) are the keymap's, handled with the timeline's (lib/timeline-shortcuts.ts) in
+ * the editor's window, so the Shortcuts window can move them; this passes them on from the
+ * player's own window when it has one.
  */
 export function usePlayerShortcuts(doc: Document | null) {
   useEffect(() => {
+    const win = doc?.defaultView;
+    if (!win || win === window) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.repeat || editable(e.target)) return;
-      const p = usePlayerStore.getState();
-      let done = true;
-      if (e.metaKey && e.altKey && !e.shiftKey && e.code === "KeyR") p.setRulers(!p.rulers);
-      else if (e.metaKey && !e.altKey && !e.shiftKey && e.code === "Semicolon") p.setShowGuides(!p.showGuides);
-      else if (e.metaKey && e.shiftKey && !e.altKey && e.code === "KeyF") {
-        const c = useControlsStore.getState();
-        c.setIsFullscreen(!c.isFullscreen);
-      } else if (e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey && e.code === "Equal") zoomIn();
-      else if (e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey && e.code === "Minus") zoomOut();
-      else if (e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey && e.code === "KeyZ") zoomFit();
-      else done = false;
-      if (done) {
+      if (e.repeat || editable(e.target)) return;
+      if (handleTimelineKey(e)) {
         e.preventDefault();
         e.stopPropagation();
       }
     };
-    const wins = new Set<Window>([window]);
-    if (doc?.defaultView) wins.add(doc.defaultView);
-    wins.forEach((w) => w.addEventListener("keydown", onKey, true));
-    return () => wins.forEach((w) => w.removeEventListener("keydown", onKey, true));
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
   }, [doc]);
 }
 
