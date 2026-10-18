@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use openrip_media::{probe, DecoderOptions, FrameRate, HardwareMode, Micros, PixelFormat, VideoDecoder, VideoFrame};
+use openrip_media::{probe, DecoderOptions, FrameRate, HardwareMode, Micros, PixelFormat, ReverseReader, VideoDecoder, VideoFrame};
 
 const FRAMES: i64 = 300;
 const BARCODE: &str = "geq=lum='255*mod(floor(N/pow(2,floor(X/64))),2)'";
@@ -313,6 +313,62 @@ fn stepping_backward_is_exact_and_mostly_cached() {
             if c.name != "prores.mov" {
                 assert!(s.cache_hits as i64 >= FRAMES * 3 / 4, "{} {mode:?}: only {} cache hits", c.name, s.cache_hits);
             }
+        }
+    }
+}
+
+#[test]
+fn reading_backward_shows_every_frame_exactly() {
+    let Some(dir) = fixtures_dir() else { return };
+    for c in clips() {
+        for mode in modes() {
+            let opts = match mode {
+                Mode::Native => DecoderOptions::default(),
+                Mode::FfmpegHw => DecoderOptions { native_videotoolbox: false, ..Default::default() },
+                Mode::Software => DecoderOptions { hardware: HardwareMode::Off, ..Default::default() },
+            };
+            // Room for 10 frames a window (a GOP is 48: windows inside GOPs), and for every
+            // frame (windows from keyframe to keyframe).
+            let frame_bytes = 640 * 128 * 3 / 2 * if c.name.contains("10bit") || c.name.contains("prores") { 2 } else { 1 };
+            for budget in [10 * frame_bytes, 1 << 30] {
+                let mut r = ReverseReader::open(&dir.join(c.name), &opts, budget).unwrap();
+                let mut rng = Lcg(7);
+                for n in (0..FRAMES).rev() {
+                    let start = (c.time)(n);
+                    let end = if n + 1 < FRAMES { (c.time)(n + 1) } else { start + Micros(33_333) };
+                    // Anywhere inside the frame: the playhead lands between frames.
+                    let t = Micros(start.0 + rng.next(end.0 - start.0));
+                    let f = r.frame_at(t).unwrap_or_else(|e| panic!("{} {mode:?}: {e}", c.name)).unwrap();
+                    assert_eq!(frame_number(&f), n, "{} {mode:?} budget {budget}: back to frame {n}", c.name);
+                    assert_eq!(f.time, start, "{} {mode:?}: time of frame {n}", c.name);
+                }
+                let s = r.stats();
+                // Each frame kept once (plus the frame shown at each window's start).
+                assert!(s.frames as i64 <= FRAMES + s.windows as i64, "{} {mode:?}: {s:?}", c.name);
+                assert!(s.waits <= s.windows, "{} {mode:?}: {s:?}", c.name);
+            }
+        }
+    }
+}
+
+#[test]
+fn reading_backward_agrees_with_seeking() {
+    // Jumps up, then backward in hops: the same frame as a decoder's `frame_at`.
+    let Some(dir) = fixtures_dir() else { return };
+    for c in clips() {
+        let path = dir.join(c.name);
+        let mut seek = open(&path, HardwareMode::Auto);
+        let mut r = ReverseReader::open(&path, &DecoderOptions::default(), 8 * 640 * 128 * 3).unwrap();
+        let mut rng = Lcg(3);
+        let mut t = Micros(9_000_000);
+        for step in 0..200 {
+            t = match step % 25 {
+                0 => Micros(rng.next(10_000_000)),
+                _ => Micros((t.0 - 1 - rng.next(70_000)).max(0)),
+            };
+            let a = r.frame_at(t).unwrap().unwrap();
+            let b = seek.frame_at(t).unwrap().unwrap();
+            assert_eq!((frame_number(&a), a.time), (frame_number(&b), b.time), "{} at {t:?} (step {step})", c.name);
         }
     }
 }

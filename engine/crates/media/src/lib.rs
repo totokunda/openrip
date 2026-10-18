@@ -30,6 +30,7 @@ mod info;
 mod nal;
 #[cfg(feature = "ffmpeg")]
 mod probe;
+mod reverse;
 mod still;
 #[cfg(feature = "ffmpeg")]
 mod util;
@@ -45,6 +46,7 @@ pub use openrip_frame::{FrameError, FramePixels, Matrix, PixelFormat, RgbImage, 
 #[cfg(feature = "ffmpeg")]
 pub use probe::probe;
 pub use openrip_model::{FrameRate, Micros};
+pub use reverse::{ReverseReader, ReverseStats};
 pub use still::{add_still_backend, decode_still, load_png, StillBackend};
 
 /// Start the platform's hardware decoder in the background. The first VideoToolbox session
