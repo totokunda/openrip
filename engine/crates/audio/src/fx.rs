@@ -4,10 +4,12 @@
 //! graph from the same processors, with the clip's slider values mapped onto their
 //! parameters the way the graph's `ParameterChangeTransform` nodes do
 //! (docs/parity/voice-effects.md). Processors OpenRip doesn't have pass the sound through
-//! and are listed in [`Chain::missing`].
+//! and are listed in [`Chain::missing`]. The reverbs (StudioReverb, Reverb) are the feedback
+//! delay network of [`crate::reverb`], which OpenRip's own effects ([`crate::voice`]) use
+//! too.
 
 use std::collections::{BTreeMap, HashMap};
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_1_SQRT_2, PI};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -15,10 +17,12 @@ use realfft::num_complex::Complex32;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use serde_json::Value;
 
+use crate::reverb::{Reverb, ReverbParams};
+
 const CHANNELS: usize = 2;
 
 /// One processor: interleaved stereo in place.
-trait Processor: Send {
+pub(crate) trait Processor: Send {
     fn process(&mut self, buf: &mut [f32]);
     /// Samples the output lags the input by.
     fn latency(&self) -> usize {
@@ -196,6 +200,28 @@ impl Chain {
         self.rate
     }
 
+    /// `procs` one after another; with `strength` below 1 the input is mixed back in at
+    /// `1 − strength` against the processed sound at `strength`, delayed by the processing's
+    /// latency so the two line up.
+    pub(crate) fn series(procs: Vec<Box<dyn Processor>>, strength: f32, rate: u32) -> Chain {
+        let mut nodes: Vec<Node> = procs.into_iter().enumerate().map(|(i, p)| Node { proc: Some(p), inputs: vec![i.checked_sub(1)], out: Vec::new() }).collect();
+        if nodes.is_empty() {
+            nodes.push(Node { proc: None, inputs: vec![None], out: Vec::new() });
+        }
+        let mut chain = Chain { output: nodes.len() - 1, nodes, rate, missing: Vec::new() };
+        let strength = strength.clamp(0.0, 1.0);
+        if strength < 1.0 {
+            let lat = chain.latency();
+            let last = chain.output;
+            chain.nodes.push(Node { proc: Some(Box::new(Gain(strength))), inputs: vec![Some(last)], out: Vec::new() });
+            chain.nodes.push(Node { proc: Some(Box::new(crate::voice::Delay::new(lat, 1.0 - strength))), inputs: vec![None], out: Vec::new() });
+            let n = chain.nodes.len();
+            chain.nodes.push(Node { proc: None, inputs: vec![Some(n - 2), Some(n - 1)], out: Vec::new() });
+            chain.output = n;
+        }
+        chain
+    }
+
     /// Process a block of interleaved stereo in place.
     pub fn process(&mut self, buf: &mut [f32]) {
         let n = self.nodes.len();
@@ -252,11 +278,134 @@ fn processor(name: &str, p: &BTreeMap<String, Value>, rate: u32) -> Option<Box<d
         }
         "Chorus" => Box::new(Chorus::new(p, fs)),
         "Tremolo" => Box::new(Tremolo::new(p, fs)),
+        "StudioReverb" => Box::new(Reverb::new(studio_reverb(p), rate)),
+        "Reverb" => Box::new(Reverb::new(plain_reverb(p), rate)),
+        "Echo" => Box::new(Echo::new(p, fs)),
+        "Filter" => {
+            let mode = p.get("Filter Mode").and_then(Value::as_str).unwrap_or("LowPass");
+            let f = Biquad::new(mode, get(p, "Cutoff Freq", 1000.0) as f32, get(p, "Resonance", 1.0) as f32 * FRAC_1_SQRT_2, get(p, "Gain dB", 0.0) as f32, fs)?;
+            Box::new(Equaliser { filters: vec![f], gain: 1.0 })
+        }
+        // Shifting in the time domain moves the formants with the pitch.
+        "TimeDomainPitchShifter" => {
+            let ratio = get(p, "Pitch Ratio", 1.0) as f32;
+            if (ratio - 1.0).abs() < 1e-6 {
+                Box::new(Gain(1.0))
+            } else {
+                Box::new(PitchShift::new(ratio, ratio))
+            }
+        }
         _ => return None,
     })
 }
 
-struct Gain(f32);
+/// SAMI's StudioReverb: RT60s for the lows, mids and highs split at `Crossover` and
+/// `HF Damping` Hz, a pre-delay per side (ms), the wet sound's width, mix, gain (dB) and
+/// its high- and low-pass. Deep 2 has a 2 s hall, 3 s in the lows and 1 s in the highs.
+fn studio_reverb(p: &BTreeMap<String, Value>) -> ReverbParams {
+    let size = match p.get("Reverb Mode").and_then(Value::as_str) {
+        Some("Room") => 0.5,
+        Some("Plate") => 0.75,
+        _ => 1.0,
+    };
+    ReverbParams {
+        low_rt60: get(p, "Low RT60", 2.0) as f32,
+        mid_rt60: get(p, "Mid RT60", 2.0) as f32,
+        high_rt60: get(p, "Hi RT60", 1.0) as f32,
+        crossover: get(p, "Crossover", 200.0) as f32,
+        damping: get(p, "HF Damping", 3000.0) as f32,
+        pre_delay: [get(p, "Pre Delay 1", 0.0) as f32 / 1000.0, get(p, "Pre Delay 2", 0.0) as f32 / 1000.0],
+        size,
+        width: get(p, "Wet Stereo Width", 1.0) as f32,
+        mix: get(p, "Wet Mix", 0.5) as f32,
+        wet_gain: 10f32.powf(get(p, "Wet Gain", 0.0) as f32 / 20.0),
+    }
+}
+
+/// SAMI's Reverb: one `Decay Time` (s), `Damp` (0–1) taking the highs' decay down with it,
+/// a pre-delay (ms), width, mix and gain (dB). Its slow modulation of the tail (`Mod Depth`,
+/// `Mod Rate`) isn't drawn.
+fn plain_reverb(p: &BTreeMap<String, Value>) -> ReverbParams {
+    let decay = get(p, "Decay Time", 2.0) as f32;
+    let damp = get(p, "Damp", 0.25).clamp(0.0, 1.0) as f32;
+    let pre = get(p, "Pre-Delay Time", 0.0) as f32 / 1000.0;
+    ReverbParams {
+        low_rt60: decay,
+        mid_rt60: decay,
+        high_rt60: decay * (1.0 - 0.8 * damp),
+        crossover: 200.0,
+        damping: 4000.0,
+        pre_delay: [pre, pre],
+        size: 0.8,
+        width: get(p, "Wet Stereo Width", 1.0) as f32,
+        mix: get(p, "Wet Mix", 0.5) as f32,
+        wet_gain: 10f32.powf(get(p, "Wet Gain", 0.0) as f32 / 20.0),
+    }
+}
+
+/// SAMI's Echo: two taps, each a delay (s, unsynced), feedback, gain (dB) and pan (−1 left,
+/// +1 right), over the dry sound unless `Dry Bypass`, the echoes through an optional
+/// high- and low-pass. Synced delays (to a tempo) aren't drawn: they take the unsynced time.
+struct Echo {
+    taps: Vec<Tap>,
+    dry: f32,
+    filters: Vec<Biquad>,
+}
+
+struct Tap {
+    line: Vec<[f32; CHANNELS]>,
+    at: usize,
+    feedback: f32,
+    /// Per side, the tap's gain and pan.
+    gains: [f32; CHANNELS],
+}
+
+impl Echo {
+    fn new(p: &BTreeMap<String, Value>, fs: f32) -> Echo {
+        let taps = (1..=2)
+            .filter(|i| !p.get(&format!("Tap {i} Bypass")).is_some_and(boolean))
+            .map(|i| {
+                let secs = get(p, &format!("Tap {i} Delay Time Unsynced"), 0.25).max(0.0) as f32;
+                let gain = 10f32.powf(get(p, &format!("Tap {i} Gain dB"), 0.0) as f32 / 20.0);
+                // Constant-power pan.
+                let pan = (get(p, &format!("Tap {i} Pan"), 0.0) as f32).clamp(-1.0, 1.0);
+                let angle = (pan + 1.0) * PI / 4.0;
+                Tap { line: vec![[0.0; CHANNELS]; (secs * fs).round().max(1.0) as usize], at: 0, feedback: get(p, &format!("Tap {i} Feedback"), 0.0) as f32, gains: [gain * angle.cos(), gain * angle.sin()] }
+            })
+            .collect();
+        let dry = if p.get("Dry Bypass").is_some_and(boolean) { 0.0 } else { 10f32.powf(get(p, "Dry Gain dB", 0.0) as f32 / 20.0) };
+        let mut filters = Vec::new();
+        for (mode, key) in [("HighPass", "HPF"), ("LowPass", "LPF")] {
+            if p.get(&format!("{key} Is Active")).is_some_and(boolean) {
+                filters.extend(Biquad::new(mode, get(p, &format!("{key} Frequency"), 1000.0) as f32, get(p, &format!("{key} Resonance"), 1.0) as f32 * FRAC_1_SQRT_2, 0.0, fs));
+            }
+        }
+        Echo { taps, dry, filters }
+    }
+}
+
+impl Processor for Echo {
+    fn process(&mut self, buf: &mut [f32]) {
+        for frame in buf.chunks_exact_mut(CHANNELS) {
+            let mono = 0.5 * (frame[0] + frame[1]);
+            let mut wet = [0f32; CHANNELS];
+            for tap in &mut self.taps {
+                let [l, r] = tap.line[tap.at];
+                let delayed = 0.5 * (l + r);
+                tap.line[tap.at] = [mono + tap.feedback * delayed; CHANNELS];
+                tap.at = (tap.at + 1) % tap.line.len();
+                wet[0] += delayed * tap.gains[0];
+                wet[1] += delayed * tap.gains[1];
+            }
+            for (c, x) in frame.iter_mut().enumerate() {
+                let w = self.filters.iter_mut().fold(wet[c], |y, f| f.tick(c, y));
+                *x = *x * self.dry + w;
+            }
+        }
+    }
+}
+
+pub(crate) struct Gain(pub(crate) f32);
 
 impl Processor for Gain {
     fn process(&mut self, buf: &mut [f32]) {
@@ -266,7 +415,7 @@ impl Processor for Gain {
 
 /// A biquad (transposed direct form II), per channel.
 #[derive(Clone, Copy, Default)]
-struct Biquad {
+pub(crate) struct Biquad {
     b: [f32; 3],
     a: [f32; 2],
     z: [[f32; 2]; CHANNELS],
@@ -274,7 +423,7 @@ struct Biquad {
 
 impl Biquad {
     /// JUCE's (RBJ) coefficients for the Equaliser's filter modes.
-    fn new(mode: &str, freq: f32, q: f32, gain_db: f32, fs: f32) -> Option<Biquad> {
+    pub(crate) fn new(mode: &str, freq: f32, q: f32, gain_db: f32, fs: f32) -> Option<Biquad> {
         let w = 2.0 * PI * freq.clamp(1.0, fs * 0.49) / fs;
         let (sn, cs) = w.sin_cos();
         let q = q.max(0.01);
@@ -309,7 +458,7 @@ impl Biquad {
         Some(Biquad { b: [b[0] / a[0], b[1] / a[0], b[2] / a[0]], a: [a[1] / a[0], a[2] / a[0]], z: [[0.0; 2]; CHANNELS] })
     }
 
-    fn tick(&mut self, c: usize, x: f32) -> f32 {
+    pub(crate) fn tick(&mut self, c: usize, x: f32) -> f32 {
         let z = &mut self.z[c];
         let y = self.b[0] * x + z[0];
         z[0] = self.b[1] * x - self.a[0] * y + z[1];
@@ -352,7 +501,7 @@ impl Processor for Equaliser {
 }
 
 /// A peak limiter: instant attack, exponential release, linked channels.
-struct Limiter {
+pub(crate) struct Limiter {
     input: f32,
     ceiling: f32,
     release: f32,
@@ -360,7 +509,7 @@ struct Limiter {
 }
 
 impl Limiter {
-    fn new(input_db: f32, ceiling_db: f32, release_ms: f32, fs: f32) -> Limiter {
+    pub(crate) fn new(input_db: f32, ceiling_db: f32, release_ms: f32, fs: f32) -> Limiter {
         Limiter { input: 10f32.powf(input_db / 20.0), ceiling: 10f32.powf(ceiling_db / 20.0), release: 1.0 - (-1.0 / (release_ms.max(1.0) * 1e-3 * fs)).exp(), gain: 1.0 }
     }
 }
@@ -426,7 +575,7 @@ impl Processor for Compressor {
 
 /// A modulated delay mixed with the dry sound; the right channel's sweep is offset by the
 /// stereo phase.
-struct Chorus {
+pub(crate) struct Chorus {
     line: Vec<[f32; CHANNELS]>,
     at: usize,
     phase: f32,
@@ -440,20 +589,16 @@ struct Chorus {
 
 impl Chorus {
     fn new(p: &BTreeMap<String, Value>, fs: f32) -> Chorus {
+        Chorus::with(get(p, "Delay", 7.0) as f32, get(p, "Depth", 2.0) as f32, get(p, "Rate", 1.0) as f32, get(p, "Feedback", 0.0) as f32, get(p, "Wetness", 0.5) as f32, get(p, "Stereo Phase Offset", 0.0) as f32, fs)
+    }
+
+    /// A delay of `delay_ms` plus up to `depth_ms`, swept at `rate` Hz, the right channel's
+    /// sweep `offset` radians later; `feedback` of the delayed sound fed back, mixed by `wet`.
+    pub(crate) fn with(delay_ms: f32, depth_ms: f32, rate: f32, feedback: f32, wet: f32, offset: f32, fs: f32) -> Chorus {
         let ms = fs / 1000.0;
-        let (delay, depth) = (get(p, "Delay", 7.0) as f32 * ms, get(p, "Depth", 2.0) as f32 * ms);
+        let (delay, depth) = (delay_ms * ms, depth_ms * ms);
         let len = (delay + depth + 4.0).ceil() as usize + 2;
-        Chorus {
-            line: vec![[0.0; CHANNELS]; len],
-            at: 0,
-            phase: 0.0,
-            step: 2.0 * PI * get(p, "Rate", 1.0) as f32 / fs,
-            delay,
-            depth,
-            feedback: get(p, "Feedback", 0.0) as f32,
-            wet: get(p, "Wetness", 0.5) as f32,
-            offset: get(p, "Stereo Phase Offset", 0.0) as f32,
-        }
+        Chorus { line: vec![[0.0; CHANNELS]; len], at: 0, phase: 0.0, step: 2.0 * PI * rate / fs, delay, depth, feedback, wet, offset }
     }
 }
 
@@ -479,7 +624,7 @@ impl Processor for Chorus {
 /// around unity. On Demonized's export this matches CapCut's 14 Hz wobble (2.47× vs 2.41× its
 /// surroundings) and loudness (+0.6 dB); dipping by `Depth` below unity instead comes out
 /// 2.2 dB quiet. (`Mod_Rate` isn't known; a sweep of the rate by it doesn't match.)
-struct Tremolo {
+pub(crate) struct Tremolo {
     phase: f32,
     rate: f32,
     depth: f32,
@@ -487,11 +632,11 @@ struct Tremolo {
 
 impl Tremolo {
     fn new(p: &BTreeMap<String, Value>, fs: f32) -> Tremolo {
-        Tremolo {
-            phase: get(p, "Phase", 0.0) as f32,
-            rate: 2.0 * PI * get(p, "Rate Hz", 5.0) as f32 / fs,
-            depth: get(p, "Depth", 0.5) as f32,
-        }
+        Tremolo::with(get(p, "Rate Hz", 5.0) as f32, get(p, "Depth", 0.5) as f32, get(p, "Phase", 0.0) as f32, fs)
+    }
+
+    pub(crate) fn with(rate_hz: f32, depth: f32, phase: f32, fs: f32) -> Tremolo {
+        Tremolo { phase, rate: 2.0 * PI * rate_hz / fs, depth }
     }
 }
 
@@ -514,7 +659,7 @@ const PV_LIFTER: usize = 40;
 /// Pitch and formants shifted independently: a phase vocoder moves each partial to its
 /// frequency times the pitch ratio (peak shifting, which keeps partials' levels), on each
 /// frame's spectral envelope (cepstrally smoothed) moved by the formant ratio instead.
-struct PitchShift {
+pub(crate) struct PitchShift {
     pitch: f32,
     formant: f32,
     fft: Arc<dyn RealToComplex<f32>>,
@@ -534,7 +679,7 @@ struct PvChannel {
 }
 
 impl PitchShift {
-    fn new(pitch: f32, formant: f32) -> PitchShift {
+    pub(crate) fn new(pitch: f32, formant: f32) -> PitchShift {
         let mut planner = RealFftPlanner::<f32>::new();
         let window = (0..PV_SIZE).map(|i| 0.5 - 0.5 * (2.0 * PI * i as f32 / PV_SIZE as f32).cos()).collect();
         let bins = PV_SIZE / 2 + 1;

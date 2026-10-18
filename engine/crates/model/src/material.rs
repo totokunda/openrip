@@ -54,6 +54,10 @@ pub struct Materials {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chromas: Vec<Chroma>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub channels: Vec<ChannelMap>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beats: Vec<Beats>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreign: Vec<Foreign>,
 }
 
@@ -76,6 +80,8 @@ pub enum MaterialRef<'a> {
     Loudness(&'a Loudness),
     Sticker(&'a Sticker),
     Chroma(&'a Chroma),
+    Channels(&'a ChannelMap),
+    Beats(&'a Beats),
     Foreign(&'a Foreign),
 }
 
@@ -99,6 +105,8 @@ impl MaterialRef<'_> {
             MaterialRef::Loudness(m) => AnyMaterial::Loudness(m.clone()),
             MaterialRef::Sticker(m) => AnyMaterial::Sticker(m.clone()),
             MaterialRef::Chroma(m) => AnyMaterial::Chroma(m.clone()),
+            MaterialRef::Channels(m) => AnyMaterial::Channels(m.clone()),
+            MaterialRef::Beats(m) => AnyMaterial::Beats(m.clone()),
             MaterialRef::Foreign(m) => AnyMaterial::Foreign(m.clone()),
         }
     }
@@ -129,6 +137,8 @@ impl Materials {
         find!(loudness, Loudness);
         find!(stickers, Sticker);
         find!(chromas, Chroma);
+        find!(channels, Channels);
+        find!(beats, Beats);
         find!(foreign, Foreign);
         None
     }
@@ -154,6 +164,8 @@ impl Materials {
             + self.loudness.len()
             + self.stickers.len()
             + self.chromas.len()
+            + self.channels.len()
+            + self.beats.len()
             + self.foreign.len()
     }
 
@@ -849,6 +861,77 @@ impl Loudness {
     }
 }
 
+/// Which of a clip's channels it plays on both sides (CapCut's "Fill channel", its
+/// `sound_channel_mappings`), or both mixed to mono (OpenRip's own).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelFill {
+    /// Each channel as recorded.
+    #[default]
+    None,
+    /// The left channel on both sides (CapCut's "Fill right with left", mapping 1).
+    Left,
+    /// The right channel on both sides (CapCut's "Fill left with right", mapping 2).
+    Right,
+    /// The two channels' mean on both sides.
+    Mono,
+}
+
+/// A clip's channel fill. A mono source has nothing to fill (CapCut: "Mono material does
+/// not require channel configuration"): its two channels are already the same.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChannelMap {
+    pub id: MaterialId,
+    pub fill: ChannelFill,
+}
+
+/// One beat found in a clip's music: where it is, in µs of the clip's media, and whether it
+/// starts a bar.
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Beat {
+    pub at: Micros,
+    #[serde(default)]
+    pub downbeat: bool,
+}
+
+/// A music clip's beat markers (CapCut's `beats`): those marked by hand, and whether the
+/// automatic ones show. Times are in µs of the clip's media, so the markers stay on the
+/// music through a trim or a move.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Beats {
+    pub id: MaterialId,
+    /// Marked by hand (CapCut's "Add beat", `user_beats`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub manual: Vec<Micros>,
+    /// The automatic beats show (CapCut's "Auto beat").
+    #[serde(default)]
+    pub auto: bool,
+    /// Which automatic beats: only those that start a bar (CapCut's "Beat 1"), or every beat
+    /// ("Beat 2").
+    #[serde(default)]
+    pub every_beat: bool,
+    /// The automatic beats the source app found (CapCut's beats file), when it gave them;
+    /// otherwise OpenRip finds them itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub detected: Vec<Beat>,
+}
+
+impl Beats {
+    /// The markers that show, in media time, sorted: the hand-marked ones and, when the
+    /// automatic ones are on, those of `detected` (or of `found`, OpenRip's own, when the
+    /// source app gave none) at the chosen density.
+    pub fn shown(&self, found: &[Beat]) -> Vec<Micros> {
+        let mut out = self.manual.clone();
+        if self.auto {
+            let auto = if self.detected.is_empty() { found } else { &self.detected };
+            out.extend(auto.iter().filter(|b| self.every_beat || b.downbeat).map(|b| b.at));
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
 /// A clip's animations: an intro, an outro and a loop or combo (at most one of each in
 /// CapCut), or a caption style.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1168,6 +1251,8 @@ pub enum AnyMaterial {
     Loudness(Loudness),
     Sticker(Sticker),
     Chroma(Chroma),
+    Channels(ChannelMap),
+    Beats(Beats),
     Foreign(Foreign),
 }
 
@@ -1190,6 +1275,8 @@ impl AnyMaterial {
             AnyMaterial::Loudness(m) => &m.id,
             AnyMaterial::Sticker(m) => &m.id,
             AnyMaterial::Chroma(m) => &m.id,
+            AnyMaterial::Channels(m) => &m.id,
+            AnyMaterial::Beats(m) => &m.id,
             AnyMaterial::Foreign(m) => &m.id,
         }
     }
@@ -1219,6 +1306,8 @@ impl Materials {
             AnyMaterial::Loudness(m) => put(&mut self.loudness, m, index),
             AnyMaterial::Sticker(m) => put(&mut self.stickers, m, index),
             AnyMaterial::Chroma(m) => put(&mut self.chromas, m, index),
+            AnyMaterial::Channels(m) => put(&mut self.channels, m, index),
+            AnyMaterial::Beats(m) => put(&mut self.beats, m, index),
             AnyMaterial::Foreign(m) => put(&mut self.foreign, m, index),
         }
     }
@@ -1248,6 +1337,8 @@ impl Materials {
         take!(loudness, Loudness);
         take!(stickers, Sticker);
         take!(chromas, Chroma);
+        take!(channels, Channels);
+        take!(beats, Beats);
         take!(foreign, Foreign);
         None
     }

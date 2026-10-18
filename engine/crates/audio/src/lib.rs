@@ -6,16 +6,25 @@
 //! default; FFmpeg's atempo) unless the clip asks for the pitch to follow the speed
 //! (`change_pitch`), which resamples. Reversed clips play their audio backwards (CapCut's
 //! copy played backward where it has one), then through the same speed change. A speed curve
-//! plays varispeed, the pitch following the speed, as CapCut's does. A clip's
-//! voice filter (CapCut's audio effect, see [`fx`]) works on its sound after the speed
-//! change and before its volume. The mix is limited at full scale, as CapCut's exports are
-//! (docs/parity/voice-effects.md).
+//! plays varispeed, the pitch following the speed, as CapCut's does. A clip's channel fill
+//! (CapCut's "Fill channel") applies after the speed change; then its voice filters (CapCut's
+//! audio effects, see [`fx`], or OpenRip's own, see [`voice`]), one after another, and then
+//! its volume: keyframed volume is followed sample by sample, so a ramp sounds the same
+//! whatever the size of the blocks it's mixed in. The mix is limited at full scale, as
+//! CapCut's exports are (docs/parity/voice-effects.md).
+//!
+//! Besides mixing: loudness as EBU R128 measures it ([`loudness`], for loudness
+//! normalisation) and beat detection ([`beats`], for beat markers).
 
+pub mod beats;
 #[cfg(feature = "ffmpeg")]
 mod decode;
 pub mod fx;
+pub mod loudness;
 mod peaks;
+mod reverb;
 mod source;
+pub mod voice;
 #[cfg(feature = "ffmpeg")]
 mod tempo;
 
@@ -49,7 +58,7 @@ mod tempo {
 use std::collections::HashMap;
 use std::path::Path;
 
-use openrip_model::{AudioFade, EffectCategory, MediaKind, Micros, Project, Remap, Segment, TrackKind};
+use openrip_model::{AudioFade, ChannelFill, EffectCategory, MediaKind, Micros, Project, Remap, Segment, TrackKind};
 
 #[cfg(feature = "ffmpeg")]
 pub use decode::AudioDecoder;
@@ -110,6 +119,22 @@ fn resample(src: &[f32], at: impl Fn(usize) -> f64, out: &mut [f32]) {
     }
 }
 
+/// Copy one channel over the other, or both to their mean (interleaved stereo, in place).
+fn fill_channels(fill: ChannelFill, samples: &mut [f32]) {
+    for f in samples.chunks_exact_mut(CHANNELS) {
+        match fill {
+            ChannelFill::None => return,
+            ChannelFill::Left => f[1] = f[0],
+            ChannelFill::Right => f[0] = f[1],
+            ChannelFill::Mono => {
+                let m = 0.5 * (f[0] + f[1]);
+                f[0] = m;
+                f[1] = m;
+            }
+        }
+    }
+}
+
 /// A sped-up clip's time-stretcher, kept while the mix stays continuous.
 struct Stretch {
     tempo: tempo::Tempo,
@@ -119,10 +144,10 @@ struct Stretch {
     next_in: i64,
 }
 
-/// A clip's voice filter, kept while the mix stays continuous. It runs ahead of the mix by
-/// its latency, so what comes out lines up with the clip.
+/// A clip's voice filters, kept while the mix stays continuous. They run ahead of the mix by
+/// their latency, so what comes out lines up with the clip.
 struct Voice {
-    chain: fx::Chain,
+    chains: Vec<fx::Chain>,
     /// Clip-local sample the next block of output is for.
     next_out: i64,
     /// Clip-local sample to feed the filter next.
@@ -146,7 +171,7 @@ pub struct Mixer {
     copies: HashMap<String, Micros>,
     /// One decoder per clip; `None` once a clip turned out to have no usable audio.
     decoders: HashMap<String, Option<Box<dyn AudioSource>>>,
-    /// Voice filters by clip; `None` when a clip's filter couldn't be loaded.
+    /// Voice filters by clip; `None` when none of a clip's filters could be loaded.
     voices: HashMap<String, Option<Voice>>,
     /// The output limiter's gain, and the sample it continues at (a jump resets it).
     limiter: (f32, i64),
@@ -225,7 +250,7 @@ impl Mixer {
                 // The filter runs `latency` samples ahead: feed it from where it's got to.
                 Some(at) => self.clip_samples(&seg, decoder.as_mut(), at, n).map(|mut block| {
                         if let Some(Some(voice)) = self.voices.get_mut(&seg.id) {
-                            voice.chain.process(&mut block);
+                            voice.chains.iter_mut().for_each(|c| c.process(&mut block));
                             voice.next_feed += n as i64;
                             voice.next_out += n as i64;
                         }
@@ -239,12 +264,14 @@ impl Mixer {
             let fade = seg.attachments.iter().find_map(|id| self.project.materials.audio_fades.iter().find(|f| &f.id == id)).cloned();
             // CapCut's loudness normalisation scales the clip as a whole.
             let norm = seg.attachments.iter().find_map(|id| self.project.materials.loudness.iter().find(|l| &l.id == id)).map_or(1.0, |l| l.gain());
-            let (g0, g1) = (norm * seg.volume.sample(time_at(local, rate)), norm * seg.volume.sample(time_at(local + n as i64, rate)));
+            // Keyframed volume at each sample's own time; otherwise one gain for the block.
+            let keyed = seg.volume.is_animated();
+            let g0 = norm * seg.volume.sample(time_at(local, rate));
             let len = (s1 - s0).max(1);
             let base = (from - start) as usize * CHANNELS;
             for i in 0..n {
                 let pos = local + i as i64;
-                let mut gain = g0 + (g1 - g0) * (i as f32 / n.max(1) as f32);
+                let mut gain = if keyed { norm * seg.volume.sample(time_at(pos, rate)) } else { g0 };
                 if let Some(AudioFade { fade_in, fade_out, .. }) = fade {
                     let (fi, fo) = (sample_at(fade_in, rate), sample_at(fade_out, rate));
                     if fi > 0 && pos < fi {
@@ -285,8 +312,16 @@ impl Mixer {
         self.limiter = (gain, start + (out.len() / CHANNELS) as i64);
     }
     /// A clip's sound for `n` samples from clip-local sample `local`, speed and direction
-    /// applied (interleaved stereo).
+    /// applied, its channels filled (interleaved stereo).
     fn clip_samples(&mut self, seg: &Segment, decoder: &mut dyn AudioSource, local: i64, n: usize) -> Result<Vec<f32>, AudioError> {
+        let mut out = self.played_samples(seg, decoder, local, n)?;
+        let fill = seg.attachments.iter().find_map(|id| self.project.materials.channels.iter().find(|c| &c.id == id)).map_or(ChannelFill::None, |c| c.fill);
+        fill_channels(fill, &mut out);
+        Ok(out)
+    }
+
+    /// [`Mixer::clip_samples`] before the channel fill.
+    fn played_samples(&mut self, seg: &Segment, decoder: &mut dyn AudioSource, local: i64, n: usize) -> Result<Vec<f32>, AudioError> {
         let speed = if seg.speed > 0.0 { seg.speed } else { 1.0 };
         let mut out = vec![0f32; n * CHANNELS];
         if let Some(remap) = seg.speed_curve(&self.project.materials).and_then(|s| Remap::new(&s.curve)) {
@@ -385,34 +420,48 @@ impl Mixer {
         Ok(())
     }
 
-    /// The clip's voice filter, ready for the block at clip-local `local`: where its input
-    /// for that block starts, or `None` for a clip without one (or whose filter can't load).
+    /// The clip's voice filters, ready for the block at clip-local `local`: where their input
+    /// for that block starts, or `None` for a clip without any (or none of whose filters
+    /// load). A filter is CapCut's (its bundle, `resource`) or OpenRip's own (`builtin`
+    /// names its kind).
     fn voice_of(&mut self, seg: &Segment, local: i64, decoder: &mut dyn AudioSource, report: &mut MixReport) -> Option<i64> {
-        let effect = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Audio))?.clone();
+        let effects: Vec<openrip_model::Effect> = seg.attachments.iter().filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Audio)).cloned().collect();
+        if effects.is_empty() {
+            return None;
+        }
         let continuous = matches!(self.voices.get(&seg.id), Some(Some(v)) if v.next_out == local);
         if !continuous {
             if matches!(self.voices.get(&seg.id), Some(None)) {
                 return None;
             }
-            let bundle = effect.resource.clone()?;
-            let mut chain = match fx::Chain::load(Path::new(&bundle), &effect.params, self.rate) {
-                Ok(c) => c,
-                Err(why) => {
-                    report.missing.push(format!("{bundle}: {why}"));
-                    self.voices.insert(seg.id.clone(), None);
-                    return None;
+            let mut chains = Vec::new();
+            for effect in &effects {
+                let (what, chain) = match (&effect.resource, &effect.builtin) {
+                    (Some(bundle), _) => (bundle.clone(), fx::Chain::load(Path::new(bundle), &effect.params, self.rate)),
+                    (None, Some(kind)) => (kind.clone(), voice::builtin(kind, &effect.params, self.rate)),
+                    (None, None) => continue,
+                };
+                match chain {
+                    Ok(c) => {
+                        for m in &c.missing {
+                            report.missing.push(format!("{what}: no {m} processor"));
+                        }
+                        chains.push(c);
+                    }
+                    Err(why) => report.missing.push(format!("{what}: {why}")),
                 }
-            };
-            for m in &chain.missing {
-                report.missing.push(format!("{bundle}: no {m} processor"));
             }
-            // Prime it with the block's first `latency` samples: its output then starts at
-            // the block.
-            let lat = chain.latency();
+            if chains.is_empty() {
+                self.voices.insert(seg.id.clone(), None);
+                return None;
+            }
+            // Prime them with the block's first `latency` samples: their output then starts
+            // at the block.
+            let lat: usize = chains.iter().map(|c| c.latency()).sum();
             if let Ok(mut pre) = self.clip_samples(seg, decoder, local, lat) {
-                chain.process(&mut pre);
+                chains.iter_mut().for_each(|c| c.process(&mut pre));
             }
-            self.voices.insert(seg.id.clone(), Some(Voice { chain, next_out: local, next_feed: local + lat as i64 }));
+            self.voices.insert(seg.id.clone(), Some(Voice { chains, next_out: local, next_feed: local + lat as i64 }));
         }
         match self.voices.get(&seg.id) {
             Some(Some(v)) => Some(v.next_feed),
