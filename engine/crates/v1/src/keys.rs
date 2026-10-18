@@ -62,9 +62,9 @@ const TEXT_PROPS: &[(&str, &[Param], bool, f64)] = &[
 ];
 
 /// What an app property of `clip` (drawn as `seg`) drives in the model. `None` for a
-/// property the model doesn't animate on this clip. `materials` may gain an effect for an
-/// Adjust slider that's keyed but at zero (the importer only makes the ones that aren't).
-fn resolve(name: &str, clip: &Value, seg: &mut Segment, materials: &mut Materials, world: &World, canvas: Canvas) -> Option<Prop> {
+/// property the model doesn't animate on this clip. An app slider keyed at zero has no effect
+/// yet (the importer only makes the ones that aren't): `apply` makes it.
+fn resolve(name: &str, clip: &Value, seg: &Segment, materials: &Materials, world: &World, canvas: Canvas) -> Option<Prop> {
     let t = clip.get("transform").cloned().unwrap_or(Value::Null);
     let ty = s(clip, "type");
     Some(match name {
@@ -103,19 +103,7 @@ fn resolve(name: &str, clip: &Value, seg: &mut Segment, materials: &mut Material
             to_app: Box::new(|v: &[f64]| vec![20.0 * v[0].max(1e-4).log10()]),
         },
         // The app's Adjust sliders, on their own scale.
-        n if crate::app::ADJUST_KEYS.contains(&n) && matches!(ty.as_str(), "video" | "image") => {
-            let id = MaterialId(format!("{}-adj-{n}", seg.id));
-            if !materials.contains(&id) {
-                let mut params = std::collections::BTreeMap::new();
-                params.insert("value".to_string(), 0.0);
-                params.insert("pixel".to_string(), 1.0 / WORLD_H);
-                materials.effects.push(Effect { id: id.clone(), category: EffectCategory::Adjust, name: n.into(), params, builtin: Some(format!("v1:{n}")), resource: None, library: None, text_style: None });
-            }
-            if !seg.attachments.contains(&id) {
-                seg.attachments.push(id.clone());
-            }
-            prop(Target::Params(id, vec![Param::Intensity]), 1, 1.0)
-        }
+        n if crate::app::ADJUST_KEYS.contains(&n) && matches!(ty.as_str(), "video" | "image") => prop(Target::Params(MaterialId(format!("{}-adj-{n}", seg.id)), vec![Param::Intensity]), 1, 1.0),
         // A converted clip's own adjustments, on CapCut's scale (`draftAdjustments`).
         n if n.starts_with("draft:") => {
             let rest = &n["draft:".len()..];
@@ -356,6 +344,18 @@ pub(crate) fn apply(seg: &mut Segment, clip: &Value, names: Option<&[String]>, f
     for name in names {
         let Some(prop) = resolve(&name, clip, seg, materials, world, canvas) else { continue };
         let keys = all.get(&name).map(|l| to_model(&prop, &app_keys(l, prop.n), fps)).unwrap_or_default();
+        if let (Target::Params(id, _), false) = (&prop.target, keys.is_empty()) {
+            // An app slider keyed at zero: its effect, at zero, for the keys to drive.
+            if crate::app::ADJUST_KEYS.contains(&name.as_str()) && !materials.contains(id) {
+                let mut params = std::collections::BTreeMap::new();
+                params.insert("value".to_string(), 0.0);
+                params.insert("pixel".to_string(), 1.0 / WORLD_H);
+                materials.effects.push(Effect { id: id.clone(), category: EffectCategory::Adjust, name: name.clone(), params, builtin: Some(format!("v1:{name}")), resource: None, library: None, text_style: None });
+            }
+            if materials.contains(id) && !seg.attachments.contains(id) && *id != seg.material {
+                seg.attachments.push(id.clone());
+            }
+        }
         match &prop.target {
             Target::Position => seg.transform.position.keys = vec2(&keys),
             Target::Scale => seg.transform.scale.keys = vec2(&keys),
@@ -367,10 +367,19 @@ pub(crate) fn apply(seg: &mut Segment, clip: &Value, names: Option<&[String]>, f
     }
 }
 
+/// Whether a segment has any keys.
+pub(crate) fn has_keys(seg: &Segment) -> bool {
+    let t = &seg.transform;
+    !(seg.keyframes.is_empty() && t.position.keys.is_empty() && t.scale.keys.is_empty() && t.rotation.keys.is_empty() && seg.opacity.keys.is_empty() && seg.volume.keys.is_empty())
+}
+
 /// The app's `keyframes` for a model segment: the properties `resolve` knows whose model keys
 /// it can show (a colour only when its three channels share their times).
 pub(crate) fn emit(seg: &Segment, clip: &Value, project: &Project, world: &World) -> Map<String, Value> {
     let mut out = Map::new();
+    if !has_keys(seg) {
+        return out;
+    }
     let mut names: Vec<String> = ["position", "scale", "rotation", "opacity", "volume", "intensity", "color", "fontSize"].iter().map(|s| s.to_string()).collect();
     names.extend(TEXT_PROPS.iter().map(|(n, ..)| n.to_string()));
     for a in clip.get("draftAdjustments").and_then(Value::as_array).into_iter().flatten() {
@@ -382,9 +391,8 @@ pub(crate) fn emit(seg: &Segment, clip: &Value, project: &Project, world: &World
         }
     }
     let fps = project.fps.as_f64();
-    let (mut seg, mut materials) = (seg.clone(), project.materials.clone());
     for name in names {
-        let Some(prop) = resolve(&name, clip, &mut seg, &mut materials, world, project.canvas) else { continue };
+        let Some(prop) = resolve(&name, clip, seg, &project.materials, world, project.canvas) else { continue };
         let keys: Vec<Keyframe<Vec<f64>>> = match &prop.target {
             Target::Position => seg.transform.position.keys.iter().map(|k| Keyframe { at: k.at, value: vec![k.value.x, k.value.y], ease: k.ease }).collect(),
             Target::Scale => seg.transform.scale.keys.iter().map(|k| Keyframe { at: k.at, value: vec![k.value.x, k.value.y], ease: k.ease }).collect(),

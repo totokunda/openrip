@@ -475,7 +475,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
 
     // The segment's keyframes the app can show and edit (lib/keyframes.ts), at clip-local
     // frames in its fields' units.
-    let keyframes = crate::keys::emit(seg, &Value::Object(clip.clone()), project, world);
+    let keyframes = if crate::keys::has_keys(seg) { crate::keys::emit(seg, &Value::Object(clip.clone()), project, world) } else { Map::new() };
     clip.insert("keyframes".into(), Value::Object(keyframes));
 
     // What the engine needs to draw it as it was, and the app's fields as written, so an
