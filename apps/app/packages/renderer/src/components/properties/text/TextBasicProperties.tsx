@@ -6,6 +6,7 @@ import { useInspectorStore } from "@/lib/inspector";
 import type { KeyframeProperty, TextClipProps, TextGradient } from "@/lib/types";
 import PropertyRow from "../PropertyRow";
 import PropertiesSlider from "../PropertiesSlider";
+import KeyframeButton from "../KeyframeButton";
 import ColorWell from "./ColorWell";
 import FontPicker from "./FontPicker";
 import { NumberField, Segments, TextSection, ToggleButton } from "./controls";
@@ -16,7 +17,8 @@ import { NumberField, Segments, TextSection, ToggleButton } from "./controls";
  * spacing, Alignment; the clip's Transform and Blend (`transform`, shared with other clips);
  * then the sections that switch on and off: Stroke, Background, Glow, Shadow, and a gradient
  * fill. Keyframeable properties are edited as CapCut edits them (`editProperty`: the key at
- * the playhead while the property has keys) and show their value at the playhead.
+ * the playhead while the property has keys), show their value at the playhead and have
+ * CapCut's keyframe navigator (‹ ◇ ›) at their row's end.
  */
 
 /** A text property at the playhead, and its edit (see `editProperty`). */
@@ -130,7 +132,7 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
           <FontPicker value={clip.fontFamily ?? "Arial"} onChange={(fontFamily) => set({ fontFamily })} />
         </PropertyRow>
         <div className="py-1.5" data-testid="text-font-size">
-          <PropertiesSlider label="Font size" value={num(fontSize.value, 32)} onChange={(v) => fontSize.set(Math.max(1, v))} min={1} max={300} step={1} toFixed={0} />
+          <PropertiesSlider label="Font size" value={num(fontSize.value, 32)} onChange={(v) => fontSize.set(Math.max(1, v))} min={1} max={300} step={1} toFixed={0} end={<KeyframeButton clipId={clipId} properties={["fontSize"]} />} />
         </div>
         <PropertyRow label="Pattern">
           <div className="flex flex-row gap-3">
@@ -161,7 +163,7 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
             }}
           />
         </PropertyRow>
-        <PropertyRow label="Color">
+        <PropertyRow label="Color" clipId={clipId} keyframes="color">
           <ColorWell testId="text-color" label="Color" value={str(color.value, "#ffffff")} onChange={(c) => color.set(c)} />
         </PropertyRow>
         {style && (
@@ -219,10 +221,10 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
           onCheckedChange={(on) => set({ strokeEnabled: on })}
           onReset={() => reset({ stroke: "#000000", strokeWidth: 2 }, ["stroke", "strokeWidth"])}
         >
-          <PropertyRow label="Color">
+          <PropertyRow label="Color" clipId={clipId} keyframes="stroke">
             <ColorWell testId="text-stroke-color" label="Stroke color" value={str(stroke.value, "#000000")} onChange={(c) => stroke.set(c)} />
           </PropertyRow>
-          <PropertiesSlider label="Thickness" value={num(strokeWidth.value, 2)} onChange={(v) => strokeWidth.set(v)} min={0} max={30} step={0.5} toFixed={1} />
+          <PropertiesSlider label="Thickness" value={num(strokeWidth.value, 2)} onChange={(v) => strokeWidth.set(v)} min={0} max={30} step={0.5} toFixed={1} end={<KeyframeButton clipId={clipId} properties={["strokeWidth"]} />} />
         </TextSection>
         <TextSection
           title="Background"
@@ -231,11 +233,11 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
           onCheckedChange={(on) => set({ backgroundEnabled: on })}
           onReset={() => reset({ backgroundColor: "#000000", backgroundOpacity: 100, backgroundCornerRadius: 0 }, ["backgroundColor", "backgroundOpacity"])}
         >
-          <PropertyRow label="Color">
+          <PropertyRow label="Color" clipId={clipId} keyframes="backgroundColor">
             <ColorWell testId="text-background-color" label="Background color" value={str(bgColor.value, "#000000")} onChange={(c) => bgColor.set(c)} />
           </PropertyRow>
           <div className="flex flex-col gap-2">
-            <PropertiesSlider label="Opacity" value={num(bgOpacity.value, 100)} onChange={(v) => bgOpacity.set(v)} min={0} max={100} step={1} toFixed={0} suffix="%" />
+            <PropertiesSlider label="Opacity" value={num(bgOpacity.value, 100)} onChange={(v) => bgOpacity.set(v)} min={0} max={100} step={1} toFixed={0} suffix="%" end={<KeyframeButton clipId={clipId} properties={["backgroundOpacity"]} />} />
             <PropertiesSlider label="Rounded rectangle" value={num(clip.backgroundCornerRadius, 0)} onChange={(backgroundCornerRadius) => set({ backgroundCornerRadius })} min={0} max={50} step={1} toFixed={0} />
           </div>
         </TextSection>
@@ -246,12 +248,12 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
           onCheckedChange={(on) => set({ glowEnabled: on })}
           onReset={() => reset({ glowColor: null, glowIntensity: 30, glowRange: 20, glowOffsetX: 0, glowOffsetY: 0 }, ["glowColor", "glowIntensity", "glowRange"])}
         >
-          <PropertyRow label="Color">
+          <PropertyRow label="Color" clipId={clipId} keyframes="glowColor">
             <ColorWell testId="text-glow-color" label="Glow color" value={str(glowColor.value, clip.color ?? "#ffffff")} onChange={(c) => glowColor.set(c)} />
           </PropertyRow>
           <div className="flex flex-col gap-2">
-            <PropertiesSlider label="Intensity" value={num(glowIntensity.value, 30)} onChange={(v) => glowIntensity.set(v)} min={0} max={100} step={1} toFixed={0} />
-            <PropertiesSlider label="Range" value={num(glowRange.value, 20)} onChange={(v) => glowRange.set(v)} min={0} max={100} step={1} toFixed={0} />
+            <PropertiesSlider label="Intensity" value={num(glowIntensity.value, 30)} onChange={(v) => glowIntensity.set(v)} min={0} max={100} step={1} toFixed={0} end={<KeyframeButton clipId={clipId} properties={["glowIntensity"]} />} />
+            <PropertiesSlider label="Range" value={num(glowRange.value, 20)} onChange={(v) => glowRange.set(v)} min={0} max={100} step={1} toFixed={0} end={<KeyframeButton clipId={clipId} properties={["glowRange"]} />} />
             <PropertiesSlider label="Y-offset" value={num(clip.glowOffsetY, 0)} onChange={(glowOffsetY) => set({ glowOffsetY })} min={-100} max={100} step={1} toFixed={0} />
             <PropertiesSlider label="X-offset" value={num(clip.glowOffsetX, 0)} onChange={(glowOffsetX) => set({ glowOffsetX })} min={-100} max={100} step={1} toFixed={0} />
           </div>
@@ -263,12 +265,12 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
           onCheckedChange={(on) => set({ shadowEnabled: on })}
           onReset={() => reset({ shadowColor: "#000000", shadowOpacity: 75, shadowBlur: 4, shadowOffsetX: 2, shadowOffsetY: 2 }, ["shadowColor", "shadowOpacity", "shadowBlur"])}
         >
-          <PropertyRow label="Color">
+          <PropertyRow label="Color" clipId={clipId} keyframes="shadowColor">
             <ColorWell testId="text-shadow-color" label="Shadow color" value={str(shadowColor.value, "#000000")} onChange={(c) => shadowColor.set(c)} />
           </PropertyRow>
           <div className="flex flex-col gap-2">
-            <PropertiesSlider label="Opacity" value={num(shadowOpacity.value, 75)} onChange={(v) => shadowOpacity.set(v)} min={0} max={100} step={1} toFixed={0} suffix="%" />
-            <PropertiesSlider label="Bluriness" value={num(shadowBlur.value, 4)} onChange={(v) => shadowBlur.set(v)} min={0} max={50} step={1} toFixed={0} />
+            <PropertiesSlider label="Opacity" value={num(shadowOpacity.value, 75)} onChange={(v) => shadowOpacity.set(v)} min={0} max={100} step={1} toFixed={0} suffix="%" end={<KeyframeButton clipId={clipId} properties={["shadowOpacity"]} />} />
+            <PropertiesSlider label="Bluriness" value={num(shadowBlur.value, 4)} onChange={(v) => shadowBlur.set(v)} min={0} max={50} step={1} toFixed={0} end={<KeyframeButton clipId={clipId} properties={["shadowBlur"]} />} />
             <PropertiesSlider label="Distance" value={distance} onChange={(d) => setShadow(Math.max(0, d), angle)} min={0} max={50} step={0.5} toFixed={1} />
             <PropertiesSlider label="Angle" value={angle} onChange={(a) => setShadow(distance || 2, a)} min={-180} max={180} step={1} toFixed={0} suffix="°" />
           </div>
