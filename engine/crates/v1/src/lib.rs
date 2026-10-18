@@ -442,9 +442,13 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
     for m in engine.get("materials").and_then(Value::as_array).into_iter().flatten() {
         match serde_json::from_value::<AnyMaterial>(m.clone()) {
             // The app's asset stands for the media (it may have been relinked), keeping what
-            // only the draft knows: CapCut's saved background removal.
+            // only the draft knows: CapCut's saved background removal, and that a video's sound
+            // was extracted to a clip of its own (the video then plays none).
             Ok(AnyMaterial::Media(m)) => match materials.media.iter_mut().find(|a| a.id == m.id) {
-                Some(asset) => asset.matte = asset.matte.take().or(m.matte),
+                Some(asset) => {
+                    asset.matte = asset.matte.take().or(m.matte);
+                    asset.has_audio &= m.has_audio || m.kind != MediaKind::Video;
+                }
                 None => materials.media.push(m),
             },
             Ok(m) if !materials.contains(m.id()) => materials.insert_at(m, None),

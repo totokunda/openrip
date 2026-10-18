@@ -1073,6 +1073,12 @@ fn app_roundtrip(root: &Path, with_audio: bool) -> Result<(), Box<dyn std::error
             let diff = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).fold(0f32, f32::max);
             if diff > 0.0 {
                 println!("  draft #{i:02}: mixes differ by up to {diff:.2e}");
+                if let Some(dir) = std::env::var_os("OPENRIP_RT_DUMP") {
+                    let dir = PathBuf::from(dir);
+                    std::fs::create_dir_all(&dir)?;
+                    std::fs::write(dir.join(format!("d{i:02}-orig.json")), serde_json::to_string_pretty(&project)?)?;
+                    std::fs::write(dir.join(format!("d{i:02}-back.json")), serde_json::to_string_pretty(&back.project)?)?;
+                }
             }
             worst_audio = worst_audio.max(diff);
         }

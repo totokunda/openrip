@@ -98,13 +98,16 @@ pub fn builtin(kind: &str, params: &BTreeMap<String, f64>, rate: u32) -> Result<
             let filters = [("LowShelf", 120.0, 0.71, get("low", 0.0)), ("Bell", 1500.0, 0.8, get("mid", 0.0)), ("HighShelf", 6000.0, 0.71, get("high", 0.0))];
             procs.push(Box::new(Filters(filters.iter().filter(|f| f.3.abs() > 1e-6).filter_map(|&(m, f, q, g)| Biquad::new(m, f, q, g, fs)).collect())));
         }
+        // The line's band last, as a phone's codec does, so the overdrive's harmonics stay in it.
         "telephone" => {
+            procs.push(Box::new(Drive::new(get("drive", 8.0).clamp(0.0, 48.0), 20_000.0, fs)));
             procs.push(Box::new(band(&[("HighPass", 300.0, 0.0), ("HighPass", 300.0, 0.0), ("LowPass", 3400.0, 0.0), ("LowPass", 3400.0, 0.0), ("Bell", 1000.0, 3.0)], fs)));
-            procs.push(Box::new(Drive::new(get("drive", 8.0).clamp(0.0, 48.0), 3400.0, fs)));
         }
+        // The horn's honk into the overdrive, then its band.
         "megaphone" => {
-            procs.push(Box::new(band(&[("HighPass", 600.0, 0.0), ("HighPass", 600.0, 0.0), ("LowPass", 3800.0, 0.0), ("LowPass", 3800.0, 0.0), ("Bell", 2000.0, 9.0)], fs)));
-            procs.push(Box::new(Drive::new(get("drive", 20.0).clamp(0.0, 48.0), 4000.0, fs)));
+            procs.push(Box::new(band(&[("HighPass", 600.0, 0.0), ("Bell", 2000.0, 9.0)], fs)));
+            procs.push(Box::new(Drive::new(get("drive", 20.0).clamp(0.0, 48.0), 20_000.0, fs)));
+            procs.push(Box::new(band(&[("HighPass", 600.0, 0.0), ("LowPass", 3800.0, 0.0), ("LowPass", 3800.0, 0.0)], fs)));
         }
         "gain" => procs.push(Box::new(Gain(10f32.powf(get("db", 0.0).clamp(-60.0, 24.0) / 20.0)))),
         _ => return Err(format!("no voice effect {kind:?}")),
@@ -461,6 +464,27 @@ mod tests {
         assert!(added("bitcrush", &[("bits", 3.0), ("downsample", 1.0)]) > 0.01);
         assert!(added("bitcrush", &[("bits", 16.0), ("downsample", 8.0)]) > 0.001);
         assert!(added("lowpass", &[("frequency", 20000.0)]) < 1e-5);
+    }
+
+    #[test]
+    fn a_phone_lines_overdrive_stays_in_its_band() {
+        // A loud 1 kHz tone overdriven: its 5th and 7th harmonics (5 and 7 kHz) are filtered off
+        // with the rest of what's above the line's band.
+        let mut x = sine(1000.0, 1.0, 0.8);
+        run("telephone", &[("drive", 20.0)], &mut x);
+        let n = 16384;
+        let mut buf: Vec<f32> = x.iter().step_by(2).skip(x.len() / 2 - n).take(n).enumerate().map(|(i, v)| v * (0.5 - 0.5 * (2.0 * PI * i as f32 / n as f32).cos())).collect();
+        let fft = RealFftPlanner::<f32>::new().plan_fft_forward(n);
+        let mut out = fft.make_output_vec();
+        fft.process(&mut buf, &mut out).unwrap();
+        let level = |f: f32| {
+            let k = (f * n as f32 / FS as f32).round() as usize;
+            out[k - 3..=k + 3].iter().map(|z| z.norm_sqr()).sum::<f32>()
+        };
+        for h in [5000.0, 7000.0] {
+            let db = 10.0 * (level(h) / level(1000.0)).log10();
+            assert!(db < -25.0, "{h} Hz at {db:.1} dB");
+        }
     }
 
     #[test]
