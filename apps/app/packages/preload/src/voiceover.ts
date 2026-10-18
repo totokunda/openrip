@@ -11,7 +11,12 @@ export type VoiceoverStatus = {
   recording: boolean;
   /** The microphone permission: "granted", "denied", "restricted", "not-determined" or "unknown". */
   permission: string;
+  /** The project's playback is silenced while this recording lasts ("Mute project"). */
+  projectMuted: boolean;
 };
+
+/** A take in the project's voiceover folder, newest first (the Audio tab's Voiceovers list). */
+export type VoiceoverTake = { path: string; url: string; name: string; modifiedMs: number };
 
 export type VoiceoverStart = { ok: true; path: string; rate: number; channels: number } | { ok: false; error: string; denied?: boolean };
 
@@ -27,10 +32,16 @@ export function voiceoverStatus(): Promise<VoiceoverStatus> {
 /**
  * Start recording into `<media>/<folder>/voiceover/Voiceover N.wav` (`folder`: the project's
  * media folder id; none for the shared one). macOS asks for the microphone the first time;
- * refused, this resolves `{ok: false, denied: true}`.
+ * refused, this resolves `{ok: false, denied: true}`. `muteProject` silences the project's
+ * playback until the recording stops (the panel's "Mute project").
  */
-export function voiceoverStart(folder?: string): Promise<VoiceoverStart> {
-  return ipcRenderer.invoke("voiceover:start", { folder });
+export function voiceoverStart(folder?: string, options?: { muteProject?: boolean }): Promise<VoiceoverStart> {
+  return ipcRenderer.invoke("voiceover:start", { folder, muteProject: !!options?.muteProject });
+}
+
+/** The takes recorded for the project (`folder`: its media folder id), newest first. */
+export function voiceoverList(folder?: string): Promise<VoiceoverTake[]> {
+  return ipcRenderer.invoke("voiceover:list", { folder });
 }
 
 /** Stop and keep the take: its file (path and file URL) and length. */

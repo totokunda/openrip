@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, ipcMain, systemPreferences } from "electron";
@@ -14,9 +14,13 @@ import { getEngine } from "./EngineModule.js";
  * until it stops; the renderer then puts the file on the timeline (lib/audio.ts
  * `placeVoiceover`).
  *
+ * "Mute project" (the panel's) silences the project's playback while it records, so the
+ * microphone doesn't pick it up from the speakers; the sound comes back when it stops.
+ *
  * On macOS the system asks for the microphone the first time, from here, before the engine
  * opens it. With `OPENRIP_FAKE_MIC` set (automated tests) the engine records a stand-in
  * microphone that hears a steady tone instead: nothing real is recorded and nothing is asked.
+ * `OPENRIP_FAKE_MIC=denied` plays a refused permission instead, for the panel's message.
  */
 export type VoiceoverStatus = {
   /** The engine is loaded, so recording can work. */
@@ -24,7 +28,12 @@ export type VoiceoverStatus = {
   recording: boolean;
   /** The microphone permission: "granted", "denied", "restricted", "not-determined" or "unknown". */
   permission: string;
+  /** The project's playback is silenced while this recording lasts ("Mute project"). */
+  projectMuted: boolean;
 };
+
+/** A take in the project's voiceover folder (the Audio tab's Voiceovers list). */
+export type VoiceoverTake = { path: string; url: string; name: string; modifiedMs: number };
 
 export type VoiceoverStart = { ok: true; path: string; rate: number; channels: number } | { ok: false; error: string; denied?: boolean };
 
@@ -33,8 +42,11 @@ export type VoiceoverStop = { ok: true; path: string; url: string; durationSec: 
 export type VoiceoverLevel = { peak: number; rms: number; elapsedMs: number };
 
 const fake = () => !!process.env.OPENRIP_FAKE_MIC;
+/** Tests of the panel's refused-permission message: nothing is recorded or asked. */
+const fakeDenied = () => process.env.OPENRIP_FAKE_MIC === "denied";
 
 const permission = (): string => {
+  if (fakeDenied()) return "denied";
   if (fake()) return "granted";
   if (process.platform !== "darwin" && process.platform !== "win32") return "granted";
   try {
@@ -46,6 +58,7 @@ const permission = (): string => {
 
 /** Ask for the microphone where the system wants asking (macOS); true if it may be used. */
 async function askForMicrophone(): Promise<boolean> {
+  if (fakeDenied()) return false;
   if (fake() || process.platform !== "darwin") return true;
   if (systemPreferences.getMediaAccessStatus("microphone") === "granted") return true;
   return systemPreferences.askForMediaAccess("microphone");
@@ -65,15 +78,40 @@ export function nextVoiceoverPath(dir: string): string {
   }
 }
 
+/** The project's takes, newest first: the WAV files the recorder left in its voiceover folder. */
+export function listTakes(folder?: string): VoiceoverTake[] {
+  const dir = join(mediaFolder(folder), "voiceover");
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir).filter((n) => n.toLowerCase().endsWith(".wav"));
+  } catch {
+    return [];
+  }
+  const takes: VoiceoverTake[] = [];
+  for (const name of names) {
+    const path = join(dir, name);
+    try {
+      takes.push({ path, url: pathToFileURL(path).href, name: name.replace(/\.wav$/i, ""), modifiedMs: statSync(path).mtimeMs });
+    } catch {}
+  }
+  return takes.sort((a, b) => b.modifiedMs - a.modifiedMs);
+}
+
+/** The engine's output level when nothing silences it (tests run it muted). */
+const playbackVolume = () => (process.env.OPENRIP_ENGINE_MUTE ? 0 : 1);
+
 class Recording {
   readonly path: string;
   readonly folder: string;
+  readonly muted: boolean;
   readonly started = Date.now();
   #timer: ReturnType<typeof setInterval>;
 
-  constructor(path: string, folder: string, sender: Electron.WebContents) {
+  constructor(path: string, folder: string, sender: Electron.WebContents, muted: boolean) {
     this.path = path;
     this.folder = folder;
+    this.muted = muted;
+    if (muted) getEngine()?.setVolume(0);
     this.#timer = setInterval(() => {
       const level = getEngine()?.recordingLevel();
       if (!level || sender.isDestroyed()) return;
@@ -84,6 +122,7 @@ class Recording {
 
   end() {
     clearInterval(this.#timer);
+    if (this.muted) getEngine()?.setVolume(playbackVolume());
   }
 }
 
@@ -91,16 +130,23 @@ export class VoiceoverModule implements AppModule {
   #recording: Recording | null = null;
 
   enable(_context: ModuleContext): void {
-    for (const channel of ["voiceover:status", "voiceover:start", "voiceover:stop", "voiceover:cancel"]) {
+    for (const channel of ["voiceover:status", "voiceover:start", "voiceover:stop", "voiceover:cancel", "voiceover:list"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
     }
     if (fake()) getEngine()?.useToneInput();
 
-    ipcMain.handle("voiceover:status", (): VoiceoverStatus => ({ available: !!getEngine(), recording: !!this.#recording, permission: permission() }));
+    ipcMain.handle("voiceover:status", (): VoiceoverStatus => ({
+      available: !!getEngine(),
+      recording: !!this.#recording,
+      permission: permission(),
+      projectMuted: !!this.#recording?.muted,
+    }));
 
-    ipcMain.handle("voiceover:start", async (event, options?: { folder?: string }): Promise<VoiceoverStart> => {
+    ipcMain.handle("voiceover:list", (_event, options?: { folder?: string }): VoiceoverTake[] => listTakes(options?.folder));
+
+    ipcMain.handle("voiceover:start", async (event, options?: { folder?: string; muteProject?: boolean }): Promise<VoiceoverStart> => {
       const engine = getEngine();
       if (!engine) return { ok: false, error: "engine not available" };
       if (this.#recording) return { ok: false, error: "already recording" };
@@ -111,7 +157,7 @@ export class VoiceoverModule implements AppModule {
         mkdirSync(dir, { recursive: true });
         const path = nextVoiceoverPath(dir);
         const started = engine.startRecording(path);
-        this.#recording = new Recording(path, folder, event.sender);
+        this.#recording = new Recording(path, folder, event.sender, !!options?.muteProject);
         return { ok: true, path, rate: started.rate, channels: started.channels };
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };

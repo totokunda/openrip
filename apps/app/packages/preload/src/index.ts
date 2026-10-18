@@ -38,8 +38,8 @@ export {
 export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult, EngineThumbnail, EngineBeats, EngineFontFace, EngineFontFamily, EngineStillResult } from "./engine.js";
 
 // Voiceover recording (the main process's VoiceoverModule)
-export { voiceoverStatus, voiceoverStart, voiceoverStop, voiceoverCancel, onVoiceoverLevel } from "./voiceover.js";
-export type { VoiceoverStatus, VoiceoverStart, VoiceoverStop, VoiceoverLevel } from "./voiceover.js";
+export { voiceoverStatus, voiceoverStart, voiceoverStop, voiceoverCancel, voiceoverList, onVoiceoverLevel } from "./voiceover.js";
+export type { VoiceoverStatus, VoiceoverStart, VoiceoverStop, VoiceoverLevel, VoiceoverTake } from "./voiceover.js";
 
 // App updates (Electron auto-updater)
 export * from "./appUpdates.js";
