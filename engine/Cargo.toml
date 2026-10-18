@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/model", "crates/platform", "crates/capcut", "crates/v1", "crates/frame", "crates/media", "crates/audio", "crates/playback", "crates/render", "crates/core", "crates/node", "crates/export", "crates/dev"]
+members = ["crates/model", "crates/platform", "crates/motion", "crates/capcut", "crates/v1", "crates/frame", "crates/media", "crates/audio", "crates/playback", "crates/render", "crates/core", "crates/node", "crates/export", "crates/dev"]
 
 [workspace.package]
 edition = "2021"
@@ -13,6 +13,7 @@ publish = false
 # member asks for the features it needs (see docs/plan/portability.md).
 openrip-model = { path = "crates/model" }
 openrip-platform = { path = "crates/platform" }
+openrip-motion = { path = "crates/motion" }
 openrip-capcut = { path = "crates/capcut" }
 openrip-v1 = { path = "crates/v1" }
 openrip-frame = { path = "crates/frame" }

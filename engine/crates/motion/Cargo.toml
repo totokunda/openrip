@@ -1,0 +1,11 @@
+[package]
+name = "openrip-motion"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Classic motion estimation: image pyramids, corner features, pyramidal Lucas-Kanade tracking, robust similarity fits, region tracking and dense optical flow"
+
+# Plain Rust with no dependencies: it builds and runs on every target the engine does.
+[dependencies]

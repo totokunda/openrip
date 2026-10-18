@@ -1288,6 +1288,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "openrip-motion"
+version = "0.0.0"
+
+[[package]]
 name = "openrip-node"
 version = "0.1.0"
 dependencies = [
