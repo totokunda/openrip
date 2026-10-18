@@ -629,6 +629,24 @@ fn library_ref(m: &Value) -> LibraryRef {
     LibraryRef { app: APP.into(), resource_id: resource, name: s(m, "name"), category: s(m, "category_name") }
 }
 
+/// A video material's Smooth slow-mo: `video_algorithm.complement_frame_config`, `null` when off,
+/// else `{"mode": "optical_flow" | "frame_blending"}`.
+fn complement_frame(m: &Value) -> Option<ComplementFrame> {
+    let mode = match m.pointer("/video_algorithm/complement_frame_config/mode")?.as_str()? {
+        "optical_flow" => ComplementMode::OpticalFlow,
+        "frame_blending" => ComplementMode::FrameBlending,
+        _ => return None,
+    };
+    Some(ComplementFrame { mode })
+}
+
+/// A video material's Optical flow (Video › Basic): `video_algorithm.smart_complement_frame`,
+/// `null` when off, else `{"fps": 60, "sub_type": 0}`.
+fn smart_complement_frame(m: &Value) -> Option<SmartComplementFrame> {
+    let c = m.pointer("/video_algorithm/smart_complement_frame").filter(|c| c.is_object())?;
+    Some(SmartComplementFrame { fps: i(c, "fps").clamp(1, 240) as u32, sub_type: i(c, "sub_type") as i32 })
+}
+
 fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport) {
     let Some(tables) = mats.as_object() else { return };
     // Freeze frames and the video materials they were taken from.
@@ -664,6 +682,9 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         // the still is the frame starting there, which CapCut finds by snapping
                         // to a frame's start within 0.8 ms (its file is named for that start).
                         freeze: m.get("freeze").filter(|fr| fr.is_object()).map(|fr| Freeze { video: s(fr, "source_material_path"), at: Micros(i(fr, "timestamp") + FRAME_SNAP.0) }),
+                        // Smooth slow-mo and Optical flow (`video_algorithm`).
+                        complement_frame: complement_frame(m),
+                        smart_complement_frame: smart_complement_frame(m),
                     });
                     if let Some(source) = m.get("freeze").map(|fr| s(fr, "source_material_id")).filter(|id| !id.is_empty()) {
                         freeze_sources.push((MaterialId(s(m, "id")), MaterialId(source)));
@@ -682,6 +703,8 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         matte: None,
                         reverse_path: None,
                         freeze: None,
+                        complement_frame: None,
+                        smart_complement_frame: None,
                     });
                     true
                 }
@@ -1390,6 +1413,32 @@ mod tests {
         let still = p.materials.media.iter().find(|m| m.id.0 == "P").unwrap();
         assert_eq!(still.freeze, Some(Freeze { video: "/nope/v.mp4".into(), at: Micros(6_667_466) }));
         assert_eq!(still.kind, MediaKind::Photo);
+    }
+
+    /// Smooth slow-mo and Optical flow as drafts store them on the video material's
+    /// `video_algorithm`: off (`null`), Smooth slow-mo by optical flow or blending, Optical flow
+    /// at 60 fps.
+    #[test]
+    fn imports_smooth_slow_mo_and_optical_flow() {
+        let video = |id: &str, algorithm: Value| json!({"id": id, "type": "video", "path": "/nope/v.mp4", "duration": 5_000_000, "video_algorithm": algorithm});
+        let draft = json!({
+            "id": "D", "fps": 30.0, "canvas_config": {"width": 1080, "height": 1920},
+            "materials": {"videos": [
+                video("off", json!({"complement_frame_config": null, "smart_complement_frame": null, "algorithms": []})),
+                video("flow", json!({"complement_frame_config": {"mode": "optical_flow"}, "algorithms": [{"type": "ComplementFrame"}], "path": "Resources/videoAlg/x.mp4"})),
+                video("blend", json!({"complement_frame_config": {"mode": "frame_blending"}})),
+                video("fps", json!({"smart_complement_frame": {"fps": 60, "sub_type": 0, "id": "X"}})),
+                {"id": "none", "type": "video", "path": "/nope/v.mp4", "duration": 5_000_000}
+            ]},
+            "tracks": []
+        });
+        let Imported { project, .. } = import_draft_json(&draft, "").unwrap();
+        let m = |id: &str| project.materials.media.iter().find(|m| m.id.0 == id).unwrap().clone();
+        assert_eq!((m("off").complement_frame, m("off").smart_complement_frame), (None, None));
+        assert_eq!(m("flow").complement_frame, Some(ComplementFrame { mode: ComplementMode::OpticalFlow }));
+        assert_eq!(m("blend").complement_frame, Some(ComplementFrame { mode: ComplementMode::FrameBlending }));
+        assert_eq!(m("fps").smart_complement_frame, Some(SmartComplementFrame { fps: 60, sub_type: 0 }));
+        assert_eq!((m("none").complement_frame, m("none").smart_complement_frame), (None, None));
     }
 
     /// A sticker bundle names its picture: a PNG through its script, or a GIF in its config.

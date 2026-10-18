@@ -263,6 +263,8 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
             matte: None,
             reverse_path: None,
             freeze: None,
+            complement_frame: None,
+            smart_complement_frame: None,
         });
     }
 
@@ -1012,6 +1014,8 @@ fn app_freeze(id: &str, clip: &Value, materials: &mut Materials) -> Option<Mater
         matte: asset.matte.clone(),
         reverse_path: None,
         freeze: Some(Freeze { video: asset.path.clone(), at: Micros::from_secs_f64(f(fr, "at", 0.0).max(0.0)) }),
+        complement_frame: None,
+        smart_complement_frame: None,
     });
     Some(mid)
 }

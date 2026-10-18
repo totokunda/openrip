@@ -589,7 +589,7 @@ mod tests {
     /// attached, and a caption above it.
     fn project() -> Project {
         let mut p = Project::new("p", "P", Canvas { width: 1080, height: 1920 }, FrameRate::new(30, 1));
-        p.materials.media.push(Media { id: MaterialId("m".into()), kind: MediaKind::Video, path: "/tmp/clip.mov".into(), width: 1080, height: 1920, duration: Micros(10_000_000), has_audio: true, matte: Some("/tmp/matte".into()), reverse_path: None, freeze: None });
+        p.materials.media.push(Media { id: MaterialId("m".into()), kind: MediaKind::Video, path: "/tmp/clip.mov".into(), width: 1080, height: 1920, duration: Micros(10_000_000), has_audio: true, matte: Some("/tmp/matte".into()), reverse_path: None, freeze: None, complement_frame: None, smart_complement_frame: None });
         let mut fx = BTreeMap::new();
         fx.insert("intensity".to_string(), 0.5);
         p.materials.effects.push(Effect { id: MaterialId("fx".into()), category: EffectCategory::Filter, name: "Film".into(), params: fx, builtin: None, resource: Some("/bundle".into()), library: None, text_style: None });

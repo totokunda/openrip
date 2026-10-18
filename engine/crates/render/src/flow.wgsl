@@ -3,8 +3,10 @@
 // is what the tests compare against. Every read is an explicit texel load (no samplers), so
 // float textures work everywhere and the maths matches the CPU reference.
 //
-// Textures: level pictures hold (intensity 0-1, d/dx, d/dy, 0); flows hold (dx, dy, 0, 0) in
-// pixels of their level; the frames are premultiplied RGBA.
+// Textures: level pictures hold (intensity 0-1, d/dx, d/dy, 0) at half precision; flows hold
+// (dx, dy, 0, 0) in pixels of their level at full precision; the frames are premultiplied
+// RGBA. Bindings 1 and 2 (pictures) can be read with the hardware's bilinear filter (the
+// inner loops' reads of the second picture); 0 and 3 (flows) are read texel by texel.
 
 struct Params {
     a: vec4<f32>,
@@ -16,6 +18,7 @@ struct Params {
 @group(0) @binding(2) var t2: texture_2d<f32>;
 @group(0) @binding(3) var t3: texture_2d<f32>;
 @group(0) @binding(4) var<uniform> P: Params;
+@group(0) @binding(5) var smp: sampler;
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
@@ -69,6 +72,14 @@ fn bl3(q: vec2<f32>) -> vec4<f32> {
     let i = vec2<i32>(floor(p));
     let f = p - floor(p);
     return mix(mix(ld3(i), ld3(i + vec2<i32>(1, 0)), f.x), mix(ld3(i + vec2<i32>(0, 1)), ld3(i + vec2<i32>(1, 1)), f.x), f.y);
+}
+
+// Bilinear reads by the hardware's filter, at pixel coordinates (edges clamped).
+fn sb1(q: vec2<f32>) -> vec4<f32> {
+    return textureSampleLevel(t1, smp, (q + 0.5) / vec2<f32>(textureDimensions(t1)), 0.0);
+}
+fn sb2(q: vec2<f32>) -> vec4<f32> {
+    return textureSampleLevel(t2, smp, (q + 0.5) / vec2<f32>(textureDimensions(t2)), 0.0);
 }
 
 fn luma(c: vec4<f32>) -> f32 {
@@ -183,7 +194,7 @@ fn fs_select(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         var cost = 0.0;
         for (var q = 0; q < 9; q++) {
             let at = p + nb(q) * 2;
-            cost += abs(bl2(vec2<f32>(at) + cand).r - ld1(at).r);
+            cost += abs(sb2(vec2<f32>(at) + cand).r - ld1(at).r);
         }
         if (cost < best) {
             best = cost;
@@ -199,35 +210,43 @@ fn fs_select(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 fn fs_lk(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let p = vec2<i32>(floor(pos.xy));
     let size = vec2<i32>(textureDimensions(t1)) - 1;
+    let inv = 1.0 / vec2<f32>(textureDimensions(t2));
     let uv = ld0(p).xy;
     let sigma = P.a.x;
-    var s = array<f32, 5>(0.0, 0.0, 0.0, 0.0, 0.0);
+    var gw: array<f32, 7>;
+    for (var i = 0; i < 7; i++) {
+        gw[i] = exp(-f32((i - 3) * (i - 3)) / (2.0 * sigma * sigma));
+    }
+    var sxx = 0.0;
+    var sxy = 0.0;
+    var syy = 0.0;
+    var sxt = 0.0;
+    var syt = 0.0;
     var norm = 0.0;
     for (var dy = -3; dy <= 3; dy++) {
-        let gy_w = exp(-f32(dy * dy) / (2.0 * sigma * sigma));
         for (var dx = -3; dx <= 3; dx++) {
-            let g = gy_w * exp(-f32(dx * dx) / (2.0 * sigma * sigma));
+            let g = gw[dy + 3] * gw[dx + 3];
             norm += g;
             let q = clamp(p + vec2<i32>(dx, dy), vec2<i32>(0), size);
             let a = textureLoad(t1, q, 0);
-            let it = bl2(vec2<f32>(q) + uv).r - a.r;
+            let it = textureSampleLevel(t2, smp, (vec2<f32>(q) + uv + 0.5) * inv, 0.0).r - a.r;
             var w = g;
             if (P.a.w > 0.0) {
                 let e = it / P.a.w;
                 w = g / (1.0 + e * e);
             }
-            s[0] += w * a.g * a.g;
-            s[1] += w * a.g * a.b;
-            s[2] += w * a.b * a.b;
-            s[3] += w * a.g * it;
-            s[4] += w * a.b * it;
+            sxx += w * a.g * a.g;
+            sxy += w * a.g * a.b;
+            syy += w * a.b * a.b;
+            sxt += w * a.g * it;
+            syt += w * a.b * it;
         }
     }
-    let gxx = s[0] / norm;
-    let gxy = s[1] / norm;
-    let gyy = s[2] / norm;
-    let bx = s[3] / norm;
-    let by = s[4] / norm;
+    let gxx = sxx / norm;
+    let gxy = sxy / norm;
+    let gyy = syy / norm;
+    let bx = sxt / norm;
+    let by = syt / norm;
     let damp = P.a.y + P.a.z * (gxx + gyy);
     let a11 = gxx + damp;
     let a22 = gyy + damp;
@@ -276,9 +295,10 @@ fn fs_median(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 }
 
 // Where a pixel's content at time t comes from, at the working resolution: flow A→B (t0) and
-// B→A (t1), level-0 pictures A (t2) and B (t3). a.x = t. Out: (the motion m through the
-// pixel from A to B, the weight of A, the weight of B): read A at x − t·m and B at
-// x + (1 − t)·m.
+// B→A (t3), level-0 pictures A (t1) and B (t2). a.x = t, a.y and a.z the patch mismatch up to
+// which the motion is trusted fully and from which not at all. Out: (the motion m through
+// the pixel from A to B, how far to mix toward B, how far to trust it over a cross-fade):
+// read A at x − t·m and B at x + (1 − t)·m.
 @fragment
 fn fs_tween_plan(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let x = floor(pos.xy);
@@ -287,13 +307,13 @@ fn fs_tween_plan(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     for (var i = 0; i < 4; i++) {
         m = bl0(x - t * m).xy;
     }
-    var n = bl1(x).xy;
+    var n = bl3(x).xy;
     for (var i = 0; i < 4; i++) {
-        n = bl1(x - (1.0 - t) * n).xy;
+        n = bl3(x - (1.0 - t) * n).xy;
     }
     let m2 = -n;
-    let cost_m = abs(bl2(x - t * m).r - bl3(x + (1.0 - t) * m).r);
-    let cost_n = abs(bl2(x - t * m2).r - bl3(x + (1.0 - t) * m2).r);
+    let cost_m = abs(sb1(x - t * m).r - sb2(x + (1.0 - t) * m).r);
+    let cost_n = abs(sb1(x - t * m2).r - sb2(x + (1.0 - t) * m2).r);
     var best = m;
     if (cost_n < cost_m) {
         best = m2;
@@ -301,10 +321,10 @@ fn fs_tween_plan(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let p = x - t * best;
     let q = x + (1.0 - t) * best;
     // Forward–backward disagreement at each end.
-    let d_q = bl1(q).xy;
+    let d_q = bl3(q).xy;
     let e_q = length(d_q + bl0(q + d_q).xy);
     let d_p = bl0(p).xy;
-    let e_p = length(d_p + bl1(p + d_p).xy);
+    let e_p = length(d_p + bl3(p + d_p).xy);
     let q_seen_in_a = 1.0 / (1.0 + e_q * e_q);
     let p_seen_in_b = 1.0 / (1.0 + e_p * e_p);
     var wa = (1.0 - t) * q_seen_in_a;
@@ -313,10 +333,19 @@ fn fs_tween_plan(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         wa = 1.0 - t;
         wb = t;
     }
-    return vec4<f32>(best, wa, wb);
+    var mismatch = 0.0;
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            let d = vec2<f32>(f32(dx), f32(dy));
+            mismatch += abs(sb1(p + d).r - sb2(q + d).r);
+        }
+    }
+    let off = clamp((mismatch / 9.0 - P.a.y) / (P.a.z - P.a.y), 0.0, 1.0);
+    let fail = max(off * min(q_seen_in_a, p_seen_in_b), 1.0 - max(q_seen_in_a, p_seen_in_b));
+    return vec4<f32>(best, wb / (wa + wb), 1.0 - fail);
 }
 
-// The picture at time t at full resolution: frames A (t0) and B (t1), the plan (t2) at the
+// The picture at time t at full resolution: frames A (t1) and B (t2), the plan (t0) at the
 // working resolution a.y times smaller. a.x = t, a.z = 1 for a straight cross-fade instead.
 @fragment
 fn fs_tween(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
@@ -324,14 +353,15 @@ fn fs_tween(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let t = P.a.x;
     if (P.a.z > 0.5) {
         let p = vec2<i32>(x);
-        return mix(ld0(p), ld1(p), t);
+        return mix(ld1(p), ld2(p), t);
     }
     let k = P.a.y;
     // Working pixel centres sit at the middle of their k × k blocks.
     let w = (x - 0.5 * (k - 1.0)) / k;
-    let plan = bl2(w);
+    let plan = bl0(w);
     let m = plan.xy * k;
-    let a = bl0(x - t * m);
-    let b = bl1(x + (1.0 - t) * m);
-    return (plan.z * a + plan.w * b) / (plan.z + plan.w);
+    let flowed = mix(sb1(x - t * m), sb2(x + (1.0 - t) * m), plan.z);
+    let p = vec2<i32>(x);
+    let blended = mix(ld1(p), ld2(p), t);
+    return mix(blended, flowed, plan.w);
 }

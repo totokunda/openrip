@@ -684,7 +684,7 @@ mod tests {
         p.tracks.push(Track { id: "v".into(), kind: TrackKind::Video, name: String::new(), segments: vec![seg("v1", "video", 0, 20_000_000, 10_000_000)], muted: false, hidden: false, locked: false });
         let stills = (0..20).map(|i| seg(&format!("s{i}"), &format!("photo{i}"), i * 1_000_000, 1_000_000, 0)).collect();
         p.tracks.push(Track { id: "s".into(), kind: TrackKind::Video, name: String::new(), segments: stills, muted: false, hidden: false, locked: false });
-        let media = |id: &str, kind: MediaKind| Media { id: MaterialId(id.into()), path: format!("/{id}"), kind, width: 0, height: 0, duration: Micros(60_000_000), has_audio: false, matte: None, reverse_path: None, freeze: None };
+        let media = |id: &str, kind: MediaKind| Media { id: MaterialId(id.into()), path: format!("/{id}"), kind, width: 0, height: 0, duration: Micros(60_000_000), has_audio: false, matte: None, reverse_path: None, freeze: None, complement_frame: None, smart_complement_frame: None };
         p.materials.media.push(media("video", MediaKind::Video));
         for i in 0..20 {
             p.materials.media.push(media(&format!("photo{i}"), MediaKind::Photo));

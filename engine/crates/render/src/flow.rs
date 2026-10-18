@@ -8,9 +8,11 @@
 //! pixels, by whole-pixel blocks) and kept for the pair of frames (by the caller's key), so
 //! every frame drawn between the same two source frames reuses it: at 0.25× speed, four.
 
-use openrip_motion::flow::{FlowOptions, MAX_STEP, SEARCH_PENALTY};
+use openrip_motion::flow::{FlowOptions, MAX_STEP, SEARCH_PENALTY, TRUST_MISMATCH};
 
-use crate::{Compositor, RgbaImage, Source, CANVAS};
+use openrip_frame::VideoFrame;
+
+use crate::{Compositor, RgbaImage, CANVAS};
 
 /// The working resolution's long side, at most.
 pub const WORK_SIDE: u32 = 960;
@@ -18,7 +20,11 @@ pub const WORK_SIDE: u32 = 960;
 const KEEP_PAIRS: usize = 4;
 const KEEP_FRAMES: u64 = 8;
 
+/// Flows, at full precision.
 const FLOAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+/// Pictures: half precision is plenty for 8- and 10-bit intensities, halves the memory the
+/// inner loops read, and can be filtered by the hardware.
+const HALF: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// How the frame in between is made.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -29,13 +35,29 @@ pub enum TweenMode {
     Flow,
 }
 
+/// One of the two frames of a [`Tween`].
+#[derive(Copy, Clone, Debug)]
+pub enum Picture<'a> {
+    Image(&'a RgbaImage),
+    Video(&'a VideoFrame),
+}
+
+impl Picture<'_> {
+    pub fn size(&self) -> (u32, u32) {
+        match self {
+            Picture::Image(i) => (i.width, i.height),
+            Picture::Video(f) => (f.width(), f.height()),
+        }
+    }
+}
+
 /// A frame in between two frames of the same video: `t` of the way from `from` to `to` (0–1).
 /// `key` identifies the pair (the same two frames give the same key), so the flow between
 /// them is worked out once.
 #[derive(Copy, Clone, Debug)]
 pub struct Tween<'a> {
-    pub from: Source<'a>,
-    pub to: Source<'a>,
+    pub from: Picture<'a>,
+    pub to: Picture<'a>,
     pub t: f32,
     pub key: u64,
     pub mode: TweenMode,
@@ -67,29 +89,31 @@ pub(crate) struct FlowFx {
     copy: wgpu::RenderPipeline,
     /// A 1×1 texture of zeros, for unused bindings.
     blank: wgpu::Texture,
+    sampler: wgpu::Sampler,
 }
 
 impl FlowFx {
     pub(crate) fn new(device: &wgpu::Device) -> FlowFx {
-        let tex = |binding| wgpu::BindGroupLayoutEntry {
+        let tex = |binding, filterable| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+            ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
             count: None,
         };
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("flow"),
             entries: &[
-                tex(0),
-                tex(1),
-                tex(2),
-                tex(3),
+                tex(0, false),
+                tex(1, true),
+                tex(2, true),
+                tex(3, false),
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry { binding: 5, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
@@ -113,9 +137,9 @@ impl FlowFx {
             })
         };
         FlowFx {
-            gray: pipeline("fs_gray", FLOAT),
-            down: pipeline("fs_down", FLOAT),
-            grad: pipeline("fs_grad", FLOAT),
+            gray: pipeline("fs_gray", HALF),
+            down: pipeline("fs_down", HALF),
+            grad: pipeline("fs_grad", HALF),
             upsample: pipeline("fs_upsample", FLOAT),
             select: pipeline("fs_select", FLOAT),
             lk: pipeline("fs_lk", FLOAT),
@@ -130,9 +154,15 @@ impl FlowFx {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: FLOAT,
+                format: HALF,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
+            }),
+            sampler: device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("flow"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
             }),
             layout,
         }
@@ -187,6 +217,7 @@ impl Compositor {
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&views[2]) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&views[3]) },
                 wgpu::BindGroupEntry { binding: 4, resource: buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&fx.sampler) },
             ],
         });
         let dst_view = dst.create_view(&Default::default());
@@ -213,14 +244,14 @@ impl Compositor {
         let fx = self.flow_fx();
         let (mut w, mut h) = (frame.width().div_ceil(factor), frame.height().div_ceil(factor));
         let mut out = Vec::with_capacity(levels);
-        let mut intensity = self.texture(w, h, FLOAT, wgpu::TextureUsages::empty());
+        let mut intensity = self.texture(w, h, HALF, wgpu::TextureUsages::empty());
         self.flow_pass(enc, &fx.gray, &[frame], &intensity, [factor as f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
         for level in 0..levels {
-            let full = self.texture(w, h, FLOAT, wgpu::TextureUsages::empty());
+            let full = self.texture(w, h, HALF, wgpu::TextureUsages::empty());
             self.flow_pass(enc, &fx.grad, &[&intensity], &full, [0.0; 8]);
             if level + 1 < levels {
                 let (nw, nh) = (w.div_ceil(2), h.div_ceil(2));
-                let next = self.texture(nw, nh, FLOAT, wgpu::TextureUsages::empty());
+                let next = self.texture(nw, nh, HALF, wgpu::TextureUsages::empty());
                 self.flow_pass(enc, &fx.down, &[&intensity], &next, [0.0; 8]);
                 scratch.push(std::mem::replace(&mut intensity, next));
                 (w, h) = (nw, nh);
@@ -258,7 +289,7 @@ impl Compositor {
             if o.select_radius > 0 {
                 step(&fx.select, [o.select_radius as f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], &mut f);
             }
-            for _ in 0..o.iterations {
+            for _ in 0..if level == 0 { o.finest_iterations } else { o.iterations } {
                 step(&fx.lk, lk, &mut f);
             }
             if o.select_radius > 0 {
@@ -308,13 +339,13 @@ impl Compositor {
         let out = self.texture(a.width(), a.height(), CANVAS, wgpu::TextureUsages::empty());
         let t = tween.t.clamp(0.0, 1.0);
         if tween.mode == TweenMode::Blend || (a.width(), a.height()) != (b.width(), b.height()) {
-            self.flow_pass(enc, &fx.tween, &[a, b], &out, [t, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+            self.flow_pass(enc, &fx.tween, &[&fx.blank, a, b], &out, [t, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
             return out;
         }
         let pair = self.flow_pair(enc, a, b, tween.key, scratch);
         let plan = self.texture(pair.a0.width(), pair.a0.height(), FLOAT, wgpu::TextureUsages::empty());
-        self.flow_pass(enc, &fx.plan, &[&pair.ab, &pair.ba, &pair.a0, &pair.b0], &plan, [t, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-        self.flow_pass(enc, &fx.tween, &[a, b, &plan], &out, [t, pair.factor as f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        self.flow_pass(enc, &fx.plan, &[&pair.ab, &pair.a0, &pair.b0, &pair.ba], &plan, [t, TRUST_MISMATCH[0], TRUST_MISMATCH[1], 0.0, 0.0, 0.0, 0.0, 0.0]);
+        self.flow_pass(enc, &fx.tween, &[&plan, a, b], &out, [t, pair.factor as f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
         scratch.push(plan);
         out
     }

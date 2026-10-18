@@ -14,7 +14,7 @@ use openrip_model::{Animation, CanvasFillKind, EffectCategory, MediaKind, Micros
 use openrip_platform::assets;
 use openrip_render::fonts;
 use openrip_render::text::{self, Align, Font, TextStyle};
-use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source, Surface, Uploader};
+use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, Picture, RenderError, RgbaImage, Source, Surface, Tween, TweenMode, Uploader};
 
 /// CapCut's default font, for CapCut's own text whose font isn't found (a draft names it).
 /// OpenRip's own text never uses it.
@@ -22,6 +22,9 @@ const CAPCUT_FONT: &str = "/Applications/CapCut.app/Contents/Resources/Font/Syst
 /// The system fonts OpenRip's own text falls back to, in order: Konva's default family, as the
 /// app's own text box shows it, then Helvetica.
 const APP_FONTS: [&str; 2] = ["Arial", "Helvetica"];
+/// A frame this close to a source frame (as a fraction of the frame's length) shows that
+/// frame rather than one made between it and the next.
+const TWEEN_EDGE: f64 = 0.02;
 /// Decoders kept open; the least recently used is closed beyond this.
 const MAX_DECODERS: usize = 12;
 /// Decoded-frame cache per preview decoder: room to step back through a 1080p GOP without
@@ -157,6 +160,9 @@ enum Pixels {
     /// A frame, the clockwise turn that displays it upright (phone video), and its masks
     /// (its cut-out first, if its background is removed).
     Video(VideoFrame, i32, Vec<Painted>),
+    /// A frame made between two source frames (Smooth slow-mo, Optical flow): the two
+    /// frames, how far between them, the pair's key, how it's made, the turn and the masks.
+    Tween(Box<(VideoFrame, VideoFrame)>, f32, u64, TweenMode, i32, Vec<Painted>),
     /// Rasterised text, its cache key, and the canvas point its image centre goes to.
     Text(std::sync::Arc<RgbaImage>, u64, [f64; 2]),
     /// A filter track's lookup table and strength, applied to everything below it.
@@ -742,6 +748,8 @@ impl PreviewEngine {
             CanvasFillKind::Blur { amount } => {
                 let source = out[at..].iter().find(|(s, _)| s.id == seg.id).and_then(|(_, p)| match p {
                     Pixels::Video(f, o, _) => f.try_clone().ok().map(|f| Backdrop::Video(f, *o)),
+                    // Blurred, the frame before is as good as the one made in between.
+                    Pixels::Tween(frames, _, _, _, o, _) => frames.0.try_clone().ok().map(|f| Backdrop::Video(f, *o)),
                     Pixels::Image(img, key, _) => Some(Backdrop::Image(img.clone(), *key)),
                     _ => None,
                 });
@@ -1426,12 +1434,52 @@ impl PreviewEngine {
             );
         }
         let Some(frame) = frame else { return Ok(None) };
+        // Smooth slow-mo or Optical flow: between two source frames, a frame made from both
+        // (not while the playhead is dragged, which wants a frame quickly).
+        let next = match self.tween_mode(seg, &media, t).filter(|_| !self.scrubbing) {
+            Some(mode) => {
+                let between = |span: i64| (at.0 - frame.time.0) as f64 / span.max(1) as f64;
+                // A quarter into the next frame, clear of its start's rounding to the µs.
+                let next_at = Micros(frame.time.0 + frame.duration.0 + frame.duration.0 / 4);
+                let d = self.decoders.get_mut(&key).unwrap();
+                match (frame.duration.0 > 0 && (TWEEN_EDGE..=1.0 - TWEEN_EDGE).contains(&between(frame.duration.0)) && next_at < media.duration).then(|| d.decoder.frame_at(next_at)) {
+                    Some(Ok(Some(n))) if n.time > frame.time => Some((between(n.time.0 - frame.time.0).clamp(0.0, 1.0) as f32, n, mode)),
+                    _ => None,
+                }
+                .map(|(b, n, mode)| (n, b, mode))
+            }
+            None => None,
+        };
         // The cut-out's masks are by the media's own frame times.
         let matte_time = if at == source { frame.time } else { source };
         let cutout = media.matte.as_deref().and_then(|dir| self.matte_at(dir, matte_time, orientation));
         let upright = if orientation.rem_euclid(180) == 90 { (frame.height(), frame.width()) } else { (frame.width(), frame.height()) };
         let mattes = self.masked(seg, upright, orientation, source, seg.local_time(t), cutout);
+        if let Some((n, between, mode)) = next {
+            let pair = key_of(("tween", &path, frame.time.0, n.time.0));
+            return Ok(Some(Pixels::Tween(Box::new((frame, n)), between, pair, mode, orientation, mattes)));
+        }
         Ok(Some(Pixels::Video(frame, orientation, mattes)))
+    }
+
+    /// How a video clip's frame at `t` is made when it falls between two source frames, if
+    /// not by holding the earlier one: Optical flow (Video › Basic) always; Smooth slow-mo, in
+    /// its mode, while the clip plays slower than its source (CapCut: "only slow-speed videos
+    /// are supported"), which a speed curve may do only in places.
+    fn tween_mode(&self, seg: &Segment, media: &openrip_model::Media, t: Micros) -> Option<TweenMode> {
+        if media.kind != MediaKind::Video {
+            return None;
+        }
+        if media.smart_complement_frame.is_some() {
+            return Some(TweenMode::Flow);
+        }
+        let mode = match media.complement_frame.as_ref()?.mode {
+            openrip_model::ComplementMode::FrameBlending => TweenMode::Blend,
+            openrip_model::ComplementMode::OpticalFlow => TweenMode::Flow,
+        };
+        let dt = 10_000;
+        let (a, b) = (seg.media_time(&self.project.materials, t)?, seg.media_time(&self.project.materials, Micros(t.0 + dt))?);
+        ((b.0 - a.0).abs() < dt * 999 / 1000).then_some(mode)
     }
 
     /// A reversed clip's frame at `at` in `path`, while it plays: from its [`ReverseReader`]
@@ -1604,7 +1652,7 @@ impl PreviewEngine {
                 let tr = &seg.transform;
                 let (mut pos, mut scale, mut rot) = (tr.position.sample(local), tr.scale.sample(local), tr.rotation.sample(local));
                 // Its animations on top of the clip's own (keyframed) transform.
-                let motion = if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Text(..)) { self.motion_of(seg, local) } else { None };
+                let motion = if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Text(..)) { self.motion_of(seg, local) } else { None };
                 if let Some(m) = motion {
                     pos = openrip_model::Vec2::new(pos.x + m.offset[0], pos.y + m.offset[1]);
                     scale = openrip_model::Vec2::new(scale.x * m.scale, scale.y * m.scale);
@@ -1615,6 +1663,10 @@ impl PreviewEngine {
                 let mut layer = match p {
                     Pixels::Image(i, key, mattes) => Layer { mattes: painted(mattes), ..Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot) },
                     Pixels::Video(f, orientation, mattes) => Layer { mattes: painted(mattes), ..Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation) },
+                    Pixels::Tween(frames, between, key, mode, orientation, mattes) => {
+                        let tween = Tween { from: Picture::Video(&frames.0), to: Picture::Video(&frames.1), t: *between, key: *key, mode: *mode };
+                        Layer { mattes: painted(mattes), ..Layer::from_model_oriented(Source::Tween(tween), [w, h], [pos.x, pos.y], scale, rot, *orientation) }
+                    }
                     Pixels::Filter(lut, strength) => Layer::pass(Source::Filter(lut, *strength)),
                     // Twice the canvas, so the image's soft edge is off it.
                     Pixels::Wash(img, key, amount) => Layer { opacity: *amount, ..Layer::placed(Source::Cached(*key, img), [w as f64 / 2.0, h as f64 / 2.0], [2.0 * w as f64, 2.0 * h as f64]) },
@@ -1688,16 +1740,16 @@ impl PreviewEngine {
                 if let Some(m) = motion {
                     layer.opacity *= m.alpha;
                 }
-                if matches!(p, Pixels::Image(..) | Pixels::Video(..)) {
+                if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..)) {
                     // The scale along the stored picture's vertical axis (sideways video swaps).
-                    let sideways = matches!(p, Pixels::Video(_, o, _) if o.rem_euclid(180) == 90);
+                    let sideways = matches!(p, Pixels::Video(_, o, _) | Pixels::Tween(_, _, _, _, o, _) if o.rem_euclid(180) == 90);
                     let tex_scale = if sideways { scale[0] } else { scale[1] };
                     layer.app_filters = self.app_filters_of(seg, layer.source.size().1, layer.size[1] / tex_scale.abs().max(1e-9), h, t);
                     layer.adjust = self.adjust_of(seg, t);
                     layer.chroma = self.chroma_of(seg, local);
                     layer.lut = self.lut_of(seg, local);
                 }
-                if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Text(..) | Pixels::Sticker(..)) {
+                if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Text(..) | Pixels::Sticker(..)) {
                     layer.blend = self.blend_of(seg);
                 }
                 vec![layer]

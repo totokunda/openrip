@@ -810,6 +810,8 @@ mod tests {
             matte: None,
             reverse_path: None,
             freeze: None,
+            complement_frame: None,
+            smart_complement_frame: None,
         })
     }
 

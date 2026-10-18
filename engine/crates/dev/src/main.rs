@@ -72,6 +72,10 @@
 //!   openrip-dev beat-scan <projects-root>
 //!       Our beat detection on every library song with CapCut's beats file at hand, against
 //!       CapCut's beats: F-measure at 70 ms, tempo, offset and bar starts.
+//!   openrip-dev slowmo <video> [--speed 0.25] [--from S] [--frames N] [--size LONG] [--save DIR] [--holdout N]
+//!       Play the file slowed through the preview engine with Smooth slow-mo off, blended and
+//!       by optical flow: time per frame and repeated frames; --holdout N rebuilds N real
+//!       frames from the frames either side of them and scores each method (PSNR).
 //!   openrip-dev thumbs-bench <media-file> [--count N] [--height H]
 //!       Timeline thumbnails across the whole file (default 40 at 64 px): the quick pass
 //!       (one keyframe per GOP), the exact pass, and the exact pass again from the disk cache.
@@ -88,6 +92,7 @@ use openrip_capcut::{import_draft_dir, ImportError, Imported};
 use openrip_model::Project;
 
 mod audio;
+mod motion;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -97,6 +102,7 @@ fn main() -> ExitCode {
         Some("v1-import") if args.len() >= 2 => v1_import(Path::new(&args[1]), flag(&args, "--out")).map_err(|e| e.to_string()),
         Some("v1-scan") if args.len() >= 2 => v1_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("probe") if args.len() >= 2 => probe(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("slowmo") if args.len() >= 2 => motion::slowmo(&args).map_err(|e| e.to_string()),
         Some("render-frame") if args.len() >= 6 => render_frame(&args[1..]).map_err(|e| e.to_string()),
         Some("play-bench") if args.len() >= 2 => play_bench(&args[1..]).map_err(|e| e.to_string()),
         Some("preview-scan") if args.len() >= 2 => preview_scan(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),

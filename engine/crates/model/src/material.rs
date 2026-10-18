@@ -209,6 +209,43 @@ pub struct Media {
     /// A freeze frame: this material is a still of one instant of a video.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub freeze: Option<Freeze>,
+    /// Smooth slow-mo (CapCut's `video_algorithm.complement_frame_config`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complement_frame: Option<ComplementFrame>,
+    /// Optical flow in Video › Basic (CapCut's `video_algorithm.smart_complement_frame`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smart_complement_frame: Option<SmartComplementFrame>,
+}
+
+/// How Smooth slow-mo makes the frames in between (CapCut's `complement_frame_config.mode`:
+/// `"frame_blending"` or `"optical_flow"`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComplementMode {
+    /// The two source frames around each moment cross-faded.
+    FrameBlending,
+    /// The two source frames moved along their motion and mixed (motion-compensated
+    /// interpolation; CapCut's is a learned model, OpenRip's classic optical flow).
+    OpticalFlow,
+}
+
+/// Smooth slow-mo: while the clip plays slower than its source's frame rate, each frame
+/// between two source frames is made from both instead of holding the earlier one. CapCut
+/// also keeps the pre-rendered result (`path`, `time_range`) and an `algorithms` entry of type
+/// `ComplementFrame`; OpenRip renders it live.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComplementFrame {
+    pub mode: ComplementMode,
+}
+
+/// Optical flow in Video › Basic: the clip's frames made up to `fps` by motion interpolation
+/// whenever the project shows it between two of its source frames, whatever its speed (CapCut:
+/// "Match your project's frame rate to the export setting"; its only choice is 60 fps).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SmartComplementFrame {
+    pub fps: u32,
+    #[serde(default)]
+    pub sub_type: i32,
 }
 
 /// What a freeze frame holds (CapCut's Freeze). CapCut saves the still as a picture, the

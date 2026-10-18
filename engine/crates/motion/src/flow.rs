@@ -25,8 +25,10 @@ use crate::image::{Gray, Pyramid};
 #[derive(Copy, Clone, Debug)]
 pub struct FlowOptions {
     pub levels: usize,
-    /// Gauss–Newton steps per level.
+    /// Gauss–Newton steps per level, and at the finest (where the coarser levels have done
+    /// most of the work, and steps cost the most).
     pub iterations: usize,
+    pub finest_iterations: usize,
     /// The window's Gaussian standard deviation, pixels at each level.
     pub sigma: f32,
     /// Regularisation of each step: this much (squared intensity per pixel², intensities 0–1)
@@ -46,7 +48,7 @@ pub struct FlowOptions {
 
 impl Default for FlowOptions {
     fn default() -> Self {
-        FlowOptions { levels: 6, iterations: 5, sigma: 2.0, lambda: 1e-8, relative: 0.02, robust: 0.05, select_radius: 2, search_radius: 4 }
+        FlowOptions { levels: 6, iterations: 5, finest_iterations: 2, sigma: 2.0, lambda: 1e-8, relative: 0.02, robust: 0.05, select_radius: 2, search_radius: 4 }
     }
 }
 
@@ -152,7 +154,7 @@ pub fn dense_flow(a: &Gray, b: &Gray, o: &FlowOptions) -> Flow {
         // Each pixel takes the neighbour's vector that matches best (so a motion boundary
         // the coarser level blurred snaps back to its place), then Gauss–Newton refines it.
         let mut f = if o.select_radius > 0 { select(&f, &la.image, lb, o.select_radius as isize) } else { f };
-        for _ in 0..o.iterations {
+        for _ in 0..if level == 0 { o.finest_iterations } else { o.iterations } {
             f = lucas_kanade_step(&f, la, lb, o);
         }
         if o.select_radius > 0 {
@@ -316,18 +318,48 @@ pub fn interpolate(a: &Gray, b: &Gray, ab: &Flow, ba: &Flow, t: f32) -> Gray {
     for y in 0..a.height {
         for x in 0..a.width {
             let (px, py) = (x as f32, y as f32);
-            let ends = interpolation_ends(ab, ba, px, py, t, |p, q| (a.sample(p[0], p[1]) - b.sample(q[0], q[1])).abs());
-            let (pa, pb, wa, wb) = ends;
-            out.data[y * a.width + x] = (wa * a.sample(pa[0], pa[1]) + wb * b.sample(pb[0], pb[1])) / (wa + wb);
+            let mismatch = |p: [f32; 2], q: [f32; 2]| (a.sample(p[0], p[1]) - b.sample(q[0], q[1])).abs();
+            let patch = |p: [f32; 2], q: [f32; 2]| {
+                let mut sum = 0.0;
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let d = [dx as f32, dy as f32];
+                        sum += mismatch([p[0] + d[0], p[1] + d[1]], [q[0] + d[0], q[1] + d[1]]);
+                    }
+                }
+                sum / 9.0
+            };
+            let e = interpolation_ends(ab, ba, px, py, t, mismatch, patch);
+            let flowed = a.sample(e.from[0], e.from[1]) * (1.0 - e.weight) + b.sample(e.to[0], e.to[1]) * e.weight;
+            let blended = a.data[y * a.width + x] * (1.0 - t) + b.data[y * a.width + x] * t;
+            out.data[y * a.width + x] = blended + (flowed - blended) * e.confidence;
         }
     }
     out
 }
 
-/// For a pixel (x, y) of the picture at `t`: where to read the first and second picture, and
-/// the weight of each. `mismatch(p, q)` is how different the pictures are at p in the first
-/// and q in the second.
-pub fn interpolation_ends(ab: &Flow, ba: &Flow, x: f32, y: f32, t: f32, mismatch: impl Fn([f32; 2], [f32; 2]) -> f32) -> ([f32; 2], [f32; 2], f32, f32) {
+/// Where a pixel of the in-between picture comes from (see [`interpolation_ends`]).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Ends {
+    /// Read the first picture here ...
+    pub from: [f32; 2],
+    /// ... and the second here, ...
+    pub to: [f32; 2],
+    /// ... mixed this much toward the second.
+    pub weight: f32,
+    /// How far to trust that over a plain cross-fade at the pixel (0–1): not where the flow
+    /// fails its own checks.
+    pub confidence: f32,
+}
+
+/// Patch mismatch (mean absolute difference of 3×3 taps, intensities 0–1) up to which the
+/// motion is trusted fully, and from which not at all.
+pub const TRUST_MISMATCH: [f32; 2] = [0.04, 0.12];
+
+/// For a pixel (x, y) of the picture at `t`: where to read the first and second picture and
+/// how to mix them. `mismatch(p, q)` is how different the pictures are at p in the first and q
+/// in the second, `patch(p, q)` the same over a small patch.
+pub fn interpolation_ends(ab: &Flow, ba: &Flow, x: f32, y: f32, t: f32, mismatch: impl Fn([f32; 2], [f32; 2]) -> f32, patch: impl Fn([f32; 2], [f32; 2]) -> f32) -> Ends {
     // The motion through (x, y) from a to b, found from the forward flow: m = ab(x − t·m) ...
     let mut m = ab.sample(x, y);
     for _ in 0..FIXED_POINT_STEPS {
@@ -359,7 +391,12 @@ pub fn interpolation_ends(ab: &Flow, ba: &Flow, x: f32, y: f32, t: f32, mismatch
     if wa + wb < 1e-3 {
         (wa, wb) = (1.0 - t, t);
     }
-    (p, q, wa, wb)
+    // The flow has failed where neither end checks out, or where both do but they don't look
+    // alike: a plain cross-fade is the safer picture there. (One end hidden is an occlusion,
+    // which the weights handle.)
+    let off = ((patch(p, q) - TRUST_MISMATCH[0]) / (TRUST_MISMATCH[1] - TRUST_MISMATCH[0])).clamp(0.0, 1.0);
+    let fail = (off * q_seen_in_a.min(p_seen_in_b)).max(1.0 - q_seen_in_a.max(p_seen_in_b));
+    Ends { from: p, to: q, weight: wb / (wa + wb), confidence: 1.0 - fail }
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@
 use openrip_motion::flow::{dense_flow, FlowOptions};
 use openrip_motion::testing::{psnr, render_square, texture, Rng};
 use openrip_motion::Gray;
-use openrip_render::{Compositor, Layer, RgbaImage, Source, Tween, TweenMode};
+use openrip_render::{Compositor, Layer, Picture, RgbaImage, Source, Tween, TweenMode};
 
 fn gpu() -> Option<Compositor> {
     match Compositor::new() {
@@ -36,9 +36,9 @@ fn gray(img: &RgbaImage) -> Vec<f32> {
 }
 
 fn tween(c: &Compositor, a: &RgbaImage, b: &RgbaImage, t: f32, mode: TweenMode) -> RgbaImage {
-    let tw = Tween { from: Source::Image(a), to: Source::Image(b), t, key: 42 + mode as u64 + 10 * a.width as u64, mode };
+    let tw = Tween { from: Picture::Image(a), to: Picture::Image(b), t, key: 42 + mode as u64 + 10 * a.width as u64, mode };
     let (w, h) = (a.width, a.height);
-    c.render(w, h, [0, 0, 0], &[Layer::placed(Source::Tween(&tw), [w as f64 / 2.0, h as f64 / 2.0], [w as f64, h as f64])])
+    c.render(w, h, [0, 0, 0], &[Layer::placed(Source::Tween(tw), [w as f64 / 2.0, h as f64 / 2.0], [w as f64, h as f64])])
 }
 
 #[test]
@@ -85,9 +85,24 @@ fn timing_at_4k() {
     let b = rgba(&scene(1.0, w, h));
     for (i, t) in [0.25f32, 0.5, 0.75, 0.25, 0.5].into_iter().enumerate() {
         let t0 = std::time::Instant::now();
-        let tw = Tween { from: Source::Image(&a), to: Source::Image(&b), t, key: 7, mode: TweenMode::Flow };
+        let tw = Tween { from: Picture::Image(&a), to: Picture::Image(&b), t, key: 7, mode: TweenMode::Flow };
         // Rendered small, as the preview does, so readback doesn't dominate.
-        let _ = c.render(960, 540, [0, 0, 0], &[Layer::placed(Source::Tween(&tw), [480.0, 270.0], [960.0, 540.0])]);
+        let _ = c.render(960, 540, [0, 0, 0], &[Layer::placed(Source::Tween(tw), [480.0, 270.0], [960.0, 540.0])]);
         eprintln!("frame {i} (t {t}): {:.1} ms{}", t0.elapsed().as_secs_f64() * 1e3, if i == 0 { " (flow worked out)" } else { "" });
+    }
+}
+
+/// How long the flow takes from 4K frames (run with --ignored --nocapture).
+#[test]
+#[ignore]
+fn flow_timing_at_4k() {
+    let Some(c) = gpu() else { return };
+    let (w, h) = (3840usize, 2160usize);
+    let a = rgba(&scene(0.0, w, h));
+    let b = rgba(&scene(1.0, w, h));
+    for i in 0..12 {
+        let t0 = std::time::Instant::now();
+        let f = c.optical_flow(&a, &b);
+        eprintln!("flow {i}: {}x{} in {:.1} ms (uploads and one direction)", f.width, f.height, t0.elapsed().as_secs_f64() * 1e3);
     }
 }

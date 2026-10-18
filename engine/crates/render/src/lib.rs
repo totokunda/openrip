@@ -29,7 +29,7 @@ mod upload;
 pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
 pub use blend::BlendMode;
 pub use grade::{CurvePoint, Curves, Hsl};
-pub use flow::{work_factor, FlowField, Tween, TweenMode, WORK_SIDE};
+pub use flow::{work_factor, FlowField, Picture, Tween, TweenMode, WORK_SIDE};
 pub use interop::Surface;
 pub use upload::Uploader;
 
@@ -194,7 +194,7 @@ pub enum Source<'a> {
     /// before it, each only if the mix draws it.
     Mix(Mix),
     /// A frame made in between two frames of a video (Smooth slow-mo, Optical flow).
-    Tween(&'a Tween<'a>),
+    Tween(Tween<'a>),
 }
 
 impl Source<'_> {
@@ -1236,15 +1236,11 @@ impl Compositor {
         }
     }
 
-    /// A picture source (an image or a video frame) on the GPU as premultiplied RGBA. A keyed
-    /// image's texture stays in the compositor's keeping: don't recycle it.
-    fn picture_texture(&self, enc: &mut wgpu::CommandEncoder, src: Source, keep: &mut Vec<wgpu::Texture>, scratch: &mut Vec<wgpu::Texture>) -> wgpu::Texture {
+    /// One frame of a tween on the GPU as premultiplied RGBA.
+    fn picture_texture(&self, enc: &mut wgpu::CommandEncoder, src: Picture, keep: &mut Vec<wgpu::Texture>, scratch: &mut Vec<wgpu::Texture>) -> wgpu::Texture {
         match src {
-            Source::Video(frame) => self.video_texture(enc, frame, keep, scratch),
-            Source::Image(img) => self.upload(enc, img, None, scratch),
-            Source::Cached(key, img) => self.upload(enc, img, Some(key), scratch),
-            Source::Tween(t) => self.picture_texture(enc, t.from, keep, scratch),
-            _ => self.texture(1, 1, CANVAS, wgpu::TextureUsages::empty()),
+            Picture::Video(frame) => self.video_texture(enc, frame, keep, scratch),
+            Picture::Image(img) => self.upload(enc, img, None, scratch),
         }
     }
 
@@ -1329,14 +1325,8 @@ impl Compositor {
                         Source::Tween(tween) => {
                             let a = self.picture_texture(enc, tween.from, &mut keep, &mut scratch);
                             let b = self.picture_texture(enc, tween.to, &mut keep, &mut scratch);
-                            let out = self.tween_textures(enc, &a, &b, tween, &mut scratch);
-                            for (src, tex) in [(tween.from, a), (tween.to, b)] {
-                                if matches!(src, Source::Cached(..)) {
-                                    keep.push(tex);
-                                } else {
-                                    scratch.push(tex);
-                                }
-                            }
+                            let out = self.tween_textures(enc, &a, &b, &tween, &mut scratch);
+                            scratch.extend([a, b]);
                             out
                         }
                     };

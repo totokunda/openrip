@@ -43,6 +43,10 @@ required-features = ["ffmpeg"]
 name = "thumbs"
 required-features = ["ffmpeg"]
 
+[[test]]
+name = "slowmo"
+required-features = ["ffmpeg"]
+
 [[example]]
 name = "clock"
 required-features = ["cpal"]
