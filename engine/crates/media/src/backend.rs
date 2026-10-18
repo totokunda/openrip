@@ -53,9 +53,33 @@ pub struct DecoderOptions {
     pub shrink_to: u32,
 }
 
+/// What [`DecoderOptions::default`] decodes with: the app's "Speed up hardware decoding"
+/// setting, for decoders opened from then on.
+static DEFAULT_HARDWARE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Decode on the GPU by default ([`HardwareMode::Auto`]) or not ([`HardwareMode::Off`]).
+/// Decoders already open keep what they have.
+pub fn set_default_hardware(mode: HardwareMode) {
+    let v = match mode {
+        HardwareMode::Auto => 0,
+        HardwareMode::Off => 1,
+        HardwareMode::Require => 2,
+    };
+    DEFAULT_HARDWARE.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The mode [`set_default_hardware`] chose ([`HardwareMode::Auto`] unless told otherwise).
+pub fn default_hardware() -> HardwareMode {
+    match DEFAULT_HARDWARE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => HardwareMode::Off,
+        2 => HardwareMode::Require,
+        _ => HardwareMode::Auto,
+    }
+}
+
 impl Default for DecoderOptions {
     fn default() -> Self {
-        DecoderOptions { hardware: HardwareMode::Auto, threads: 0, native_videotoolbox: true, cache_bytes: 384 << 20, shrink_to: 0 }
+        DecoderOptions { hardware: default_hardware(), threads: 0, native_videotoolbox: true, cache_bytes: 384 << 20, shrink_to: 0 }
     }
 }
 

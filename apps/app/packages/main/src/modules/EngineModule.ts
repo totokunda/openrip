@@ -7,6 +7,7 @@ import { app, ipcMain, net, sharedTexture } from "electron";
 import { AppModule } from "../AppModule.js";
 import { ModuleContext } from "../ModuleContext.js";
 import { ensureProjectJson } from "./JSONPersistenceModule.js";
+import { getSettingsModule, type Preferences } from "./SettingsModule.js";
 
 /**
  * The Rust engine (`engine/crates/node`, built by `scripts/build-engine.mjs`), loaded into
@@ -56,6 +57,8 @@ export type EngineAddon = {
   exportProgress(): { done: number; total: number };
   cancelExport(): void;
   setThumbnailCacheDir(dir: string): void;
+  /** Performance › Speed up hardware decoding (absent in engines built before it). */
+  setHardwareDecoding?(on: boolean): void;
   capcutToApp(dir: string): Promise<{ json: string; name: string; missingMedia: string[]; notes: string[] }>;
   thumbnails(path: string, timesUs: number[], height: number, exact: boolean): Promise<Thumbnail[]>;
   /** The beats in a file's audio (times in s of its media; downbeats 1 where a bar starts), cached; null without audio. */
@@ -361,6 +364,10 @@ export class EngineModule implements AppModule {
     }
     // Exact thumbnails are kept across runs.
     if (addon) addon.setThumbnailCacheDir(join(app.getPath("userData"), "engine-thumbnails"));
+    // Performance › Speed up hardware decoding, now and when it changes.
+    const settings = getSettingsModule();
+    addon?.setHardwareDecoding?.(settings.getPreferences().hardwareDecoding);
+    settings.on("preferences-changed", (p: Preferences) => addon?.setHardwareDecoding?.(p.hardwareDecoding));
     for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families"]) {
       try {
         ipcMain.removeHandler(channel);

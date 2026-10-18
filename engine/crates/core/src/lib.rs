@@ -77,6 +77,17 @@ pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Decode video on the GPU where the platform can (on, the default) or always in software
+/// (off). Media opened from then on follow it; what's open keeps its decoder.
+pub fn set_hardware_decoding(on: bool) {
+    openrip_media::set_default_hardware(if on { openrip_media::HardwareMode::Auto } else { openrip_media::HardwareMode::Off });
+}
+
+/// Whether video is decoded on the GPU where it can be ([`set_hardware_decoding`]).
+pub fn hardware_decoding() -> bool {
+    openrip_media::default_hardware() != openrip_media::HardwareMode::Off
+}
+
 /// What this build of the engine is and has.
 #[derive(Clone, Debug)]
 pub struct EngineInfo {

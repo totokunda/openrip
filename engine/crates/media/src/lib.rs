@@ -37,7 +37,7 @@ mod util;
 #[cfg(all(feature = "ffmpeg", target_vendor = "apple"))]
 mod vt;
 
-pub use backend::{add_video_backend, open_video, video_backends, DecodeStats, Decoder, DecoderOptions, HardwareMode, VideoBackend, VideoSource};
+pub use backend::{add_video_backend, default_hardware, open_video, set_default_hardware, video_backends, DecodeStats, Decoder, DecoderOptions, HardwareMode, VideoBackend, VideoSource};
 #[cfg(feature = "ffmpeg")]
 pub use decode::VideoDecoder;
 pub use error::MediaError;

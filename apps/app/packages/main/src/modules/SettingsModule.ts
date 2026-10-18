@@ -1,13 +1,117 @@
 import { AppModule } from "src/AppModule.js";
 import { ModuleContext } from "src/ModuleContext.js";
 import Store from "electron-store";
-import { ipcMain } from "electron";
+import { BrowserWindow, Notification, app, dialog, ipcMain } from "electron";
 import { EventEmitter } from "node:events";
+import { promises as fsp } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * The app's preferences, as the Settings window edits them (CapCut's Draft, Edit, Performance
+ * and General tabs) and the Shortcuts window's key bindings. The renderer keeps the same
+ * shape in `lib/preferences.ts` (preload's `Preferences` type): change both together.
+ */
+export interface Preferences {
+  /** Draft › Cache: delete cache files older than `cacheMaxAgeDays` (false: don't delete). */
+  cacheAutoDelete: boolean;
+  cacheMaxAgeDays: number;
+  /** Edit › Step forward or back many N frames (⇧← / ⇧→). */
+  stepFrames: number;
+  /** Edit › Adjust value many N units (⇧↑ / ⇧↓ in a value field). */
+  adjustUnits: number;
+  /** Edit › Image duration, in `imageDurationUnit`s. */
+  imageDuration: number;
+  imageDurationUnit: "s" | "frames";
+  /** Edit › Frame rate of new projects. */
+  frameRate: number;
+  /** Edit › Time code: HH:MM:SS+frame ("frame") or HH:MM:SS:FF ("ff"). */
+  timeCode: "frame" | "ff";
+  /** Edit › Target loudness of Normalize loudness, LUFS. */
+  targetLoudness: number;
+  /** Edit › Sound for export. */
+  exportSound: boolean;
+  /** Performance › Speed up hardware decoding (the engine's VideoToolbox decoder). */
+  hardwareDecoding: boolean;
+  /** Performance › Auto optimization: a playable copy of media the preview can't decode. */
+  autoOptimization: "none" | "smart";
+  /** General › Language. */
+  language: string;
+  /** General › Notification. */
+  notifications: boolean;
+  /** General › Software update: install updates automatically, else only say there is one. */
+  autoUpdate: boolean;
+  /** The Shortcuts window: the preset in use (1–5) and each preset's changed bindings. */
+  shortcutPreset: number;
+  shortcutPresets: Record<string, Record<string, string[]>>;
+}
+
+export const DEFAULT_PREFERENCES: Preferences = {
+  cacheAutoDelete: false,
+  cacheMaxAgeDays: 30,
+  stepFrames: 10,
+  adjustUnits: 10,
+  imageDuration: 5,
+  imageDurationUnit: "s",
+  frameRate: 24,
+  timeCode: "frame",
+  targetLoudness: -23,
+  exportSound: false,
+  hardwareDecoding: true,
+  autoOptimization: "smart",
+  language: "en",
+  notifications: false,
+  autoUpdate: true,
+  shortcutPreset: 1,
+  shortcutPresets: {},
+};
 
 interface Settings {
   activeProjectId?: string | number | null;
   /** Draw the preview with the Rust engine instead of the app's own renderer. */
   useEnginePreview?: boolean;
+  /** The Settings window's preferences (what differs from the defaults). */
+  preferences?: Partial<Preferences>;
+  /** Draft › Save to: where projects are kept (unset: `<userData>/projects-json`). */
+  projectsDir?: string;
+}
+
+/** Files and folders under `dir`, summed. Missing ones count as nothing. */
+async function sizeOf(path: string): Promise<number> {
+  try {
+    const st = await fsp.lstat(path);
+    if (!st.isDirectory()) return st.size;
+    const entries = await fsp.readdir(path);
+    let total = 0;
+    for (const e of entries) total += await sizeOf(join(path, e));
+    return total;
+  } catch {
+    return 0;
+  }
+}
+
+/** Delete what's in `dir` (older than `before`, a time in ms, when given); `dir` itself stays. */
+async function prune(dir: string, before?: number): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await fsp.readdir(dir);
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    const p = join(dir, e);
+    try {
+      const st = await fsp.lstat(p);
+      if (st.isDirectory()) {
+        await prune(p, before);
+        if (before == null || (await fsp.readdir(p)).length === 0) await fsp.rmdir(p).catch(() => {});
+      } else if (before == null || st.mtimeMs < before) {
+        await fsp.rm(p, { force: true });
+      }
+    } catch {
+      // A file in use or already gone: leave it.
+    }
+  }
 }
 
 // Singleton instance
@@ -27,6 +131,8 @@ export class SettingsModule extends EventEmitter implements AppModule {
 
   enable(_context: ModuleContext): void {
     this.registerHandlers();
+    // Draft › Cache's automatic deletion, once the app is up.
+    void app.whenReady().then(() => this.pruneCacheByAge());
   }
 
   getActiveProjectId(): string | null {
@@ -37,6 +143,72 @@ export class SettingsModule extends EventEmitter implements AppModule {
   setActiveProjectId(projectId: string | number | null): void {
     this.store.set("activeProjectId", projectId ?? null);
     this.emit("active-project-id-changed", projectId ?? null);
+  }
+
+  getPreferences(): Preferences {
+    const saved = (this.store.get("preferences") as Partial<Preferences> | undefined) ?? {};
+    return { ...DEFAULT_PREFERENCES, ...saved };
+  }
+
+  /** Merge `patch` into the preferences, tell every window and the main process's modules. */
+  setPreferences(patch: Partial<Preferences>): Preferences {
+    const before = this.getPreferences();
+    const next = { ...before, ...(patch ?? {}) };
+    const changed: Partial<Preferences> = {};
+    for (const k of Object.keys(DEFAULT_PREFERENCES) as (keyof Preferences)[]) {
+      if (JSON.stringify(next[k]) !== JSON.stringify(DEFAULT_PREFERENCES[k])) (changed as any)[k] = next[k];
+    }
+    this.store.set("preferences", changed);
+    this.emit("preferences-changed", next, before);
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        win.webContents.send("settings:preferences-changed", next);
+      } catch {
+        // ignore
+      }
+    }
+    if (before.cacheAutoDelete !== next.cacheAutoDelete || before.cacheMaxAgeDays !== next.cacheMaxAgeDays) void this.pruneCacheByAge();
+    return next;
+  }
+
+  /** The projects folder the user chose (Draft › Save to), or null for the default one. */
+  getProjectsDir(): string | null {
+    const v = this.store.get("projectsDir");
+    return typeof v === "string" && v.length > 0 ? v : null;
+  }
+
+  setProjectsDir(dir: string | null): void {
+    if (dir) this.store.set("projectsDir", dir);
+    else this.store.delete("projectsDir");
+  }
+
+  /**
+   * What Draft › Cache counts and clears: files OpenRip can make again. The engine's
+   * timeline thumbnails, the audio mixes made for exports, and finished exports kept to
+   * reuse when nothing changed.
+   */
+  cacheDirs(): string[] {
+    const userData = app.getPath("userData");
+    return [join(userData, "engine-thumbnails"), join(userData, "media", "previews"), join(userData, "apex-export-cache")];
+  }
+
+  async pruneCacheByAge(): Promise<void> {
+    const p = this.getPreferences();
+    if (!p.cacheAutoDelete) return;
+    const before = Date.now() - Math.max(1, p.cacheMaxAgeDays) * 24 * 3600 * 1000;
+    for (const dir of this.cacheDirs()) await prune(dir, before);
+  }
+
+  /** Proxies and playable copies made for the app's own preview, in every project's media folder. */
+  async proxySize(): Promise<number> {
+    const media = join(app.getPath("userData"), "media");
+    let total = 0;
+    try {
+      for (const e of await fsp.readdir(media)) total += await sizeOf(join(media, e, "proxy"));
+    } catch {
+      // no media yet
+    }
+    return total + (await sizeOf(join(media, "proxy")));
   }
 
   private registerHandlers() {
@@ -61,6 +233,74 @@ export class SettingsModule extends EventEmitter implements AppModule {
 
     ipcMain.handle("settings:set-engine-preview", (_event, on: boolean): void => {
       this.store.set("useEnginePreview", on === true);
+    });
+
+    ipcMain.handle("settings:get-preferences", (): Preferences => this.getPreferences());
+    ipcMain.handle("settings:set-preferences", (_event, patch: Partial<Preferences>): Preferences => this.setPreferences(patch));
+
+    // A folder from the native picker (Draft › Save to and the other path rows).
+    ipcMain.handle("settings:pick-folder", async (event, opts?: { title?: string; defaultPath?: string }) => {
+      const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options: Electron.OpenDialogOptions = {
+        title: opts?.title,
+        defaultPath: opts?.defaultPath,
+        properties: ["openDirectory", "createDirectory"],
+      };
+      const res = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+      return res.canceled ? null : (res.filePaths[0] ?? null);
+    });
+
+    ipcMain.handle("settings:cache-size", async () => {
+      let total = 0;
+      for (const dir of this.cacheDirs()) total += await sizeOf(dir);
+      return total;
+    });
+    ipcMain.handle("settings:clear-cache", async () => {
+      for (const dir of this.cacheDirs()) await prune(dir);
+      let total = 0;
+      for (const dir of this.cacheDirs()) total += await sizeOf(dir);
+      return total;
+    });
+    ipcMain.handle("settings:proxy-size", () => this.proxySize());
+    ipcMain.handle("settings:paths", () => ({
+      userData: app.getPath("userData"),
+      media: join(app.getPath("userData"), "media"),
+    }));
+
+    // The About window's facts.
+    ipcMain.handle("settings:app-info", () => ({
+      name: app.getName(),
+      version: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: process.platform,
+      arch: process.arch,
+    }));
+
+    // The open-source notices, made from the lockfiles when the app is built
+    // (scripts/third-party-notices.mjs writes them beside the main process's bundle).
+    ipcMain.handle("settings:third-party-notices", async () => {
+      const here = dirname(fileURLToPath(import.meta.url));
+      for (const p of [join(here, "third-party-notices.json"), join(here, "..", "third-party-notices.json")]) {
+        try {
+          return JSON.parse(await fsp.readFile(p, "utf8"));
+        } catch {
+          // try the next
+        }
+      }
+      return null;
+    });
+
+    // General › Notification: a system notification, when the user allowed them.
+    ipcMain.handle("settings:notify", (_event, n: { title: string; body?: string }) => {
+      if (!this.getPreferences().notifications || !Notification.isSupported()) return false;
+      try {
+        new Notification({ title: String(n?.title ?? ""), body: n?.body ? String(n.body) : undefined, silent: true }).show();
+        return true;
+      } catch {
+        return false;
+      }
     });
   }
 }

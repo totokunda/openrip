@@ -271,6 +271,20 @@ pub fn frame_for_display() -> Option<DisplayFrame> {
     Some(DisplayFrame { id: f.id, io_surface: Buffer::from(f.io_surface.to_ne_bytes().to_vec()), width: f.width, height: f.height, time_us: f.time_us, render_ms: f.render_ms })
 }
 
+// ---- Decoding ----
+
+/// The app's "Speed up hardware decoding": GPU decoding where the platform has it (true), or
+/// software only. Media opened from then on follow it.
+#[napi]
+pub fn set_hardware_decoding(on: bool) {
+    openrip_core::set_hardware_decoding(on);
+}
+
+#[napi]
+pub fn hardware_decoding() -> bool {
+    openrip_core::hardware_decoding()
+}
+
 // ---- Timeline thumbnails ----
 
 fn thumbnails_service() -> &'static Thumbnails {

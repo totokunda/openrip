@@ -3,6 +3,7 @@ import { ModuleContext } from "../ModuleContext.js";
 import { ipcMain } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { getSettingsModule } from "./SettingsModule.js";
 
@@ -224,12 +225,27 @@ export async function createProject(
 
 export class JSONPersistenceModule implements AppModule {
   #projectsDir: string | undefined;
+  #defaultProjectsDir: string | undefined;
+  #userDataDir: string | undefined;
   #appVersion: string | undefined;
 
   async enable({ app }: ModuleContext): Promise<void> {
     await app.whenReady();
     const userData = app.getPath("userData");
-    const rootDir = path.join(userData, "projects-json");
+    this.#userDataDir = userData;
+    this.#defaultProjectsDir = path.join(userData, "projects-json");
+    // Draft › Save to: the folder the user chose, else the one under the profile.
+    const chosen = getSettingsModule().getProjectsDir();
+    let rootDir = this.#defaultProjectsDir;
+    if (chosen) {
+      try {
+        await fs.mkdir(chosen, { recursive: true });
+        await fs.access(chosen, fsConstants.W_OK);
+        rootDir = chosen;
+      } catch {
+        console.warn(`JSONPersistenceModule: the projects folder ${chosen} can't be used; using ${rootDir}`);
+      }
+    }
 
     try {
       await fs.mkdir(rootDir, { recursive: true });
@@ -829,7 +845,62 @@ export class JSONPersistenceModule implements AppModule {
     }
   }
 
+  /**
+   * Draft › Save to: keep projects in `dir` from now on. The projects, their covers and their
+   * mask data move there (nothing is left behind or overwritten: a folder that already holds
+   * a project file of the same name is refused). Media stay where they are.
+   */
+  private async relocateProjects(dir: string): Promise<string> {
+    const from = this.projectsDir;
+    const to = path.resolve(dir);
+    if (to === path.resolve(from)) return to;
+    if (to.startsWith(path.resolve(from) + path.sep)) throw new Error("Choose a folder outside the current projects folder");
+    await fs.mkdir(to, { recursive: true });
+    await fs.access(to, fsConstants.W_OK);
+    const entries = await fs.readdir(from).catch(() => [] as string[]);
+    const files = entries.filter((e) => /^project-\d+\.json$/i.test(e));
+    const there = new Set(await fs.readdir(to).catch(() => [] as string[]));
+    const clash = files.find((f) => there.has(f));
+    if (clash) throw new Error(`That folder already has ${clash}`);
+    const move = async (a: string, b: string) => {
+      try {
+        await fs.rename(a, b);
+      } catch (e: any) {
+        if (e?.code !== "EXDEV") throw e;
+        await fs.cp(a, b, { recursive: true, errorOnExist: true, force: false });
+        await fs.rm(a, { recursive: true, force: true });
+      }
+    };
+    for (const f of files) await move(path.join(from, f), path.join(to, f));
+    for (const sub of ["covers", "local"]) {
+      const a = path.join(from, sub);
+      const b = path.join(to, sub);
+      const inside = await fs.readdir(a).catch(() => null);
+      if (!inside) continue;
+      await fs.mkdir(b, { recursive: true });
+      for (const e of inside) {
+        if (there.has(sub) && (await fs.stat(path.join(b, e)).then(() => true, () => false))) continue;
+        await move(path.join(a, e), path.join(b, e));
+      }
+    }
+    await fs.mkdir(path.join(to, "covers"), { recursive: true });
+    this.#projectsDir = to;
+    getSettingsModule().setProjectsDir(this.#defaultProjectsDir && to === path.resolve(this.#defaultProjectsDir) ? null : to);
+    return to;
+  }
+
   private registerHandlers() {
+    // Draft › Save to: where projects are kept, and moving them.
+    ipcMain.handle("projects:get-dir", () => ({ dir: this.projectsDir, defaultDir: this.#defaultProjectsDir ?? this.projectsDir }));
+    ipcMain.handle("projects:set-dir", async (_e, dir: string): Promise<JsonResponse<{ dir: string }>> => {
+      try {
+        if (typeof dir !== "string" || !dir.trim()) throw new Error("No folder given");
+        return { success: true, data: { dir: await this.relocateProjects(dir) } };
+      } catch (e) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    });
+
     // Save full JSON snapshot for a specific project
     ipcMain.handle(
       "projects:save-json",
@@ -1222,7 +1293,7 @@ export class JSONPersistenceModule implements AppModule {
                 try {
                   const safeFolderUuid = folderUuid.replace(/[^a-zA-Z0-9_-]/g, "_");
                   if (safeFolderUuid.length > 0) {
-                    const userDataDir = path.dirname(this.projectsDir);
+                    const userDataDir = (this.#userDataDir ?? path.dirname(this.projectsDir));
                     const mediaDir = path.join(userDataDir, "media", safeFolderUuid);
                     await fs.rm(mediaDir, { recursive: true, force: true });
                   }
@@ -1240,7 +1311,7 @@ export class JSONPersistenceModule implements AppModule {
             try {
               const safeFolderUuid = folderUuid.replace(/[^a-zA-Z0-9_-]/g, "_");
               if (safeFolderUuid.length > 0) {
-                const userDataDir = path.dirname(this.projectsDir);
+                const userDataDir = (this.#userDataDir ?? path.dirname(this.projectsDir));
                 const mediaDir = path.join(userDataDir, "media", safeFolderUuid);
                 await fs.rm(mediaDir, { recursive: true, force: true });
               }

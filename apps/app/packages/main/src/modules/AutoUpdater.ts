@@ -1,5 +1,6 @@
 import { AppModule } from "../AppModule.js";
 import { BrowserWindow, ipcMain } from "electron";
+import { getSettingsModule, type Preferences } from "./SettingsModule.js";
 import electronUpdater, {
   type AppUpdater,
   type Logger,
@@ -223,9 +224,16 @@ export class AutoUpdater implements AppModule {
     try {
       updater.logger = this.#logger || null;
       updater.fullChangelog = true;
-      // Keep the runtime UX in renderer-land; we disable implicit download and
-      // let the UI trigger download/install. (Startup checks still happen.)
-      updater.autoDownload = false;
+      // General › Software update: "Automatic updates" downloads an update when one is
+      // found and installs it when the app quits; "Get notified about updates" only says so
+      // (the update toasts), and the user downloads and installs it from there.
+      const apply = (p: Preferences) => {
+        updater.autoDownload = p.autoUpdate;
+        updater.autoInstallOnAppQuit = p.autoUpdate;
+      };
+      const settings = getSettingsModule();
+      apply(settings.getPreferences());
+      settings.on("preferences-changed", (p: Preferences) => apply(p));
 
       if (import.meta.env.VITE_DISTRIBUTION_CHANNEL) {
         updater.channel = import.meta.env.VITE_DISTRIBUTION_CHANNEL;
