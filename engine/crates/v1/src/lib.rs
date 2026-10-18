@@ -949,7 +949,7 @@ fn app_animation(clip: &Value, kind: AnimationKind, length: Micros) -> Option<An
         AnimationKind::Combo => (Micros::ZERO, length),
         _ => (Micros::ZERO, given.min(length)),
     };
-    (duration.0 > 0).then(|| Animation { kind, start, duration, builtin: Some(builtin), library: None, resource: None })
+    (duration.0 > 0).then_some(Animation { kind, start, duration, builtin: Some(builtin), library: None, resource: None })
 }
 
 /// The Animation tab's caption style, over the whole clip.

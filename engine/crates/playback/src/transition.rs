@@ -6,8 +6,8 @@
 //! transition runs from half its duration before the cut to half after it. The outgoing clip
 //! plays up to the cut and the incoming one from it. Most transitions work on one clip at a
 //! time, or on the canvas over it; the ones that mix the two (a cross-fade, a slide, a wipe)
-//! need both at once, and CapCut plays the outgoing clip on past its end and the incoming
-//! one from before its start, from their media.
+//! need both at once: CapCut plays the outgoing clip on past its end and the incoming one
+//! from before its start, and OpenRip takes those frames from their media.
 
 use openrip_model::{Micros, Project, Segment, Transition};
 
@@ -186,7 +186,7 @@ pub fn steps(tr: &Transition, p: f64) -> Vec<Step> {
         }
         // White Fade (scriptScene.js, a 2 s timeline): white rises linearly from 50 to 800 ms,
         // holds to 1200 ms and falls by 1950 ms; the clips cross-fade from 750 to 1250 ms,
-        // under at least 93% white.
+        // under at least 93% white. Its seek starts a tween 10 ms after its delay.
         "white_fade" => {
             let ms = p * 2000.0;
             let brightness = if ms <= 60.0 {
@@ -200,7 +200,15 @@ pub fn steps(tr: &Transition, p: f64) -> Vec<Step> {
             } else {
                 1.0
             };
-            vec![Step::Wash([255, 255, 255, 255], ((brightness - 1.0) / 1.2).clamp(0.0, 1.0) as f32)]
+            let mix = if ms <= 760.0 { 0.0 } else { ((ms - 750.0) / 500.0).min(1.0) };
+            let white = ((brightness - 1.0) / 1.2).clamp(0.0, 1.0);
+            let wash = Step::Wash([255, 255, 255, 255], white as f32);
+            // Under all white the mix doesn't show: one clip is enough.
+            if mix > 0.0 && mix < 1.0 && white < 1.0 {
+                vec![Step::Mix(Mix { outgoing: shot(1.0), incoming: shot(mix as f32), mask: Mask::All }), wash]
+            } else {
+                vec![wash]
+            }
         }
         // Blink (Set.lua): an eyelid sequence of 120 frames, closing over the outgoing clip
         // and opening over the incoming one, over the clip blurred near the closed eye.
@@ -353,6 +361,28 @@ mod tests {
         let tr = tr("white_flash");
         assert_eq!(steps(&tr, 0.25), vec![Step::Wash([255; 4], 0.5)]);
         assert_eq!(steps(&tr, 0.5), vec![Step::Wash([255; 4], 1.0)]);
+    }
+
+    #[test]
+    fn white_fade_cross_fades_under_the_white() {
+        let tr = tr("white_fade");
+        // 400 ms of its 2 s timeline: white rising, one clip.
+        assert!(matches!(steps(&tr, 0.2).as_slice(), [Step::Wash(_, a)] if (*a - 0.35 / 0.75).abs() < 1e-4));
+        // At the cut, half way through the cross-fade, all white: the mix doesn't show.
+        assert_eq!(steps(&tr, 0.5), vec![Step::Wash([255; 4], 1.0)]);
+        // At 780 ms: 6% of the way, under 96% white.
+        match steps(&tr, 0.39).as_slice() {
+            [Step::Mix(m), Step::Wash(_, a)] => assert!(m.outgoing == Some(Shot::STILL) && (m.incoming.unwrap().alpha - 0.06).abs() < 1e-4 && *a < 1.0),
+            s => panic!("{s:?}"),
+        }
+        // At 1225 ms: 95% of the way, under 97% white; by 1250 ms the incoming clip alone.
+        match steps(&tr, 0.6125).as_slice() {
+            [Step::Mix(m), Step::Wash(_, a)] => assert!((m.incoming.unwrap().alpha - 0.95).abs() < 1e-4 && (*a - (1.0 - 1.2 * 25.0 / 750.0 / 1.2)).abs() < 1e-4),
+            s => panic!("{s:?}"),
+        }
+        assert!(matches!(steps(&tr, 0.63).as_slice(), [Step::Wash(..)]));
+        // Its tween starts 10 ms after its delay.
+        assert!(matches!(steps(&tr, 0.379).as_slice(), [Step::Wash(..)]));
     }
 
     #[test]

@@ -32,7 +32,7 @@ The ones that show both at once (Mix, Slide, Push, Wipe, Circle) need the outgoi
 | Blur | — | named | CapCut's transition blur over the canvas, taps up to 6 px apart (at 1080 wide) at the cut, eased. |
 | Spin | — | named | The outgoing clip turns half a turn as it shrinks to nothing by the cut; the incoming one turns in from half a turn as it grows. |
 
-"Named" means CapCut has a transition of that name (its Classic, Basic, Slide, Mask and Movement panels) but its bundle isn't in CapCut's cache here, so the curve is ours; the code says so where each is drawn (`openrip-playback::transition`). The White Fade's cross-fade happens under at least 93% white, so OpenRip switches clips at the cut instead of mixing them: at most 7% of the difference between the clips, for a quarter of the transition.
+"Named" means CapCut has a transition of that name (its Classic, Basic, Slide, Mask and Movement panels) but its bundle isn't in CapCut's cache here, so the curve is ours; the code says so where each is drawn (`openrip-playback::transition`). The White Fade's cross-fade happens under at least 93% white; OpenRip mixes the clips as its script does (its tween starting 10 ms after its delay) wherever the white isn't total, and shows one clip under total white, where the mix doesn't show. Until 2026-10-18 it switched at the cut instead, which differed by at most 7% of the difference between the clips for a few milliseconds either side of the hold: no frame of the draft's 24 fps export falls there, and its frames through the White Fade score the same either way (17 frames, p50 44.5 dB, worst 37.0 dB).
 
 ## Import
 
@@ -56,4 +56,5 @@ The classic set has no draft or export to compare with. What's checked:
 
 - CapCut's own curves for Mix, Black Fade, Pull out, Slide, Push, Wipe, Circle, Blur and Spin. Dragging each onto a clip once in CapCut puts its bundle in the cache; reading it then replaces our curve, and an export of a calibration draft gives the numbers.
 - CapCut's other transitions (Glare II, Wispy Wipe, Flash Split and the rest of its library).
-- The White Fade's real cross-fade (the machinery exists now).
+- A mixing transition's groups carry black because that's all the preview draws under the main track today; once CapCut's canvas fills (colour, blur, image) are drawn, each clip's group should carry its own fill, as CapCut's clips do.
+- Whether CapCut plays an overlapping transition's clips on from their media, as OpenRip does, or holds their end frames: no local draft has one with an export.
