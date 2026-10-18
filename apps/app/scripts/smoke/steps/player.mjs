@@ -182,16 +182,17 @@ export default async (ctx) => {
   const area = await box(win, "[data-testid=player-canvas-area]");
   check("⌘⌥R shows 16 px rulers along the top and left", rx && ry && Math.round(rx.height) === 16 && Math.round(ry.width) === 16 && Math.abs(area.y - rx.y - 16) < 1 && Math.abs(rx.width - area.width) < 1 && Math.abs(ry.height - area.height) < 1, `${rx?.width}×${rx?.height}, ${ry?.width}×${ry?.height}`);
   await shot("p10-rulers-visible"); // 010-rulers-visible
-  // The frame on screen: fitted (90%) and centred in the canvas area, with the canvas's shape.
-  const p = await previewRect(win);
+  // The frame on screen (the player's empty box over it), and the canvas's shape.
+  const frameOn = async () => {
+    const r = await box(win, "[data-testid=player-frame]");
+    return { fleft: r.x, ftop: r.y, fw: r.width, fh: r.height };
+  };
   const fb = await win.evaluate(() => {
     const c = document.getElementById("openrip-engine-frame");
     return { w: c.width, h: c.height };
   });
-  const fh = Math.min(p.h * 0.9, (p.w * 0.9 * fb.h) / fb.w);
-  const fw = (fh * fb.w) / fb.h;
-  const ftop = p.y + (p.h - fh) / 2;
-  const fleft = p.x + (p.w - fw) / 2;
+  const { fleft, ftop, fw, fh } = await frameOn();
+  check("the frame fills the canvas area's height, as CapCut's", Math.abs(fh - area.height) < 1.5, `frame ${fw.toFixed(1)}×${fh.toFixed(1)} in an area ${area.width.toFixed(1)}×${area.height.toFixed(1)}`);
   // A guide dragged down out of the top ruler to 30% of the way down the frame.
   const guideY = ftop + fh * 0.3;
   await drag(win, rx.x + rx.width / 2, rx.y + 8, rx.x + rx.width / 2, guideY);
@@ -281,6 +282,32 @@ export default async (ctx) => {
   await escape(win, 2);
   d = await doc();
   check("Add vertical guide puts one down the middle", (d.settings?.guides ?? []).length === 1 && d.settings.guides[0].axis === "x" && d.settings.guides[0].at === 0.5);
+  // A transform snaps too: the guide moved to X 648 px (80% across), the video's bottom-right
+  // handle dragged in to 2 px short of it.
+  {
+    const vg = await box(win, "[data-testid=player-guide]");
+    await win.mouse.click(vg.x + vg.width / 2, vg.y + vg.height * 0.3, { button: "right" });
+    await win.waitForTimeout(300);
+    await win.locator("[data-testid=guide-edit]").click();
+    await win.waitForTimeout(300);
+    await win.locator("[data-testid=guide-position]").fill("648");
+    await win.locator("[data-testid=guide-ok]").click();
+    await win.waitForTimeout(500);
+    d = await doc();
+    check("Edit guide moves a vertical guide to X 648 px (80%)", Math.abs((d.settings?.guides?.[0]?.at ?? 0) - 0.8) < 1e-6, JSON.stringify(d.settings?.guides));
+    const { fleft: gx, ftop: gy, fw: gw, fh: gh } = await frameOn();
+    await select(ctx, d, video.clipId, 3);
+    await win.keyboard.press("v");
+    await settled(win, () => drag(win, gx + gw - 0.5, gy + gh - 0.5, gx + gw * 0.8 + 2, gy + gh * 0.8 + 2));
+    d = await doc();
+    const t = d.timeline.clips.find((c) => c.clipId === video.clipId).transform ?? {};
+    const right = (t.x ?? 0) + (t.width ?? 0) * (t.scaleX ?? 1);
+    const rectW = (600 * fb.w) / fb.h;
+    check("resizing snaps the moving edge onto the guide", Math.abs(right - 0.8 * rectW) < 0.6, `right edge ${right.toFixed(2)} world, guide at ${(0.8 * rectW).toFixed(2)}`);
+    await shot("p03-resize-snapped");
+    await win.keyboard.press("Meta+z");
+    await win.waitForTimeout(500);
+  }
   await subItem(win, "menu-guides", "guides-clear");
   await escape(win, 2);
   d = await doc();
@@ -301,12 +328,14 @@ export default async (ctx) => {
     await win.waitForTimeout(200);
     await shot("p01-export-still-frames");
     await win.locator("[data-testid=export-still]").click();
-    for (let i = 0; i < 40 && !ctx.fs.existsSync(file); i++) await win.waitForTimeout(250);
+    const t0 = Date.now();
+    for (let i = 0; i < 120 && !ctx.fs.existsSync(file); i++) await win.waitForTimeout(250);
+    const took = Date.now() - t0;
     await win.waitForTimeout(800);
     const ok = ctx.fs.existsSync(file);
     const buf = ok ? ctx.fs.readFileSync(file) : Buffer.alloc(0);
     const [pw, ph] = ok ? [buf.readUInt32BE(16), buf.readUInt32BE(20)] : [0, 0];
-    check("Export still frames writes a PNG at the project's size", ok && buf.subarray(1, 4).toString() === "PNG" && pw === 2160 && ph === 3840, `${pw}×${ph}, ${(buf.length / 1e6).toFixed(1)} MB`);
+    check("Export still frames writes a PNG at the project's size", ok && buf.subarray(1, 4).toString() === "PNG" && pw === 2160 && ph === 3840, `${pw}×${ph}, ${(buf.length / 1e6).toFixed(1)} MB, written ${(took / 1000).toFixed(1)} s after the click`);
     // Against the engine's frame: the still scaled to the frame canvas's size.
     const fsz = await win.evaluate(() => {
       const c = document.getElementById("openrip-engine-frame");

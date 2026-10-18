@@ -621,7 +621,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.12 Left panel: Filters | 2 | 0 | 2 |
 | 6.13 Left panel: Adjustment | 0 | 2 | 1 |
 | 6.14 Left panel: Templates | 0 | 0 | 1 |
-| 6.15 Player | 4 | 3 | 6 |
+| 6.15 Player | 12 | 1 | 0 |
 | 6.16 Inspector: project (nothing selected) | 1 | 3 | 7 |
 | 6.17 Inspector: video clip | 10 | 9 | 21 |
 | 6.18 Inspector: photo clip | (see 6.17) | | |
@@ -638,7 +638,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.29 Export dialog | 5 | 2 | 9 |
 | 6.30 Other dialogs | 2 | 0 | 4 |
 | 6.31 Classic-algorithm features brought into scope | 0 | 1 | 10 |
-| **Total (348 in-scope features)** | **98** | **77** | **173** |
+| **Total (348 in-scope features)** | **106** | **75** | **167** |
 
 The counts above are as written. A re-audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows (32.0% strict, 47.8% with partly as half); with the text, inspector and audio branches then in progress, 146 / 86 / 105 (43.3% / 56.1%). §6.31's 11 rows were added after it.
 
@@ -901,18 +901,18 @@ Screenshots are in `16-player/` unless a path says otherwise.
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Play/pause, centred | `03-editor-overview/003-base-timeline-built.png` | has (in the timeline toolbar) |
-| Current / total timecode `HH:MM:SS:FF` | `03-editor-overview/003-base-timeline-built.png` | partly (`MM:SS.ss`, not frames) |
-| Stereo audio level meter | `16-player/002-guides-rulers-menu.png` | missing |
-| Safe-area overlay toggle (generic; CapCut's is branded) | `03-editor-overview/003-base-timeline-built.png` | missing |
-| Preview quality menu: Full, High, Medium, Low (playback only) | `16-player/004-quality-menu.png` | missing |
-| Zoom popover (slider, −/+) | `005-zoom-popover.png` | has |
-| Zoom navigator thumbnail while zoomed | `005-zoom-popover.png` | missing |
+| Play/pause, centred | `03-editor-overview/003-base-timeline-built.png` | has (centred in the player's bar) |
+| Current / total timecode `HH:MM:SS:FF` | `03-editor-overview/003-base-timeline-built.png` | has |
+| Stereo audio level meter | `16-player/002-guides-rulers-menu.png` | has (the engine's mix level; idle without the engine preview) |
+| Safe-area overlay toggle (generic; CapCut's is branded) | `03-editor-overview/003-base-timeline-built.png` | has (the bar's first button on the right) |
+| Preview quality menu: Full, High, Medium, Low (playback only) | `16-player/004-quality-menu.png` | has (playback at 1, ¾, ½, ¼ of the screen's size) |
+| Zoom popover (slider, −/+) | `005-zoom-popover.png` | has (50–400% of fit; ⌥⇧+, ⌥⇧−, ⌥⇧Z) |
+| Zoom navigator thumbnail while zoomed | `005-zoom-popover.png` | has |
 | Ratio menu: Original, Custom, 16:9, 4:3, 2.35:1, 2:1, 1.85:1, 9:16, 3:4, 5.8-inch, 1:1 | `006-aspect-ratio-menu.png` | partly (Topbar Size menu: 16:9, 9:16, 1:1, 4:3, 4:5, 21:9, 2:3, Custom) |
 | Fullscreen preview with floating transport | `007-fullscreen-preview.png` | has |
-| Header menu › Color oscilloscope: RGB parade, waveform, vectorscope | `001-header-menu.png`, `009-color-oscilloscope.png` | missing |
-| Header menu › Guides and rulers; rulers; draggable guides; Edit guide (Pixels/Percent, position); Delete guide | `002-guides-rulers-menu.png`, `010-rulers-visible.png`, `003-horizontal-guide.png`, `008-guide-context-menu.png`, `31-dialogs/014-edit-guide-dialog.png`, `31-dialogs/015-guide-units-menu.png` | missing |
-| Header menu › Export still frames | `001-header-menu.png` | partly (image export in the Export dialog and clip menu) |
+| Header menu › Color oscilloscope: RGB parade, waveform, vectorscope | `001-header-menu.png`, `009-color-oscilloscope.png` | has (WebGL2 from the engine's frame) |
+| Header menu › Guides and rulers; rulers; draggable guides; Edit guide (Pixels/Percent, position); Delete guide | `002-guides-rulers-menu.png`, `010-rulers-visible.png`, `003-horizontal-guide.png`, `008-guide-context-menu.png`, `31-dialogs/014-edit-guide-dialog.png`, `31-dialogs/015-guide-units-menu.png` | has (guides saved in the project and undone; clips snap to them) |
+| Header menu › Export still frames | `001-header-menu.png` | has (PNG at the project's size, by the engine) |
 | Selected clip bounding box with handles on the canvas | `03-editor-overview/003-base-timeline-built.png` | has |
 
 ### 6.16 Inspector: project (nothing selected)
