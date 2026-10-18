@@ -3,7 +3,7 @@
 //! transition, blend modes and chroma keys from their materials, and a LUT on a clip. Stills
 //! are flat colours written as PNGs.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use openrip_model::*;
 use openrip_playback::PreviewEngine;
@@ -31,7 +31,7 @@ fn still(name: &str, rgb: [u8; 3]) -> PathBuf {
     png(name, W, H, |_, _| [rgb[0], rgb[1], rgb[2], 255])
 }
 
-fn photo(id: &str, path: &PathBuf) -> Media {
+fn photo(id: &str, path: &Path) -> Media {
     Media { id: MaterialId(id.into()), kind: MediaKind::Photo, path: path.to_string_lossy().into_owned(), width: W, height: H, duration: Micros(0), has_audio: false, matte: None }
 }
 

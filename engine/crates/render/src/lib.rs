@@ -102,7 +102,7 @@ impl Lut3d {
                 }
             }
         }
-        (size >= 2 && size <= 128 && rgb.len() == (size * size * size * 3) as usize).then_some(Lut3d { key, size, rgb, edge_aligned: true })
+        ((2..=128).contains(&size) && rgb.len() == (size * size * size * 3) as usize).then_some(Lut3d { key, size, rgb, edge_aligned: true })
     }
 }
 

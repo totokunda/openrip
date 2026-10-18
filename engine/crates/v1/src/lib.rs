@@ -800,12 +800,14 @@ fn convert_clip(
             let resource = [s(clip, "fullPath"), s(clip, "smallPath")].into_iter().find(|p| !p.is_empty());
             let mut params = BTreeMap::new();
             params.insert("intensity".to_string(), f(clip, "intensity", 100.0).clamp(0.0, 100.0) / 100.0);
+            // A Hald CLUT image, or a .cube table.
+            let cube = resource.as_deref().is_some_and(|p| p.to_lowercase().ends_with(".cube"));
             materials.effects.push(Effect {
                 id: mid.clone(),
                 category: EffectCategory::Filter,
                 name: s(clip, "name"),
                 params,
-                builtin: Some("lut".into()),
+                builtin: Some(if cube { "cube" } else { "lut" }.into()),
                 resource,
                 library: None,
                 text_style: None,

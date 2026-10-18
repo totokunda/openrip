@@ -120,7 +120,7 @@ pub(crate) fn curve(points: &[[f64; 2]]) -> Vec<CurvePoint> {
 
 /// The app's LUT as a filter on the clip: a `.cube` file, else a Hald CLUT image.
 pub(crate) fn lut(clip: &str, v: &Value) -> Option<Effect> {
-    let path = v.get("path").and_then(Value::as_str).filter(|p| !p.is_empty())?.to_string();
+    let path = crate::file_url_to_path(v.get("path").and_then(Value::as_str).filter(|p| !p.is_empty())?);
     let builtin = if path.to_lowercase().ends_with(".cube") { "cube" } else { "lut" };
     let mut params = BTreeMap::new();
     params.insert("intensity".to_string(), (f(v, "intensity", 100.0) / 100.0).clamp(0.0, 1.0));

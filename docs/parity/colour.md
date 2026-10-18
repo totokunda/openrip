@@ -110,6 +110,6 @@ Brightness has none (an offset: +25 is still 25 levels off at CapCut's strongest
 
 ## Not drawn
 
-- **Log wheels:** no local draft uses them.
+- **Log wheels:** no local draft uses them. Their bundle ships with CapCut (`Resources/LogWheel/log_wheel_v1`, readable): per channel a shadow line below a lower range bound, a midtone power curve between the bounds, a highlight line above the upper one, cubic joins 0.05 either side of each bound (its script solves them from the values and slopes), and saturation from the luma's change. The draft's `log_color_wheels` keeps `shadow`, `midtone`, `highlight` and `offset` (CapCut's `MaterialLogColorWheels` accessors), not lift, gamma and gain, so the importer's reading of them as primary wheels is wrong for log; the range bounds' field names can't be confirmed without a draft that uses them.
 - **color_match and color_correct:** used by one draft. These are CapCut's automatic colour matching and correction, run by its colour-analysis models (`preRenderAlgorithmTex`, `lens_ii_auto_color_map`). OpenRip has no such models.
 - **particle:** used once, at 0. It does nothing at 0.

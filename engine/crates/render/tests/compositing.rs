@@ -2,7 +2,7 @@
 //! are drawn at the canvas's size, so placement leaves their pixels as they are. Skipped
 //! when no GPU adapter is available.
 
-use openrip_render::{BlendMode, ChromaKey, Compositor, Layer, Lut3d, RgbaImage, Source};
+use openrip_render::{BlendMode, ChromaKey, Compositor, Layer, Lut3d, RgbaImage};
 
 fn gpu() -> Option<Compositor> {
     match Compositor::new() {
