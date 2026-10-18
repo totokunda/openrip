@@ -607,9 +607,9 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 
 | Area | Has | Partly | Missing |
 |---|---:|---:|---:|
-| 6.1 App menu bar (macOS) | 4 | 6 | 5 |
-| 6.2 Home screen | 3 | 4 | 9 |
-| 6.3 Settings and shortcuts | 1 | 7 | 27 |
+| 6.1 App menu bar (macOS) | 9 | 3 | 3 |
+| 6.2 Home screen | 4 | 3 | 9 |
+| 6.3 Settings and shortcuts | 17 | 11 | 7 |
 | 6.4 Editor top bar and layout | 2 | 4 | 1 |
 | 6.5 Left panel: Media | 7 | 2 | 13 |
 | 6.6 Left panel: Audio | 0 | 1 | 3 |
@@ -638,7 +638,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.29 Export dialog | 5 | 2 | 9 |
 | 6.30 Other dialogs | 2 | 0 | 4 |
 | 6.31 Classic-algorithm features brought into scope | 0 | 1 | 10 |
-| **Total (348 in-scope features)** | **77** | **76** | **195** |
+| **Total (348 in-scope features)** | **99** | **76** | **173** |
 
 The counts above are as written. A re-audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows (32.0% strict, 47.8% with partly as half); with the text, inspector and audio branches then in progress, 146 / 86 / 105 (43.3% / 56.1%). §6.31's 11 rows were added after it.
 
@@ -650,20 +650,20 @@ Captured from Home, so editor-only items show disabled (see §7).
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| App menu › About (version) | `00-menu-bar/001-about.png`, `002-capcut-menu.png` | has (Electron default) |
-| App menu › Settings | `002-capcut-menu.png` | partly (Settings modal exists but nothing opens it) |
-| App menu › Back to home page | `002-capcut-menu.png` | missing (no home screen) |
-| App menu › Layout › Default, Media, Attributes, Vertical, Reset current layout | `003-layout-submenu.png` | partly (presets live in the Topbar) |
-| App menu › More › Third-party copyright (licences view) | `007-more-submenu.png`, `31-dialogs/006-third-party-copyright.png` | missing |
+| App menu › About (version) | `00-menu-bar/001-about.png`, `002-capcut-menu.png` | has (About window: OpenRip's mark, version, copyright) |
+| App menu › Settings | `002-capcut-menu.png` | has (the Settings window, ⌘,) |
+| App menu › Back to home page | `002-capcut-menu.png` | has (off on the home screen) |
+| App menu › Layout › Default, Media, Attributes, Vertical, Reset current layout | `003-layout-submenu.png` | has (Attributes is OpenRip's Inspector layout) |
+| App menu › More › Third-party copyright (licences view) | `007-more-submenu.png`, `31-dialogs/006-third-party-copyright.png` | has (OpenRip's npm and Cargo notices, made from the lockfiles at build time) |
 | App menu › Quit ⌘Q | `002-capcut-menu.png` | has |
-| File › New Project ⌘N | `004-file-menu.png`, `008-editor-file-menu.png` | partly (Topbar switcher, no menu item or shortcut) |
+| File › New Project ⌘N | `004-file-menu.png`, `008-editor-file-menu.png` | partly (⌘N works; no menu item) |
 | File › New timeline (several timelines per project) | `008-editor-file-menu.png` | missing |
-| File › Import ⌘I | `004-file-menu.png` | partly (Media panel only) |
-| File › Export ⌘E | `004-file-menu.png` | partly (Topbar button only) |
+| File › Import ⌘I | `004-file-menu.png` | partly (⌘I opens the Media tab's picker; no menu item) |
+| File › Export ⌘E | `004-file-menu.png` | partly (⌘E opens Export; no menu item) |
 | Edit › Undo ⌘Z, Redo ⇧⌘Z | `005-edit-menu.png` | has |
 | Edit › Split ⌘B | `009-editor-edit-menu.png` | missing |
 | Edit › Copy, Cut, Paste, Delete | `005-edit-menu.png` | has |
-| Help › Shortcut | `006-help-menu.png` | partly (read-only list in the Topbar) |
+| Help › Shortcut | `006-help-menu.png` | has (opens the Shortcuts window) |
 | Help › Walkthrough (first-run tour: spotlight, step counter, Next/Exit) | `006-help-menu.png`, `31-dialogs/042-walkthrough-import-step.png` | missing |
 
 Out of scope: Terms of Service, Privacy Policy, Network Testing, Help › Feedback (OpenRip links to its issue tracker instead).
@@ -687,7 +687,7 @@ Screenshots are in `01-home/` unless a path says otherwise.
 | No-results state | `017-project-search-empty.png` | missing |
 | Trash: recently deleted (30-day retention), Restore, Delete permanently, empty trash, grid/list | `020-trash-view.png`–`024-trash-list-view.png` | missing |
 | Home sidebar: Home, Templates (local templates) | `001-at-rest.png`, `028-templates-page.png` | missing |
-| Settings gear (Settings, Third-party copyright, Version) | `079-settings-menu.png`, `012-settings-tooltip.png` | partly |
+| Settings gear (Settings, Third-party copyright, Version) | `079-settings-menu.png`, `012-settings-tooltip.png` | has (Version opens About) |
 | Update-available indicator | `010-update-tooltip.png` | partly (update toasts) |
 | Open a CapCut draft as a project (OpenRip-only) | – | has (Projects › Open CapCut Project) |
 
@@ -699,41 +699,41 @@ Screenshots are in `02-settings/` unless a path says otherwise.
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Draft › Save to (projects folder) | `02-settings/001-draft.png`, `020-draft-save-path-picker.png` | missing |
-| Draft › Screen recording folder | `001-draft.png`, `021-draft-recording-path-picker.png` | missing |
-| Draft › Cache: don't delete / auto delete after 90, 60, 30, 15 days; cache size + clear | `001-draft.png`, `002-draft-cache-age-dropdown.png` | missing |
-| Draft › Preset save path | `001-draft.png`, `023-draft-preset-path-picker.png` | missing |
-| Edit › Step forward or back many N frames | `005-edit.png` | missing |
-| Edit › Adjust value many N units | `005-edit.png` | missing |
-| Edit › Image duration (s or frames) | `005-edit.png`, `009-edit-image-duration-unit.png` | partly (default clip length in the unreachable modal) |
-| Edit › Target loudness: −23, −14, −12 LUFS | `006-edit-target-loudness.png` | missing |
-| Edit › Play audio while scrubbing | `005-edit.png` | missing |
-| Edit › Linkage settings | `010-edit-linkage-settings.png` | missing |
-| Edit › Arrange layers by default | `005-edit.png` | missing |
-| Edit › Default frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `007-edit-frame-rate.png` | partly (24/25/30/48/60, unreachable) |
-| Edit › Time code: HH:MM:SS+frame or HH:MM:SS:FF | `008-edit-time-code.png` | missing |
-| Edit › Sound when export completes | `005-edit.png` | missing |
-| Performance › Hardware encoding, Hardware decoding | `011-performance.png` | missing |
-| Performance › Auto optimization (None / Smart) | `012-performance-optimization-dropdown.png` | missing |
-| Performance › Proxy default, proxy folder, proxy size + clear | `011-performance.png`, `024-performance-proxy-path-picker.png` | partly (per-item proxies) |
-| Performance › Rendering cache location, size, auto clear, auto render | `011-performance.png`, `025-performance-rendering-path-picker.png` | missing |
-| General › Language | `014-general.png` | missing |
-| General › Notifications | `014-general.png` | missing |
-| General › Software update: automatic or notify | `014-general.png` | partly (Updates tab in the unreachable modal) |
-| Shortcuts window: categories Timeline, Player, Basic, Other | `026-shortcuts-timeline.png`–`034-shortcuts-other.png` | partly (read-only list) |
-| Shortcuts: click to rebind, Reset, Save | `026-shortcuts-timeline.png` | missing |
-| Shortcuts: presets 1–5 | `036-shortcuts-preset-dropdown.png` | missing |
-| Keys: Space play/pause, ←/→ frame step, Home/End, K/L shuttle | `031-shortcuts-player.png`, `026-shortcuts-timeline.png` | missing |
-| Keys: ⌘B split, ⌘⇧B split all, Q/W delete left/right | `026-shortcuts-timeline.png` | missing |
-| Keys: A select mode, B split mode, [ ] select leftward/rightward | `026-shortcuts-timeline.png` | missing |
-| Keys: P magnet, N snapping, ~ linkage, S preview axis | `026-shortcuts-timeline.png` | missing |
-| Keys: M marker, ⌥M new-colour marker, ⇧M / ⌥⇧M next/previous marker | `028-shortcuts-timeline-2.png` | missing |
-| Keys: ⌥K keyframe panel, ⇧⌥K add keyframe | `029-shortcuts-timeline-3.png` | missing |
-| Keys: ⌘+ / ⌘− zoom, ⇧Z zoom to fit, ⌘scroll zoom, ⌥scroll pan | `026-shortcuts-timeline.png` | partly (zoom slider and buttons) |
-| Keys: V activate/deactivate clip, ⇧⌃S extract audio | `026-shortcuts-timeline.png` | missing |
+| Draft › Save to (projects folder) | `02-settings/001-draft.png`, `020-draft-save-path-picker.png` | has (the projects, covers and mask data move to the folder chosen) |
+| Draft › Screen recording folder | `001-draft.png`, `021-draft-recording-path-picker.png` | missing (no screen recording; the row shows disabled) |
+| Draft › Cache: don't delete / auto delete after 90, 60, 30, 15 days; cache size + clear | `001-draft.png`, `002-draft-cache-age-dropdown.png` | has (engine thumbnails, export audio mixes, kept exports; old files deleted at start) |
+| Draft › Preset save path | `001-draft.png`, `023-draft-preset-path-picker.png` | missing (no saved presets; the row shows disabled) |
+| Edit › Step forward or back many N frames | `005-edit.png` | has (⇧← / ⇧→) |
+| Edit › Adjust value many N units | `005-edit.png` | has (↑ / ↓ in the inspector's value fields, ⇧ for N) |
+| Edit › Image duration (s or frames) | `005-edit.png`, `009-edit-image-duration-unit.png` | has |
+| Edit › Target loudness: −23, −14, −12 LUFS | `006-edit-target-loudness.png` | has (Normalize loudness's target) |
+| Edit › Play audio while scrubbing | `005-edit.png` | missing (the row shows disabled) |
+| Edit › Linkage settings | `010-edit-linkage-settings.png` | missing (linkage moves a video and its detached audio only; the row shows disabled) |
+| Edit › Arrange layers by default | `005-edit.png` | missing (the row shows disabled) |
+| Edit › Default frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `007-edit-frame-rate.png` | has (a new project's) |
+| Edit › Time code: HH:MM:SS+frame or HH:MM:SS:FF | `008-edit-time-code.png` | has (the player, the marker box, the project's length; the two differ at 29.97 and 59.94) |
+| Edit › Sound when export completes | `005-edit.png` | has |
+| Performance › Hardware encoding, Hardware decoding | `011-performance.png` | partly (decoding switches the engine's decoder; encoding is always VideoToolbox) |
+| Performance › Auto optimization (None / Smart) | `012-performance-optimization-dropdown.png` | has (the app's own preview's playable copies) |
+| Performance › Proxy default, proxy folder, proxy size + clear | `011-performance.png`, `024-performance-proxy-path-picker.png` | partly (size and folder shown; proxies are per item and the engine plays originals) |
+| Performance › Rendering cache location, size, auto clear, auto render | `011-performance.png`, `025-performance-rendering-path-picker.png` | missing (no pre-render; the rows show disabled) |
+| General › Language | `014-general.png` | partly (English only; the words come from lib/i18n.ts, ready for more) |
+| General › Notifications | `014-general.png` | has (when an export finishes) |
+| General › Software update: automatic or notify | `014-general.png` | has (and Check for updates) |
+| Shortcuts window: categories Timeline, Player, Basic, Other | `026-shortcuts-timeline.png`–`034-shortcuts-other.png` | has |
+| Shortcuts: click to rebind, Reset, Save | `026-shortcuts-timeline.png` | has (a key another action has is refused and named) |
+| Shortcuts: presets 1–5 | `036-shortcuts-preset-dropdown.png` | has |
+| Keys: Space play/pause, ←/→ frame step, Home/End, K/L shuttle | `031-shortcuts-player.png`, `026-shortcuts-timeline.png` | partly (no J/K/L shuttle) |
+| Keys: ⌘B split, ⌘⇧B split all, Q/W delete left/right | `026-shortcuts-timeline.png` | has |
+| Keys: A select mode, B split mode, [ ] select leftward/rightward | `026-shortcuts-timeline.png` | partly ([ and ]; no select or split mode) |
+| Keys: P magnet, N snapping, ~ linkage, S preview axis | `026-shortcuts-timeline.png` | partly (no preview axis) |
+| Keys: M marker, ⌥M new-colour marker, ⇧M / ⌥⇧M next/previous marker | `028-shortcuts-timeline-2.png` | partly (no ⌥M) |
+| Keys: ⌥K keyframe panel, ⇧⌥K add keyframe | `029-shortcuts-timeline-3.png` | partly (⌥K) |
+| Keys: ⌘+ / ⌘− zoom, ⇧Z zoom to fit, ⌘scroll zoom, ⌥scroll pan | `026-shortcuts-timeline.png` | partly (no ⌘scroll zoom; ⇧scroll pans) |
+| Keys: V activate/deactivate clip, ⇧⌃S extract audio | `026-shortcuts-timeline.png` | partly (⇧⌃S; no activate) |
 | Keys: ⌘C/⌘X/⌘V, ⌘Z/⌘⇧Z, ⌫ | `032-shortcuts-basic.png` | has |
 | Keys: ⌘⇧C / ⌘⇧V copy/paste attributes | `032-shortcuts-basic.png` | missing |
-| Keys: ⌘⇧F full-screen preview, ⌘⌥R rulers, ⌘; guides | `031-shortcuts-player.png` | partly (full-screen preview exists) |
+| Keys: ⌘⇧F full-screen preview, ⌘⌥R rulers, ⌘; guides | `031-shortcuts-player.png` | partly (⌘⇧F) |
 
 Out of scope: Download to, Auto sync, Synced items, Default space, Size limit, Dreamina sync, the shortcuts for Generate captions and voice isolation.
 

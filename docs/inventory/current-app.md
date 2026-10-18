@@ -1248,7 +1248,7 @@ The Animation tab (renderer/src/components/properties/AnimationProperties.tsx) i
 
 **Transport:** under the player: go to start, ±5 s (`fps·5` frames), and play/pause, which restarts from 0 when at the end (Buttons.tsx:23-101; control.ts:302-316). Time is shown as `HH:MM:SS:FF`. `ExtendTimelineButton` and `ReduceTimelineButton` exist but are never rendered.
 
-**Keyboard shortcuts.** The `document` keydown handler is in Controls.tsx; it passes keys to the timeline's handler (`handleTimelineKey`, renderer/src/lib/timeline-shortcuts.ts) first. It is ignored while focus is in an input, textarea or contentEditable. "Mod" means ⌘ or Ctrl. The Shortcuts menu lists them from renderer/src/lib/shortcuts.ts.
+**Keyboard shortcuts.** The `document` keydown handler is in Controls.tsx; it passes keys to the timeline's handler (`handleTimelineKey`, renderer/src/lib/timeline-shortcuts.ts) first. It is ignored while focus is in an input, textarea or contentEditable, and while one of the app's windows (Settings, Shortcuts, About, the notices) is open. Which key is which action is renderer/src/lib/keymap.ts's: CapCut's actions in its four tabs with their default keys, five presets, and the user's changes from the Shortcuts window (kept in the preferences); both handlers ask it (`actionFor`), so a rebinding moves what a key does. "Mod" is ⌘ on macOS, Ctrl elsewhere. The keys below are the defaults.
 
 | Keys | Action | Cite |
 |---|---|---|
@@ -1257,19 +1257,21 @@ The Animation tab (renderer/src/components/properties/AnimationProperties.tsx) i
 | Space | play / pause | timeline-shortcuts.ts |
 | Mod+B / Mod+Shift+B | split at the playhead (selected clips, else the main track's) / every track | timeline-shortcuts.ts |
 | Q / W | delete left / right of the playhead | timeline-shortcuts.ts |
-| M; Alt+← / Alt+→ | add marker at the playhead; previous / next marker | timeline-shortcuts.ts |
+| M; Shift+M / Alt+Shift+M (also Alt+→ / Alt+←) | add marker at the playhead; next / previous marker | timeline-shortcuts.ts |
 | P / N / ` | main track magnet / auto snapping / linkage | timeline-shortcuts.ts |
-| ← / →, Shift+← / Shift+→ | a frame back / forward; 10 frames | timeline-shortcuts.ts |
+| ← / →, Shift+← / Shift+→ | a frame back / forward; Settings › Edit › Step forward or back many (10) frames | timeline-shortcuts.ts |
 | ↑ / ↓; Home / End | previous / next edit (a clip's start or end); start / end | timeline-shortcuts.ts |
 | [ / ] | select the clips left (starting before) / right (ending after) of the playhead | timeline-shortcuts.ts |
 | Mod+A | select every clip not on a locked track | timeline-shortcuts.ts |
-| Mod+Shift+S | extract the selected video's audio | timeline-shortcuts.ts |
+| Ctrl+Shift+S (also Mod+Shift+S) | extract the selected video's audio | timeline-shortcuts.ts |
 | Mod+= / Mod+−; Shift+Z | timeline zoom in / out; zoom timeline to fit | timeline-shortcuts.ts |
 | Alt+K | the selected clip's keyframe graph | timeline-shortcuts.ts |
 | Delete / Backspace on a selected mask keyframe | delete the keyframe (capture phase) | renderer/src/components/timeline/clips/MaskKeyframes.tsx:516-541 |
 | Mod+C / Mod+X / Mod+V | copy / cut / paste at playhead | Controls.tsx:341-367 |
 | Mod+G / Mod+Shift+G | group / ungroup | Controls.tsx:370-406 |
-| Mod+0 / 5 / 1 / 2 | preview zoom fit / 50 % / 100 % / 200 % | Controls.tsx:415-427 |
+| Mod+0 (also Alt+Shift+Z) / 5 / 1 / 2; Alt+Shift+= / Alt+Shift+− | preview zoom fit / 50 % / 100 % / 200 %; a step in / out | timeline-shortcuts.ts |
+| Mod+Shift+F | full-screen preview | timeline-shortcuts.ts |
+| Mod+N / Mod+I / Mod+E | new project / import media / export | timeline-shortcuts.ts |
 | 1–5 (shape tool) | rect / ellipse / polygon / line / star | Controls.tsx:431-457 |
 | 1–3 (mask tool) | lasso / shape / draw | Controls.tsx:460-477 |
 | 1–3 (draw tool) | brush / highlighter / eraser | Controls.tsx:480-496 |
@@ -1293,7 +1295,7 @@ Shortcuts that do **not** exist: J/K/L, CapCut's select/split modes (A/B), enabl
 - type filter; sort by name, duration or date
 - item menu: Create/Remove Proxy (video only), Rename, Open File Location, Delete (Item.tsx:425-482)
 
-**Settings modal** (renderer/src/components/dialogs/SettingsModal.tsx): FPS 24/25/30/48/60, default clip length 3/5/10/15/30 s, the engine preview switch and an Updates tab. Opened from the top bar's gear or Menu ▸ Settings….
+**Settings window** (renderer/src/components/dialogs/settings/SettingsWindow.tsx; preferences in renderer/src/lib/preferences.ts, kept by main's SettingsModule): CapCut's Draft, Edit, Performance and General tabs; what each row does is listed in docs/plan/capcut-ui-spec.md §6.3. Opened from the home screen's gear, the top bar's gear and Menu ▸ Settings…, and the menu bar's Settings (⌘,). **Shortcuts window** (renderer/src/components/dialogs/ShortcutsWindow.tsx): from the top bar's keyboard and Help ▸ Shortcuts. **Project settings** (renderer/src/components/dialogs/ProjectSettingsModal.tsx, the inspector's Modify): the project's frame rate (CapCut's seven rates, rescaling the clips) and a filter clip's length. **About** and **Third-party copyright** (the notices made from the npm and Cargo lockfiles by scripts/third-party-notices.mjs): the home gear and the menu bar.
 
 ## 14. Known gaps / bugs noticed (facts only)
 
