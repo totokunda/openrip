@@ -12,6 +12,7 @@ import {
   useAssetControlsStore,
   updateAssetZoomLevel,
 } from "@/lib/assetControl";
+import { canDeleteTrack } from "./TrackControls";
 
 // One function, so the memoised clips keep their props when no selection is passed.
 const NEVER_SELECTED = (_clipId: string) => false;
@@ -45,6 +46,8 @@ const Timeline: React.FC<
 
   const { hoveredTimelineId, getClipsForTimeline } = useClipStore();
   const hiddenRectRef = React.useRef<KonvaRect>(null);
+  const lockedRectRef = React.useRef<KonvaRect>(null);
+  const locked = useClipStore((s) => !!s.getTimelineById(timelineId)?.locked);
 
   const clipsAll = getClipsForTimeline(timelineId);
   const clips = useMemo(() => {
@@ -105,13 +108,14 @@ const Timeline: React.FC<
 
   // Ensure the hidden/disabled overlay rect always stays on top visually
   React.useEffect(() => {
-    if (hiddenRectRef.current) {
+    if (hiddenRectRef.current || lockedRectRef.current) {
       setTimeout(() => {
         hiddenRectRef.current?.moveToTop();
+        lockedRectRef.current?.moveToTop();
         hiddenRectRef.current?.getLayer()?.batchDraw();
       }, 100);
     }
-  }, [hidden, muted, type]);
+  }, [hidden, muted, type, locked]);
 
 
 
@@ -172,6 +176,8 @@ const Timeline: React.FC<
             useControlsStore.getState().setFocusAnchorRatio(progress);
             useControlsStore.getState().setFocusFrame(frame, false);
           }
+          const store = useClipStore.getState();
+          const track = store.getTimelineById(timelineId);
           useContextMenuStore.getState().openMenu({
             position: { x: e.evt.clientX, y: e.evt.clientY },
             target: { type: "timeline", timelineId },
@@ -184,6 +190,21 @@ const Timeline: React.FC<
                     label: "Paste at Playhead",
                     action: "paste",
                     shortcut: "⌘V",
+                    disabled: !!track?.locked,
+                  },
+                ],
+              },
+              {
+                id: "track",
+                items: [
+                  track?.locked
+                    ? { id: "unlock", label: "Unlock track", action: "unlockTrack" }
+                    : { id: "lock", label: "Lock track", action: "lockTrack" },
+                  {
+                    id: "delete",
+                    label: "Delete track",
+                    action: "deleteTrack",
+                    disabled: !track || !canDeleteTrack(store.timelines, track),
                   },
                 ],
               },
@@ -248,6 +269,19 @@ const Timeline: React.FC<
           width={timelineWidth! - timelineX + 8}
           height={timelineHeight - 8}
           fill={"rgba(11, 11, 13, 0.60)"}
+        />
+      )}
+      {/* A locked track: its clips are dimmed, and clicks go through to the track's menu. */}
+      {!assetMode && locked && (
+        <Rect
+          ref={lockedRectRef}
+          id={`locked-${timelineId}`}
+          x={timelineX}
+          y={timelineY! + 32}
+          width={timelineWidth! - timelineX + 8}
+          height={timelineHeight - 8}
+          fill={"rgba(11, 11, 13, 0.45)"}
+          listening={false}
         />
       )}
     </>

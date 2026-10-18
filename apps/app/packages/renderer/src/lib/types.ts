@@ -166,6 +166,11 @@ export interface ClipProps {
    * and the field's own value is ignored; editing it at the playhead sets a key there.
    */
   keyframes?: ClipKeyframes;
+  /**
+   * Clips that share it are linked, as CapCut links a video and its extracted audio: they
+   * move, trim, split and delete together until unlinked.
+   */
+  linkId?: string;
 }
 
 export interface TimelineProps {
@@ -177,7 +182,17 @@ export interface TimelineProps {
   timelinePadding: number;
   muted: boolean;
   hidden: boolean;
+  /** Its clips can't be selected or edited (CapCut's "Lock track"). */
+  locked?: boolean;
 }
+
+/** A timeline marker: a point in time on the ruler, with a colour and a note. */
+export type Marker = {
+  id: string;
+  frame: number;
+  color: string;
+  note: string;
+};
 
 /** Visual media clips (video or image) that can carry masks. */
 export type MediaClipProps = VideoClipProps | ImageClipProps;

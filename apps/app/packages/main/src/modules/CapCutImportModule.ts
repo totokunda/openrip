@@ -83,6 +83,33 @@ async function linkInto(dir: string, target: string): Promise<string> {
   }
 }
 
+/**
+ * The draft's main track magnet (`config.maintrack_adsorb`) and its timeline markers
+ * (`time_marks`: times in µs), which the editor keeps beside the clips the engine converts.
+ */
+async function withDraftTimeline(doc: any, folder: string) {
+  let draft: any;
+  try {
+    draft = JSON.parse(await fs.readFile(path.join(folder, "draft_info.json"), "utf8"));
+  } catch {
+    return;
+  }
+  const fps = Number(doc?.settings?.fps) || 30;
+  if (typeof draft?.config?.maintrack_adsorb === "boolean") {
+    doc.settings = { ...(doc.settings ?? {}), mainTrackMagnet: draft.config.maintrack_adsorb };
+  }
+  const marks = Array.isArray(draft?.time_marks?.mark_items) ? draft.time_marks.mark_items : [];
+  const markers = marks
+    .filter((m: any) => Number.isFinite(m?.time_range?.start))
+    .map((m: any, i: number) => ({
+      id: typeof m.id === "string" && m.id ? m.id : `marker-${i}`,
+      frame: Math.max(0, Math.round((m.time_range.start / 1e6) * fps)),
+      color: typeof m.color === "string" && m.color ? m.color : "#00C1CD",
+      note: typeof m.title === "string" ? m.title : "",
+    }));
+  if (markers.length > 0) doc.timeline = { ...(doc.timeline ?? {}), markers };
+}
+
 async function importDraft(folder: string): Promise<CapCutImportResult> {
   const engine = getEngine();
   if (!engine) return { success: false, error: "The engine isn't available, and it's what reads CapCut drafts." };
@@ -92,6 +119,7 @@ async function importDraft(folder: string): Promise<CapCutImportResult> {
   const converted = await engine.capcutToApp(folder);
   const t1 = performance.now();
   const doc = JSON.parse(converted.json);
+  await withDraftTimeline(doc, folder);
   const userData = app.getPath("userData");
   const projectsDir = path.join(userData, "projects-json");
   const fps = Number(doc?.settings?.fps) || 30;

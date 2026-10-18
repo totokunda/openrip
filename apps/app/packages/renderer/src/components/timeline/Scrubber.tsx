@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useControlsStore } from "@/lib/control";
-import { getZoomLevelConfig } from "@/lib/zoom";
+import { useClipStore } from "@/lib/clip";
+import { SNAP_PX, snapPoints, snapToPoints } from "@/lib/timeline-edit";
 import { cn } from "@/lib/utils";
 
 interface ScrubControlProps {
@@ -14,8 +15,6 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
 }) => {
   const {
     timelineDuration,
-    fps,
-    zoomLevel,
     focusFrame,
     setFocusFrame,
     setFocusAnchorRatio,
@@ -74,73 +73,38 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
     const anchorRatio = (centerX - startPadding) / stageWidth;
     setFocusAnchorRatio(anchorRatio);
 
-    // Track nearest frame under the cursor (no snapping yet)
+    // The frame under the pointer, or a marker or clip edge it comes near (snapping, N; held
+    // ⌘ skips it), as CapCut's playhead does.
     const progress = (centerX - startPadding) / stageWidth;
     const [startFrame, endFrame] = timelineDuration;
     const framePosition = startFrame + progress * (endFrame - startFrame);
-    const snapped = Math.round(framePosition);
+    const snapped = snapPlayhead(framePosition, e.metaKey);
     setCurrentFrame(snapped);
     setFocusFrame(snapped);
   };
 
+  /** A frame for the playhead: the nearest one, or a marker or clip edge within reach. */
+  const snapPlayhead = (frame: number, skip: boolean) => {
+    const nearest = Math.max(0, Math.round(frame));
+    const controls = useControlsStore.getState();
+    if (!controls.snapping || skip) return nearest;
+    const { clips, markers } = useClipStore.getState();
+    const [startFrame, endFrame] = timelineDuration;
+    const points = snapPoints(clips, { playhead: -Infinity, markers, exclude: new Set() });
+    const hit = snapToPoints([frame], points, (SNAP_PX * Math.max(1, endFrame - startFrame)) / Math.max(1, stageWidth));
+    return hit ? hit.point : nearest;
+  };
+
+  // Let go: the playhead stays on the frame it was dragged to (the nearest frame, or what it
+  // snapped to), not on the ruler's tick grid, which can be two frames or more apart.
   const handleMouseUp = () => {
     setIsDragging(false);
-
-    // Determine snapping strategy based on zoom config (frame vs second)
-    const config = getZoomLevelConfig(zoomLevel, timelineDuration, fps);
-    const isFrameMode =
-      config.minorTickFormat === "frame" || config.majorTickFormat === "frame";
-
-    // Current center in pixels
-    const currentCenterX = position + handleHalf;
-    const minCenterX = startPadding;
-    const maxCenterX = startPadding + stageWidth;
-    let targetCenterX = currentCenterX;
     const [startFrame, endFrame] = timelineDuration;
-
-    if (isFrameMode) {
-      // Build frame tick positions (use minor interval for density)
-      const frameStep = Math.max(
-        1,
-        Math.round(
-          config.minorTickInterval *
-            (config.minorTickFormat === "second" ? fps : 1),
-        ),
-      );
-      let nearest = currentCenterX;
-      let nearestDist = Number.POSITIVE_INFINITY;
-
-      for (let f = startFrame; f <= endFrame; f += frameStep) {
-        const progress = (f - startFrame) / (endFrame - startFrame);
-        const tickCenterX = startPadding + progress * stageWidth;
-        if (tickCenterX < minCenterX - 1 || tickCenterX > maxCenterX + 1)
-          continue;
-        const d = Math.abs(tickCenterX - currentCenterX);
-        if (d < nearestDist) {
-          nearestDist = d;
-          nearest = tickCenterX;
-        }
-      }
-      targetCenterX = nearest;
-    } else {
-      // Approximate nearest frame position when ticks are in seconds
-      const progress = (currentFrame - startFrame) / (endFrame - startFrame);
-      targetCenterX = startPadding + progress * stageWidth;
-    }
-
-    // Clamp and apply (align handle center to target)
-    const clampedCenterX = Math.max(
-      minCenterX,
-      Math.min(targetCenterX, maxCenterX),
-    );
-    setPosition(clampedCenterX - handleHalf);
-    // Update focus frame and anchor to snapped values
-    const progress = (clampedCenterX - startPadding) / stageWidth;
-    const framePosition = startFrame + progress * (endFrame - startFrame);
-    
+    const frame = Math.max(startFrame, Math.min(endFrame, currentFrame));
+    const progress = (frame - startFrame) / Math.max(1, endFrame - startFrame);
+    setPosition(startPadding + progress * stageWidth - handleHalf);
     setIsAccurateSeekNeeded(true);
-    setFocusFrame(Math.round(framePosition));
-
+    setFocusFrame(frame);
     setFocusAnchorRatio(progress);
 
     if (wasPlaying) {

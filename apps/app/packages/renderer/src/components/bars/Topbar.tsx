@@ -54,6 +54,7 @@ import { cn } from "@/lib/utils";
 import { SettingsModal } from "../dialogs/SettingsModal";
 import { CapCutImportDialog } from "../dialogs/CapCutImportDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { SHORTCUT_SECTIONS } from "@/lib/shortcuts";
 
 interface TopBarProps {
 
@@ -673,65 +674,22 @@ const TopBar: React.FC<TopBarProps> = () => {
               Keyboard Shortcuts
             </span>
           </div>
-          <div className="divide-y divide-brand-light/10 ">
-            <div className="p-3">
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                <ShortcutRow action="Undo" keys={["⌘", "Z"]} />
-                <ShortcutRow action="Redo" keys={["⌘", "⇧", "Z"]} />
-                <ShortcutRow action="Zoom to Fit" keys={["⌘", "0"]} />
-                <ShortcutRow action="Zoom to 50%" keys={["⌘", "5"]} />
-                <ShortcutRow action="Zoom to 100%" keys={["⌘", "1"]} />
-                <ShortcutRow action="Zoom to 200%" keys={["⌘", "2"]} />
-                <ShortcutRow action="Group" keys={["⌘", "G"]} />
-                <ShortcutRow action="Ungroup" keys={["⌘", "⇧", "G"]} />
+          {/* Tall enough for the timeline's shortcuts: it scrolls. */}
+          <div className="divide-y divide-brand-light/10 max-h-[70vh] overflow-y-auto">
+            {SHORTCUT_SECTIONS.map((section, i) => (
+              <div className="p-3" key={section.title ?? i}>
+                {section.title && (
+                  <DropdownMenuLabel className="dark text-[11px] font-semibold text-brand-light p-0 mb-2">
+                    {section.title}
+                  </DropdownMenuLabel>
+                )}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  {section.rows.map((row) => (
+                    <ShortcutRow key={row.action} action={row.action} keys={row.keys} />
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="p-3">
-              <DropdownMenuLabel className="dark text-[11px] font-semibold text-brand-light p-0">
-                Tools
-              </DropdownMenuLabel>
-              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
-                <ShortcutRow action="Pointer" keys={["V"]} />
-                <ShortcutRow action="Hand" keys={["H"]} />
-                <ShortcutRow action="Draw" keys={["D"]} />
-                <ShortcutRow action="Text" keys={["T"]} />
-                <ShortcutRow action="Mask" keys={["M"]} />
-                <ShortcutRow action="Shape" keys={["S"]} />
-              </div>
-            </div>
-
-            <div className="p-3">
-              <DropdownMenuLabel className="dark text-[11px] font-semibold text-brand-light p-0">
-                Shape Mode
-              </DropdownMenuLabel>
-              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
-                <ShortcutRow action="Rectangle" keys={["1"]} />
-                <ShortcutRow action="Ellipse" keys={["2"]} />
-                <ShortcutRow action="Polygon" keys={["3"]} />
-                <ShortcutRow action="Line" keys={["4"]} />
-                <ShortcutRow action="Star" keys={["5"]} />
-              </div>
-            </div>
-            <div className="p-3">
-              <DropdownMenuLabel className="dark text-[11px] font-semibold text-brand-light p-0">
-                Mask Mode
-              </DropdownMenuLabel>
-              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
-                <ShortcutRow action="Lasso" keys={["1"]} />
-                <ShortcutRow action="Shape" keys={["2"]} />
-                <ShortcutRow action="Draw" keys={["3"]} />
-              </div>
-            </div>
-            <div className="p-3">
-              <DropdownMenuLabel className="dark text-[11px] font-semibold text-brand-light p-0">
-                Draw Mode
-              </DropdownMenuLabel>
-              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
-                <ShortcutRow action="Brush" keys={["1"]} />
-                <ShortcutRow action="Highlighter" keys={["2"]} />
-                <ShortcutRow action="Eraser" keys={["3"]} />
-              </div>
-            </div>
+            ))}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

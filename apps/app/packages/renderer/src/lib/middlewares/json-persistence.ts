@@ -1,5 +1,5 @@
 import type { StateCreator } from "zustand";
-import { useClipStore } from "../clip";
+import { useClipStore, resolveOverlapsTimelines } from "../clip";
 import { useControlsStore } from "../control";
 import {
   saveProjectJson,
@@ -21,6 +21,7 @@ import type {
   ShapeTool,
   ViewTool,
   Point,
+  Marker,
 } from "../types";
 
 import _ from "lodash";
@@ -30,6 +31,7 @@ import { exportSequence, type ExportClip } from "@app/export-renderer";
 import { prepareExportClipsForValue } from "../prepareExportClips";
 import { sortClipsForStacking } from "../clipOrdering";
 import { pauseHistory, resetHistory } from "../history";
+import { isMainTrackPacked } from "../timeline-edit";
 type JsonProjectSlice = {
   projects: Array<{
     id: number;
@@ -134,6 +136,8 @@ type ProjectJsonSnapshot = {
     fps: number;
     defaultClipLength: number;
     aspectRatio?: { width: number; height: number; id: string };
+    /** The main track magnet (CapCut's maintrack_adsorb). */
+    mainTrackMagnet?: boolean;
   };
   editorState: {
     duration: number;
@@ -148,12 +152,17 @@ type ProjectJsonSnapshot = {
     tool: ViewTool;
     shape: ShapeTool;
     viewportSize: { width: number; height: number };
+    /** Auto snapping and linkage on the timeline. */
+    snapping?: boolean;
+    linkage?: boolean;
     contentBounds: { x: number; y: number; width: number; height: number } | null;  
   };
   assets: Record<string, Asset>;
   timeline: {
     tracks: TimelineProps[];
     clips: TimelineClipJson[];
+    /** Markers on the ruler; frames, like the playhead. */
+    markers?: Marker[];
   };
 };
 
@@ -353,6 +362,7 @@ const buildProjectJsonSnapshot = (
         fps,
         aspectRatio: viewportState?.aspectRatio,
         defaultClipLength: controlsState.defaultClipLength,
+        mainTrackMagnet: clipState.magnet,
       },
       editorState: {
         duration: Number(clipState.clipDuration || 0),
@@ -373,6 +383,8 @@ const buildProjectJsonSnapshot = (
         timelineWindow: Array.isArray(controlsState.timelineDuration)
           ? (controlsState.timelineDuration as [number, number])
           : [0, controlsState.totalTimelineFrames || 0],
+        snapping: controlsState.snapping,
+        linkage: controlsState.linkage,
       },
       assets,
       timeline: {
@@ -380,6 +392,7 @@ const buildProjectJsonSnapshot = (
           ? (clipState.timelines as TimelineProps[])
           : [],
         clips: clipsForJson,
+        markers: clipState.markers,
       },
     };
 
@@ -467,6 +480,7 @@ const computeTimelineSignature = (timelines: unknown): string => {
     hidden: t?.hidden,
     timelineY: t?.timelineY,
     muted: t?.muted,
+    locked: t?.locked,
   }));
   return safeStringify(reduced);
 };
@@ -783,12 +797,28 @@ const hydrateStoresFromProjectJson = async (
         clipDuration = Math.max(clipDuration, doc.editorState.duration);
       }
 
+      // Markers as saved, in time order.
+      const markers: Marker[] = (Array.isArray(doc.timeline?.markers) ? doc.timeline.markers : [])
+        .filter((m) => m && typeof m.id === "string" && Number.isFinite(m.frame))
+        .map((m) => ({ id: m.id, frame: Math.max(0, Math.round(m.frame)), color: m.color || "#00C1CD", note: m.note ?? "" }))
+        .sort((a, b) => a.frame - b.frame);
+      // The magnet as saved (on for a project saved before it existed), but only over a main
+      // track that's already gapless from the start: opening a project never moves its clips.
+      const magnet =
+        (typeof doc.settings?.mainTrackMagnet === "boolean" ? doc.settings.mainTrackMagnet : true) &&
+        isMainTrackPacked(clips, timelineTracks);
+
       if (useClipStore && typeof useClipStore.setState === "function") {
         useClipStore.setState({
           clips,
-          timelines: timelineTracks,
+          // Laid out again: each track its kind's height (an older project's or a draft's
+          // tracks were sized differently).
+          timelines: resolveOverlapsTimelines(timelineTracks),
           assets: assetsRecord,
           clipDuration,
+          markers,
+          magnet,
+          mainPreview: null,
           snapGuideX:
             typeof doc.editorState?.snapGuideX === "number"
               ? doc.editorState.snapGuideX
@@ -849,6 +879,9 @@ const hydrateStoresFromProjectJson = async (
               : currentControls.focusFrame ?? 0,
           timelineDuration: timelineWindow as [number, number],
           totalTimelineFrames,
+          snapping: typeof doc.editorState?.snapping === "boolean" ? doc.editorState.snapping : true,
+          linkage: typeof doc.editorState?.linkage === "boolean" ? doc.editorState.linkage : true,
+          selectedMarkerId: null,
         });
       }
 
@@ -950,8 +983,12 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
         lastAssetSignature = assetsSig;
 
         // The signature covers what the cover shows; any other edit to a clip (a panel's
-        // field: its style, animation, transition…) replaces the clips and is saved too.
-        const clipsEdited = (state as any)?.clips !== (prev as any)?.clips;
+        // field: its style, animation, transition…) replaces the clips and is saved too, as
+        // are the markers and the magnet.
+        const clipsEdited =
+          (state as any)?.clips !== (prev as any)?.clips ||
+          (state as any)?.markers !== (prev as any)?.markers ||
+          (state as any)?.magnet !== (prev as any)?.magnet;
         if (clipsChanged || timelinesChanged || assetsChanged || clipsEdited) {
           scheduleJsonProjectSave(getProjectState);
         }
@@ -996,7 +1033,9 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
           state?.fps !== prev?.fps ||
           state?.timelineDuration !== prev?.timelineDuration ||
           state?.zoomLevel !== prev?.zoomLevel ||
-          state?.focusFrame !== prev?.focusFrame
+          state?.focusFrame !== prev?.focusFrame ||
+          state?.snapping !== prev?.snapping ||
+          state?.linkage !== prev?.linkage
         ) {
           scheduleJsonProjectSave(getProjectState);
         }
@@ -1167,6 +1206,9 @@ export const withJsonProjectPersistence =
                 assets: {},
                 clipDuration: 0,
                 snapGuideX: null,
+                markers: [],
+                magnet: true,
+                mainPreview: null,
               } as any);
             } catch {
               // ignore; best-effort

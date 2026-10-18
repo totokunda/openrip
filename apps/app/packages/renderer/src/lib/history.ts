@@ -1,7 +1,7 @@
 // Undo and redo for the open project. The history keeps states of the project's document (its
-// clips, tracks, assets and canvas), not commands: every edit in the app goes through the
-// stores, so recording what they hold covers every panel, tool and shortcut without each one
-// knowing about undo. The stores replace what they change and keep the rest, so states share
+// clips, tracks, markers, assets, canvas and main track magnet), not commands: every edit in
+// the app goes through the stores, so recording what they hold covers every panel, tool and
+// shortcut without each one knowing about undo. The stores replace what they change and keep the rest, so states share
 // everything an edit didn't touch and a step costs about what the edit changed. Putting a
 // state back goes through the stores too, so the autosave writes it and the engine syncs it.
 // See docs/plan/app-engine-integration.md.
@@ -11,7 +11,7 @@ import _ from "lodash";
 import { useClipStore, pruneAssetsForClips } from "./clip";
 import { useControlsStore } from "./control";
 import { useViewportStore } from "./viewport";
-import type { AnyClipProps, Asset, TimelineProps } from "./types";
+import type { AnyClipProps, Asset, Marker, TimelineProps } from "./types";
 
 /** The part of the stores an undo puts back. Playhead, selection, zoom and views aren't in it. */
 type Doc = {
@@ -20,6 +20,8 @@ type Doc = {
   assets: Record<string, Asset>;
   clipDuration: number;
   aspectRatio: { width: number; height: number; id: string };
+  markers: Marker[];
+  magnet: boolean;
 };
 
 /** A state in the history and the clips that were selected while it was the current one. */
@@ -57,6 +59,8 @@ const readDoc = (): Doc => {
     assets: c.assets,
     clipDuration: c.clipDuration,
     aspectRatio: useViewportStore.getState().aspectRatio,
+    markers: c.markers,
+    magnet: c.magnet,
   };
 };
 
@@ -66,7 +70,11 @@ const readDoc = (): Doc => {
  * Cheap on states that share most of their objects: equal references aren't looked into.
  */
 const sameDoc = (a: Doc, b: Doc) =>
-  _.isEqual(a.clips, b.clips) && _.isEqual(a.timelines, b.timelines) && _.isEqual(a.aspectRatio, b.aspectRatio);
+  _.isEqual(a.clips, b.clips) &&
+  _.isEqual(a.timelines, b.timelines) &&
+  _.isEqual(a.aspectRatio, b.aspectRatio) &&
+  _.isEqual(a.markers, b.markers) &&
+  a.magnet === b.magnet;
 
 const shallowEqual = (a: object, b: object) => {
   const keys = Object.keys(a);
@@ -120,7 +128,11 @@ const onChange = () => {
   // The assets and the duration follow the clips: a change to them alone (media info coming
   // in for a new import) is folded in, as is one that leaves the project as it was.
   const followsOnly =
-    next.clips === present.clips && next.timelines === present.timelines && next.aspectRatio === present.aspectRatio;
+    next.clips === present.clips &&
+    next.timelines === present.timelines &&
+    next.aspectRatio === present.aspectRatio &&
+    next.markers === present.markers &&
+    next.magnet === present.magnet;
   if (folding > 0 || followsOnly || action === stepAction || sameDoc(present, next)) {
     present = next;
     return;
@@ -138,7 +150,14 @@ const subscribe = () => {
   if (subscribed) return;
   subscribed = true;
   useClipStore.subscribe((s, p) => {
-    if (s.clips !== p.clips || s.timelines !== p.timelines || s.assets !== p.assets || s.clipDuration !== p.clipDuration) {
+    if (
+      s.clips !== p.clips ||
+      s.timelines !== p.timelines ||
+      s.assets !== p.assets ||
+      s.clipDuration !== p.clipDuration ||
+      s.markers !== p.markers ||
+      s.magnet !== p.magnet
+    ) {
       onChange();
     }
   });
@@ -167,7 +186,7 @@ export const isRestoredAspect = (aspectRatio: unknown) => aspectRatio != null &&
 
 /** Put a state back into the stores, with its selection where its clips are still there. */
 const restore = (entry: Entry) => {
-  const { clips, timelines, clipDuration, aspectRatio } = entry.doc;
+  const { clips, timelines, clipDuration, aspectRatio, markers, magnet } = entry.doc;
   const clipStore = useClipStore.getState();
   // Assets are the media's metadata: the newest of each, for the clips that use them.
   const assets = pruneAssetsForClips({ ...entry.doc.assets, ...clipStore.assets }, clips);
@@ -178,7 +197,7 @@ const restore = (entry: Entry) => {
   restoring = true;
   try {
     clipStore._updateZoomLevel(clips, clipDuration);
-    useClipStore.setState({ clips, timelines, assets, clipDuration });
+    useClipStore.setState({ clips, timelines, assets, clipDuration, markers, magnet, mainPreview: null });
     if (aspectRatio !== useViewportStore.getState().aspectRatio) {
       restoredAspect = aspectRatio;
       useViewportStore.setState({ aspectRatio, shouldUpdateViewport: true });

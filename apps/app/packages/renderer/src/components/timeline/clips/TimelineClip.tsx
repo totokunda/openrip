@@ -12,6 +12,16 @@ import {
   isValidTimelineForClip,
   getTimelineTypeForClip,
 } from "@/lib/clip";
+import {
+  isTrackLocked,
+  linkedClips,
+  mainTrackOf,
+  insertionFrame,
+  mainTrackPreview,
+  snapPoints,
+  snapToPoints,
+  SNAP_PX,
+} from "@/lib/timeline-edit";
 import { generatePosterCanvas } from "@/lib/media/timeline";
 import { useControlsStore } from "@/lib/control";
 import { useAssetControlsStore } from "@/lib/assetControl";
@@ -125,8 +135,12 @@ const TimelineClip: React.FC<
     : ctrlTimelineDuration;
   const zoomLevel = assetMode ? assetZoomLevel : ctrlZoomLevel;
   const resizeClip = useClipStore((s) => s.resizeClip);
-  const moveClipToEnd = useClipStore((s) => s.moveClipToEnd);
   const updateClip = useClipStore((s) => s.updateClip);
+  // A locked track's clips can't be selected, moved or trimmed.
+  const locked = useClipStore((s) => !assetMode && isTrackLocked(s.timelines, timelineId));
+  // Where the main track's clips would go while another is dragged over it (magnet on).
+  const previewStart = useClipStore((s) => (assetMode ? undefined : s.mainPreview?.[clipId]));
+  const setMainPreview = useClipStore((s) => s.setMainPreview);
   const setGhostX = useClipStore((s) => s.setGhostX);
   const setGhostTimelineId = useClipStore((s) => s.setGhostTimelineId);
   const setGhostStartEndFrame = useClipStore((s) => s.setGhostStartEndFrame);
@@ -215,12 +229,13 @@ const TimelineClip: React.FC<
   const clipX = useMemo(
     () =>
       getClipX(
-        currentStartFrame,
+        previewStart ?? currentStartFrame,
         currentEndFrame,
         timelineWidth,
         timelineDuration,
       ),
     [
+      previewStart,
       currentStartFrame,
       currentEndFrame,
       timelineWidth,
@@ -237,6 +252,10 @@ const TimelineClip: React.FC<
     getMediaInfoCached((currentClip as VideoClipProps | ImageClipProps)?.assetId!),
   );
   const dragInitialWindowRef = useRef<[number, number] | null>(null);
+  // While dragged over the main track with the magnet on: the point it would go in at.
+  const insertAtRef = useRef<number | null>(null);
+  // A trim under way: the clip's ends when it began (its edge follows the pointer from them).
+  const resizeFromRef = useRef<{ start: number; end: number } | null>(null);
   const thumbnailClipWidth = useRef<number>(0);
   const maxTimelineWidth = useMemo(
     () => timelineWidth,
@@ -660,8 +679,39 @@ const TimelineClip: React.FC<
       }
       const targetTimelineId = nearestTimelineForGhost || timelineId!;
       const targetTimeline = getTimelineById(targetTimelineId);
-      if (!isValidTimelineForClip(targetTimeline!, currentClip!)) return;
       if (!targetTimeline) return;
+      if (!isValidTimelineForClip(targetTimeline, currentClip!) || targetTimeline.locked) return;
+
+      const stateNow = useClipStore.getState();
+      const controls = useControlsStore.getState();
+      const visibleFrames = Math.max(1, visibleEndFrame - visibleStartFrame);
+      const frameOfPx = (px: number) => visibleStartFrame + (px / timelineWidth) * visibleFrames;
+      const pxOfFrame = (f: number) => ((f - visibleStartFrame) / visibleFrames) * timelineWidth;
+      const main = mainTrackOf(stateNow.timelines);
+      const magnetMain = stateNow.magnet && !!main && !main.locked;
+      const alone = new Set([currentClipId]);
+
+      // With the magnet on, the main track makes room where the clip would go in (before or
+      // after the clip under the pointer), and closes up behind a clip dragged off it, as in
+      // CapCut.
+      if (magnetMain && targetTimelineId === main!.timelineId) {
+        const at = insertionFrame(stateNow.clips, stateNow.timelines, frameOfPx(pointerX - timelinePadding), alone);
+        const preview = mainTrackPreview(stateNow.clips, stateNow.timelines, alone, clipLen, at);
+        insertAtRef.current = at;
+        setMainPreview(preview.starts);
+        setGhostTimelineId(targetTimelineId);
+        setGhostInStage(true);
+        setGhostX(pxOfFrame(preview.insertAt ?? 0));
+        setSnapGuideX(null);
+        setGhostStartEndFrame(0, clipLen);
+        return;
+      }
+      insertAtRef.current = null;
+      if (magnetMain && currentClip?.timelineId === main!.timelineId) {
+        setMainPreview(mainTrackPreview(stateNow.clips, stateNow.timelines, alone, null, 0).starts);
+      } else if (stateNow.mainPreview) {
+        setMainPreview(null);
+      }
 
       // Build occupied intervals on the target timeline excluding this clip (visible-window pixels)
       const otherClips = getClipsForTimeline(targetTimelineId).filter(
@@ -742,85 +792,31 @@ const TimelineClip: React.FC<
 
       validatedLeft = Math.max(0, validatedLeft);
 
-      // Cross-timeline edge snapping against other timelines' clip edges
-      const SNAP_THRESHOLD_PX = 6;
+      // Snapping (CapCut's auto snapping, N; held ⌘ skips it): either edge to the playhead, a
+      // marker or the edge of any clip on any track, within the gap it would drop into. The
+      // clip's linked clips move with it, so they aren't targets.
       let appliedSnap = false;
       let snapStageX: number | null = null;
-
-      if (chosenGap) {
+      if (chosenGap && controls.snapping && !e.evt.metaKey) {
         const [gLo, gHi] = chosenGap;
-        const allTimelines = useClipStore.getState().timelines || [];
-        const [sStart, sEnd] = useControlsStore.getState().timelineDuration;
-        const edgeCandidates: number[] = [];
-        for (const t of allTimelines) {
-          if (!t?.timelineId) continue;
-          if (t.timelineId === targetTimelineId) continue;
-          const tClips = getClipsForTimeline(t.timelineId);
-          for (const c of tClips) {
-            const sx = getClipX(
-              c.startFrame || 0,
-              c.endFrame || 0,
-              timelineWidth,
-              [sStart, sEnd],
-            );
-            const sw = getClipWidth(
-              c.startFrame || 0,
-              c.endFrame || 0,
-              timelineWidth,
-              [sStart, sEnd],
-            );
-            const lo = Math.max(0, Math.min(timelineWidth, sx));
-            const hi = Math.max(0, Math.min(timelineWidth, sx + sw));
-            if (hi > lo) {
-              edgeCandidates.push(lo, hi);
-            }
-          }
-        }
-        if (edgeCandidates.length > 0) {
-          const leftEdge = validatedLeft;
-          const rightEdge = validatedLeft + ghostWidthPx;
-          let bestDist = Infinity;
-          let bestEdge: number | null = null;
-          let bestSide: "left" | "right" | null = null;
-          for (const edge of edgeCandidates) {
-            const dL = Math.abs(edge - leftEdge);
-            const dR = Math.abs(edge - rightEdge);
-            if (dL < bestDist) {
-              bestDist = dL;
-              bestEdge = edge;
-              bestSide = "left";
-            }
-            if (dR < bestDist) {
-              bestDist = dR;
-              bestEdge = edge;
-              bestSide = "right";
-            }
-          }
-          if (bestEdge != null && bestDist <= SNAP_THRESHOLD_PX) {
-            let snappedLeft =
-              bestSide === "left" ? bestEdge : bestEdge - ghostWidthPx;
-            // keep within chosen gap
-            if (snappedLeft < gLo) snappedLeft = gLo;
-            if (snappedLeft + ghostWidthPx > gHi)
-              snappedLeft = gHi - ghostWidthPx;
-            const finalLeft = snappedLeft;
-            const finalRight = snappedLeft + ghostWidthPx;
-            const finalDist =
-              bestSide === "left"
-                ? Math.abs(bestEdge - finalLeft)
-                : Math.abs(bestEdge - finalRight);
-            if (finalDist <= SNAP_THRESHOLD_PX) {
-              validatedLeft = finalLeft;
-              appliedSnap = true;
-              snapStageX = timelinePadding + bestEdge;
-            }
+        const moving = new Set([currentClipId, ...(controls.linkage ? linkedClips(stateNow.clips, currentClip) : []).map((c) => c.clipId)]);
+        const points = snapPoints(stateNow.clips, { playhead: controls.focusFrame, markers: stateNow.markers, exclude: moving });
+        const start = frameOfPx(validatedLeft);
+        const hit = snapToPoints([start, start + clipLen], points, (SNAP_PX * visibleFrames) / timelineWidth);
+        if (hit) {
+          const snappedLeft = pxOfFrame(start + hit.delta);
+          if (snappedLeft >= gLo - 0.5 && snappedLeft + ghostWidthPx <= gHi + 0.5) {
+            validatedLeft = snappedLeft;
+            appliedSnap = true;
+            snapStageX = timelinePadding + pxOfFrame(hit.point);
           }
         }
       }
 
       setGhostTimelineId(targetTimelineId);
       setGhostInStage(true);
-      setGhostX(Math.round(validatedLeft));
+      // Not rounded: the drop takes its frame from it, exactly the one it snapped to.
+      setGhostX(validatedLeft);
       setSnapGuideX(
         appliedSnap && snapStageX != null ? Math.round(snapStageX) : null,
       );
@@ -868,16 +864,36 @@ const TimelineClip: React.FC<
       // Use ghost state target timeline and position, but if hovered dashed line exists,
       // create a new timeline at that location and drop onto it (similar to DnD flow)
       const state = useClipStore.getState();
-      const hoveredId = state.hoveredTimelineId;
+      let hoveredId = state.hoveredTimelineId;
       let dropTimelineId = state.ghostTimelineId || timelineId!;
       let gX = state.ghostX;
+      let insertAt = insertAtRef.current;
+      insertAtRef.current = null;
+      setMainPreview(null);
+      const main = mainTrackOf(state.timelines);
+      const mainIdx = main ? state.timelines.indexOf(main) : -1;
+      const magnetMain = state.magnet && !!main && !main.locked;
+
+      // A new video track under the main track would become the main track: the clip goes
+      // onto the main track instead (in where the pointer is), or with the magnet off onto a
+      // new track just above it.
+      let hoveredIdx = hoveredId
+        ? state.timelines.findIndex((t) => t.timelineId === hoveredId!.replace("dashed-", ""))
+        : -1;
+      if (hoveredId && main && getTimelineTypeForClip(currentClip!) === "media" && hoveredIdx >= mainIdx) {
+        if (magnetMain) {
+          const rect = _e.target.getStage()?.container().getBoundingClientRect();
+          const px = _e.evt.clientX - (rect?.left ?? 0) - timelinePadding;
+          insertAt = insertionFrame(state.clips, state.timelines, tStart + (px / stageWidth) * visibleDuration, new Set([currentClipId]));
+          dropTimelineId = main.timelineId;
+          hoveredId = null;
+        } else {
+          hoveredIdx = mainIdx - 1;
+        }
+      }
 
       if (hoveredId) {
         const timelines = state.timelines;
-        const hoveredKey = hoveredId.replace("dashed-", "");
-        const hoveredIdx = timelines.findIndex(
-          (t) => t.timelineId === hoveredKey,
-        );
         const hoveredTimeline =
           hoveredIdx !== -1 ? timelines[hoveredIdx] : null;
         const newTimelineId = uuidv4();
@@ -934,6 +950,20 @@ const TimelineClip: React.FC<
       }
 
       setHoveredTimelineId(null);
+
+      // Onto the main track with the magnet on: in at the point the drag showed, the clips
+      // after it making room (the store lays the track out).
+      if (magnetMain && dropTimelineId === main!.timelineId && insertAt != null) {
+        updateClip(clipId, { timelineId: dropTimelineId, startFrame: insertAt, endFrame: insertAt + clipLen });
+        setGhostInStage(false);
+        setGhostTimelineId(null);
+        setGhostStartEndFrame(0, 0);
+        setGhostX(0);
+        setDraggingClipId(null);
+        setSnapGuideX(null);
+        return;
+      }
+
       let startFrame = Math.round(tStart + (gX / stageWidth) * visibleDuration);
       let newTEnd = tEnd;
       let endFrame = startFrame + clipLen;
@@ -1085,6 +1115,7 @@ const TimelineClip: React.FC<
   const handleClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       const isShiftClick = e.evt?.shiftKey || false;
+      if (locked) return;
       if (assetMode) {
         setSelectedAssetClipId(currentClipId);
       } else {
@@ -1096,13 +1127,14 @@ const TimelineClip: React.FC<
       currentClipId,
       ctrlToggleClipSelection,
       setSelectedAssetClipId,
-      moveClipToEnd,
+      locked,
     ],
   );
 
   const handleContextMenu = 
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       e.evt.preventDefault();
+      if (locked) return;
       const stage = e.target.getStage();
       const container = stage?.container();
       if (!container) return;
@@ -1199,6 +1231,14 @@ const TimelineClip: React.FC<
           disabled: !isVideo || isSeparated,
         },
       ];
+      // A video and its detached audio are linked; Unlink lets them go their own ways, Link
+      // ties clips together again.
+      const anyLinked = targetIds.some((id) => !!clipsState.getClipById(id)?.linkId);
+      clipActions.push(
+        anyLinked
+          ? { id: "unlink", label: "Unlink", action: "unlink" }
+          : { id: "link", label: "Link", action: "link", disabled: targetIds.length < 2 || isGroup },
+      );
 
       useContextMenuStore.getState().openMenu({
         position: { x: e.evt.clientX, y: e.evt.clientY },
@@ -1259,7 +1299,9 @@ const TimelineClip: React.FC<
     } catch {}
   }, [assetMode, isSelected, clipWidth, timelineHeight]);
 
-  // Handle resizing via global mouse move/up while a handle is being dragged
+  // Handle resizing via global mouse move/up while a handle is being dragged. The edge follows
+  // the pointer from where the trim began, so a main track that closes up under it (a left
+  // edge trimmed with the magnet on stays where the clip before ends) doesn't move the mark.
   useEffect(() => {
     if (assetMode) return;
     if (!resizeSide) return;
@@ -1270,132 +1312,40 @@ const TimelineClip: React.FC<
       stage.container().style.cursor = "col-resize";
       const rect = stage.container().getBoundingClientRect();
       const stageX = e.clientX - rect.left;
-      const newFrame = calculateFrameFromX(stageX);
+      const state = useClipStore.getState();
+      const controls = useControlsStore.getState();
+      const clip = state.getClipById(clipId);
+      const from = resizeFromRef.current;
+      if (!clip || !from) return;
+      let targetFrame = calculateFrameFromX(stageX);
 
-      if (resizeSide === "right") {
-        let targetFrame = newFrame;
-
-
-        // Cross-timeline edge snapping when resizing right
-        const [tStart, tEnd] = useControlsStore.getState().timelineDuration;
-        const stageWidth = timelineWidth;
-        const pointerEdgeInnerX = Math.max(
-          0,
-          Math.min(stageWidth, stageX - timelinePadding),
-        );
-        const allTimelines = useClipStore.getState().timelines || [];
-        const existingEdges: number[] = [];
-        for (const t of allTimelines) {
-          if (!t?.timelineId) continue;
-          const tClips = getClipsForTimeline(t.timelineId).filter(
-            (c) => c.clipId !== clipId,
-          );
-          for (const c of tClips) {
-            const sx = getClipX(
-              c.startFrame || 0,
-              c.endFrame || 0,
-              stageWidth,
-              [tStart, tEnd],
-            );
-            const sw = getClipWidth(
-              c.startFrame || 0,
-              c.endFrame || 0,
-              stageWidth,
-              [tStart, tEnd],
-            );
-            const lo = Math.max(0, Math.min(stageWidth, sx));
-            const hi = Math.max(0, Math.min(stageWidth, sx + sw));
-            if (hi > lo) {
-              existingEdges.push(lo, hi);
-            }
-          }
-        }
-
-        const SNAP_THRESHOLD_PX = 6;
-        let best: { edge: number; dist: number } | null = null;
-        for (const edge of existingEdges) {
-          const dist = Math.abs(edge - pointerEdgeInnerX);
-          if (!best || dist < best.dist) best = { edge, dist };
-        }
-        if (best && best.dist <= SNAP_THRESHOLD_PX) {
-          const snappedFrame = Math.round(
-            tStart + (best.edge / Math.max(1, stageWidth)) * (tEnd - tStart),
-          );
-          targetFrame = Math.max((currentStartFrame || 0) + 1, snappedFrame);
-          setSnapGuideX(Math.round(timelinePadding + best.edge));
-        } else {
-          setSnapGuideX(null);
-        }
-        if (targetFrame !== currentEndFrame) {
-          // Use the new contiguous resize method - local state will update via useEffect
-          resizeClip(clipId, "right", targetFrame);
-        }
-      } else if (resizeSide === "left") {
-        let targetFrame = newFrame;
-
-
-        // Cross-timeline edge snapping when resizing left
-        const [tStart, tEnd] = useControlsStore.getState().timelineDuration;
-        const stageWidth = timelineWidth;
-        const pointerEdgeInnerX = Math.max(
-          0,
-          Math.min(stageWidth, stageX - timelinePadding),
-        );
-        const allTimelines = useClipStore.getState().timelines || [];
-        const existingEdges: number[] = [];
-        for (const t of allTimelines) {
-          if (!t?.timelineId) continue;
-          const tClips = getClipsForTimeline(t.timelineId).filter(
-            (c) => c.clipId !== clipId,
-          );
-          for (const c of tClips) {
-            const sx = getClipX(
-              c.startFrame || 0,
-              c.endFrame || 0,
-              stageWidth,
-              [tStart, tEnd],
-            );
-            const sw = getClipWidth(
-              c.startFrame || 0,
-              c.endFrame || 0,
-              stageWidth,
-              [tStart, tEnd],
-            );
-            const lo = Math.max(0, Math.min(stageWidth, sx));
-            const hi = Math.max(0, Math.min(stageWidth, sx + sw));
-            if (hi > lo) {
-              existingEdges.push(lo, hi);
-            }
-          }
-        }
-        const SNAP_THRESHOLD_PX = 6;
-        let best: { edge: number; dist: number } | null = null;
-        for (const edge of existingEdges) {
-          const dist = Math.abs(edge - pointerEdgeInnerX);
-          if (!best || dist < best.dist) best = { edge, dist };
-        }
-        if (best && best.dist <= SNAP_THRESHOLD_PX) {
-          const snappedFrame = Math.round(
-            tStart + (best.edge / Math.max(1, stageWidth)) * (tEnd - tStart),
-          );
-          targetFrame = Math.min((currentEndFrame || 0) - 1, snappedFrame);
-          setSnapGuideX(Math.round(timelinePadding + best.edge));
-        } else {
-          setSnapGuideX(null);
-        }
-
-        // Prevent resizing below frame 0
-        targetFrame = Math.max(0, targetFrame);
-
-        if (targetFrame !== currentStartFrame) {
-          // Use the new contiguous resize method - local state will update via useEffect
-          resizeClip(clipId, "left", targetFrame);
+      // Snapping (N; held ⌘ skips it) to the playhead, a marker or any other clip's edge.
+      setSnapGuideX(null);
+      if (controls.snapping && !e.metaKey) {
+        const [tStart, tEnd] = controls.timelineDuration;
+        const moving = new Set([clipId, ...(controls.linkage ? linkedClips(state.clips, clip) : []).map((c) => c.clipId)]);
+        const points = snapPoints(state.clips, { playhead: controls.focusFrame, markers: state.markers, exclude: moving });
+        const hit = snapToPoints([targetFrame], points, (SNAP_PX * Math.max(1, tEnd - tStart)) / Math.max(1, timelineWidth));
+        if (hit) {
+          targetFrame = hit.point;
+          setSnapGuideX(timelinePadding + ((hit.point - tStart) / Math.max(1, tEnd - tStart)) * timelineWidth);
         }
       }
+
+      // How far the edge should have moved since the trim began, less how far it has: the
+      // clip's length has changed by exactly what was applied.
+      const length = (clip.endFrame ?? 0) - (clip.startFrame ?? 0);
+      const applied = resizeSide === "right" ? length - (from.end - from.start) : from.end - from.start - length;
+      const wanted = resizeSide === "right" ? targetFrame - from.end : targetFrame - from.start;
+      const step = wanted - applied;
+      if (step === 0) return;
+      const edge = resizeSide === "right" ? clip.endFrame ?? 0 : clip.startFrame ?? 0;
+      resizeClip(clipId, resizeSide, edge + step);
     };
 
     const handleMouseUp = () => {
       setResizeSide(null);
+      resizeFromRef.current = null;
       stage.container().style.cursor = "default";
       setSnapGuideX(null);
     };
@@ -1409,17 +1359,11 @@ const TimelineClip: React.FC<
   }, [
     assetMode,
     resizeSide,
-    currentStartFrame,
-    currentEndFrame,
     calculateFrameFromX,
     clipId,
     resizeClip,
-    clipType,
-    currentClip,
-    updateClip,
     timelinePadding,
     timelineWidth,
-    getClipsForTimeline,
     setSnapGuideX,
   ]);
 
@@ -1475,7 +1419,6 @@ const TimelineClip: React.FC<
     [
       assetMode,
       currentClipId,
-      moveClipToEnd,
       isSelected,
       currentEndFrame,
       currentStartFrame,
@@ -1675,7 +1618,7 @@ const TimelineClip: React.FC<
     <Group ref={rootGroupRef}>
       <Group
         onClick={handleClick}
-        draggable={!assetMode && resizeSide === null}
+        draggable={!assetMode && resizeSide === null && !locked}
         onDragEnd={handleDragEnd}
         onDragMove={handleDragMove}
         onDragStart={handleDragStart}
@@ -2096,6 +2039,7 @@ const TimelineClip: React.FC<
         visible={
           !assetMode &&
           isSelected &&
+          !locked &&
           clipType !== "group"
         }
         height={timelineHeight}
@@ -2112,10 +2056,9 @@ const TimelineClip: React.FC<
           if (!isSelected) {
             ctrlToggleClipSelection(currentClipId, false);
           }
-          if (currentClipId) {
-            //moveClipToEnd(currentClipId);
-          }
-          if (assetMode) return;
+          // Drawn over its neighbours while trimmed (Konva's order, not the store's).
+          rootGroupRef.current?.moveToTop();
+          resizeFromRef.current = { start: currentStartFrame, end: currentEndFrame };
           setResizeSide("right");
           e.target.getStage()!.container().style.cursor = "col-resize";
         }}
@@ -2134,6 +2077,7 @@ const TimelineClip: React.FC<
         visible={
           !assetMode &&
           isSelected &&
+          !locked &&
           clipType !== "group"
         }
         height={timelineHeight}
@@ -2150,10 +2094,10 @@ const TimelineClip: React.FC<
           if (!isSelected) {
             ctrlToggleClipSelection(currentClipId, false);
           }
-          if (currentClipId) {
-            moveClipToEnd(currentClipId);
-          }
-          if (assetMode) return;
+          // Drawn over its neighbours while trimmed (Konva's order: reordering the store's
+          // clips was a change undo recorded).
+          rootGroupRef.current?.moveToTop();
+          resizeFromRef.current = { start: currentStartFrame, end: currentEndFrame };
           setResizeSide("left");
           e.target.getStage()!.container().style.cursor = "col-resize";
         }}

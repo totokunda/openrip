@@ -1,4 +1,5 @@
 import { useClipStore, getClipWidth, getClipX } from "@/lib/clip";
+import { mainTrackOf } from "@/lib/timeline-edit";
 import { useControlsStore } from "@/lib/control";
 import { TimelineProps } from "@/lib/types";
 import React, { useMemo } from "react";
@@ -44,8 +45,12 @@ const GhostTimeline: React.FC<TimelineProps> = ({
     return timelinePadding;
   }, [timelinePadding]);
 
+  // Going into the main track with the magnet on, its clips make room (mainPreview): the ghost
+  // shows where the clip goes, with no gap to fit into.
+  const inserting = useClipStore((s) => s.mainPreview != null && mainTrackOf(s.timelines)?.timelineId === timelineId);
+
   const computedGuideLines = useMemo(() => {
-    if (!ghostInStage || ghostTimelineId !== timelineId) return null;
+    if (!ghostInStage || ghostTimelineId !== timelineId || inserting) return null;
     const [tStart, tEnd] = timelineDuration;
     const stageWidth = timelineWidth || 0;
     // Build merged occupied intervals in px (inner coordinates)
@@ -119,6 +124,7 @@ const GhostTimeline: React.FC<TimelineProps> = ({
     timelineWidth,
     draggingClipId,
     ghostInStage,
+    inserting,
   ]);
 
   const guideLines = computedGuideLines;

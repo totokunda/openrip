@@ -111,6 +111,18 @@ interface ControlStore {
   setPossibleKeyFocusFrames: (frames: number[]) => void;
   isAccurateSeekNeeded: boolean;
   setIsAccurateSeekNeeded: (needed: boolean) => void;
+  /** CapCut's auto snapping (N): dragged clips and edges snap to the playhead, markers and clip edges. */
+  snapping: boolean;
+  setSnapping: (on: boolean) => void;
+  /**
+   * CapCut's linkage (`): linked clips (a video and its extracted audio) move, trim, split and
+   * delete together. Off, each clip is edited on its own; the links stay.
+   */
+  linkage: boolean;
+  setLinkage: (on: boolean) => void;
+  /** The marker last clicked on the ruler (Delete removes it). */
+  selectedMarkerId: string | null;
+  setSelectedMarkerId: (id: string | null) => void;
 }
 
 export const useControlsStore = create<ControlStore>((set, get) => ({
@@ -361,4 +373,10 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
   setPossibleKeyFocusFrames: (frames) => set({ possibleKeyFocusFrames: frames }),
   isAccurateSeekNeeded: true,
   setIsAccurateSeekNeeded: (needed) => set({ isAccurateSeekNeeded: needed }),
+  snapping: true,
+  setSnapping: (on) => set({ snapping: on }),
+  linkage: true,
+  setLinkage: (on) => set({ linkage: on }),
+  selectedMarkerId: null,
+  setSelectedMarkerId: (id) => set({ selectedMarkerId: id }),
 }));

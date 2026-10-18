@@ -1,6 +1,7 @@
-import { create } from "zustand";
+import { create, StateCreator } from "zustand";
 import {
   AnyClipProps,
+  Marker,
   TimelineProps,
   ClipTransform,
   TimelineType,
@@ -21,6 +22,15 @@ import { getMediaInfo, getMediaInfoCached } from "./media/utils";
 import { getLowercaseExtension } from "@app/preload";
 import { remapMaskWithClipTransformProportional } from "./mask/clipTransformUtils";
 import { scaleKeyframes, shiftKeyframes, splitKeyframes } from "./keyframes";
+import {
+  mainTrackOf,
+  isTrackLocked,
+  isClipLocked,
+  linkedClips,
+  packMainTrack,
+  insertionFrame as mainInsertionFrame,
+  MARKER_COLORS,
+} from "./timeline-edit";
 
 import _ from "lodash";
 
@@ -66,8 +76,22 @@ interface ClipStore {
     newFrame: number,
   ) => boolean;
   splitClip: (cutFrame: number, clipId: string) => void;
+  /**
+   * Split at the playhead: the given clips there, or (none) the main track's clip under it;
+   * "all" splits every clip under it. False when nothing was split.
+   */
+  splitAtPlayhead: (frame: number, clipIds: string[] | "all") => boolean;
+  /**
+   * CapCut's Delete left / Delete right (Q / W): the part of the given clips before or after
+   * the playhead goes (none given: the main track's clip under it). With the magnet on, the
+   * main track closes up and, after Delete left, the playhead goes to where the clip now
+   * starts. False when nothing was trimmed.
+   */
+  trimToPlayhead: (side: "left" | "right", frame: number, clipIds: string[]) => boolean;
+  /** Link clips (a video and audio), or unlink the links the given clips are in. */
+  linkClips: (clipIds: string[]) => void;
+  unlinkClips: (clipIds: string[]) => void;
   mergeClips: (clipIds: string[]) => void;
-  moveClipToEnd: (clipId: string) => void;
   clipboard: AnyClipProps[];
   copyClips: (clipIds: string[]) => void;
   cutClips: (clipIds: string[]) => void;
@@ -141,6 +165,31 @@ interface ClipStore {
       keyframes: Map<number, MaskData> | Record<number, MaskData>,
     ) => Map<number, MaskData> | Record<number, MaskData>,
   ) => void;
+  /** A new empty track: a video, text, filter or shape track on top, an audio track at the bottom. */
+  addTrack: (type: TimelineType) => string;
+  /**
+   * Delete a track and its clips (clips linked to them elsewhere are unlinked). Not a locked
+   * track, nor the main track while another video track exists. False when refused.
+   */
+  deleteTrack: (timelineId: string) => boolean;
+  /** Move a track to `toIndex` in the list. The main track stays the lowest video track. */
+  moveTrack: (timelineId: string, toIndex: number) => void;
+  setTrackLocked: (timelineId: string, locked: boolean) => void;
+  // The main track magnet (CapCut's, on by default): the lowest video track keeps its clips
+  // end to end from the start; see lib/timeline-edit.ts. Part of the project.
+  magnet: boolean;
+  setMagnet: (on: boolean) => void;
+  // Markers on the ruler, in time order. Part of the project.
+  markers: Marker[];
+  /** A marker at `frame` (or the one already there); its id. */
+  addMarker: (frame: number) => string;
+  updateMarker: (id: string, patch: Partial<Omit<Marker, "id">>) => void;
+  removeMarker: (id: string) => void;
+  removeAllMarkers: () => void;
+  // While a clip is dragged over (or off) the main track with the magnet on: where its other
+  // clips would start, so they make room as in CapCut. Null otherwise.
+  mainPreview: Record<string, number> | null;
+  setMainPreview: (starts: Record<string, number> | null) => void;
 }
 
 // Helper function to calculate total duration of all clips
@@ -239,23 +288,21 @@ export const getTimelineTypeForClip = (
   return clip.type;
 };
 
+/** The space the timeline draws between tracks (inside each track's height). */
+const TRACK_GAP = 8;
+
+/**
+ * A track's height: CapCut's row for its kind (docs/plan/capcut-ui-spec.md §4.11: the main
+ * track 76 px, overlay video 52, audio 50, text, filter and the rest 24) and the gap below it.
+ */
+export const trackHeightFor = (type: TimelineType, main: boolean) =>
+  (type === "media" ? (main ? 76 : 52) : type === "audio" ? 50 : 24) + TRACK_GAP;
+
 export const getTimelineHeightForClip = (
   clip: AnyClipProps | MediaItem | string,
 ): number => {
   if (typeof clip === "string") clip = { type: clip } as AnyClipProps;
-
-  if (
-    clip.type === "video" ||
-    clip.type === "image" ||
-    (clip.type as any) === "media" ||
-    clip.type === "group"
-  ) {
-    return 72;
-  }
-  if (clip.type === "audio") {
-    return 54;
-  }
-  return 36;
+  return trackHeightFor(getTimelineTypeForClip(clip as AnyClipProps), false);
 };
 
 // Helper function to resolve overlaps by shifting clips to maintain frame gaps
@@ -314,15 +361,18 @@ export const getCorrectedClip = (
   return clip;
 };
 
+// The tracks laid out top to bottom, each its kind's height (trackHeightFor: the main track
+// taller than the overlays above it).
 export const resolveOverlapsTimelines = (
   timelines: TimelineProps[],
 ): TimelineProps[] => {
   if (timelines.length === 0) return timelines;
 
   const resolvedTimelines: TimelineProps[] = [];
+  const main = mainTrackOf(timelines);
 
   for (let i = 0; i < timelines.length; i++) {
-    const timeline = { ...timelines[i] };
+    const timeline = { ...timelines[i], timelineHeight: trackHeightFor(timelines[i].type, timelines[i] === main) };
 
     // First timeline starts at 0
     if (i === 0) {
@@ -341,12 +391,390 @@ export const resolveOverlapsTimelines = (
   return resolvedTimelines;
 };
 
-export const useClipStore = create<ClipStore>(((set, get) => ({
+/**
+ * What follows from any edit to the clips or tracks: a track the edit left empty goes, as in
+ * CapCut (the main track stays while anything is on the timeline; a track added empty stays
+ * until it's used); and with the magnet on, the main track closes up.
+ */
+const followRules = (prev: ClipStore, next: ClipStore): Partial<ClipStore> => {
+  const out: Partial<ClipStore> = {};
+  let timelines = next.timelines;
+  if (next.clips !== prev.clips) {
+    const counts = (clips: AnyClipProps[]) => {
+      const m = new Map<string, number>();
+      for (const c of clips) if (!c.hidden) m.set(c.timelineId ?? "", (m.get(c.timelineId ?? "") ?? 0) + 1);
+      return m;
+    };
+    const [before, after] = [counts(prev.clips), counts(next.clips)];
+    const main = mainTrackOf(timelines);
+    const emptied = timelines.filter(
+      (t) => (before.get(t.timelineId) ?? 0) > 0 && !after.get(t.timelineId) && !(after.size > 0 && t === main),
+    );
+    if (emptied.length > 0) {
+      timelines = resolveOverlapsTimelines(timelines.filter((t) => !emptied.includes(t)));
+      out.timelines = timelines;
+    }
+  }
+  if (next.magnet) {
+    const packed = packMainTrack(next.clips, timelines, undefined, linkage());
+    if (packed !== next.clips) {
+      const clips = resolveOverlaps(packed);
+      out.clips = clips;
+      out.clipDuration = calculateTotalClipDuration(clips);
+      next._updateZoomLevel(clips, out.clipDuration);
+    }
+  }
+  return out;
+};
+
+/**
+ * Applies followRules to every edit the store makes. States put back by undo or loaded from
+ * a file come in through setState and stay as they were.
+ */
+const withTimelineRules =
+  (config: StateCreator<ClipStore>): StateCreator<ClipStore> =>
+  (set, get, api) =>
+    config(
+      ((partial: any, replace?: any) =>
+        set((state) => {
+          const next = typeof partial === "function" ? partial(state) : partial;
+          if (!next || (next.clips === undefined && next.timelines === undefined && next.magnet === undefined)) return next;
+          // As the store is now: the edit may have set something itself already (a new track).
+          const merged = { ...api.getState(), ...next } as ClipStore;
+          return { ...next, ...followRules(state, merged) };
+        }, replace)) as any,
+      get,
+      api,
+    );
+
+/** Whether linked clips are edited together (CapCut's linkage, the toolbar's toggle). */
+const linkage = () => useControlsStore.getState().linkage;
+
+/** The clips linked to `clip` that its edits carry along: none with linkage off. */
+const partners = (clips: AnyClipProps[], clip: AnyClipProps | undefined) => (linkage() ? linkedClips(clips, clip) : []);
+
+/** The two halves of `clip` cut at `cutFrame` (between its ends), with new ids. */
+const splitClipAt = (clip: AnyClipProps, cutFrame: number): [AnyClipProps, AnyClipProps] => {
+  // create new clip ids
+  const newClipId1 = uuidv4();
+  const newClipId2 = uuidv4();
+  // IMPORTANT:
+  // Splitting must not change the displayed frames at any given timeline focusFrame.
+  // We achieve this by preserving the original clip's media mapping and only
+  // adjusting trims for the new boundaries.
+  //
+  // - `trimStart` is the source-frame offset at the clip's start (in project frames).
+  // - `trimEnd` is a <= 0 "give" value used by resize logic (negative when trimmed in).
+  // - The right clip must advance `trimStart` by the cut offset so it starts on the
+  //   same source frame the original clip had at `cutFrame`.
+  const oldStart = Math.max(0, Number(clip.startFrame ?? 0));
+  const oldEnd = Math.max(oldStart + 1, Number(clip.endFrame ?? oldStart + 1));
+  const safeOldTrimStart = isFinite(clip.trimStart ?? 0)
+    ? Number(clip.trimStart ?? 0)
+    : 0;
+  const safeOldTrimEnd = isFinite(clip.trimEnd ?? 0)
+    ? Number(clip.trimEnd ?? 0)
+    : 0;
+  const cutRel = Math.max(0, Math.min(oldEnd - oldStart, cutFrame - oldStart));
+
+  // Left clip: same start/trimStart; end at cut; adjust trimEnd exactly like a right-edge resize.
+  const newClip1: AnyClipProps = {
+    ...clip,
+    clipId: newClipId1,
+    endFrame: cutFrame,
+    trimStart: safeOldTrimStart,
+    trimEnd: safeOldTrimEnd + (cutFrame - oldEnd),
+  };
+
+  // Right clip: start at cut; advance trimStart so it begins at the cut point in the source.
+  const newClip2: AnyClipProps = {
+    ...clip,
+    clipId: newClipId2,
+    startFrame: cutFrame,
+    trimStart: safeOldTrimStart + cutRel,
+    trimEnd: safeOldTrimEnd,
+  };
+
+  // Each half keeps the keys on its side, and one at the cut so the motion carries on
+  // (the right half's moved to its start), as CapCut splits a keyframed clip.
+  if (clip.keyframes) {
+    const [leftKeys, rightKeys] = splitKeyframes(clip.keyframes, cutRel, useControlsStore.getState().fps || 30);
+    newClip1.keyframes = leftKeys;
+    newClip2.keyframes = rightKeys;
+  }
+
+  // A text's In animation plays where the clip starts, so it stays on the left clip; a
+  // transition leads into the clip after, so it stays on the right one, which ends where
+  // the clip did. A caption's words keep time with the speech: the right clip starts that
+  // far into it.
+  if (clip.type === "text") {
+    const text = newClip2 as TextClipProps;
+    text.animationIn = null;
+    if (text.spokenWords) text.spokenFrom = (text.spokenFrom ?? 0) + cutRel / (useControlsStore.getState().fps || 30);
+  }
+  if (clip.type === "video" || clip.type === "image") {
+    (newClip1 as VideoClipProps | ImageClipProps).transitionOut = null;
+  }
+
+  if (clip.type === "image" || clip.type === "video") {
+    // Split masks by local frame index (mask frames use the same local frame space
+    // as preview: focusFrame - startFrame + trimStart).
+    const originalMasks = (clip as VideoClipProps | ImageClipProps).masks;
+    if (Array.isArray(originalMasks) && originalMasks.length > 0) {
+      const masksForClip1: MaskClipProps[] = [];
+      const masksForClip2: MaskClipProps[] = [];
+
+      const startFrame = Number(clip.startFrame ?? 0);
+      const trimStart = isFinite(clip.trimStart ?? 0)
+        ? Number(clip.trimStart ?? 0)
+        : 0;
+      const cutLocal = Math.max(0, cutFrame - startFrame + trimStart);
+
+      const makeEmptyKeyframesLike = (
+        kf: Map<number, MaskData> | Record<number, MaskData>,
+      ) =>
+        kf instanceof Map
+          ? new Map<number, MaskData>()
+          : ({} as Record<number, MaskData>);
+
+      const setKeyframe = (
+        target: Map<number, MaskData> | Record<number, MaskData>,
+        frame: number,
+        data: MaskData,
+      ) => {
+        if (target instanceof Map) target.set(frame, data);
+        else (target as Record<number, MaskData>)[frame] = data;
+      };
+
+      const getKeyframe = (
+        source: Map<number, MaskData> | Record<number, MaskData>,
+        frame: number,
+      ): MaskData | undefined => {
+        return source instanceof Map
+          ? source.get(frame)
+          : (source as Record<number, MaskData>)[frame];
+      };
+
+      const getSortedFrames = (
+        kf: Map<number, MaskData> | Record<number, MaskData>,
+      ): number[] =>
+        (kf instanceof Map
+          ? Array.from(kf.keys())
+          : Object.keys(kf).map(Number)
+        ).sort((a, b) => a - b);
+
+      for (const mask of originalMasks) {
+        const keyframes = mask.keyframes;
+        const frames = getSortedFrames(keyframes);
+        const now = Date.now();
+
+        // Image clips only use frame 0; copy that to both
+        if (clip.type === "image") {
+          const dataAt0 =
+            getKeyframe(keyframes, 0) ??
+            (frames.length > 0
+              ? getKeyframe(keyframes, frames[0])
+              : undefined);
+          if (dataAt0) {
+            const kf1 = makeEmptyKeyframesLike(keyframes);
+            const kf2 = makeEmptyKeyframesLike(keyframes);
+            setKeyframe(kf1, 0, { ...dataAt0 });
+            setKeyframe(kf2, 0, { ...dataAt0 });
+            masksForClip1.push({
+              ...mask,
+              keyframes: kf1,
+              clipId: newClip1.clipId,
+              lastModified: now,
+            });
+            masksForClip2.push({
+              ...mask,
+              keyframes: kf2,
+              clipId: newClip2.clipId,
+              lastModified: now,
+            });
+          }
+          continue;
+        }
+
+        const kfLeft = makeEmptyKeyframesLike(keyframes);
+        const kfRight = makeEmptyKeyframesLike(keyframes);
+        for (const f of frames) {
+          const data = getKeyframe(keyframes, f);
+          if (!data) continue;
+          if (f < cutLocal) setKeyframe(kfLeft, f, { ...data });
+          else setKeyframe(kfRight, f, { ...data });
+        }
+
+        masksForClip1.push({
+          ...mask,
+          keyframes: kfLeft,
+          clipId: newClip1.clipId,
+          lastModified: now,
+        });
+        masksForClip2.push({
+          ...mask,
+          keyframes: kfRight,
+          clipId: newClip2.clipId,
+          lastModified: now,
+        });
+      }
+
+      (newClip1 as VideoClipProps | ImageClipProps).masks = masksForClip1;
+      (newClip2 as VideoClipProps | ImageClipProps).masks = masksForClip2;
+    }
+  }
+  return [newClip1, newClip2];
+};
+
+/**
+ * How far an edge of `clip` can move by `delta` frames: its length stays at least a frame, a
+ * left edge stays at or after 0, and a trim doesn't reach past its media (`trimStart` ≥ 0,
+ * `trimEnd` ≤ 0; text, photos and the like have no such bound).
+ */
+const clampEdgeDelta = (clip: AnyClipProps, side: "left" | "right", delta: number) => {
+  const start = clip.startFrame ?? 0;
+  const end = Math.max(clip.endFrame ?? 0, start + 1);
+  if (side === "right") {
+    let d = Math.max(delta, start + 1 - end);
+    if (isFinite(clip.trimEnd ?? 0)) d = Math.min(d, -(clip.trimEnd ?? 0));
+    return d;
+  }
+  let d = Math.min(delta, end - 1 - start);
+  d = Math.max(d, -start);
+  if (isFinite(clip.trimStart ?? 0)) d = Math.max(d, -(clip.trimStart ?? 0));
+  return d;
+};
+
+/** `clip` with an edge moved by `delta` frames, its trim following. */
+const moveEdge = (clip: AnyClipProps, side: "left" | "right", delta: number): AnyClipProps => {
+  if (side === "right") {
+    return { ...clip, endFrame: (clip.endFrame ?? 0) + delta, trimEnd: (clip.trimEnd || 0) + delta };
+  }
+  const next = {
+    ...clip,
+    startFrame: (clip.startFrame ?? 0) + delta,
+    trimStart: (clip.trimStart || 0) + delta,
+    // Keys stay on the content as the start moves (they're clip-local).
+    keyframes: shiftKeyframes(clip.keyframes, -delta),
+  } as AnyClipProps;
+  // A caption's words keep time with the speech as its start moves.
+  if (clip.type === "text" && clip.spokenWords) {
+    (next as TextClipProps).spokenFrom = (clip.spokenFrom ?? 0) + delta / (useControlsStore.getState().fps || 30);
+  }
+  return next;
+};
+
+export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => ({
   clipDuration: 0,
   _setClipDuration: (duration) => set({ clipDuration: duration }),
   clips: [],
   assets: {},
   timelines: [],
+  magnet: true,
+  // CapCut won't turn the magnet on or off while the main track is locked. Turned on, the
+  // main track closes up (withTimelineRules).
+  setMagnet: (on) =>
+    set((state) => (mainTrackOf(state.timelines)?.locked ? {} : { magnet: on })),
+  markers: [],
+  addMarker: (frame) => {
+    const at = Math.max(0, Math.round(frame));
+    const existing = get().markers.find((m) => m.frame === at);
+    if (existing) return existing.id;
+    const id = uuidv4();
+    set((state) => ({
+      markers: [
+        ...state.markers,
+        // CapCut names them "Marker 01", "Marker 02", …
+        { id, frame: at, color: MARKER_COLORS[0], note: `Marker ${String(state.markers.length + 1).padStart(2, "0")}` },
+      ].sort((a, b) => a.frame - b.frame),
+    }));
+    return id;
+  },
+  updateMarker: (id, patch) =>
+    set((state) => ({
+      markers: state.markers
+        .map((m) => (m.id === id ? { ...m, ...patch, frame: Math.max(0, Math.round(patch.frame ?? m.frame)) } : m))
+        .sort((a, b) => a.frame - b.frame),
+    })),
+  removeMarker: (id) => set((state) => ({ markers: state.markers.filter((m) => m.id !== id) })),
+  removeAllMarkers: () => set({ markers: [] }),
+  mainPreview: null,
+  setMainPreview: (starts) => set({ mainPreview: starts }),
+  addTrack: (type) => {
+    const id = uuidv4();
+    set((state) => {
+      const ref = state.timelines[0];
+      const track: TimelineProps = {
+        timelineId: id,
+        type,
+        timelineHeight: getTimelineHeightForClip(type === "media" ? "video" : type),
+        timelineWidth: ref?.timelineWidth ?? 0,
+        timelineY: 0,
+        timelinePadding: ref?.timelinePadding ?? 24,
+        muted: false,
+        hidden: false,
+      };
+      // Audio goes under the video, as in CapCut; the rest on top, above what's there.
+      const timelines = type === "audio" ? [...state.timelines, track] : [track, ...state.timelines];
+      return { timelines: resolveOverlapsTimelines(timelines) };
+    });
+    return id;
+  },
+  deleteTrack: (timelineId) => {
+    const state = get();
+    const track = state.getTimelineById(timelineId);
+    if (!track || track.locked) return false;
+    const main = mainTrackOf(state.timelines);
+    if (track === main && state.timelines.some((t) => t.type === "media" && t !== main)) return false;
+    // Its clips go; clips linked to them on other tracks stay, unlinked. A group's hidden
+    // children belong to the group's track.
+    const gone = state.clips.filter((c) => c.timelineId === timelineId && !c.hidden);
+    const goneIds = new Set(gone.map((c) => c.clipId));
+    const links = new Set(gone.map((c) => c.linkId).filter(Boolean));
+    set((s) => {
+      const clips = s.clips
+        .filter((c) => !goneIds.has(c.clipId))
+        .filter((c) => !gone.some((g) => g.type === "group" && ((g as GroupClipProps).children ?? []).flat().includes(c.clipId)))
+        .map((c) => (c.linkId && links.has(c.linkId) ? ({ ...c, linkId: undefined } as AnyClipProps) : c));
+      const resolvedClips = resolveOverlaps(clips);
+      const clipDuration = calculateTotalClipDuration(resolvedClips);
+      return {
+        clips: resolvedClips,
+        clipDuration,
+        assets: pruneAssetsForClips(s.assets, resolvedClips),
+        timelines: resolveOverlapsTimelines(s.timelines.filter((t) => t.timelineId !== timelineId)),
+      };
+    });
+    const controls = useControlsStore.getState();
+    controls.setSelectedClipIds(controls.selectedClipIds.filter((id) => !goneIds.has(id)));
+    return true;
+  },
+  moveTrack: (timelineId, toIndex) =>
+    set((state) => {
+      const from = state.timelines.findIndex((t) => t.timelineId === timelineId);
+      if (from === -1) return {};
+      const main = mainTrackOf(state.timelines);
+      const track = state.timelines[from];
+      if (track === main) return {};
+      const rest = state.timelines.filter((t) => t !== track);
+      let at = Math.max(0, Math.min(rest.length, toIndex));
+      // A video track can't go under the main track: it would become the main track.
+      if (track.type === "media" && main) at = Math.min(at, rest.indexOf(main));
+      const timelines = [...rest.slice(0, at), track, ...rest.slice(at)];
+      if (timelines.every((t, i) => t === state.timelines[i])) return {};
+      return { timelines: resolveOverlapsTimelines(timelines) };
+    }),
+  setTrackLocked: (timelineId, locked) => {
+    set((state) => ({
+      timelines: state.timelines.map((t) => (t.timelineId === timelineId ? { ...t, locked } : t)),
+    }));
+    // A locked track's clips can't be selected.
+    if (locked) {
+      const onTrack = new Set(get().clips.filter((c) => c.timelineId === timelineId).map((c) => c.clipId));
+      const controls = useControlsStore.getState();
+      controls.setSelectedClipIds(controls.selectedClipIds.filter((id) => !onTrack.has(id)));
+    }
+  },
   setAssets: (assets) => set({ assets }),
   addAssetAsync: async (asset): Promise<Asset> => {
     if (typeof asset === "string") {
@@ -823,7 +1251,14 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
   },
   addClip: (clip: AnyClipProps) =>
     set((state) => {
-      const newClips = [...state.clips, clip];
+      if (isTrackLocked(state.timelines, clip.timelineId)) return {};
+      let newClips = [...state.clips, clip];
+      // Onto the main track with the magnet on: it goes in at its start (a clip's start, from
+      // insertionFrame), the clips after it making room.
+      const main = mainTrackOf(state.timelines);
+      if (state.magnet && main && clip.timelineId === main.timelineId) {
+        newClips = packMainTrack(newClips, state.timelines, { ids: [clip.clipId], at: clip.startFrame ?? 0 }, linkage());
+      }
       const resolvedClips = resolveOverlaps(newClips);
       const clipDuration = calculateTotalClipDuration(resolvedClips);
       get()._updateZoomLevel(resolvedClips, clipDuration);
@@ -833,8 +1268,13 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
   removeClip: (clipId: string) =>
     set((state) => {
       const clipToDelete = state.clips.find((c) => c.clipId === clipId);
+      // A locked track's clips stay. With the magnet on, the main track closes up behind a
+      // clip deleted from it (CapCut's ripple delete; withTimelineRules).
+      if (clipToDelete && isClipLocked(state.clips, state.timelines, clipToDelete, linkage())) return {};
 
-      let newClips: AnyClipProps[] = state.clips;
+      // Linked clips (a video's extracted audio) go with it.
+      const linked = new Set(partners(state.clips, clipToDelete).map((c) => c.clipId));
+      let newClips: AnyClipProps[] = state.clips.filter((c) => !linked.has(c.clipId));
 
       if (!clipToDelete) {
         const resolvedClips = resolveOverlaps(newClips);
@@ -933,6 +1373,41 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
       let newClips = [...state.clips];
       newClips[index] = updatedClip;
 
+      // Timing and track changes leave a locked track alone, and don't go onto one.
+      const timingKeys = ["startFrame", "endFrame", "trimStart", "trimEnd", "timelineId", "speed"] as const;
+      const retimed = timingKeys.some((k) => Object.prototype.hasOwnProperty.call(nextUpdate, k) && (nextUpdate as any)[k] !== (current as any)[k]);
+      if (retimed && (isClipLocked(state.clips, state.timelines, current, linkage()) || isTrackLocked(state.timelines, updatedClip.timelineId))) {
+        return {};
+      }
+      const deltaStart = (updatedClip.startFrame ?? 0) - (current.startFrame ?? 0);
+      const deltaEnd = (updatedClip.endFrame ?? 0) - (current.endFrame ?? 0);
+
+      // Linked clips keep time with it: they move as it moves (on their own tracks) and take
+      // its speed.
+      if (current.type !== "group") {
+        const speedChanged = (nextUpdate as VideoClipProps).speed !== undefined && (nextUpdate as VideoClipProps).speed !== (current as VideoClipProps).speed;
+        for (const partner of partners(state.clips, current)) {
+          const i = newClips.findIndex((c) => c.clipId === partner.clipId);
+          if (speedChanged && (partner.type === "video" || partner.type === "audio")) {
+            const speed = (nextUpdate as VideoClipProps).speed as number;
+            const start = partner.startFrame + deltaStart;
+            const length = Math.max(1, Math.round(Math.max(1, partner.endFrame - partner.startFrame) * (Math.max(0.1, Number(partner.speed || 1)) / speed)));
+            const keyframes = scaleKeyframes(partner.keyframes, Math.max(0.1, Number(partner.speed || 1)) / speed);
+            newClips[i] = { ...partner, speed, startFrame: start, endFrame: start + length, keyframes } as AnyClipProps;
+          } else if (deltaStart !== 0 || deltaEnd !== 0) {
+            newClips[i] = { ...partner, startFrame: partner.startFrame + deltaStart, endFrame: partner.endFrame + deltaEnd };
+          }
+        }
+      }
+
+      // Moved onto or along the main track with the magnet on: it goes in at its new start
+      // (a clip's start, from insertionFrame), the clips after it making room.
+      const main = mainTrackOf(state.timelines);
+      const moved = updatedClip.timelineId !== current.timelineId || (deltaStart !== 0 && deltaStart === deltaEnd);
+      if (state.magnet && main && updatedClip.timelineId === main.timelineId && moved) {
+        newClips = packMainTrack(newClips, state.timelines, { ids: [clipId], at: updatedClip.startFrame ?? 0 }, linkage());
+      }
+
       // If updating a group clip's location, offset its children accordingly
       if (current.type === "group") {
         const oldStart = current.startFrame ?? 0;
@@ -978,6 +1453,7 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
     set((state) => {
       const clip = state.clips.find((c) => c.clipId === clipId);
       if (!clip || clip.type !== "video") return { clips: state.clips };
+      if (isClipLocked(state.clips, state.timelines, clip, linkage())) return {};
       const newClipId1 = uuidv4();
       const newClipId2 = uuidv4();
       const newAudioTimelineId = uuidv4();
@@ -1021,10 +1497,13 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
         height: asset?.height ?? 0,
       });
 
+      // The two stay linked, as in CapCut: they move, trim, split and delete together.
+      const linkId = uuidv4();
       const clipVideo: AnyClipProps = {
         ...clip,
         assetId: asset1.id,
         clipId: newClipId1,
+        linkId,
       };
       const clipAudio: AnyClipProps = {
         ...clip,
@@ -1032,7 +1511,10 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
         assetId: asset2.id,
         clipId: newClipId2,
         timelineId: newAudioTimelineId,
+        linkId,
       };
+      // A converted CapCut clip's payload stays with the video: the audio is a plain audio clip.
+      delete (clipAudio as any).engine;
 
       // Remove the original clip and add both new clips
       const newClips = [
@@ -1065,108 +1547,27 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
     }),
   isValidResize: (clipId: string, side: "left" | "right", newFrame: number) => {
     const state = get();
-    const sortedClips = [...state.clips].sort(
-      (a, b) => (a.startFrame || 0) - (b.startFrame || 0),
-    );
-    const currentIndex = sortedClips.findIndex((c) => c.clipId === clipId);
-    if (currentIndex === -1) return false;
-
-    const currentClip = sortedClips[currentIndex];
-
-
-    if (side === "right") {
-      // Resize right edge - adjust current clip's end and shift all clips after it
-      const oldEndFrame = currentClip.endFrame || 0;
-      const newEndFrame = Math.max((currentClip.startFrame || 0) + 1, newFrame);
-      const frameDelta = newEndFrame - oldEndFrame;
-
-      if (frameDelta + (currentClip.trimEnd || 0) > 0) {
-        return false;
-      }
-    } else if (side === "left") {
-      // Resize left edge - adjust current clip's start and shift all clips before it
-      const oldStartFrame = currentClip.startFrame || 0;
-      const newStartFrame = Math.min((currentClip.endFrame || 0) - 1, newFrame);
-      let frameDelta = newStartFrame - oldStartFrame;
-
-      if (frameDelta + (currentClip.trimStart || 0) < 0) {
-        return false;
-      }
-    }
-    return true;
+    const clip = state.clips.find((c) => c.clipId === clipId);
+    if (!clip || clip.type === "group" || isClipLocked(state.clips, state.timelines, clip, linkage())) return false;
+    const edge = side === "right" ? clip.endFrame ?? 0 : clip.startFrame ?? 0;
+    const delta = newFrame - edge;
+    return clampEdgeDelta(clip, side, delta) === delta;
   },
+  // An edge dragged to `newFrame`, as far as the clip's media allows. Clips linked to it
+  // (its extracted audio) take the same change, so they stay in step; it goes only as far as
+  // all of them can. Neighbours aren't checked: resolveOverlaps pushes them, and with the
+  // magnet on the main track closes up (a left edge stays where the clip before ends).
   resizeClip: (clipId: string, side: "left" | "right", newFrame: number) =>
     set((state) => {
-      const sortedClips = [...state.clips].sort(
-        (a, b) => (a.startFrame || 0) - (b.startFrame || 0),
-      );
-      const currentIndex = sortedClips.findIndex((c) => c.clipId === clipId);
-      if (currentIndex === -1) return { clips: state.clips };
-
-      const currentClip = sortedClips[currentIndex];
-      if (currentClip.type === "group") {
-        return { clips: state.clips };
-      }
-      const newClips = [...state.clips];
-
-      if (side === "right") {
-        // Resize right edge - adjust current clip's end and shift all clips after it
-        const oldEndFrame = currentClip.endFrame || 0;
-        const start = Math.max(0, currentClip.startFrame || 0);
-        let desiredEndFrame = Math.max(start + 1, newFrame);
-
-
-        const frameDelta = desiredEndFrame - oldEndFrame;
- 
-        
-        if (frameDelta + (currentClip.trimEnd || 0) > 0) {
-          return { clips: state.clips };
-        }
-
-        const currentClipIndex = newClips.findIndex((c) => c.clipId === clipId);
-        newClips[currentClipIndex] = {
-          ...currentClip,
-          endFrame: desiredEndFrame,
-          trimEnd: frameDelta + (currentClip.trimEnd || 0),
-        };
-      
-      } else if (side === "left") {
-        // Resize left edge - adjust current clip's start and shift all clips before it
-        const oldStartFrame = currentClip.startFrame || 0;
-        const end = Math.max(currentClip.endFrame || 0, oldStartFrame + 1);
-        let desiredStartFrame = Math.min(end - 1, newFrame);
-
-
-        let frameDelta = desiredStartFrame - oldStartFrame;
-
-        if (frameDelta + (currentClip.trimStart || 0) < 0) {
-          return { clips: state.clips };
-        }
-
-        if (frameDelta == 0 && (currentClip.trimStart || 0) > 0) {
-          frameDelta = Math.max(
-            0,
-            Math.min(1, (currentClip.trimStart || 0) - 1),
-          );
-        } else {
-          const currentClipIndex = newClips.findIndex(
-            (c) => c.clipId === clipId,
-          );
-          newClips[currentClipIndex] = {
-            ...currentClip,
-            startFrame: desiredStartFrame,
-            trimStart: frameDelta + (currentClip.trimStart || 0),
-            // Keys stay on the content as the start moves (they're clip-local).
-            keyframes: shiftKeyframes(currentClip.keyframes, -frameDelta),
-          };
-          // A caption's words keep time with the speech as its start moves.
-          if (currentClip.type === "text" && currentClip.spokenWords) {
-            (newClips[currentClipIndex] as TextClipProps).spokenFrom =
-              (currentClip.spokenFrom ?? 0) + frameDelta / (useControlsStore.getState().fps || 30);
-          }
-        }
-      }
-  
+      const clip = state.clips.find((c) => c.clipId === clipId);
+      if (!clip || clip.type === "group" || isClipLocked(state.clips, state.timelines, clip, linkage())) return {};
+      const group = [clip, ...partners(state.clips, clip).filter((c) => c.type !== "group" && !c.hidden)];
+      const edge = side === "right" ? clip.endFrame ?? 0 : clip.startFrame ?? 0;
+      let delta = Math.round(newFrame) - edge;
+      for (const c of group) delta = clampEdgeDelta(c, side, delta);
+      if (delta === 0) return {};
+      const changed = new Map(group.map((c) => [c.clipId, moveEdge(c, side, delta)] as const));
+      const newClips = state.clips.map((c) => changed.get(c.clipId) ?? c);
       const resolvedClips = resolveOverlaps(newClips);
       const clipDuration = calculateTotalClipDuration(resolvedClips);
       const prunedAssets = pruneAssetsForClips(state.assets, resolvedClips);
@@ -1214,6 +1615,7 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
     set((state) => {
       const newClips = [...state.clips];
       const clips = newClips.filter((c) => clipIds.includes(c.clipId));
+      if (clips.some((c) => isClipLocked(state.clips, state.timelines, c, linkage()))) return {};
       // Sort clips by vertical timeline position (top to bottom), then by startFrame
       const sortedByTimeline = [...clips].sort((a, b) => {
         const ta = state.timelines.find((t) => t.timelineId === a.timelineId);
@@ -1262,15 +1664,21 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
         (t) => t.type === desiredType,
       );
       const candidateTimelines = mediaTimelines
-        .filter((t) => hasFreeSpace(t.timelineId))
+        .filter((t) => hasFreeSpace(t.timelineId) && !t.locked)
         .sort((a, b) => (a.timelineY || 0) - (b.timelineY || 0));
 
-      let targetTimelineId: string | undefined =
-        candidateTimelines[0]?.timelineId;
+      // Clips grouped from the main track stay on it where they can, as a CapCut compound
+      // clip does (with the magnet on, the main track would otherwise close up behind them).
+      const main = mainTrackOf(state.timelines);
+      const fromMain = main && clips.some((c) => c.timelineId === main.timelineId) && candidateTimelines.includes(main);
+      let targetTimelineId: string | undefined = fromMain
+        ? main.timelineId
+        : candidateTimelines[0]?.timelineId;
 
       const timelines = [...state.timelines];
 
-      // If no suitable existing timeline, create a new media timeline
+      // If no suitable existing timeline, create a new media timeline, above the main track
+      // (one under it would become the main track).
       if (!targetTimelineId) {
         const newTimelineId = uuidv4();
         const last = state.timelines[state.timelines.length - 1];
@@ -1284,7 +1692,9 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
           muted: false,
           hidden: false,
         };
-        timelines.push(newTimeline);
+        const mainIndex = main ? timelines.indexOf(main) : -1;
+        if (mainIndex === -1) timelines.push(newTimeline);
+        else timelines.splice(mainIndex, 0, newTimeline);
         targetTimelineId = newTimelineId;
       }
 
@@ -1352,6 +1762,7 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
       const groupClip = state.clips.find((c) => c.clipId === _groupId);
       if (!groupClip || groupClip.type !== "group")
         return { clips: state.clips };
+      if (isTrackLocked(state.timelines, groupClip.timelineId)) return {};
 
       const childrenNested = ((groupClip as GroupClipProps).children ||
         []) as string[][];
@@ -1562,200 +1973,93 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
       };
     }),
 
-  // Create two new clips from the original clip at the cut frame
+  // Create two new clips from the original clip at the cut frame. Clips linked to it are cut
+  // there too: the left halves stay linked to each other, and the right halves.
   splitClip: (cutFrame: number, clipId: string) =>
     set((state) => {
       // Find the clip that contains the cut frame
-      const clip = state.clips.find((clip) => {
-        const startFrame = clip.startFrame || 0;
-        const endFrame = clip.endFrame || 0;
-        return (
-          cutFrame > startFrame && cutFrame < endFrame && clip.clipId === clipId
-        );
-      });
-
-      if (!clip) return { clips: state.clips };
-
-      // remove the clip from the array
-      const filteredClips = state.clips.filter((c) => c.clipId !== clip.clipId);
-
-      // create new clip ids
-      const newClipId1 = uuidv4();
-      const newClipId2 = uuidv4();
-      // IMPORTANT:
-      // Splitting must not change the displayed frames at any given timeline focusFrame.
-      // We achieve this by preserving the original clip's media mapping and only
-      // adjusting trims for the new boundaries.
-      //
-      // - `trimStart` is the source-frame offset at the clip's start (in project frames).
-      // - `trimEnd` is a <= 0 "give" value used by resize logic (negative when trimmed in).
-      // - The right clip must advance `trimStart` by the cut offset so it starts on the
-      //   same source frame the original clip had at `cutFrame`.
-      const oldStart = Math.max(0, Number(clip.startFrame ?? 0));
-      const oldEnd = Math.max(oldStart + 1, Number(clip.endFrame ?? oldStart + 1));
-      const safeOldTrimStart = isFinite(clip.trimStart ?? 0)
-        ? Number(clip.trimStart ?? 0)
-        : 0;
-      const safeOldTrimEnd = isFinite(clip.trimEnd ?? 0)
-        ? Number(clip.trimEnd ?? 0)
-        : 0;
-      const cutRel = Math.max(0, Math.min(oldEnd - oldStart, cutFrame - oldStart));
-
-      // Left clip: same start/trimStart; end at cut; adjust trimEnd exactly like a right-edge resize.
-      const newClip1: AnyClipProps = {
-        ...clip,
-        clipId: newClipId1,
-        endFrame: cutFrame,
-        trimStart: safeOldTrimStart,
-        trimEnd: safeOldTrimEnd + (cutFrame - oldEnd),
-      };
-
-      // Right clip: start at cut; advance trimStart so it begins at the cut point in the source.
-      const newClip2: AnyClipProps = {
-        ...clip,
-        clipId: newClipId2,
-        startFrame: cutFrame,
-        trimStart: safeOldTrimStart + cutRel,
-        trimEnd: safeOldTrimEnd,
-      };
-
-      // Each half keeps the keys on its side, and one at the cut so the motion carries on
-      // (the right half's moved to its start), as CapCut splits a keyframed clip.
-      if (clip.keyframes) {
-        const [leftKeys, rightKeys] = splitKeyframes(clip.keyframes, cutRel, useControlsStore.getState().fps || 30);
-        newClip1.keyframes = leftKeys;
-        newClip2.keyframes = rightKeys;
-      }
-
-      // A text's In animation plays where the clip starts, so it stays on the left clip; a
-      // transition leads into the clip after, so it stays on the right one, which ends where
-      // the clip did. A caption's words keep time with the speech: the right clip starts that
-      // far into it.
-      if (clip.type === "text") {
-        const text = newClip2 as TextClipProps;
-        text.animationIn = null;
-        if (text.spokenWords) text.spokenFrom = (text.spokenFrom ?? 0) + cutRel / (useControlsStore.getState().fps || 30);
-      }
-      if (clip.type === "video" || clip.type === "image") {
-        (newClip1 as VideoClipProps | ImageClipProps).transitionOut = null;
-      }
-
-      if (clip.type === "image" || clip.type === "video") {
-        // Split masks by local frame index (mask frames use the same local frame space
-        // as preview: focusFrame - startFrame + trimStart).
-        const originalMasks = (clip as VideoClipProps | ImageClipProps).masks;
-        if (Array.isArray(originalMasks) && originalMasks.length > 0) {
-          const masksForClip1: MaskClipProps[] = [];
-          const masksForClip2: MaskClipProps[] = [];
-
-          const startFrame = Number(clip.startFrame ?? 0);
-          const trimStart = isFinite(clip.trimStart ?? 0)
-            ? Number(clip.trimStart ?? 0)
-            : 0;
-          const cutLocal = Math.max(0, cutFrame - startFrame + trimStart);
-
-          const makeEmptyKeyframesLike = (
-            kf: Map<number, MaskData> | Record<number, MaskData>,
-          ) =>
-            kf instanceof Map
-              ? new Map<number, MaskData>()
-              : ({} as Record<number, MaskData>);
-
-          const setKeyframe = (
-            target: Map<number, MaskData> | Record<number, MaskData>,
-            frame: number,
-            data: MaskData,
-          ) => {
-            if (target instanceof Map) target.set(frame, data);
-            else (target as Record<number, MaskData>)[frame] = data;
-          };
-
-          const getKeyframe = (
-            source: Map<number, MaskData> | Record<number, MaskData>,
-            frame: number,
-          ): MaskData | undefined => {
-            return source instanceof Map
-              ? source.get(frame)
-              : (source as Record<number, MaskData>)[frame];
-          };
-
-          const getSortedFrames = (
-            kf: Map<number, MaskData> | Record<number, MaskData>,
-          ): number[] =>
-            (kf instanceof Map
-              ? Array.from(kf.keys())
-              : Object.keys(kf).map(Number)
-            ).sort((a, b) => a - b);
-
-          for (const mask of originalMasks) {
-            const keyframes = mask.keyframes;
-            const frames = getSortedFrames(keyframes);
-            const now = Date.now();
-
-            // Image clips only use frame 0; copy that to both
-            if (clip.type === "image") {
-              const dataAt0 =
-                getKeyframe(keyframes, 0) ??
-                (frames.length > 0
-                  ? getKeyframe(keyframes, frames[0])
-                  : undefined);
-              if (dataAt0) {
-                const kf1 = makeEmptyKeyframesLike(keyframes);
-                const kf2 = makeEmptyKeyframesLike(keyframes);
-                setKeyframe(kf1, 0, { ...dataAt0 });
-                setKeyframe(kf2, 0, { ...dataAt0 });
-                masksForClip1.push({
-                  ...mask,
-                  keyframes: kf1,
-                  clipId: newClip1.clipId,
-                  lastModified: now,
-                });
-                masksForClip2.push({
-                  ...mask,
-                  keyframes: kf2,
-                  clipId: newClip2.clipId,
-                  lastModified: now,
-                });
-              }
-              continue;
-            }
-
-            const kfLeft = makeEmptyKeyframesLike(keyframes);
-            const kfRight = makeEmptyKeyframesLike(keyframes);
-            for (const f of frames) {
-              const data = getKeyframe(keyframes, f);
-              if (!data) continue;
-              if (f < cutLocal) setKeyframe(kfLeft, f, { ...data });
-              else setKeyframe(kfRight, f, { ...data });
-            }
-
-            masksForClip1.push({
-              ...mask,
-              keyframes: kfLeft,
-              clipId: newClip1.clipId,
-              lastModified: now,
-            });
-            masksForClip2.push({
-              ...mask,
-              keyframes: kfRight,
-              clipId: newClip2.clipId,
-              lastModified: now,
-            });
-          }
-
-          (newClip1 as VideoClipProps | ImageClipProps).masks = masksForClip1;
-          (newClip2 as VideoClipProps | ImageClipProps).masks = masksForClip2;
+      const within = (c: AnyClipProps) => cutFrame > (c.startFrame || 0) && cutFrame < (c.endFrame || 0);
+      const clip = state.clips.find((c) => c.clipId === clipId && within(c));
+      if (!clip || isClipLocked(state.clips, state.timelines, clip, linkage())) return {};
+      const cut = [clip, ...partners(state.clips, clip).filter((c) => within(c) && c.type !== "group")];
+      const [leftLink, rightLink] = [uuidv4(), uuidv4()];
+      const halves = cut.map((c) => {
+        const [left, right] = splitClipAt(c, cutFrame);
+        if (cut.length > 1) {
+          left.linkId = leftLink;
+          right.linkId = rightLink;
         }
-      }
-
-      const newClips = [...filteredClips, newClip1, newClip2];
+        return [left, right] as const;
+      });
+      const cutIds = new Set(cut.map((c) => c.clipId));
+      const newClips = [...state.clips.filter((c) => !cutIds.has(c.clipId)), ...halves.flat()];
       const resolvedClips = resolveOverlaps(newClips);
       const clipDuration = calculateTotalClipDuration(resolvedClips);
       const prunedAssets = pruneAssetsForClips(get().assets, resolvedClips);
       get()._updateZoomLevel(resolvedClips, clipDuration);
       const controlStore = useControlsStore.getState();
-      controlStore.setSelectedClipIds([newClip1.clipId, newClip2.clipId]);
+      controlStore.setSelectedClipIds([halves[0][0].clipId, halves[0][1].clipId]);
       return { clips: resolvedClips, clipDuration, assets: prunedAssets };
+    }),
+  splitAtPlayhead: (frame, clipIds) => {
+    const state = get();
+    const at = (c: AnyClipProps) =>
+      !c.hidden && c.type !== "group" && frame > (c.startFrame ?? 0) && frame < (c.endFrame ?? 0) && !isClipLocked(state.clips, state.timelines, c, linkage());
+    const main = mainTrackOf(state.timelines);
+    const targets =
+      clipIds === "all"
+        ? state.clips.filter(at)
+        : clipIds.length > 0
+          ? state.clips.filter((c) => clipIds.includes(c.clipId) && at(c))
+          : state.clips.filter((c) => c.timelineId === main?.timelineId && at(c));
+    // A linked clip is cut with the first of its link to come: then it isn't there any more.
+    const selection: string[] = [];
+    for (const c of targets) {
+      if (!get().clips.some((x) => x.clipId === c.clipId)) continue;
+      get().splitClip(frame, c.clipId);
+      selection.push(...useControlsStore.getState().selectedClipIds);
+    }
+    if (selection.length > 0) useControlsStore.getState().setSelectedClipIds(selection);
+    return selection.length > 0;
+  },
+  trimToPlayhead: (side, frame, clipIds) => {
+    const state = get();
+    const at = (c: AnyClipProps) =>
+      !c.hidden && c.type !== "group" && frame > (c.startFrame ?? 0) && frame < (c.endFrame ?? 0) && !isClipLocked(state.clips, state.timelines, c, linkage());
+    const main = mainTrackOf(state.timelines);
+    const chosen = state.clips.filter((c) => clipIds.includes(c.clipId) && at(c));
+    const targets = chosen.length > 0 ? chosen : state.clips.filter((c) => c.timelineId === main?.timelineId && at(c));
+    if (targets.length === 0) return false;
+    const done = new Set<string>();
+    let mainClipId: string | null = null;
+    for (const t of targets) {
+      if (done.has(t.clipId)) continue;
+      // Its linked clips are trimmed with it.
+      [t, ...partners(state.clips, t)].forEach((c) => done.add(c.clipId));
+      if (t.timelineId === main?.timelineId) mainClipId = t.clipId;
+      get().resizeClip(t.clipId, side, frame);
+    }
+    // Delete left on the main track with the magnet on: what's left of the clip moves back to
+    // where the clip started, and the playhead goes with it, as in CapCut.
+    if (side === "left" && mainClipId && get().magnet) {
+      const clip = get().getClipById(mainClipId);
+      if (clip) useControlsStore.getState().setFocusFrame(clip.startFrame ?? 0);
+    }
+    return true;
+  },
+  linkClips: (clipIds) =>
+    set((state) => {
+      const clips = state.clips.filter((c) => clipIds.includes(c.clipId) && !c.hidden && c.type !== "group");
+      if (clips.length < 2 || clips.some((c) => isTrackLocked(state.timelines, c.timelineId))) return {};
+      const linkId = uuidv4();
+      const ids = new Set(clips.map((c) => c.clipId));
+      return { clips: state.clips.map((c) => (ids.has(c.clipId) ? ({ ...c, linkId } as AnyClipProps) : c)) };
+    }),
+  unlinkClips: (clipIds) =>
+    set((state) => {
+      const links = new Set(state.clips.filter((c) => clipIds.includes(c.clipId) && c.linkId).map((c) => c.linkId));
+      if (links.size === 0) return {};
+      return { clips: state.clips.map((c) => (c.linkId && links.has(c.linkId) ? ({ ...c, linkId: undefined } as AnyClipProps) : c)) };
     }),
   mergeClips: (clipIds: string[]) =>
     set((state) => {
@@ -1841,10 +2145,11 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
     set((state) => {
       if (!clipIds || clipIds.length === 0)
         return { clips: state.clips, clipboard: state.clipboard };
-      const toCut = clipIds
-        .map((id) => state.clips.find((c) => c.clipId === id))
-        .filter(Boolean) as AnyClipProps[];
-      const remaining = state.clips.filter((c) => !clipIds.includes(c.clipId));
+      // Not from a locked track; a clip's linked clips go with it, as in a delete.
+      const picked = state.clips.filter((c) => clipIds.includes(c.clipId) && !isClipLocked(state.clips, state.timelines, c, linkage()));
+      const toCut = _.uniqBy([...picked, ...picked.flatMap((c) => partners(state.clips, c))], (c) => c.clipId);
+      const cutIds = new Set(toCut.map((c) => c.clipId));
+      const remaining = state.clips.filter((c) => !cutIds.has(c.clipId));
       const resolvedClips = resolveOverlaps(remaining);
       const clipDuration = calculateTotalClipDuration(resolvedClips);
       const prunedAssets = pruneAssetsForClips(state.assets, resolvedClips);
@@ -1866,9 +2171,9 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
       const newIds: string[] = [];
       // Determine the destination timeline per item: prefer provided target, otherwise a compatible existing timeline or create one
       const chooseTimelineFor = (template: AnyClipProps): string => {
-        if (targetTimelineId) return targetTimelineId;
+        if (targetTimelineId && !isTrackLocked(state.timelines, targetTimelineId)) return targetTimelineId;
         const desiredType = getTimelineTypeForClip(template);
-        const existing = state.timelines.find((t) => t.type === desiredType);
+        const existing = state.timelines.find((t) => t.type === desiredType && !t.locked);
         if (existing) return existing.timelineId;
         // If no matching timeline, create one beside last timeline
         const timelineId = uuidv4();
@@ -1885,6 +2190,14 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
         };
         state.addTimeline(newTimeline);
         return timelineId;
+      };
+      // Copies of linked clips are linked to each other, not to the originals.
+      const links = new Map<string, string>();
+      const linkCounts = _.countBy(clipboardItems.filter((c) => c.linkId), (c) => c.linkId);
+      const linkFor = (id?: string) => {
+        if (!id || linkCounts[id] < 2) return undefined;
+        if (!links.has(id)) links.set(id, uuidv4());
+        return links.get(id);
       };
       const pasted = clipboardItems.map((template) => {
         const templateStart = template.startFrame || 0;
@@ -1904,29 +2217,30 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
           endFrame: end,
           trimEnd: 0,
           trimStart: 0,
+          linkId: linkFor(template.linkId),
         } as AnyClipProps;
       });
-      const newClips = [...state.clips, ...pasted];
+      let newClips = [...state.clips, ...pasted];
+      // Onto the main track with the magnet on: in at the clip boundary nearest the playhead,
+      // the clips after making room.
+      const timelines = get().timelines;
+      const main = mainTrackOf(timelines);
+      const onMain = pasted.filter((c) => c.timelineId === main?.timelineId);
+      if (state.magnet && main && onMain.length > 0) {
+        const at = mainInsertionFrame(state.clips, timelines, insertionFrame);
+        newClips = packMainTrack(newClips, timelines, { ids: onMain.map((c) => c.clipId), at }, linkage());
+      }
       const resolvedClips = resolveOverlaps(newClips);
       const clipDuration = calculateTotalClipDuration(resolvedClips);
       const prunedAssets = pruneAssetsForClips(state.assets, resolvedClips);
+      // The timeline's zoom range follows a longer project, as after an add.
+      get()._updateZoomLevel(resolvedClips, clipDuration);
       // Select newly pasted clips
       try {
         const controls = useControlsStore.getState();
         controls.setSelectedClipIds(newIds);
       } catch {}
       return { clips: resolvedClips, clipDuration, assets: prunedAssets };
-    }),
-  moveClipToEnd: (clipId: string) =>
-    set((state) => {
-      const clip = state.clips.find((clip) => clip.clipId === clipId);
-      if (!clip) return { clips: state.clips };
-      const newClips = [
-        ...state.clips.filter((c) => c.clipId !== clipId),
-        clip,
-      ];
-      const clipDuration = calculateTotalClipDuration(newClips);
-      return { clips: newClips, clipDuration };
     }),
   getClipAtFrame: (frame: number) => {
     const clips = get().clips;

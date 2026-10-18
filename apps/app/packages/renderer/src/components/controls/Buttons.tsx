@@ -20,6 +20,8 @@ import { PiSplitHorizontal } from "react-icons/pi";
 import { MediaDialog } from "@/components/dialogs/MediaDialog";
 import { useState } from "react";
 import { undo, redo, useHistoryStore } from "@/lib/history";
+import { mainTrackOf } from "@/lib/timeline-edit";
+import type { AnyClipProps } from "@/lib/types";
 
 const BackButton = () => {
   const { setFocusFrame, focusFrame } = useControlsStore();
@@ -222,44 +224,28 @@ const ReduceTimelineButton: React.FC<{ numSeconds?: number }> = ({
   );
 };
 
+// Splits the selected clips at the playhead, or with none selected the main track's clip
+// there, as CapCut's Split (⌘B) does.
 const SplitButton = () => {
-  const { splitClip, clipWithinFrame, getClipById } = useClipStore();
+  const { splitAtPlayhead, getClipById } = useClipStore();
   const { focusFrame } = useControlsStore();
-  const { clips, clipDuration } = useClipStore();
+  const { clips, clipDuration, timelines } = useClipStore();
   const hasClips = clips.length > 0;
 
   const selectedClipIds = useControlsStore((state) => state.selectedClipIds);
 
-  const disabled = useMemo(
-    () =>
-      !hasClips ||
-      focusFrame === 0 ||
-      selectedClipIds.length === 0 ||
-      focusFrame >= clipDuration ||
-      selectedClipIds.some((clipId) => {
-        const clip = getClipById(clipId);
-        if (clip?.type === "group") return true;
-        return !clip || !clipWithinFrame(clip, focusFrame);
-      }),
-    [
-      hasClips,
-      focusFrame,
-      selectedClipIds,
-      clipDuration,
-      clipWithinFrame,
-      getClipById,
-    ],
-  );
+  const disabled = useMemo(() => {
+    if (!hasClips || focusFrame === 0 || focusFrame >= clipDuration) return true;
+    const inside = (c?: AnyClipProps) => !!c && c.type !== "group" && focusFrame > (c.startFrame ?? 0) && focusFrame < (c.endFrame ?? 0);
+    if (selectedClipIds.length > 0) return !selectedClipIds.some((id) => inside(getClipById(id)));
+    const main = mainTrackOf(timelines);
+    return !clips.some((c) => c.timelineId === main?.timelineId && inside(c));
+  }, [hasClips, focusFrame, selectedClipIds, clipDuration, clips, timelines, getClipById]);
 
   const handleSplit = useCallback(() => {
     if (disabled) return;
-    selectedClipIds.forEach((clipId) => {
-      const clip = getClipById(clipId);
-      if (clip) {
-        splitClip(focusFrame, clipId);
-      }
-    });
-  }, [disabled, splitClip, focusFrame, selectedClipIds, getClipById]);
+    splitAtPlayhead(focusFrame, selectedClipIds);
+  }, [disabled, splitAtPlayhead, focusFrame, selectedClipIds]);
   return (
     <div
       className={cn(

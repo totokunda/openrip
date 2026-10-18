@@ -10,6 +10,7 @@ import { prepareExportClipsForValue } from "@/lib/prepareExportClips";
 import { getMediaInfoCached } from "@/lib/media/utils";
 import { exportSequence, exportClip } from "@app/export-renderer";
 import { saveImageToPath } from "@app/preload";
+import { useMarkerEditorStore } from "@/components/timeline/Markers";
 import ClipExportModal, {
   ClipExportSettings,
 } from "@/components/dialogs/ClipExportModal";
@@ -415,9 +416,20 @@ const GlobalContextMenu: React.FC = () => {
         clipsStore.groupClips(ids);
       } else if (action === "ungroup") {
         clipsStore.ungroupClips(target.primaryClipId);
+      } else if (action === "link") {
+        clipsStore.linkClips(ids);
+      } else if (action === "unlink") {
+        clipsStore.unlinkClips(ids);
       }
-    } else if (target?.type === "timeline") {
-      if (action === "paste") {
+    } else if (target?.type === "marker") {
+      if (action === "editMarker") useMarkerEditorStore.getState().open(target.markerId);
+      else if (action === "deleteMarker") clipsStore.removeMarker(target.markerId);
+      else if (action === "deleteAllMarkers") clipsStore.removeAllMarkers();
+    } else if (target?.type === "track" || target?.type === "timeline") {
+      if (action === "lockTrack") clipsStore.setTrackLocked(target.timelineId, true);
+      else if (action === "unlockTrack") clipsStore.setTrackLocked(target.timelineId, false);
+      else if (action === "deleteTrack") clipsStore.deleteTrack(target.timelineId);
+      else if (action === "paste" && target.type === "timeline") {
         const frame = useControlsStore.getState().focusFrame;
         clipsStore.pasteClips(frame, target.timelineId);
         // Attempt to fix any overlaps by resolving again (pasteClips already resolves overlaps globally)

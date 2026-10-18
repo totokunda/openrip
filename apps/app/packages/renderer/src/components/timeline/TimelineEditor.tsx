@@ -38,6 +38,8 @@ import { useWebGLHaldClut } from "../preview/webgl-filters";
 import { ensureFullMediaStats } from "@/lib/media/utils";
 import { convertFrameRange } from "@/lib/media/fps";
 import { useViewportStore } from "@/lib/viewport";
+import { insertionFrame, mainTrackOf, mainTrackPreview } from "@/lib/timeline-edit";
+import { MarkerEditor, MarkerFlags } from "./Markers";
 
 interface TimelineEditorProps {}
 
@@ -247,14 +249,12 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
   const {
     clips,
     timelines,
-    getClipsForTimeline,
     addTimeline,
     addClip,
     setGhostStartEndFrame,
     setGhostX,
     setGhostTimelineId,
     setActiveMediaItem,
-    removeTimeline,
     setGhostInStage,
     setHoveredTimelineId,
     hoveredTimelineId,
@@ -272,6 +272,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     fractionalFrames: 0,
   });
   const wheelRemainderRef = useRef(0);
+  // While media is dragged over the main track with the magnet on: the point it would go in at.
+  const insertAtRef = useRef<number | null>(null);
   const timelinesLayerRef = useRef<Konva.Layer | null>(null);
   const haldClutRef = useWebGLHaldClut();
   const [verticalScroll, setVerticalScroll] = useState(0);
@@ -401,6 +403,14 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
 
       setIsDragging(false);
     },
+    // A drag given up (Escape): the main track goes back to how it is.
+    onDragCancel: () => {
+      insertAtRef.current = null;
+      useClipStore.getState().setMainPreview(null);
+      setGhostTimelineId(null);
+      setGhostInStage(false);
+      setIsDragging(false);
+    },
   });
 
   useEffect(() => {
@@ -426,15 +436,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     };
   }, []);
 
-  // monitor all timelines and if any are empty, remove them
-  useEffect(() => {
-    const emptyTimelines = timelines.filter(
-      (t) => getClipsForTimeline(t.timelineId).length === 0,
-    );
-    emptyTimelines.forEach((t) => {
-      removeTimeline(t.timelineId);
-    });
-  }, [clips]);
+  // A track an edit leaves empty is removed by the store, in the same edit (withTimelineRules
+  // in lib/clip.ts): one undo step, and a track added empty stays until it's used.
 
   // Memoize dimensions to prevent unnecessary recalculations
   const dimensions = useMemo(() => {
@@ -501,6 +504,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         // make everything else null
         setGhostTimelineId(null);
         setGhostInStage(false);
+        insertAtRef.current = null;
+        useClipStore.getState().setMainPreview(null);
         return;
       }
 
@@ -524,7 +529,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
           pointerX <= right;
         if (isInside) {
           // check for same type
-          if (isValidTimelineForClip(t, data!)) {
+          if (isValidTimelineForClip(t, data!) && !t.locked) {
             activeTimelineId = t.timelineId!;
             break;
           }
@@ -534,7 +539,30 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       if (!activeTimelineId) {
         setGhostTimelineId(null);
         setGhostInStage(false);
+        useClipStore.getState().setMainPreview(null);
         return;
+      }
+
+      // Over the main track with the magnet on, its clips make room where the new one would go
+      // in (before or after the clip under the pointer), as in CapCut.
+      {
+        const state = useClipStore.getState();
+        const main = mainTrackOf(state.timelines);
+        if (state.magnet && main && !main.locked && activeTimelineId === main.timelineId) {
+          const [vs, ve] = useControlsStore.getState().timelineDuration;
+          const span = Math.max(1, ve - vs);
+          const len = Math.max(1, state.ghostStartEndFrame[1] - state.ghostStartEndFrame[0]);
+          const at = insertionFrame(state.clips, state.timelines, vs + ((pointerX - timelinePadding) / stageWidth) * span);
+          const preview = mainTrackPreview(state.clips, state.timelines, new Set(), len, at);
+          insertAtRef.current = at;
+          state.setMainPreview(preview.starts);
+          setGhostTimelineId(activeTimelineId);
+          setGhostInStage(true);
+          setGhostX((((preview.insertAt ?? 0) - vs) / span) * stageWidth);
+          return;
+        }
+        insertAtRef.current = null;
+        if (state.mainPreview) state.setMainPreview(null);
       }
 
       // Center ghost under pointer and validate against bounds/overlaps
@@ -681,9 +709,16 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       } else if (hoveredTimelineId) {
         // we add a new timeline at the hovered timeline id
         const timelines = useClipStore.getState().timelines;
-        const hoveredTimelineIdx = timelines.findIndex(
+        let hoveredTimelineIdx = timelines.findIndex(
           (t) => t.timelineId === hoveredTimelineId.replace("dashed-", ""),
         );
+        // A video track under the main track would become the main track: it goes just
+        // above it (with the magnet on, the clip goes onto the main track itself, below).
+        const main = mainTrackOf(timelines);
+        const mainIdx = main ? timelines.indexOf(main) : -1;
+        if (main && getTimelineTypeForClip(data) === "media" && hoveredTimelineIdx >= mainIdx) {
+          hoveredTimelineIdx = mainIdx - 1;
+        }
         const hoveredTimeline =
           hoveredTimelineIdx !== -1 ? timelines[hoveredTimelineIdx] : null;
         timelineId = uuidv4();
@@ -758,10 +793,29 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         ghostX = Math.round(innerX);
       }
 
-      const dropTimelineId = hoveredTimelineId
+      let dropTimelineId = hoveredTimelineId
         ? timelineId
         : ghostTimelineId || timelineId;
       setHoveredTimelineId(null);
+      let insertAt = insertAtRef.current;
+      insertAtRef.current = null;
+      state.setMainPreview(null);
+      // Dropped under the main track with the magnet on: onto the main track, where the
+      // pointer is.
+      const main = mainTrackOf(useClipStore.getState().timelines);
+      const magnetMain = state.magnet && !!main && !main.locked;
+      if (hoveredTimelineId && magnetMain && getTimelineTypeForClip(data) === "media") {
+        const timelines = useClipStore.getState().timelines;
+        const idx = timelines.findIndex((t) => t.timelineId === hoveredTimelineId.replace("dashed-", ""));
+        if (idx >= timelines.indexOf(main!)) {
+          const [vs, ve] = controlStore.timelineDuration;
+          const pointerX = Number((window as any).__apex_lastPointerX ?? 24);
+          insertAt = insertionFrame(state.clips, timelines, vs + ((pointerX - 24) / dimensions.stageWidth) * (ve - vs));
+          // The track just made above the main track isn't wanted.
+          if (timelineId) useClipStore.getState().removeTimeline(timelineId);
+          dropTimelineId = main!.timelineId;
+        }
+      }
 
       if (!dropTimelineId) {
         setActiveMediaItem(null);
@@ -852,6 +906,11 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
             ? startFrame
             : placementStart
           : placementStart;
+      // Onto the main track with the magnet on: in at the point the drag showed (addClip lays
+      // the track out).
+      if (magnetMain && dropTimelineId === main!.timelineId) {
+        startFrame = insertAt ?? insertionFrame(state.clips, state.timelines, startFrame);
+      }
       endFrame = startFrame + clipLen;
 
 
@@ -1135,6 +1194,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
   const handleRulerClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       controlStore.clearSelection();
+      controlStore.setSelectedMarkerId(null);
       const stage = e.target.getStage();
       const pos = stage?.getPointerPosition();
       if (!pos) return;
@@ -1148,6 +1208,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       // Check if the click target is the stage itself (background click)
       if (e.target === e.target.getStage()) {
         controlStore.clearSelection();
+        controlStore.setSelectedMarkerId(null);
         const stage = e.target.getStage();
         const pos = stage?.getPointerPosition();
         if (!pos) return;
@@ -1244,6 +1305,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                         return thumbY;
                       }}
                     />
+                    <MarkerFlags stageWidth={dimensions.stageWidth} startPadding={24} />
                   </Layer>
                   {/* Snap guideline overlay */}
                   <Layer listening={false}>
@@ -1403,6 +1465,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
             )}
           </>
         )}
+        <MarkerEditor anchor={containerRef} stageWidth={dimensions.stageWidth} startPadding={24} />
         <div style={{ display: hasClips ? undefined : "none" }}>
           <ScrubControl
             stageHeight={dimensions.stageHeight - 30}

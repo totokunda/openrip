@@ -29,6 +29,7 @@ export interface ProjectJsonV1 {
   timeline: {
     tracks: any[];
     clips: any[];
+    markers?: any[];
   };
   [key: string]: unknown;
 }
@@ -83,6 +84,8 @@ export function ensureProjectJson(
     clips: Array.isArray(raw?.timeline?.clips)
       ? raw.timeline.clips
       : ([] as any[]),
+    // The ruler's markers, when the project has any.
+    ...(Array.isArray(raw?.timeline?.markers) ? { markers: raw.timeline.markers } : {}),
   };
 
   const inputControls = {

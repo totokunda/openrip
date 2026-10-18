@@ -9,11 +9,21 @@ export type ContextMenuAction =
   | "separateAudio"
   | "export"
   | "group"
-  | "ungroup";
+  | "ungroup"
+  | "link"
+  | "unlink"
+  | "editMarker"
+  | "deleteMarker"
+  | "deleteAllMarkers"
+  | "lockTrack"
+  | "unlockTrack"
+  | "deleteTrack";
 
 export type ContextTarget =
   | { type: "clip"; clipIds: string[]; primaryClipId: string; isVideo: boolean }
   | { type: "timeline"; timelineId: string }
+  | { type: "track"; timelineId: string }
+  | { type: "marker"; markerId: string }
   | { type: "textSelection" };
 
 export interface ContextMenuItem {

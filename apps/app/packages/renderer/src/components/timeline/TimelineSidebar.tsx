@@ -7,152 +7,88 @@ import {
   LuShapes,
   LuType,
 } from "react-icons/lu";
-import { IoVolumeMute } from "react-icons/io5";
-import { IoVolumeHigh } from "react-icons/io5";
-import { IoEye } from "react-icons/io5";
-import { IoEyeOff } from "react-icons/io5";
+import { LuLock } from "react-icons/lu";
 import { TimelineProps } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useControlsStore } from "@/lib/control";
 import { MdPhotoFilter } from "react-icons/md";
+import { AddTrackButton, TrackButtons, openTrackMenu, useTrackReorder } from "./TrackControls";
 
 interface TimelineSidebarProps {
   clampedScroll: number; // for the scroll position
 }
 
-const TimelineSidebarItem: React.FC<
-  TimelineProps & {
-    isCollapsed: boolean;
-    clampedScroll: number;
-  }
-> = ({
-  isCollapsed,
-  type,
-  timelineHeight,
-  timelineY,
-  timelineId,
-  clampedScroll,
-}) => {
-  const {
-    muteTimeline,
-    unmuteTimeline,
-    hideTimeline,
-    unhideTimeline,
-    isTimelineMuted,
-    isTimelineHidden,
-  } = useClipStore();
-  const timelineMuted = isTimelineMuted(timelineId);
-  const timelineHidden = isTimelineHidden(timelineId);
+// The track's kind, dimmer than its controls (CapCut's #5e5e5e beside #d8d8d8).
+const TypeIcon: React.FC<{ type: TimelineProps["type"] }> = ({ type }) => (
+  <>
+    {type === "media" && <GoFileMedia className="w-3 h-3 text-brand-light/40" />}
+    {type === "audio" && <LuAudioWaveform className="w-3 h-3 text-brand-light/40" />}
+    {type === "shape" && <LuShapes className="w-3 h-3 text-brand-light/40" />}
+    {type === "text" && <LuType className="w-3 h-3 text-brand-light/40" />}
+    {type === "filter" && <MdPhotoFilter className="w-3 h-3 text-brand-light/40" />}
+    {type === "draw" && <LuPaintbrush className="w-3 h-3 text-brand-light/40" />}
+  </>
+);
 
+// A track's header: its kind, and when the sidebar is open its lock, hide and mute buttons and
+// its menu in CapCut's columns. Right-click opens the track's menu; dragging it moves the track
+// up or down.
+const TimelineSidebarItem: React.FC<{
+  track: TimelineProps;
+  isCollapsed: boolean;
+  clampedScroll: number;
+  onMouseDown: (e: React.MouseEvent) => void;
+}> = ({ track, isCollapsed, clampedScroll, onMouseDown }) => {
+  const { type, timelineHeight, timelineY, locked } = track;
   return (
-    <>
-      <div
-        style={{
-          height: (timelineHeight ?? 0) - 8,
-          top: (timelineY ?? 0) + 32 - clampedScroll,
-        }}
-        className={cn(
-          "bg-brand-light/5  w-full absolute flex items-center justify-center",
-        )}
-      >
-        {isCollapsed && (
-          <>
-            {type === "media" && (
-              <GoFileMedia className="w-3 h-3 text-brand-light/50" />
-            )}
-            {type === "audio" && (
-              <LuAudioWaveform className="w-3 h-3 text-brand-light/50" />
-            )}
-            {type === "shape" && (
-              <LuShapes className="w-3 h-3 text-brand-light/50" />
-            )}
-            {type === "text" && (
-              <LuType className="w-3 h-3 text-brand-light/50" />
-            )}
-            {type === "filter" && (
-              <MdPhotoFilter className="w-3 h-3 text-brand-light/50" />
-            )}
-            {type === "draw" && (
-              <LuPaintbrush className="w-3 h-3 text-brand-light/50" />
-            )}
-          </>
-        )}
-        {!isCollapsed && (
-          <div className="w-full h-full flex items-center gap-x-3 px-3">
-            {type === "media" && (
-              <GoFileMedia className="w-3 h-3 text-brand-light/50" />
-            )}
-            {type === "audio" && (
-              <LuAudioWaveform className="w-3 h-3 text-brand-light/50" />
-            )}
-            {type === "shape" && (
-              <LuShapes className="w-3 h-3 text-brand-light/50" />
-            )}
-            {type === "text" && (
-              <LuType className="w-3 h-3 text-brand-light/50" />
-            )}
-            {type === "filter" && (
-              <MdPhotoFilter className="w-3 h-3 text-brand-light/50" />
-            )}
-            {type === "draw" && (
-              <LuPaintbrush className="w-3 h-3 text-brand-light/50" />
-            )}
-
-            {type !== "shape" &&
-              type !== "text" &&
-              type !== "filter" &&
-              type !== "draw" && (
-                <button
-                  className="cursor-pointer"
-                  onClick={() => {
-                    if (timelineMuted) {
-                      unmuteTimeline(timelineId);
-                    } else {
-                      muteTimeline(timelineId);
-                    }
-                  }}
-                >
-                  {timelineMuted ? (
-                    <IoVolumeMute className="w-3 h-3 text-brand-light hover:text-brand-lighter" />
-                  ) : (
-                    <IoVolumeHigh className="w-3 h-3 text-brand-light hover:text-brand-lighter" />
-                  )}
-                </button>
-              )}
-            {type !== "audio" && (
-              <button
-                className="cursor-pointer"
-                onClick={() => {
-                  if (timelineHidden) {
-                    unhideTimeline(timelineId);
-                  } else {
-                    hideTimeline(timelineId);
-                  }
-                }}
-              >
-                {timelineHidden ? (
-                  <IoEyeOff className="w-3 h-3 text-brand-light hover:text-brand-lighter" />
-                ) : (
-                  <IoEye className="w-3 h-3 text-brand-light hover:text-brand-lighter" />
-                )}
-              </button>
-            )}
+    <div
+      data-track-header={track.timelineId}
+      style={{
+        height: (timelineHeight ?? 0) - 8,
+        top: (timelineY ?? 0) + 32 - clampedScroll,
+      }}
+      className={cn("bg-brand-light/5  w-full absolute flex items-center justify-center cursor-grab", locked && "bg-brand-light/[0.02]")}
+      onMouseDown={onMouseDown}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        openTrackMenu(e, track);
+      }}
+    >
+      {isCollapsed && (locked ? <LuLock className="w-3 h-3 text-brand-light/70" /> : <TypeIcon type={type} />)}
+      {!isCollapsed && (
+        <div className="w-full h-full flex items-center pl-0.5">
+          <div className="w-6 h-full shrink-0 flex items-center justify-center">
+            <TypeIcon type={type} />
           </div>
-        )}
-      </div>
-    </>
+          <TrackButtons track={track} />
+        </div>
+      )}
+    </div>
   );
 };
 
 const TimelineSidebar: React.FC<TimelineSidebarProps> = ({ clampedScroll }) => {
   const collapsedWidth = 40; // ~ w-14
-  const expandedWidth = 84; // ~ w-24
-  const [width, setWidth] = useState<number>(collapsedWidth);
-  const [isOpen, setIsOpen] = useState<boolean>(false);
+  const expandedWidth = 123; // CapCut's: the kind, lock, hide, mute and the menu
+  // Open, as CapCut's always is; its rail still folds it to the kinds alone.
+  const [width, setWidth] = useState<number>(expandedWidth);
+  const [isOpen, setIsOpen] = useState<boolean>(true);
   const startXRef = useRef<number>(0);
   const isDraggingRef = useRef<boolean>(false);
   const { timelines } = useClipStore();
   const { isFullscreen } = useControlsStore();
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const last = timelines[timelines.length - 1];
+  // The headers as laid out on screen, for dragging them.
+  const reorder = useTrackReorder(() => {
+    const top = listRef.current?.getBoundingClientRect().top ?? 0;
+    return timelines.map((t) => ({ id: t.timelineId, top: top + (t.timelineY ?? 0) + 32 - clampedScroll, height: (t.timelineHeight ?? 0) - 8 }));
+  });
+  const indicatorTop = (gap: number) => {
+    const t = timelines[Math.min(gap, timelines.length - 1)];
+    const y = gap < timelines.length ? (t.timelineY ?? 0) + 32 - 5 : (t.timelineY ?? 0) + (t.timelineHeight ?? 0) + 32 - 7;
+    return y - clampedScroll;
+  };
 
   const endDrag = useCallback(() => {
     if (!isDraggingRef.current) return;
@@ -225,15 +161,31 @@ const TimelineSidebar: React.FC<TimelineSidebarProps> = ({ clampedScroll }) => {
         }}
         onMouseDown={(e) => startDrag(e)}
       />
-      <div className="relative h-full">
+      <div className="relative h-full" ref={listRef}>
         {timelines.map((timeline) => (
           <TimelineSidebarItem
             key={timeline.timelineId}
+            track={timeline}
             isCollapsed={!isOpen}
-            {...timeline}
             clampedScroll={clampedScroll}
+            onMouseDown={(e) => reorder.onMouseDown(e, timeline.timelineId)}
           />
         ))}
+        {/* Where a dragged track would go. */}
+        {reorder.indicator != null && (
+          <div
+            className="absolute left-0 right-0 h-0.5 bg-brand-accent pointer-events-none"
+            style={{ top: indicatorTop(reorder.indicator) }}
+          />
+        )}
+        {timelines.length > 0 && (
+          <div
+            className="absolute left-0 right-0"
+            style={{ top: (last?.timelineY ?? 0) + (last?.timelineHeight ?? 0) + 30 - clampedScroll }}
+          >
+            <AddTrackButton />
+          </div>
+        )}
       </div>
     </div>
   );

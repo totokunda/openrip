@@ -152,18 +152,32 @@ function fitTextBlocks(project: EngineProjectInfo) {
   }
 }
 
-/** The snapshot with each asset's path pointing at its original file. */
+/** A volume (dB) the engine plays as silence. */
+const SILENT_DB = -1000;
+
+/**
+ * The snapshot with each asset's path pointing at its original file. A video whose audio was
+ * detached (separateClip) uses the file as `…#video` and its audio as `…#audio`: the engine
+ * reads the file itself for both, the video half silent, as the app's own preview plays them.
+ */
 async function withOriginalMedia<T>(snapshot: T): Promise<T> {
   const assets = (snapshot as any)?.assets;
   if (!assets || typeof assets !== "object") return snapshot;
   const entries = Object.entries(assets as Record<string, any>).filter(([, a]) => typeof a?.path === "string");
   if (entries.length === 0) return snapshot;
-  const originals = await engineSourcePaths(entries.map(([, a]) => a.path));
+  const silent = new Set(entries.filter(([, a]) => a.path.endsWith("#video")).map(([id]) => id));
+  const paths = entries.map(([, a]) => a.path.replace(/#(video|audio)$/, ""));
+  const originals = await engineSourcePaths(paths);
   const mapped = { ...(assets as Record<string, any>) };
   entries.forEach(([id, a], i) => {
     if (originals[i] !== a.path) mapped[id] = { ...a, path: originals[i] };
   });
-  return { ...(snapshot as any), assets: mapped };
+  let out = { ...(snapshot as any), assets: mapped };
+  const clips = out.timeline?.clips;
+  if (silent.size > 0 && Array.isArray(clips)) {
+    out = { ...out, timeline: { ...out.timeline, clips: clips.map((c: any) => (silent.has(c?.assetId) ? { ...c, volume: SILENT_DB } : c)) } };
+  }
+  return out;
 }
 
 /** While the mask tool is out, clips show unmasked (as the app's own preview does). */

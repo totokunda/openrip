@@ -397,6 +397,7 @@ const FloatingBar: React.FC<FloatingBarProps> = () => {
               onClick={() => setTool("text")}
             />
             <div
+              title="Mask"
               onClick={() => setTool("mask")}
               className={`rounded-md h-8 w-8 p-1.5 transition-all duration-300 cursor-pointer ${tool === "mask" ? "text-brand-light bg-brand-accent-two-shade" : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"}`}
             >

@@ -15,23 +15,27 @@ import {
 } from "./Buttons";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
-import { ZoomLevel } from "@/lib/types";
-import { MIN_DURATION } from "@/lib/settings";
 import { useDrawingStore } from "@/lib/drawing";
 import { useMaskStore } from "@/lib/mask";
 import { useViewportStore } from "@/lib/viewport";
 import { undo, redo } from "@/lib/history";
+import { handleTimelineKey, zoomTimelineTo } from "@/lib/timeline-shortcuts";
+import {
+  AddMarkerButton,
+  DeleteLeftButton,
+  DeleteRightButton,
+  LinkageToggle,
+  MagnetToggle,
+  SnappingToggle,
+  ToolbarDivider,
+  ZoomToFitButton,
+} from "@/components/timeline/TimelineTools";
 
 const TimelineZoom = () => {
   const {
     zoomLevel,
     setZoomLevel,
-    setTimelineDuration,
-    focusFrame,
     setFocusFrame,
-    focusAnchorRatio,
-    totalTimelineFrames,
-    setFocusAnchorRatio,
     minZoomLevel,
     maxZoomLevel,
   } = useControlsStore();
@@ -48,46 +52,8 @@ const TimelineZoom = () => {
     }
   }, [hasClips]);
 
-  const setZoom = (level: number) => {
-    // Clamp to valid integer zoom step
-    const clampedLevel = Math.max(
-      minZoomLevel,
-      Math.min(maxZoomLevel, Math.round(level)),
-    );
-
-    // Use dynamic baseline where zoomLevel 1 spans the entire timeline baseline
-    // and max zoom spans exactly MIN_DURATION (5 frames)
-    const maxDuration = Math.max(1, totalTimelineFrames);
-    const minDuration = Math.max(1, Math.min(MIN_DURATION, maxDuration));
-    const steps = Math.max(1, maxZoomLevel - minZoomLevel);
-    const ratio = minDuration / maxDuration;
-    const levelIndex = clampedLevel - minZoomLevel; // 0..steps
-
-    // Build deterministic duration table once per call (cheap) to avoid rounding drift
-    const durations: number[] = new Array(steps + 1).fill(0).map((_, i) => {
-      const ti = i / steps; // 0..1
-      const d = Math.round(maxDuration * Math.pow(ratio, ti));
-      return Math.max(minDuration, Math.min(maxDuration, d));
-    });
-
-    const targetDuration = durations[levelIndex];
-
-    // Anchor focusFrame; clamp within timeline bounds while keeping exact width
-    let newStart = Math.round(focusFrame - focusAnchorRatio * targetDuration);
-    newStart = Math.max(
-      0,
-      Math.min(newStart, Math.max(0, totalTimelineFrames - targetDuration)),
-    );
-    const newEnd = newStart + targetDuration;
-
-    // Keep anchor ratio consistent with the final clamped window
-    const newAnchor =
-      targetDuration > 0 ? (focusFrame - newStart) / targetDuration : 0.5;
-    setFocusAnchorRatio(Math.max(0, Math.min(1, newAnchor)));
-
-    setTimelineDuration(newStart, newEnd);
-    setZoomLevel(clampedLevel as ZoomLevel);
-  };
+  // The slider and the ⌘= / ⌘− shortcuts zoom the same way (lib/timeline-shortcuts.ts).
+  const setZoom = (level: number) => zoomTimelineTo(level);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -297,6 +263,9 @@ const Controls = () => {
         return;
       }
 
+      // CapCut's timeline keys: Space, ⌘B, Q / W, M, N, P, arrows, Home / End, [ / ], …
+      if (handleTimelineKey(e)) return;
+
       // Delete selected clips, lines, or masks
       if (e.key === "Delete" || e.key === "Backspace") {
         // Delete selected mask if it exists
@@ -341,6 +310,14 @@ const Controls = () => {
           drawingStore.setSelectedLineId(null);
           return;
         }
+        // A marker selected on the ruler (with no clips selected).
+        if (controls.selectedMarkerId && selectedIds.length === 0) {
+          e.preventDefault();
+          clipsStore.removeMarker(controls.selectedMarkerId);
+          controls.setSelectedMarkerId(null);
+          return;
+        }
+        // With the magnet on, the main track closes up behind clips deleted from it.
         if (selectedIds.length > 0) {
           e.preventDefault();
           selectedIds.forEach((id) => clipsStore.removeClip(id));
@@ -529,11 +506,8 @@ const Controls = () => {
           viewport.setTool("text");
           return;
         }
-        if (key === "m") {
-          e.preventDefault();
-          viewport.setTool("mask");
-          return;
-        }
+        // M is CapCut's Add marker (lib/timeline-shortcuts.ts); the mask tool is in the
+        // preview's toolbar.
         if (key === "s") {
           e.preventDefault();
           viewport.setTool("shape");
@@ -552,9 +526,12 @@ const Controls = () => {
           <UndoButton />
           <RedoButton />
           <SplitButton />
+          <DeleteLeftButton />
+          <DeleteRightButton />
           <TrashButton />
-          <SeparateButton />
+          <AddMarkerButton />
           <CropButton />
+          <SeparateButton />
         </div>
         <div className=" flex items-center justify-center gap-x-4 absolute left-1/2 -translate-x-1/2">
           <BackButton />
@@ -566,6 +543,11 @@ const Controls = () => {
           <TimeControl />
         </div>
         <div className="flex items-center gap-x-2">
+          <MagnetToggle />
+          <SnappingToggle />
+          <LinkageToggle />
+          <ToolbarDivider />
+          <ZoomToFitButton />
           <div className="ml-3">
             <TimelineZoom />
           </div>
