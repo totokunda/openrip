@@ -7,6 +7,7 @@
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
+import { openEditor } from "./steps/_preview.mjs";
 // Absolute paths: the app doesn't open projects in a profile given by a relative path.
 const [appDir, outDir, udDir, clipPath, ...steps] = process.argv.slice(2).map((a, i) => (i < 3 ? path.resolve(a) : a));
 fs.mkdirSync(outDir, { recursive: true });
@@ -37,7 +38,17 @@ for (let last = "", i = 0; i < 20; i++) {
   last = size;
 }
 const shot = (n) => win.screenshot({ path: `${outDir}/${n}.png` });
-const clock = async () => (await win.locator("body").innerText()).match(/\d\d:\d\d\.\d\d\s*\/\s*\d\d:\d\d\.\d\d/)?.[0];
+// The app opens on its home screen: steps start in the editor, on the project the app had
+// open last (as it used to open straight into it). STAY_HOME=1 starts on the home screen.
+if (!process.env.STAY_HOME) await openEditor(win);
+// The player's time over the project's length, as "MM:SS.ss/MM:SS.ss" (the player shows
+// HH:MM:SS:FF; its element carries both in seconds).
+const clock = async () => {
+  const t = win.locator("[data-testid=player-time]");
+  if (!(await t.count())) return undefined;
+  const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${(s % 60).toFixed(2).padStart(5, "0")}`;
+  return `${mmss(+(await t.getAttribute("data-time")))}/${mmss(+(await t.getAttribute("data-total")))}`;
+};
 globalThis.ctx = { app, win, shot, clock, logs, clipPath, outDir, udDir, fs };
 for (const step of steps) {
   const mod = await import(`./steps/${step}.mjs?${Date.now()}`);

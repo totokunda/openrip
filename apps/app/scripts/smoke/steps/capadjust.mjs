@@ -1,20 +1,16 @@
-// The Adjust tab's "From the CapCut draft" section on an opened draft. CLIP_AT="x,y" is a
-// video or photo bar with CapCut adjustments and RULER_Y the ruler's y (CSS px, from
-// c2-capcut-opened.png at 2x); the playhead goes 8 px left of it, off the bar's click. Sets
-// the first slider the engine draws to ADJUST_VALUE (default 40), removes it, then puts the
-// draft's back, and checks the engine's frame after each.
+// The Adjust tab's "From the CapCut draft" section on an opened draft: the first video or
+// photo with CapCut adjustments (as saved), with the playhead inside it. Sets the first slider
+// the engine draws to ADJUST_VALUE (default 40), removes it, then puts the draft's back, and
+// checks the engine's frame after each.
 import { engineFrame, tab } from "./_preview.mjs";
-export default async ({ win, shot }) => {
-  const [x, y] = (process.env.CLIP_AT || "604,830").split(",").map(Number);
-  const rulerY = Number(process.env.RULER_Y || 747);
+import { clipsWhere, focus, savedProject } from "./_anim.mjs";
+export default async (ctx) => {
+  const { win, shot, udDir } = ctx;
   await win.keyboard.press("v");
-  await win.mouse.click(x - 8, rulerY);
-  await win.waitForTimeout(900);
-  await win.mouse.click(x, y);
-  await win.waitForTimeout(600);
-  // The properties tabs scroll sideways; bring this one into view first.
-  await win.evaluate(() => [...document.querySelectorAll("[role=tab]")].find((e) => e.innerText.trim() === "Adjust")?.scrollIntoView({ inline: "center" }));
-  await win.waitForTimeout(300);
+  const doc = await savedProject(win, udDir);
+  const clip = clipsWhere(doc, (c) => c.draftAdjustments?.length)[0];
+  if (!clip) throw new Error("no clip with the draft's adjustments");
+  await focus(ctx, doc, clip);
   await tab(win, "Adjust");
   await shot("j1-adjust-tab");
   const rows = await win.locator("[data-draft-adjustment]").evaluateAll((els) => els.map((e) => `${e.getAttribute("data-draft-adjustment")}:${e.innerText.replace(/\s+/g, " ").trim()}`));

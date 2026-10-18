@@ -5,7 +5,7 @@ export default async ({ app, win, shot, clipPath }) => {
     ipcMain.handle("dialog:pick-media", async () => [p]);
   }, clipPath);
   const t0 = Date.now();
-  await win.getByText("Upload Media", { exact: true }).click();
+  await win.locator("[data-testid=media-import]").click();
   let seen = "no conversion";
   for (let i = 0; i < 90; i++) {
     await win.waitForTimeout(1000);

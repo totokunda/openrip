@@ -63,16 +63,12 @@ export const undoCase = async (ctx, check, name, edit, { frame = true } = {}) =>
   return { ok, before: s0, after: s1 };
 };
 
-// Open a properties tab, scrolling the tab strip to it first.
-export const openTab = async (win, name) => {
-  await win.evaluate((name) => [...document.querySelectorAll("[role=tab]")].find((e) => e.innerText.trim() === name)?.scrollIntoView({ inline: "center" }), name);
-  await win.waitForTimeout(300);
-  await tab(win, name);
-};
+// Open an inspector tab (tab() scrolls the strip to it).
+export const openTab = (win, name) => tab(win, name);
 
 // The number field under a panel label ("Position", "Volume", …).
 export const field = (win, label) =>
-  win.locator("[role=tabpanel] label", { hasText: new RegExp(`^${label}$`) }).first().locator("xpath=..").locator("xpath=..").locator("input").first();
+  win.locator("[data-testid=inspector] [role=tabpanel] label", { hasText: new RegExp(`^${label}$`) }).first().locator("xpath=..").locator("xpath=..").locator("input").first();
 
 // Type `value` into the field under `label` and press Enter.
 export const typeInto = async (win, label, value) => {
@@ -86,7 +82,7 @@ export const typeInto = async (win, label, value) => {
 // Where a slider's thumb is (the slider under `label`), scrolled into view.
 export const thumb = (win, label) =>
   win.evaluate((label) => {
-    const l = [...document.querySelectorAll("[role=tabpanel] label")].find((e) => e.innerText.trim() === label);
+    const l = [...document.querySelectorAll("[data-testid=inspector] [role=tabpanel] label")].find((e) => e.innerText.trim() === label);
     const t = l?.parentElement?.querySelector("[role=slider]");
     if (!t) return null;
     t.scrollIntoView({ block: "center" });

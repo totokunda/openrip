@@ -1,12 +1,13 @@
 // Undo and redo of an Animation tab change (after newtext): Type 1 on the text, then ⌘Z should
 // bring back None and ⇧⌘Z Type 1 again.
 import { rulerMap, tab } from "./_preview.mjs";
-import { checks, choose, selected } from "./_anim.mjs";
-import { ROW, textX } from "./animtext.mjs";
+import { checks, choose, rowOf, selected } from "./_anim.mjs";
+import { textX } from "./animtext.mjs";
 
 export default async (ctx) => {
   const { win } = ctx;
   const map = ctx.map ?? (ctx.map = await rulerMap(win));
+  const ROW = await rowOf(ctx, "text");
   const { check, report } = checks();
   await win.mouse.click(await textX(win, map), ROW);
   await win.waitForTimeout(600);

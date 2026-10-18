@@ -1,6 +1,6 @@
 // Measure the open project: playhead seeks and a scrub drag, playback smoothness, and how long
 // an edit takes to reach the picture, with the renderer's long tasks (stalls over 50 ms).
-import { previewRect, timelineRect, drag } from "./_preview.mjs";
+import { playButton, previewRect, timelineRect, drag } from "./_preview.mjs";
 
 const stats = (xs) => {
   if (!xs.length) return "n/a";
@@ -76,7 +76,8 @@ export default async ({ win, outDir, fs }) => {
   {
     await win.mouse.click(tl.x + 20, rulerY);
     await win.waitForTimeout(800);
-    const play = (await win.evaluate(() => [...document.querySelectorAll("svg")].filter((el) => (el.getAttribute("class") || "").includes("text-brand-light/70 h-7 w-7")).map((el) => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })))[0];
+    const b = await playButton(win).boundingBox();
+    const play = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
     const t0 = await now();
     await win.mouse.click(play.x, play.y);
     await win.waitForTimeout(8000);

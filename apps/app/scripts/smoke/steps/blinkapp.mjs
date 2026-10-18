@@ -3,11 +3,10 @@
 // project with the standard clip split at 5 s. Now that the project has CapCut's image
 // sequence, Blink is offered for the app's clips, and the eyelid closes over the video up to
 // the cut.
-import { diff, grab, rulerMap, seek, settled, tallTimeline } from "./_preview.mjs";
+import { clickSplit, diff, goHome, grab, rulerMap, seek, settled, tallTimeline } from "./_preview.mjs";
 import { bar, checks, choose, options, pick, savedClips, savedProject } from "./_anim.mjs";
 import importMedia from "./import.mjs";
 import toTimeline from "./timeline.mjs";
-import { SPLIT } from "./textcut.mjs";
 
 export default async (ctx) => {
   const { win, shot, udDir } = ctx;
@@ -18,9 +17,9 @@ export default async (ctx) => {
   const blink = doc.timeline.clips.find((c) => c.transitionOut?.type === "blink");
   await pick(ctx, doc, blink.clipId);
   await win.keyboard.press("Meta+c");
-  await win.getByText("Projects", { exact: true }).first().click();
-  await win.waitForTimeout(600);
-  await win.getByText("New Project", { exact: true }).click();
+  await goHome(win);
+  await win.locator("[data-testid=new-project]").click();
+  await win.waitForSelector("[data-testid=editor]", { timeout: 60000 });
   await win.waitForTimeout(3000);
   await importMedia(ctx);
   await toTimeline(ctx);
@@ -36,7 +35,7 @@ export default async (ctx) => {
   await seek(win, map, 5);
   await win.mouse.click(...(await bar(ctx, doc, video.clipId, 2)));
   await win.waitForTimeout(600);
-  await settled(win, () => win.mouse.click(...SPLIT));
+  await settled(win, () => clickSplit(win));
   // Two thirds of the way to the cut in a 0.5 s Blink (frame 118 at 24 fps): the lids show.
   await seek(win, map, 118 / 24);
   await grab(win, "none");

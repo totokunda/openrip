@@ -15,7 +15,7 @@ export default async ({ app, win, shot, outDir, fs }) => {
   });
   const file = path.join(outDir, "anim-export.mp4");
   fs.rmSync(file, { force: true });
-  await win.getByText("Export", { exact: true }).first().click();
+  await win.locator("[data-testid=export]").click();
   await win.waitForTimeout(1000);
   const dialog = win.getByRole("dialog");
   await dialog.locator('input[placeholder="My export"]').fill("anim-export");

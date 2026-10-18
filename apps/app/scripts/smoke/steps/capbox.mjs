@@ -34,7 +34,7 @@ export default async ({ win, shot }) => {
   const f1 = await engineFrame(win);
   await shot("b1-uppercase-box");
   const font = process.env.BOX_FONT || "Georgia";
-  await win.locator("[role=tabpanel] [role=combobox]").first().click();
+  await win.locator("[data-testid=inspector] [role=tabpanel] [role=combobox]").first().click();
   await win.waitForTimeout(400);
   await win.keyboard.type(font);
   await win.waitForTimeout(400);

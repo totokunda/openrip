@@ -1,22 +1,19 @@
-// A CapCut filter bar's intensity on an opened draft. FILTER_AT="x,y" is the bar and RULER_Y
-// the ruler's y (CSS px, from c2-capcut-opened.png at 2x); the playhead goes 8 px left of it.
-// Sets the Filter tab's intensity to 0, then 100, and checks the engine's frame after each.
+// A CapCut filter bar's intensity on an opened draft: its first filter bar (as saved), with
+// the playhead inside it. Sets the Filter tab's intensity to 0, then 100, and checks the
+// engine's frame after each.
 import { engineFrame, tab } from "./_preview.mjs";
-export default async ({ win, shot }) => {
-  const [x, y] = (process.env.FILTER_AT || "300,700").split(",").map(Number);
-  const rulerY = Number(process.env.RULER_Y || 747);
+import { clipsWhere, focus, savedProject } from "./_anim.mjs";
+export default async (ctx) => {
+  const { win, shot, udDir } = ctx;
   await win.keyboard.press("v");
-  await win.mouse.click(x - 8, rulerY);
-  await win.waitForTimeout(900);
-  await win.mouse.click(x, y);
-  await win.waitForTimeout(600);
-  // The properties tabs scroll sideways; bring this one into view first.
-  await win.evaluate(() => [...document.querySelectorAll("[role=tab]")].find((e) => e.innerText.trim() === "Filter")?.scrollIntoView({ inline: "center" }));
-  await win.waitForTimeout(300);
+  const doc = await savedProject(win, udDir);
+  const bar = clipsWhere(doc, (c) => c.type === "filter" && c.draftKind !== "sticker")[0];
+  if (!bar) throw new Error("no filter bar");
+  await focus(ctx, doc, bar);
   await tab(win, "Filter");
   await shot("f1-filter-tab");
-  const panel = await win.locator("[role=tabpanel]").first().innerText();
-  const field = win.locator("[role=tabpanel] input").first();
+  const panel = await win.locator("[data-testid=inspector] [role=tabpanel]").first().innerText();
+  const field = win.locator("[data-testid=inspector] [role=tabpanel] input").first();
   if ((await field.count()) === 0) throw new Error(`no intensity field: ${panel.replace(/\s+/g, " ").slice(0, 200)}`);
   const was = await field.inputValue();
   const set = async (v) => {

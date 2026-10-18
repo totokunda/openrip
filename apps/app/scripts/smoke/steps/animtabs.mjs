@@ -9,7 +9,7 @@ export default async (ctx) => {
   ctx.map = await rulerMap(win);
   const { check, report } = checks();
   const doc = await savedProject(win, udDir);
-  const tabs = () => win.evaluate(() => [...document.querySelectorAll("[role=tab]")].map((e) => e.innerText.trim()));
+  const tabs = () => win.evaluate(() => [...document.querySelectorAll("[data-testid=inspector] [role=tab]")].map((e) => e.innerText.trim()));
   for (const type of ["text", "video", "image", "audio", "filter"]) {
     const clip = doc.timeline.clips.find((c) => c.type === type);
     if (!clip) continue;

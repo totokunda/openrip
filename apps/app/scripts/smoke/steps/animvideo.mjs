@@ -3,17 +3,16 @@
 // the second, with their duration and None; the second has no clip after it, so it shows the
 // note and draws nothing; no Blink without CapCut's image sequence. Then the first half split
 // again at 2.5 s: its transition stays on the half that ends at the cut. Compares the engine's
-// frames with the clips drawn without a transition. VIDEO_ROW is the video track's y in CSS px.
-import { diff, grab, rulerMap, seek, settled, tab } from "./_preview.mjs";
-import { checks, choose, duration, note, options, savedClips, selected, setDuration } from "./_anim.mjs";
-import { SPLIT } from "./textcut.mjs";
+// frames with the clips drawn without a transition. The video's row is found from the project.
+import { clickSplit, diff, grab, rulerMap, seek, settled, tab } from "./_preview.mjs";
+import { checks, choose, duration, note, options, rowOf, savedClips, selected, setDuration } from "./_anim.mjs";
 
-const ROW = +(process.env.VIDEO_ROW || 796);
 const TIMES = [2.5, 4.5, 4.6, 4.875, 4.9, 5, 5.4, 9.9];
 
 export default async (ctx) => {
   const { win, shot, udDir } = ctx;
   const map = ctx.map ?? (ctx.map = await rulerMap(win));
+  const ROW = await rowOf(ctx, "video");
   const { check, report } = checks();
   const at = async (s, name) => {
     await seek(win, map, s);
@@ -30,7 +29,7 @@ export default async (ctx) => {
   await seek(win, map, 5);
   await win.mouse.click(map.x(2), ROW);
   await win.waitForTimeout(600);
-  await settled(win, () => win.mouse.click(...SPLIT));
+  await settled(win, () => clickSplit(win));
   check("split in two", (await videos()).length === 2, (await videos()).map((c) => `${c.startTick}-${c.endTick}`).join());
 
   await select(2);
@@ -94,7 +93,7 @@ export default async (ctx) => {
   await seek(win, map, 2.5);
   await win.mouse.click(map.x(1), ROW);
   await win.waitForTimeout(600);
-  await settled(win, () => win.mouse.click(...SPLIT));
+  await settled(win, () => clickSplit(win));
   await shot("v3-split");
   v = await videos();
   check("split: three clips, the transition only on the one ending at 5 s", v.length === 3 && !v[0].transitionOut && v[1].transitionOut?.type === "white_flash", JSON.stringify(v.map((c) => [c.startTick, c.transitionOut?.type ?? null])));

@@ -3,7 +3,7 @@
 // with ⇧⌘Z: the engine's frame and the saved project should come back exactly (see
 // _undo.mjs). Then everything is undone at once back to the start and redone, by the
 // toolbar's buttons. UNDO_CASES="a,b" runs some of the cases only.
-import { drag, previewRect, seek, settled, timelineRect } from "./_preview.mjs";
+import { clickSplit, drag, previewRect, seek, settled, timelineRect } from "./_preview.mjs";
 import { bar, checks, choose, savedProject, select } from "./_anim.mjs";
 import { field, openTab, press, state, thumb, typeInto, undoCase } from "./_undo.mjs";
 
@@ -55,7 +55,7 @@ export default async (ctx) => {
       await pick("text", 0);
       await openTab(win, "Text");
       const at = await win.evaluate(() => {
-        const h = [...document.querySelectorAll("h4")].find((e) => (e.innerText || "").trim() === "Text Transform");
+        const h = [...document.querySelectorAll("[data-testid=inspector] h4")].find((e) => (e.innerText || "").trim() === "Text Transform");
         const r = h?.parentElement?.querySelectorAll("button")[1]?.getBoundingClientRect();
         return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
       });
@@ -64,7 +64,7 @@ export default async (ctx) => {
     color: async () => {
       await pick("text", 0);
       await openTab(win, "Text");
-      const inputs = win.locator("[role=tabpanel] input");
+      const inputs = win.locator("[data-testid=inspector] [role=tabpanel] input");
       for (let i = 0; i < (await inputs.count()); i++) {
         if (!/^#?[0-9a-f]{6}$/i.test(await inputs.nth(i).inputValue())) continue;
         await inputs.nth(i).click({ clickCount: 3 });
@@ -77,7 +77,7 @@ export default async (ctx) => {
     font: async () => {
       await pick("text", 0);
       await openTab(win, "Text");
-      await win.locator("[role=tabpanel] [role=combobox]").first().click();
+      await win.locator("[data-testid=inspector] [role=tabpanel] [role=combobox]").first().click();
       await win.waitForTimeout(400);
       await win.keyboard.type("Georgia");
       await win.waitForTimeout(400);
@@ -102,10 +102,10 @@ export default async (ctx) => {
       const [, y] = await bar(ctx, await doc(), text.clipId);
       await settled(win, () => drag(win, map.x(end) - 1, y, map.x(end - 1), y));
     },
-    // By the toolbar's split button, the one after Redo.
+    // By the toolbar's split button.
     split: async () => {
       await pick("video", 0, 2);
-      await settled(win, () => win.locator("[title=Redo] + div").click());
+      await settled(win, () => clickSplit(win));
     },
     // A White Flash into the second half, seen at the cut.
     transition: async () => {
@@ -126,7 +126,7 @@ export default async (ctx) => {
     },
     // A filter from the Filters panel dropped on the timeline from 1 s, then its intensity.
     filter: async () => {
-      await win.getByText("Filters", { exact: true }).first().click();
+      await win.locator("[data-testid=assets-tab-filters]").click();
       await win.waitForTimeout(1000);
       // A warm one: it tints even a black-and-white picture.
       const from = await win.evaluate(() => {
@@ -146,7 +146,7 @@ export default async (ctx) => {
         await win.waitForTimeout(300);
         await win.mouse.up();
       });
-      await win.getByText("Media", { exact: true }).first().click();
+      await win.locator("[data-testid=assets-tab-media]").click();
     },
     intensity: async () => {
       await pick("filter", 0);
@@ -178,7 +178,7 @@ export default async (ctx) => {
       await settled(win, () => win.mouse.click(eye.x, eye.y));
     },
     aspect: async () => {
-      await win.getByText("Size", { exact: true }).first().click();
+      await win.locator("[data-testid=ratio-menu]").click();
       await win.waitForTimeout(500);
       await settled(win, () => win.getByRole("menuitem").filter({ hasText: "Square" }).first().click());
       await win.keyboard.press("Escape");
@@ -205,7 +205,7 @@ export default async (ctx) => {
     }
   }
   await seek(win, map, 1.5);
-  const tabs = () => win.evaluate(() => [...document.querySelectorAll("[role=tab]")].map((e) => e.innerText.trim()).join(","));
+  const tabs = () => win.evaluate(() => [...document.querySelectorAll("[data-testid=inspector] [role=tab]")].map((e) => e.innerText.trim()).join(","));
   if (!only.length) {
     // A field keeps ⌘Z for its typing: nothing in the project is undone.
     await pick("text", 0);

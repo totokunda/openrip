@@ -1,23 +1,21 @@
 // A CapCut sticker bar on an opened draft (scratch draft: calibration session 6 with its
-// sticker track shown). CLIP_AT="x,y" is the sticker's bar and RULER_Y the ruler's y (CSS px,
-// from c2-capcut-opened.png at 2x); the playhead goes 16 px left of it, off the bar's click. Checks
+// sticker track shown): its first sticker bar (as saved), with the playhead inside it. Checks
 // the engine draws the sticker, the Filter tab shows its opacity, and setting it to
 // STICKER_OPACITY (default 30) fades the sticker.
-import { checks } from "./_anim.mjs";
+import { checks, clipsWhere, focus, savedProject } from "./_anim.mjs";
 import { engineFrame, tab } from "./_preview.mjs";
-export default async ({ win, shot }) => {
+export default async (ctx) => {
+  const { win, shot, udDir } = ctx;
   const { check, report } = checks();
-  const [x, y] = (process.env.CLIP_AT || "604,830").split(",").map(Number);
-  const rulerY = Number(process.env.RULER_Y || 747);
   const bright = "r + g + b > 200";
   await win.keyboard.press("v");
-  await win.mouse.click(x - 16, rulerY);
-  await win.waitForTimeout(1500);
+  const doc = await savedProject(win, udDir);
+  const sticker = clipsWhere(doc, (c) => c.draftKind === "sticker")[0];
+  if (!sticker) throw new Error("no sticker bar");
+  await focus(ctx, doc, sticker);
+  await win.waitForTimeout(900);
   const drawn = await engineFrame(win, bright);
   check("the sticker is drawn", drawn.count > 0, `${drawn.count} bright pixels`);
-  await win.mouse.click(x, y);
-  await win.waitForTimeout(600);
-  await win.evaluate(() => [...document.querySelectorAll("[role=tab]")].find((e) => e.innerText.trim() === "Filter")?.scrollIntoView({ inline: "center" }));
   await tab(win, "Filter").catch(() => {});
   await shot("s1-sticker-tab");
   const body = await win.locator("body").innerText();

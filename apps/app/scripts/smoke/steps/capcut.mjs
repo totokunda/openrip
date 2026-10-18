@@ -1,11 +1,27 @@
-// Projects ▸ Open CapCut Project…, pick the draft whose card text contains CAPCUT_DRAFT, wait
-// for it to open. "opened in" includes a fixed 4 s wait.
+// Home ▸ Open a CapCut project, pick the draft whose card text contains CAPCUT_DRAFT, wait
+// for it to open in the editor. "opened in" includes a fixed 4 s wait.
+import { goHome } from "./_preview.mjs";
+
+// The CapCut dialog, from the home screen (going there first from the editor).
+export const openCapCutDialog = async (win) => {
+  if (await win.locator("[data-testid=editor]").count()) await goHome(win);
+  await win.locator("[data-testid=home-open-capcut]").click();
+  await win.waitForTimeout(1500);
+};
+
+// Until the dialog has closed and the editor shows the opened project.
+export const waitOpened = async (win) => {
+  for (let i = 0; i < 120; i++) {
+    await win.waitForTimeout(500);
+    if ((await win.getByRole("dialog").count()) === 0) break;
+  }
+  await win.waitForSelector("[data-testid=editor]", { timeout: 60000 });
+  await win.waitForTimeout(4000);
+};
+
 export default async ({ win, shot }) => {
   const want = process.env.CAPCUT_DRAFT || "";
-  await win.getByText("Projects", { exact: true }).first().click();
-  await win.waitForTimeout(500);
-  await win.getByText("Open CapCut Project…", { exact: true }).click();
-  await win.waitForTimeout(1500);
+  await openCapCutDialog(win);
   await shot("c1-capcut-dialog");
   const cards = win.getByRole("dialog").locator("button[title]");
   const n = await cards.count();
@@ -19,11 +35,7 @@ export default async ({ win, shot }) => {
   if (!picked) throw new Error(`no draft matching "${want}" among ${n}`);
   const t0 = Date.now();
   await picked.click();
-  for (let i = 0; i < 120; i++) {
-    await win.waitForTimeout(500);
-    if ((await win.getByRole("dialog").count()) === 0) break;
-  }
-  await win.waitForTimeout(4000);
+  await waitOpened(win);
   await shot("c2-capcut-opened");
   const toast = await win.locator("[data-sonner-toast]").allInnerTexts().catch(() => []);
   return `opened in ${((Date.now() - t0) / 1000).toFixed(1)} s; drafts listed ${n}; ${toast.join(" | ").slice(0, 200)}`;

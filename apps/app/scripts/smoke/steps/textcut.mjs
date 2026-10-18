@@ -1,17 +1,15 @@
 // Trim and split of the app's own text with an In animation (after animtext, whose frames
 // without an animation it compares with): Type 1 over 2 s; the clip trimmed to 1.5 s, so the
 // animation must end by then (whole on its last frame, 1.46 s at 24 fps); then split at 0.75 s:
-// the In stays on the first half and the second shows whole from its start. SPLIT_AT is the
-// timeline's split button in CSS px.
-import { diff, drag, grab, rulerMap, seek, settled, tab } from "./_preview.mjs";
-import { checks, choose, duration, savedClips, selected, setDuration } from "./_anim.mjs";
-import { ROW } from "./animtext.mjs";
-
-export const SPLIT = (process.env.SPLIT_AT || "87,703").split(",").map(Number);
+// the In stays on the first half and the second shows whole from its start.
+import { clickSplit, diff, drag, grab, rulerMap, seek, settled, tab } from "./_preview.mjs";
+import { checks, choose, duration, rowOf, savedClips, selected, setDuration } from "./_anim.mjs";
+import { handleX } from "./_timeline.mjs";
 
 export default async (ctx) => {
   const { win, shot, udDir } = ctx;
   const map = ctx.map ?? (ctx.map = await rulerMap(win));
+  const ROW = await rowOf(ctx, "text");
   const { check, report } = checks();
   const at = async (s, name) => {
     await seek(win, map, s);
@@ -25,8 +23,10 @@ export default async (ctx) => {
   await select(1.0);
   await choose(win, "Animation", "Type 1");
   await setDuration(win, 2);
-  // Trim the end from 3 s to 1.5 s by its handle.
-  await settled(win, () => drag(win, map.x(3) - 1, ROW, map.x(1.5), ROW));
+  // Trim the end from 3 s to 1.5 s by its handle (found on screen: it's 3 px wide, and the
+  // ruler's mapping can be a pixel off).
+  const hx = await handleX(win, map.x(3) - 1, ROW);
+  await settled(win, () => drag(win, hx, ROW, map.x(1.5), ROW));
   await shot("c1-trimmed");
   let text = (await savedClips(win, udDir)).filter((c) => c.type === "text");
   check("trimmed to 1.5 s", text.length === 1 && text[0].endTick === "1500000", text.map((c) => c.endTick).join());
@@ -39,7 +39,7 @@ export default async (ctx) => {
   // Split at 0.75 s; the panel then shows the second half (both are selected, it the last).
   await seek(win, map, 0.75);
   await select(0.4);
-  await settled(win, () => win.mouse.click(...SPLIT));
+  await settled(win, () => clickSplit(win));
   await shot("c2-split");
   text = (await savedClips(win, udDir)).filter((c) => c.type === "text").sort((a, b) => +a.startTick - +b.startTick);
   check("split in two", text.length === 2, text.map((c) => `${c.startTick}-${c.endTick}`).join());

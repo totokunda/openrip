@@ -1,21 +1,20 @@
 // The Adjust tab's controls for CapCut's clarity, vignette, fade, HSL and curves on an opened
 // draft whose clip has all of them (scratch draft: calibration session 4's first clip with them
-// attached). CLIP_AT="x,y" is the clip's bar and RULER_Y the ruler's y (CSS px, from
-// c2-capcut-opened.png at 2x). Each slider is set and the engine's frame checked; the HSL
-// range's saturation is moved; the curves are taken off; then the draft's are put back.
-import { checks } from "./_anim.mjs";
+// attached), found as saved: the first clip whose draft adjustments have them all, with the
+// playhead inside it. Each slider is set and the engine's frame checked; the HSL range's
+// saturation is moved; the curves are taken off; then the draft's are put back.
+import { checks, clipsWhere, focus, savedProject } from "./_anim.mjs";
 import { engineFrame, tab } from "./_preview.mjs";
-export default async ({ win, shot }) => {
+const KINDS = ["clarity", "vignette", "fade", "hsl", "curves"];
+export default async (ctx) => {
+  const { win, shot, udDir } = ctx;
   const { check, report } = checks();
-  const [x, y] = (process.env.CLIP_AT || "604,830").split(",").map(Number);
-  const rulerY = Number(process.env.RULER_Y || 747);
   await win.keyboard.press("v");
-  await win.mouse.click(x - 8, rulerY);
-  await win.waitForTimeout(900);
-  await win.mouse.click(x, y);
-  await win.waitForTimeout(600);
-  await win.evaluate(() => [...document.querySelectorAll("[role=tab]")].find((e) => e.innerText.trim() === "Adjust")?.scrollIntoView({ inline: "center" }));
-  await win.waitForTimeout(300);
+  const doc = await savedProject(win, udDir);
+  const kinds = (c) => new Set((c.draftAdjustments ?? []).map((a) => a.kind));
+  const clip = clipsWhere(doc, (c) => KINDS.every((k) => kinds(c).has(k)))[0] ?? clipsWhere(doc, (c) => c.draftAdjustments?.length)[0];
+  if (!clip) throw new Error("no clip with the draft's adjustments");
+  await focus(ctx, doc, clip);
   await tab(win, "Adjust");
   await shot("k1-adjust-tab");
   const row = (kind) => win.locator(`[data-draft-adjustment="${kind}"]`).first();

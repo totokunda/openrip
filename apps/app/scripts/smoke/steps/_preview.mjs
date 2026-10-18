@@ -1,14 +1,34 @@
-// The preview stage: the largest canvas in the upper half of the window.
+// From the home screen into the editor, on the project the app had open last (its card is
+// marked active), or the first card. Waits until the editor shows. Nothing when it already does.
+export const openEditor = async (win) => {
+  await win.waitForSelector("[data-testid=home], [data-testid=editor]", { timeout: 60000 });
+  if (await win.locator("[data-testid=editor]").count()) return;
+  const active = win.locator("[data-testid=project-card][data-active=true] button[title^='Open ']");
+  const card = (await active.count()) ? active.first() : win.locator("[data-testid=project-card] button[title^='Open ']").first();
+  await card.click();
+  await win.waitForSelector("[data-testid=editor]", { timeout: 60000 });
+  await win.waitForTimeout(1500);
+};
+// Back to the home screen by the top bar's Home button.
+export const goHome = async (win) => {
+  await win.locator("[data-testid=go-home]").click();
+  await win.waitForSelector("[data-testid=home]", { timeout: 20000 });
+  await win.waitForTimeout(500);
+};
+// The preview stage: the largest canvas in the player (in the upper half of the window
+// without one; off-screen canvases for thumbnails and text measuring are left out).
 export const previewRect = async (win) => win.evaluate(() => {
-  const cs = [...document.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).filter((r) => r.y < window.innerHeight * 0.5 && r.width > 200);
+  const root = document.querySelector("[data-testid=player]") ?? document;
+  const cs = [...root.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).filter((r) => r.y >= 0 && r.x >= 0 && r.y < window.innerHeight * 0.5 && r.width > 200);
   cs.sort((a, b) => b.width * b.height - a.width * a.height);
   const r = cs[0];
   return { x: r.x, y: r.y, w: r.width, h: r.height };
 });
-// The timeline: the largest canvas in the lower part of the window (as wide as it, unlike the
-// preview); its ruler is the top strip.
+// The timeline: the largest canvas in the timeline panel (in the lower part of the window
+// without one); its ruler is the top strip.
 export const timelineRect = async (win) => win.evaluate(() => {
-  const cs = [...document.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).filter((b) => b.y > window.innerHeight * 0.3 && b.width > window.innerWidth * 0.75);
+  const root = document.querySelector("[data-testid=timeline]") ?? document;
+  const cs = [...root.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).filter((b) => b.x >= 0 && b.y > window.innerHeight * 0.3 && b.width > window.innerWidth * 0.5);
   cs.sort((p, q) => q.width * q.height - p.width * p.height);
   const b = cs[0];
   return { x: b.x, y: b.y, w: b.width, h: b.height };
@@ -37,18 +57,43 @@ export const engineFrame = (win, test = "false") => win.evaluate((test) => {
   }
   return { sum, light: light / (d.length / 4), count, w: t.width, h: t.height };
 }, test);
-// Click a properties tab ("Text", "Animation", …).
-export const tab = async (win, name) => {
+// Click one of the inspector's tabs or sub-tabs by its name, if it's there; false if not.
+const clickTab = async (win, name) => {
   const at = await win.evaluate((name) => {
-    const el = [...document.querySelectorAll("[role=tab]")].find((e) => (e.innerText || "").trim() === name);
+    const el = [...document.querySelectorAll("[data-testid=inspector] [role=tab]")].find((e) => (e.innerText || "").trim() === name);
     if (!el) return null;
+    el.scrollIntoView({ inline: "center", block: "nearest" });
     const r = el.getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }, name);
-  if (!at) throw new Error(`no ${name} tab`);
+  if (!at) return false;
   await win.mouse.click(at.x, at.y);
-  await win.waitForTimeout(500);
+  await win.waitForTimeout(400);
+  return true;
 };
+// Where the panels that steps name by their old tab ("Transform", "Mask") are now: inside the
+// clip's first tab (Video, Image, Text, Shape), under a sub-tab.
+const NESTED = { Transform: ["Text", "Shape", "Video", "Image"], Mask: ["Video", "Image"], Basic: ["Text", "Shape", "Video", "Image"] };
+// Click an inspector tab ("Text", "Animation", "Adjust", …). A tab with sub-tabs opens on its
+// first ("Basic"), where its main panel is; "Transform" and "Mask" find their sub-tab
+// (a video's transform is in Video ▸ Basic) and "Duration" is a video's Speed.
+export const tab = async (win, name) => {
+  if (NESTED[name]) {
+    for (const parent of NESTED[name]) {
+      if (!(await clickTab(win, parent))) continue;
+      if (await clickTab(win, name)) return win.waitForTimeout(100);
+      if (name === "Transform" && (await clickTab(win, "Basic"))) return win.waitForTimeout(100);
+    }
+    throw new Error(`no ${name} tab`);
+  }
+  if (!(await clickTab(win, name)) && !(name === "Duration" && (await clickTab(win, "Speed")))) throw new Error(`no ${name} tab`);
+  // Its first sub-tab, where the tab's main panel is.
+  await clickTab(win, "Basic");
+  await win.waitForTimeout(100);
+};
+// The timeline toolbar's split button and the player's play button.
+export const clickSplit = (win) => win.locator("[data-testid=tool-split]").click();
+export const playButton = (win) => win.locator("[data-testid=play]");
 // Make the timeline as tall as the layout allows (its handle dragged up), so deep tracks show.
 export const tallTimeline = async (win) => {
   for (let tries = 0; tries < 3; tries++) {
@@ -94,10 +139,10 @@ export const settled = async (win, action, { quiet = 500, timeout = 4000 } = {})
     if (Date.now() - start > timeout) return s.n > 0;
   }
 };
-// The playhead's time in seconds, from the clock.
+// The playhead's time in seconds, from the player's time.
 export const now = async (win) => {
-  const c = (await win.locator("body").innerText()).match(/(\d\d):(\d\d\.\d\d)\s*\/\s*\d\d:\d\d\.\d\d/);
-  return c ? +c[1] * 60 + +c[2] : NaN;
+  const t = win.locator("[data-testid=player-time]");
+  return (await t.count()) ? Math.round(+(await t.getAttribute("data-time")) * 1000) / 1000 : NaN;
 };
 // Seconds to ruler x, measured by clicking the ruler at two places and reading the clock.
 export const rulerMap = async (win, x1 = 100, x2 = 500) => {

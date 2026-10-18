@@ -1,47 +1,46 @@
-// Animation tab check on an opened draft. Coordinates (CSS px, from c2-capcut-opened.png at 2x):
-// ANIM_LAYOUT='{"t0":75.5,"pps":272.7,"ruler":747,"caption":[185,778],"video":[604,830],"cut":4.03}'
-// where t0/pps map seconds to ruler x, caption/video are clip bars, and cut is where the video
-// meets the next clip (in the same ruler units). Sets Typewriter on the caption and White Flash
-// on the video, and checks the engine's frames.
-import { engineFrame, tab } from "./_preview.mjs";
-const L = JSON.parse(process.env.ANIM_LAYOUT || '{"t0":75.5,"pps":272.7,"ruler":747,"caption":[185,778],"video":[604,830],"cut":4.03}');
-// Clicking the ruler where the playhead already is used to send it to 0; step away first anyway.
-const seek = async (win, s) => {
-  await win.mouse.click(L.t0 + (s > 3 ? 1 : 5) * L.pps, L.ruler);
-  await win.waitForTimeout(300);
-  await win.mouse.click(L.t0 + s * L.pps, L.ruler);
-  await win.waitForTimeout(900);
-};
+// Animation tab check on an opened draft: Typewriter on its first caption and White Flash on
+// its first video that another clip follows on the same track (both found in the project as
+// saved), and the engine's frames checked, a quarter second into the caption and at the cut.
+import { engineFrame, rulerMap, seek, tab } from "./_preview.mjs";
+import { clipsWhere, savedProject, select } from "./_anim.mjs";
+
 const choose = async (win, option) => {
-  await win.locator("[role=tabpanel] [role=combobox]").first().click();
+  await win.locator("[data-testid=inspector] [role=tabpanel] [role=combobox]").first().click();
   await win.waitForTimeout(300);
   await win.getByRole("option", { name: option, exact: true }).click();
   await win.waitForTimeout(1500);
 };
-export default async ({ win, shot, clock }) => {
+
+export default async (ctx) => {
+  const { win, shot, clock, udDir } = ctx;
   const out = [];
   await win.keyboard.press("v");
-  await seek(win, 0.25);
+  const map = (ctx.map ??= await rulerMap(win));
+  const doc = await savedProject(win, udDir);
+  const caption = clipsWhere(doc, (c) => c.type === "text")[0];
+  const video = clipsWhere(doc, (c) => c.type === "video" && doc.timeline.clips.some((d) => d.timelineId === c.timelineId && d.startTick === c.endTick))[0];
+  if (!caption || !video) throw new Error(`no ${caption ? "video followed by a clip" : "caption"}`);
+  const at = +caption.startTick / 1e6 + 0.25;
+  const cut = +video.endTick / 1e6;
+
+  await seek(win, map, at);
   const before = await engineFrame(win);
-  await win.mouse.click(...L.caption);
-  await win.waitForTimeout(600);
+  await select(ctx, doc, caption.clipId);
   await tab(win, "Animation");
   await shot("a1-animation-tab");
   await choose(win, "Typewriter");
-  await seek(win, 0.25);
+  await seek(win, map, at);
   const typing = await engineFrame(win);
   await shot("a2-typewriter");
   out.push(`caption changes with Typewriter: ${before.sum !== typing.sum} (clock ${await clock()})`);
-  await win.mouse.click(...L.video);
-  await win.waitForTimeout(600);
-  await seek(win, L.cut);
+
+  await seek(win, map, cut);
   const cut0 = await engineFrame(win);
-  await win.mouse.click(...L.video);
-  await win.waitForTimeout(400);
+  await select(ctx, doc, video.clipId);
   await tab(win, "Animation");
   await shot("a3-transition-tab");
   await choose(win, "White Flash");
-  await seek(win, L.cut);
+  await seek(win, map, cut);
   const cut1 = await engineFrame(win);
   await shot("a4-white-flash");
   out.push(`lightness at the cut ${cut0.light.toFixed(2)} → ${cut1.light.toFixed(2)} (clock ${await clock()})`);

@@ -2,18 +2,18 @@
 // the project as saved; and a log of checks.
 import fs from "node:fs";
 import path from "node:path";
-import { now, settled, tab, timelineRect } from "./_preview.mjs";
+import { now, rulerMap, seek, settled, tab, timelineRect } from "./_preview.mjs";
 
 // The select in the panel row labelled `label` ("Animation", "Words", "Transition"): its
 // shown value, or null when there's no such row.
 export const selected = (win, label) => win.evaluate((label) => {
-  const h = [...document.querySelectorAll("[role=tabpanel] h4")].find((e) => e.innerText.trim() === label);
+  const h = [...document.querySelectorAll("[data-testid=inspector] [role=tabpanel] h4")].find((e) => e.innerText.trim() === label);
   return h?.parentElement?.querySelector("[role=combobox]")?.innerText.trim() ?? null;
 }, label);
 
 const openSelect = async (win, label) => {
   const at = await win.evaluate((label) => {
-    const h = [...document.querySelectorAll("[role=tabpanel] h4")].find((e) => e.innerText.trim() === label);
+    const h = [...document.querySelectorAll("[data-testid=inspector] [role=tabpanel] h4")].find((e) => e.innerText.trim() === label);
     const r = h?.parentElement?.querySelector("[role=combobox]")?.getBoundingClientRect();
     return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
   }, label);
@@ -39,7 +39,7 @@ export const choose = async (win, label, option) => {
 
 // The Duration slider's value in seconds, its bounds, or null when it isn't shown.
 export const duration = (win) => win.evaluate(() => {
-  const l = [...document.querySelectorAll("[role=tabpanel] label")].find((e) => e.innerText.trim() === "Duration");
+  const l = [...document.querySelectorAll("[data-testid=inspector] [role=tabpanel] label")].find((e) => e.innerText.trim() === "Duration");
   const box = l?.parentElement;
   if (!box) return null;
   const thumb = box.querySelector("[role=slider]");
@@ -48,7 +48,7 @@ export const duration = (win) => win.evaluate(() => {
 
 // Type `s` into the Duration field and press Enter.
 export const setDuration = async (win, s) => {
-  const input = win.locator("[role=tabpanel] label", { hasText: /^Duration$/ }).locator("xpath=..").locator("input");
+  const input = win.locator("[data-testid=inspector] [role=tabpanel] label", { hasText: /^Duration$/ }).locator("xpath=..").locator("input");
   await input.click();
   await win.keyboard.press("Meta+A");
   await win.keyboard.type(String(s));
@@ -56,7 +56,7 @@ export const setDuration = async (win, s) => {
 };
 
 // The notes under the panel's sections.
-export const note = (win) => win.evaluate(() => [...document.querySelectorAll("[role=tabpanel] p")].map((p) => p.innerText.trim()).join(" | "));
+export const note = (win) => win.evaluate(() => [...document.querySelectorAll("[data-testid=inspector] [role=tabpanel] p")].map((p) => p.innerText.trim()).join(" | "));
 
 // The project the app saved last (its projects-json folder), once it has saved.
 export const savedProject = async (win, udDir) => {
@@ -87,12 +87,37 @@ export const bar = async (ctx, doc, id, at) => {
   return [ctx.map.x(s), tl.y + 27 + track.timelineY + track.timelineHeight / 2];
 };
 
+// The saved clips `pred` accepts, earliest first.
+export const clipsWhere = (doc, pred) => doc.timeline.clips.filter(pred).sort((a, b) => +a.startTick - +b.startTick);
+
+// The y of the timeline row of the first clip of `type` (TEXT_ROW or VIDEO_ROW, CSS px,
+// override it), from the project as saved.
+export const rowOf = async (ctx, type) => {
+  const env = process.env[type === "text" ? "TEXT_ROW" : "VIDEO_ROW"];
+  if (env) return +env;
+  ctx.map ??= await rulerMap(ctx.win);
+  const doc = await savedProject(ctx.win, ctx.udDir);
+  const clip = clipsWhere(doc, (c) => c.type === type)[0];
+  if (!clip) throw new Error(`no ${type} clip`);
+  return (await bar(ctx, doc, clip.clipId))[1];
+};
+
+// Put the playhead inside a saved clip (a quarter of the way in, or at `at` s) and select it
+// by its bar three quarters in, well off the playhead's line: its picture in the engine's
+// frame, its tabs in the inspector.
+export const focus = async (ctx, doc, clip, at) => {
+  ctx.map ??= await rulerMap(ctx.win);
+  const [a, b] = [+clip.startTick / 1e6, +clip.endTick / 1e6];
+  await seek(ctx.win, ctx.map, at ?? Math.round((a + (b - a) / 4) * 24) / 24);
+  await select(ctx, doc, clip.clipId, at == null ? a + ((b - a) * 3) / 4 : undefined);
+};
+
 // Select a clip by clicking its bar. A click on the playhead's line would grab the playhead
 // instead: then it clicks a quarter of the way from the bar's farther end.
 export const select = async (ctx, doc, id, at) => {
   let [x, y] = await bar(ctx, doc, id, at);
   const head = ctx.map.x(await now(ctx.win));
-  if (Math.abs(x - head) < 10) {
+  if (Math.abs(x - head) < 16) {
     const clip = doc.timeline.clips.find((c) => c.clipId.startsWith(id));
     const [a, b] = [ctx.map.x(+clip.startTick / 1e6), ctx.map.x(+clip.endTick / 1e6)];
     x = head - a > b - head ? a + (head - a) / 2 : head + (b - head) / 2;

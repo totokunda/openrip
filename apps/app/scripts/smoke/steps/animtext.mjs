@@ -1,11 +1,9 @@
 // The app's own text and its In animation (after newtext): each animation hides the text at
 // the clip's start, shows part of it at 0.25 s and all of it after its 0.5 s; a longer
 // duration moves that; None brings the text back. Compares the engine's frames with the text
-// drawn without an animation. TEXT_ROW is the text track's y in CSS px (from n1-text.png).
+// drawn without an animation. The text's row is found from the project as saved.
 import { diff, grab, now, rulerMap, seek, tab } from "./_preview.mjs";
-import { checks, choose, duration, options, savedClips, selected, setDuration } from "./_anim.mjs";
-
-export const ROW = +(process.env.TEXT_ROW || 780);
+import { checks, choose, clipsWhere, duration, options, savedClips, savedProject, select as selectClip, selected, setDuration } from "./_anim.mjs";
 // Where to click the text's bar (0–3 s): at 1.5 s, or 2.4 s when the playhead is near there.
 // The playhead's line takes clicks 6 px either side of it, which can be under 0.1 s.
 export const textX = async (win, map) => map.x(Math.abs((await now(win)) - 1.5) < 0.4 ? 2.4 : 1.5);
@@ -20,13 +18,16 @@ export default async (ctx) => {
     await seek(win, map, s);
     await grab(win, name);
   };
-  // Clicking the ruler drops the selection: select the text again before using the panel.
+  // Clicking the ruler drops the selection: select the text again before using the panel,
+  // by its bar away from the playhead (a click on its line would grab it).
   const select = async () => {
-    await win.mouse.click(await textX(win, map), ROW);
-    await win.waitForTimeout(600);
+    await selectClip(ctx, doc, text.clipId);
     await tab(win, "Animation");
   };
   for (const s of TIMES) await at(s, `none@${s}`);
+  // The text as saved (read after the frames, by when newtext's save has landed).
+  const doc = await savedProject(win, udDir);
+  const text = clipsWhere(doc, (c) => c.type === "text")[0];
   await select();
   await shot("t1-tab");
   check("tab shows None and no duration", (await selected(win, "Animation")) === "None" && (await duration(win)) === null, await selected(win, "Animation"));
