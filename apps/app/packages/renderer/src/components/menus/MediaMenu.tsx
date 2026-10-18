@@ -52,6 +52,7 @@ import {
 import { HiFilm } from "react-icons/hi";
 import { useClipStore } from "@/lib/clip";
 import { useShellStore } from "@/lib/shell";
+import { preferences } from "@/lib/preferences";
 
 /** The library's grid or list, kept between sessions. */
 const LAYOUT_KEY = "openrip:media-layout";
@@ -113,6 +114,8 @@ const fetchMediaInfos = async (list: ConvertedMediaItem[], folderUuid?: string) 
   const infos = await Promise.allSettled(list.map((it) => getMediaInfo(it.assetUrl)));
   const engine = useEnginePreviewStore.getState();
   if (engine.enabled && engine.info?.available) return { list, infos };
+  // Settings › Performance › Auto optimization: None leaves such videos as they are.
+  if (preferences().autoOptimization === "none") return { list, infos };
   const key = (it: ConvertedMediaItem) => `${folderUuid ?? ""}/${it.name}`;
   const undecodable = list.filter((it, i) => {
     const r = infos[i];

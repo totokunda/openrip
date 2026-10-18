@@ -5,26 +5,22 @@ import { useControlsStore } from "@/lib/control";
 import { useViewportStore } from "@/lib/viewport";
 import { usePlayerStore, type PreviewQuality } from "@/lib/player";
 import { cn } from "@/lib/utils";
+import { formatTimecode, type TimeCodeStyle } from "@/lib/timecode";
+import { usePreference } from "@/lib/preferences";
 import { BackButton, RewindBackward, RewindForward } from "@/components/controls/Buttons";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import RatioMenu from "./RatioMenu";
 import Boxed from "./Boxed";
 
-/** "HH:MM:SS:FF", as CapCut shows time: hours, minutes, seconds and the frame within it. */
-export const timecode = (frames: number, fps: number) => {
-  const rate = Math.max(1, Math.round(fps || 1));
-  const f = Number.isFinite(frames) && frames > 0 ? Math.round(frames) : 0;
-  const seconds = Math.floor(f / fps);
-  const ff = Math.min(rate - 1, Math.round(f - seconds * fps));
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}:${pad(ff)}`;
-};
+/** "HH:MM:SS:FF", as CapCut shows time, in Settings › Edit › Time code's style (lib/timecode.ts). */
+export const timecode = (frames: number, fps: number, style?: TimeCodeStyle) => formatTimecode(frames, fps, style);
 
 /** The playhead's time over the project's length (their seconds ride along for scripts). */
 const TimeControl: React.FC<{ off: boolean }> = ({ off }) => {
   const clipDuration = useClipStore((s) => s.clipDuration);
   const focusFrame = useControlsStore((s) => s.focusFrame);
   const fps = useControlsStore((s) => s.fps);
+  const style = usePreference("timeCode");
   return (
     <span
       data-testid="player-time"
@@ -32,9 +28,9 @@ const TimeControl: React.FC<{ off: boolean }> = ({ off }) => {
       data-total={fps ? (clipDuration || 0) / fps : 0}
       className={cn("text-[12px] tabular-nums whitespace-nowrap", off && "opacity-40")}
     >
-      <span className="text-brand-accent">{timecode(focusFrame, fps)}</span>
+      <span className="text-brand-accent">{timecode(focusFrame, fps, style)}</span>
       <span className="text-brand-hover px-1">/</span>
-      <span className="text-brand-light">{timecode(clipDuration, fps)}</span>
+      <span className="text-brand-light">{timecode(clipDuration, fps, style)}</span>
     </span>
   );
 };

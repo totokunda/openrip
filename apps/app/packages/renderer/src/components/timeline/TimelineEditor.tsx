@@ -44,6 +44,7 @@ import { RULER_HEIGHT, TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { applyTransition, cutsOn, useTransitionDropStore } from "@/lib/transitions";
 import type { TransitionDrag } from "../menus/TransitionMenu";
 import KeyframeGraph from "./KeyframeGraph";
+import { imageDurationFrames } from "@/lib/preferences";
 
 interface TimelineEditorProps {}
 
@@ -369,7 +370,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       setActiveMediaItem(data as MediaItem);
       const clipFrames = (() => {
         const fps = controlStore.fps;
-        if (data.type === "image") return fps * controlStore.defaultClipLength;
+        // Settings › Edit › Image duration.
+        if (data.type === "image") return imageDurationFrames(fps);
         if (data.type === "video") {
           const realFps = mediaInfo?.stats.video?.averagePacketRate ?? fps;
           const realEnd = (mediaInfo?.duration ?? 0) * realFps;
@@ -385,7 +387,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
           return Math.round((mediaInfo?.duration ?? 0) * fps);
         }
         if (data.type === "filter") {
-          return fps * controlStore.defaultClipLength;
+          return Math.round(fps * controlStore.defaultClipLength);
         }
         return 0;
       })();
@@ -822,13 +824,13 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         const fps = controlStore.fps;
         numFrames = Math.round(duration * fps);
       } else if (data.type === "image") {
-        numFrames = controlStore.fps * controlStore.defaultClipLength;
+        numFrames = imageDurationFrames(controlStore.fps);
         trimEnd = -Infinity;
         trimStart = Infinity;
         height = mediaInfo?.image?.height;
         width = mediaInfo?.image?.width;
       } else if (data.type === "filter") {
-        numFrames = controlStore.fps * controlStore.defaultClipLength;
+        numFrames = Math.round(controlStore.fps * controlStore.defaultClipLength);
         trimEnd = -Infinity;
         trimStart = Infinity;
         // Start with smallPath

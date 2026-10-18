@@ -4,6 +4,7 @@ import { LuChevronDown, LuChevronUp } from "react-icons/lu";
 import { useState, useEffect } from "react";
 
 import { cn } from "@/lib/utils";
+import { preferences } from "@/lib/preferences";
 
 const Slider = React.forwardRef<
   React.ElementRef<typeof SliderPrimitive.Root>,
@@ -118,6 +119,13 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
     } else if (e.key === "Escape") {
       setTempValue(value.toString());
       e.currentTarget.blur();
+    } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      // A step, or Settings › Edit › Adjust value many with ⇧.
+      e.preventDefault();
+      const unit = step > 0 ? step : 1;
+      const by = (e.shiftKey ? unit * Math.max(1, preferences().adjustUnits) : unit) * (e.key === "ArrowUp" ? 1 : -1);
+      const next = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, Number((value + by).toFixed(6))));
+      onChange(next);
     }
   };
 

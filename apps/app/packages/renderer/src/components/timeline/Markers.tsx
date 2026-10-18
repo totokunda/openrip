@@ -12,6 +12,7 @@ import { useControlsStore } from "@/lib/control";
 import { useContextMenuStore } from "@/lib/context-menu";
 import { MARKER_COLORS, SNAP_PX, snapPoints, snapToPoints } from "@/lib/timeline-edit";
 import { cn } from "@/lib/utils";
+import { formatTimecode, parseTimecode } from "@/lib/timecode";
 
 /** The marker whose box is open, if any. */
 export const useMarkerEditorStore = create<{ markerId: string | null; open: (id: string) => void; close: () => void }>((set) => ({
@@ -27,22 +28,9 @@ const FLAG_TOP = 19;
 const FLAG_SHOULDER = 27;
 const FLAG_BOTTOM = 31;
 
-/** A time in frames as CapCut writes it, HH:MM:SS:FF. */
-export const formatTimecode = (frame: number, fps: number) => {
-  const rate = Math.max(1, Math.round(fps));
-  const f = Math.max(0, Math.round(frame));
-  const s = Math.floor(f / rate);
-  const two = (n: number) => String(n).padStart(2, "0");
-  return `${two(Math.floor(s / 3600))}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}:${two(f % rate)}`;
-};
-
-/** HH:MM:SS:FF (or fewer fields, from the right) back to frames; null when it isn't one. */
-export const parseTimecode = (text: string, fps: number): number | null => {
-  const parts = text.trim().split(":").map((p) => (/^\d+$/.test(p) ? Number(p) : NaN));
-  if (parts.length === 0 || parts.length > 4 || parts.some((p) => !Number.isFinite(p))) return null;
-  const [ff = 0, ss = 0, mm = 0, hh = 0] = parts.reverse();
-  return ((hh * 60 + mm) * 60 + ss) * Math.max(1, Math.round(fps)) + ff;
-};
+// A time in frames as CapCut writes it, HH:MM:SS:FF, and back, in Settings › Edit › Time
+// code's style (lib/timecode.ts).
+export { formatTimecode, parseTimecode };
 
 /** The markers' tags, for the ruler's layer. The selected one has a white edge. */
 export const MarkerFlags: React.FC<{ stageWidth: number; startPadding: number }> = ({ stageWidth, startPadding }) => {

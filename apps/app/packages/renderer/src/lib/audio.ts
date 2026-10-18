@@ -11,9 +11,16 @@
 // - Voiceover: the recording the main process made (preload `voiceoverStop`) as an asset and an
 //   audio clip on a new track at the playhead, as CapCut puts a voiceover.
 import type { AnyClipProps, Asset, AudioClipProps, ChannelFill, ClipLoudness, TimelineProps, VideoClipProps } from "./types";
+import { preferences } from "./preferences";
 
 /** CapCut's loudness target, LUFS. */
 export const LOUDNESS_TARGET = -23;
+
+/** The target Normalize loudness turns a clip to: Settings › Edit › Target loudness (−23, −14 or −12 LUFS). */
+export const targetLoudness = (): number => {
+  const v = Number(preferences().targetLoudness);
+  return Number.isFinite(v) && v < 0 ? v : LOUDNESS_TARGET;
+};
 
 /** The engine's meter for a file's range (preload `engineLoudness`): LUFS (null for silence) and the peak, dBFS. */
 export type MeasureLoudness = (path: string, startSec: number, durationSec: number | null) => Promise<{ integrated: number | null; peak: number } | null>;
@@ -42,7 +49,7 @@ export const normalizeLoudness = async (clip: AnyClipProps, path: string, fps: n
   if (!hasSound(clip)) return {};
   const range = playedRange(clip, fps, mediaSeconds);
   const m = await measure(path, range[0], range[1]);
-  const loudness: ClipLoudness = { enabled: true, target: LOUDNESS_TARGET, measured: m?.integrated ?? null, peak: m?.peak ?? null, range };
+  const loudness: ClipLoudness = { enabled: true, target: targetLoudness(), measured: m?.integrated ?? null, peak: m?.peak ?? null, range };
   return { loudness } as Partial<AnyClipProps>;
 };
 

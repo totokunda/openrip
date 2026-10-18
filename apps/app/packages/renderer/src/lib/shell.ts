@@ -17,9 +17,22 @@ interface ShellState {
   /** Open the media picker once the editor shows (the home screen's Import media). */
   importOnOpen: boolean;
   setImportOnOpen: (on: boolean) => void;
-  /** The editor's Settings dialog (the top bar's gear, Menu, the inspector's Modify). */
+  /**
+   * The app's windows over either screen (components/dialogs/AppDialogs.tsx): Settings (the
+   * home screen's gear, the top bar's gear and Menu, the menu bar), Shortcuts (the top bar's
+   * keyboard, Help ▸ Shortcuts), About and the open-source notices.
+   */
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
+  shortcutsOpen: boolean;
+  setShortcutsOpen: (open: boolean) => void;
+  aboutOpen: boolean;
+  setAboutOpen: (open: boolean) => void;
+  noticesOpen: boolean;
+  setNoticesOpen: (open: boolean) => void;
+  /** The project's own settings (the inspector's Modify): its frame rate. */
+  projectSettingsOpen: boolean;
+  setProjectSettingsOpen: (open: boolean) => void;
 }
 
 export const useShellStore = create<ShellState>((set) => ({
@@ -31,4 +44,18 @@ export const useShellStore = create<ShellState>((set) => ({
   setImportOnOpen: (importOnOpen) => set({ importOnOpen }),
   settingsOpen: false,
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  shortcutsOpen: false,
+  setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  aboutOpen: false,
+  setAboutOpen: (aboutOpen) => set({ aboutOpen }),
+  noticesOpen: false,
+  setNoticesOpen: (noticesOpen) => set({ noticesOpen }),
+  projectSettingsOpen: false,
+  setProjectSettingsOpen: (projectSettingsOpen) => set({ projectSettingsOpen }),
 }));
+
+/** Whether one of the app's windows is open over the screen (the editor's keys wait). */
+export const appWindowOpen = () => {
+  const s = useShellStore.getState();
+  return s.settingsOpen || s.shortcutsOpen || s.aboutOpen || s.noticesOpen || s.projectSettingsOpen;
+};

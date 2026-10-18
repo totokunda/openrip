@@ -16,7 +16,6 @@ import { clearProjectCover } from "@app/preload";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -40,8 +39,8 @@ import { cancelEngineExport, engineExportProject, engineExports, parseBitrate } 
 import { toast } from "sonner";
 import { revealPathInFolder, writeFileBuffer } from "@app/preload";
 import { cn } from "@/lib/utils";
-import { SHORTCUT_SECTIONS } from "@/lib/shortcuts";
-import { SettingsModal } from "../dialogs/SettingsModal";
+import { exportFinished } from "@/lib/export-finished";
+import { onCommand } from "@/lib/commands";
 import { CapCutImportDialog } from "../dialogs/CapCutImportDialog";
 import { createAndOpenProject, goHome, openProject } from "@/lib/project-actions";
 import { useShellStore } from "@/lib/shell";
@@ -50,40 +49,12 @@ interface TopBarProps {
 
 }
 
-const Keycap: React.FC<{ label: string }> = ({ label }) => (
-  <span className="inline-flex items-center justify-center px-1.5 h-5 min-w-[20px] shadow-sm rounded-[4px] bg-brand-light/[0.075] border border-brand-light/20 text-[10.5px]  text-brand-light/80">
-    {label}
-  </span>
-);
-
-const ShortcutRow: React.FC<{ action: string; keys: string[] }> = ({
-  action,
-  keys,
-}) => (
-  <div className="flex items-center justify-between">
-    <span className="text-[11px] text-brand-light/90 font-medium">
-      {action}
-    </span>
-    <div className="flex items-center gap-x-1.5">
-      {keys.map((k, i) => (
-        <React.Fragment key={`${action}-${k}-${i}`}>
-          <Keycap label={k} />
-          {i < keys.length - 1 && (
-            <span className="text-brand-light/40 text-[10px]">+</span>
-          )}
-        </React.Fragment>
-      ))}
-    </div>
-  </div>
-);
-
 const TopBar: React.FC<TopBarProps> = () => {
   const layout = useLayoutConfigStore((s) => s.layout);
   const setLayout = useLayoutConfigStore((s) => s.setLayout);
   const resetLayout = useLayoutConfigStore((s) => s.resetLayout);
   const [layoutOpen, setLayoutOpen] = useState(false);
   const aspectRatio = useViewportStore((s) => s.aspectRatio);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<number | null>(null);
@@ -159,6 +130,7 @@ const TopBar: React.FC<TopBarProps> = () => {
         );
         if (r.ok) {
           toast("Export completed", { description: outpath });
+          exportFinished(outpath);
           try {
             await revealPathInFolder(outpath);
           } catch (e) {
@@ -253,6 +225,7 @@ const TopBar: React.FC<TopBarProps> = () => {
                 toast("Export completed", {
                   description: outpath,
                 });
+                exportFinished(outpath);
                 // Best-effort: open the exported file location for the user.
                 try {
                   await revealPathInFolder(outpath);
@@ -274,6 +247,7 @@ const TopBar: React.FC<TopBarProps> = () => {
         const buffer = new Uint8Array(await blob.arrayBuffer());
         await writeFileBuffer(outpath, buffer);
         toast("Export completed", { description: outpath });
+        exportFinished(outpath);
         try {
           await revealPathInFolder(outpath);
         } catch (e) {
@@ -299,8 +273,8 @@ const TopBar: React.FC<TopBarProps> = () => {
     }
   };
 
-  const settingsOpen = useShellStore((s) => s.settingsOpen);
   const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
+  const setShortcutsOpen = useShellStore((s) => s.setShortcutsOpen);
   const [capcutOpen, setCapcutOpen] = useState(false);
 
   useEffect(() => {
@@ -363,6 +337,15 @@ const TopBar: React.FC<TopBarProps> = () => {
     return clips.some((clip) => hasExportableMedia(clip));
   }, [clips, timelines, getClipsForGroup]);
 
+  // The Export shortcut (⌘E, lib/keymap.ts) opens the export dialog, as the button does.
+  useEffect(
+    () =>
+      onCommand("export", () => {
+        if (canExport && !isExporting) setExportOpen(true);
+      }),
+    [canExport, isExporting],
+  );
+
   const button =
     "h-6 flex items-center gap-x-1.5 px-1.5 rounded-[4px] text-[12px] text-brand-light/75 hover:text-brand-light hover:bg-brand-light/[0.08] transition-colors cursor-pointer";
   // Menus as CapCut draws them: the header surface, 32 px rows, a hairline outline.
@@ -378,7 +361,6 @@ const TopBar: React.FC<TopBarProps> = () => {
   return (
     <div data-testid="topbar" className="w-full relative h-[35px] shrink-0 px-2 flex items-center justify-between font-poppins">
       <div className="flex flex-row items-center gap-1 min-w-0 z-10">
-        <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} hideTrigger />
         <CapCutImportDialog
           open={capcutOpen}
           onOpenChange={setCapcutOpen}
@@ -479,33 +461,15 @@ const TopBar: React.FC<TopBarProps> = () => {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <DropdownMenu open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
-          <DropdownMenuTrigger title="Keyboard shortcuts" data-testid="shortcuts" className={cn(button, "w-7 justify-center px-0 text-brand-light/60")}>
-            <LuKeyboard className="w-[18px] h-[18px]" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className={cn(menu, "w-[400px] p-0 overflow-hidden z-[100]")}>
-            <div className="border-b border-brand-light/10 px-3 py-2">
-              <span className="text-[11px] text-brand-light/70">Keyboard shortcuts</span>
-            </div>
-            {/* Tall enough for the timeline's shortcuts: it scrolls. */}
-            <div className="divide-y divide-brand-light/10 max-h-[70vh] overflow-y-auto">
-              {SHORTCUT_SECTIONS.map((section, i) => (
-                <div className="p-3" key={section.title ?? i}>
-                  {section.title && (
-                    <DropdownMenuLabel className="dark text-[11px] font-semibold text-brand-light p-0 mb-2">
-                      {section.title}
-                    </DropdownMenuLabel>
-                  )}
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                    {section.rows.map((row) => (
-                      <ShortcutRow key={row.action} action={row.action} keys={row.keys} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <button
+          type="button"
+          title="Shortcuts"
+          data-testid="shortcuts"
+          onClick={() => setShortcutsOpen(true)}
+          className={cn(button, "w-7 justify-center px-0 text-brand-light/60")}
+        >
+          <LuKeyboard className="w-[18px] h-[18px]" />
+        </button>
         <button
           type="button"
           title="Settings"

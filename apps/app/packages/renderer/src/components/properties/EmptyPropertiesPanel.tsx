@@ -21,7 +21,7 @@ const EmptyPropertiesPanel: React.FC = () => {
   const clipDuration = useClipStore((s) => s.clipDuration);
   const clipCount = useClipStore((s) => s.clips.length);
   const mediaCount = useClipStore((s) => Object.keys(s.assets).length);
-  const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
+  const setProjectSettingsOpen = useShellStore((s) => s.setProjectSettingsOpen);
   // A project made in this session (new, or from a CapCut draft) learns its file from the list.
   useEffect(() => {
     if (project && !project.filePath) void refreshProjects();
@@ -80,7 +80,7 @@ const EmptyPropertiesPanel: React.FC = () => {
         <button
           type="button"
           data-testid="project-modify"
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => setProjectSettingsOpen(true)}
           className="h-5 w-[72px] rounded-[4px] bg-brand-button hover:bg-brand-hover text-[12px] font-semibold text-brand-lighter transition-colors cursor-pointer"
         >
           Modify

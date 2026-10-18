@@ -1,12 +1,22 @@
-// CapCut's timeline shortcuts: playback and stepping, split, delete left and right, markers,
-// the magnet and snapping toggles, selection, timeline zoom and the keyframe graph. The keyboard handler in
-// Controls.tsx passes keys here first; the list the Shortcuts menu shows is lib/shortcuts.ts.
+// CapCut's timeline and player shortcuts: playback and stepping, split, delete left and right,
+// markers, the magnet and snapping toggles, selection, timeline zoom, the keyframe graph, the
+// transform tools and the player's zoom. The keyboard handler in Controls.tsx passes keys here
+// first; which key is which action is lib/keymap.ts's (the Shortcuts window changes it).
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
 import { MIN_DURATION } from "./settings";
 import type { ZoomLevel } from "./types";
 import { isClipLocked } from "./timeline-edit";
 import { useKeyframeGraphStore } from "./timeline-keyframes";
+import { useViewportStore } from "./viewport";
+import { actionFor } from "./keymap";
+import { preferences } from "./preferences";
+import { freezeAtPlayhead, reverseTarget, toggleReverse } from "./timeline-motion";
+import { rotate90, toggleFlip } from "./transform-presets";
+import { createAndOpenProject } from "./project-actions";
+import { runCommand } from "./commands";
+import { useSidebarStore } from "./sidebar";
+import { useShellStore } from "./shell";
 
 /**
  * Zoom the timeline to `level` (1 shows the whole project, 10 a few frames), keeping the
@@ -65,119 +75,147 @@ export function deleteToPlayhead(side: "left" | "right") {
   return useClipStore.getState().trimToPlayhead(side, c.focusFrame, c.selectedClipIds);
 }
 
+/** Select what's left or right of the playhead: the clips that start before it, or end after it. */
+const selectBeside = (side: "left" | "right") => {
+  const controls = useControlsStore.getState();
+  const clips = useClipStore.getState();
+  const f = controls.focusFrame;
+  const picked = clips.clips.filter(
+    (c) => !c.hidden && !isClipLocked(clips.clips, clips.timelines, c, controls.linkage) && (side === "left" ? (c.startFrame ?? 0) < f : (c.endFrame ?? 0) > f),
+  );
+  controls.setSelectedClipIds(picked.map((c) => c.clipId));
+};
+
+/** The selected (else the last selected) video or photo, for Mirror and Rotate. */
+const visualTarget = () => {
+  const { selectedClipIds } = useControlsStore.getState();
+  return useClipStore.getState().clips.find((c) => c.clipId === selectedClipIds[selectedClipIds.length - 1] && (c.type === "video" || c.type === "image"));
+};
+
+/** The player's zoom, stepped as CapCut's ⌥⇧+ and ⌥⇧− step it. */
+const PLAYER_ZOOM_STEPS = [10, 25, 33, 50, 67, 75, 100, 125, 150, 200, 300, 400, 600, 800];
+const stepPlayerZoom = (dir: 1 | -1) => {
+  const v = useViewportStore.getState();
+  const now = Math.round((v.scale || 1) * 100);
+  const next = dir > 0 ? PLAYER_ZOOM_STEPS.find((p) => p > now) : [...PLAYER_ZOOM_STEPS].reverse().find((p) => p < now);
+  if (next != null) v.setScalePercent(next);
+};
+
+/** The previous or next edit: a clip's start or end on any track. */
+const goToEdit = (forward: boolean) => {
+  const clips = useClipStore.getState();
+  const edges = clips.clips.filter((c) => !c.hidden).flatMap((c) => [c.startFrame ?? 0, c.endFrame ?? 0]);
+  const to = nextStop([0, ...edges], useControlsStore.getState().focusFrame, forward);
+  if (to != null) seekTo(to);
+};
+
+/** Edit › Step forward or back many frames. */
+const stepMany = () => Math.max(1, Math.round(preferences().stepFrames || 10));
+
 /**
- * Handle a timeline shortcut. True when the key was one (the caller stops there). Keys typed
- * into a field never get here.
+ * What the timeline's and the player's actions do (lib/keymap.ts names them and the Shortcuts
+ * window binds them to keys). Editing (undo, copy, delete, group…) is Controls.tsx's.
+ */
+const RUN: Record<string, () => void> = {
+  playPause: () => {
+    const c = useControlsStore.getState();
+    if (c.isPlaying) c.pause();
+    else c.play();
+  },
+  // Split at the playhead, and across every track.
+  split: () => {
+    const c = useControlsStore.getState();
+    useClipStore.getState().splitAtPlayhead(c.focusFrame, c.selectedClipIds);
+  },
+  splitAll: () => useClipStore.getState().splitAtPlayhead(useControlsStore.getState().focusFrame, "all"),
+  // Extract audio from the selected video.
+  extractAudio: () => {
+    const clips = useClipStore.getState();
+    const video = useControlsStore.getState().selectedClipIds.map((id) => clips.getClipById(id)).find((c) => c?.type === "video");
+    if (video && !(video as any).linkId) clips.separateClip(video.clipId);
+  },
+  // Every clip that isn't on a locked track.
+  selectAll: () => {
+    const controls = useControlsStore.getState();
+    const clips = useClipStore.getState();
+    controls.setSelectedClipIds(clips.clips.filter((c) => !c.hidden && !isClipLocked(clips.clips, clips.timelines, c, controls.linkage)).map((c) => c.clipId));
+  },
+  zoomIn: () => zoomTimelineTo(useControlsStore.getState().zoomLevel + 1),
+  zoomOut: () => zoomTimelineTo(useControlsStore.getState().zoomLevel - 1),
+  zoomToFit: () => zoomTimelineTo(useControlsStore.getState().minZoomLevel),
+  keyframePanel: () => useKeyframeGraphStore.getState().toggle(),
+  prevFrame: () => seekTo(useControlsStore.getState().focusFrame - 1),
+  nextFrame: () => seekTo(useControlsStore.getState().focusFrame + 1),
+  stepBackMany: () => seekTo(useControlsStore.getState().focusFrame - stepMany()),
+  stepForwardMany: () => seekTo(useControlsStore.getState().focusFrame + stepMany()),
+  prevMarker: () => goToMarker(false),
+  nextMarker: () => goToMarker(true),
+  prevEdit: () => goToEdit(false),
+  nextEdit: () => goToEdit(true),
+  firstFrame: () => seekTo(0),
+  lastFrame: () => seekTo(useClipStore.getState().clipDuration),
+  deleteLeft: () => void deleteToPlayhead("left"),
+  deleteRight: () => void deleteToPlayhead("right"),
+  addMarker: () => void addMarkerAtPlayhead(),
+  snapping: () => {
+    const c = useControlsStore.getState();
+    c.setSnapping(!c.snapping);
+  },
+  magnet: () => {
+    const clips = useClipStore.getState();
+    clips.setMagnet(!clips.magnet);
+  },
+  linkage: () => {
+    const c = useControlsStore.getState();
+    c.setLinkage(!c.linkage);
+  },
+  selectLeft: () => selectBeside("left"),
+  selectRight: () => selectBeside("right"),
+  // The toolbar's transform tools.
+  freeze: () => void freezeAtPlayhead(),
+  reverse: () => {
+    if (reverseTarget(useClipStore.getState().clips, useControlsStore.getState().selectedClipIds)) toggleReverse();
+  },
+  mirror: () => {
+    const v = visualTarget();
+    if (v) useClipStore.getState().updateClip(v.clipId, toggleFlip(v, "horizontal"));
+  },
+  rotate: () => {
+    const v = visualTarget();
+    if (v) useClipStore.getState().updateClip(v.clipId, rotate90(v, 1));
+  },
+  // The player.
+  fullScreenPreview: () => {
+    const c = useControlsStore.getState();
+    c.setIsFullscreen(!c.isFullscreen);
+  },
+  zoomInPlayer: () => stepPlayerZoom(1),
+  zoomOutPlayer: () => stepPlayerZoom(-1),
+  zoomFitPlayer: () => useViewportStore.getState().zoomToFit(),
+  zoom50Player: () => useViewportStore.getState().setScalePercent(50),
+  zoom100Player: () => useViewportStore.getState().setScalePercent(100),
+  zoom200Player: () => useViewportStore.getState().setScalePercent(200),
+  // The project.
+  newProject: () => void createAndOpenProject().catch(() => {}),
+  // The Media tab's picker, as the home screen's Import media opens it.
+  importMedia: () => {
+    useSidebarStore.getState().openSection("media");
+    useShellStore.getState().setImportOnOpen(true);
+  },
+  export: () => void runCommand("export"),
+};
+
+/**
+ * Handle a timeline or player shortcut, as the keymap binds it. True when the key was one (the
+ * caller stops there). Keys typed into a field never get here.
  */
 export function handleTimelineKey(e: KeyboardEvent): boolean {
   // A menu or list that's open (Radix's) took the key itself: arrows move through it.
   if (e.defaultPrevented) return false;
-  const mod = e.metaKey || e.ctrlKey;
-  const key = e.key.toLowerCase();
-  const controls = useControlsStore.getState();
-  const clips = useClipStore.getState();
-  const done = () => {
-    e.preventDefault();
-    return true;
-  };
-
-  // Play / pause.
-  if (e.code === "Space" && !mod) {
-    if (controls.isPlaying) controls.pause();
-    else controls.play();
-    return done();
-  }
-  // Split at the playhead (⌘B), and across every track (⇧⌘B).
-  if (mod && e.code === "KeyB") {
-    clips.splitAtPlayhead(controls.focusFrame, e.shiftKey ? "all" : controls.selectedClipIds);
-    return done();
-  }
-  // Extract audio from the selected video (⇧⌘S).
-  if (mod && e.shiftKey && e.code === "KeyS") {
-    const video = controls.selectedClipIds.map((id) => clips.getClipById(id)).find((c) => c?.type === "video");
-    if (video && !(video as any).linkId) clips.separateClip(video.clipId);
-    return done();
-  }
-  // Select every clip that isn't on a locked track (⌘A).
-  if (mod && key === "a" && !e.shiftKey) {
-    controls.setSelectedClipIds(clips.clips.filter((c) => !c.hidden && !isClipLocked(clips.clips, clips.timelines, c, controls.linkage)).map((c) => c.clipId));
-    return done();
-  }
-  // Timeline zoom in and out (⌘= / ⌘−).
-  if (mod && (e.key === "=" || e.key === "+" || e.key === "-")) {
-    zoomTimelineTo(controls.zoomLevel + (e.key === "-" ? -1 : 1));
-    return done();
-  }
-  // The selected clip's keyframe graph (⌥K; by its key, ⌥ changes the letter).
-  if (e.altKey && !mod && e.code === "KeyK") {
-    useKeyframeGraphStore.getState().toggle();
-    return done();
-  }
-  if (mod || (e.altKey && !["ArrowLeft", "ArrowRight"].includes(e.key))) return false;
-
-  switch (e.key) {
-    // Frames: ← / →, ten with ⇧; with ⌥, the previous or next marker.
-    case "ArrowLeft":
-    case "ArrowRight": {
-      const forward = e.key === "ArrowRight";
-      if (e.altKey) goToMarker(forward);
-      else seekTo(controls.focusFrame + (forward ? 1 : -1) * (e.shiftKey ? 10 : 1));
-      return done();
-    }
-    // The previous or next edit: a clip's start or end on any track.
-    case "ArrowUp":
-    case "ArrowDown": {
-      const edges = clips.clips.filter((c) => !c.hidden).flatMap((c) => [c.startFrame ?? 0, c.endFrame ?? 0]);
-      const to = nextStop([0, ...edges], controls.focusFrame, e.key === "ArrowDown");
-      if (to != null) seekTo(to);
-      return done();
-    }
-    case "Home":
-      seekTo(0);
-      return done();
-    case "End":
-      seekTo(clips.clipDuration);
-      return done();
-  }
-
-  // Letters without ⇧ (⇧Z is zoom to fit).
-  if (e.shiftKey) {
-    if (key === "z") {
-      zoomTimelineTo(controls.minZoomLevel);
-      return done();
-    }
-    return false;
-  }
-  switch (key) {
-    case "q":
-      deleteToPlayhead("left");
-      return done();
-    case "w":
-      deleteToPlayhead("right");
-      return done();
-    case "m":
-      addMarkerAtPlayhead();
-      return done();
-    case "n":
-      controls.setSnapping(!controls.snapping);
-      return done();
-    case "p":
-      clips.setMagnet(!clips.magnet);
-      return done();
-    case "`":
-      controls.setLinkage(!controls.linkage);
-      return done();
-    // Select what's left or right of the playhead: the clips that start before it, or end
-    // after it.
-    case "[":
-    case "]": {
-      const f = controls.focusFrame;
-      const picked = clips.clips.filter(
-        (c) => !c.hidden && !isClipLocked(clips.clips, clips.timelines, c, controls.linkage) && (key === "[" ? (c.startFrame ?? 0) < f : (c.endFrame ?? 0) > f),
-      );
-      controls.setSelectedClipIds(picked.map((c) => c.clipId));
-      return done();
-    }
-  }
-  return false;
+  const id = actionFor(e);
+  const run = id ? RUN[id] : undefined;
+  if (!run) return false;
+  run();
+  e.preventDefault();
+  return true;
 }

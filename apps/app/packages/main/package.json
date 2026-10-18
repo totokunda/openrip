@@ -2,7 +2,7 @@
   "name": "@app/main",
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && node ../../scripts/third-party-notices.mjs dist/third-party-notices.json",
     "typecheck": "tsc --noEmit"
   },
   "exports": {

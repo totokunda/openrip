@@ -18,6 +18,7 @@ import {
   LuPlay,
   LuPlus,
   LuSearch,
+  LuSettings,
   LuTrash2,
   LuUpload,
 } from "react-icons/lu";
@@ -29,9 +30,9 @@ import { useShellStore } from "@/lib/shell";
 import { useSidebarStore } from "@/lib/sidebar";
 import { ASPECT_PRESETS, ratioBox } from "@/lib/aspect-presets";
 import { createAndOpenProject, deleteProjectAnywhere, openProject, refreshProjects, renameProject } from "@/lib/project-actions";
-import { revealPathInFolder } from "@app/preload";
+import { getAppInfo, revealPathInFolder } from "@app/preload";
 import { CapCutImportDialog } from "@/components/dialogs/CapCutImportDialog";
-import { SettingsModal } from "@/components/dialogs/SettingsModal";
+import { useT } from "@/lib/i18n";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -301,6 +302,40 @@ const ProjectRow: React.FC<CardProps & { showPath?: boolean }> = ({ project, act
   );
 };
 
+/**
+ * The gear at the top right, as CapCut's (01-home/079-settings-menu.png): Settings, then the
+ * open-source notices and the version, which opens About. CapCut's account, billing, spaces,
+ * policies and network-test items need its servers and are left out.
+ */
+const GearMenu: React.FC = () => {
+  const t = useT();
+  const shell = useShellStore();
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    void getAppInfo().then((i) => setVersion(i.version)).catch(() => {});
+  }, []);
+  const row = "dark h-8 text-[13px] text-brand-light px-3 rounded-[4px] cursor-pointer focus:bg-brand-hover";
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger title={t("home.menu.title")} data-testid="home-settings" className="h-6 w-6 flex items-center justify-center rounded-[4px] text-brand-light/90 hover:bg-white/[0.06] outline-none cursor-pointer">
+        <LuSettings className="w-4 h-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={6} className="dark w-[248px] bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] p-1">
+        <DropdownMenuItem data-testid="home-menu-settings" className={row} onSelect={() => shell.setSettingsOpen(true)}>
+          {t("home.menu.settings")}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator className="bg-brand-hover mx-1" />
+        <DropdownMenuItem data-testid="home-menu-notices" className={row} onSelect={() => shell.setNoticesOpen(true)}>
+          {t("home.menu.notices")}
+        </DropdownMenuItem>
+        <DropdownMenuItem data-testid="home-menu-version" className={row} onSelect={() => shell.setAboutOpen(true)}>
+          {t("home.menu.version", { version: version || "…" })}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
 const NavItem: React.FC<{ icon: IconType; label: string; active: boolean; onClick: () => void; testId: string }> = ({
   icon: Icon,
   label,
@@ -451,7 +486,6 @@ const HomeScreen: React.FC = () => {
   const [creating, setCreating] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [capcutOpen, setCapcutOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [toDelete, setToDelete] = useState<ProjectSettings | null>(null);
   // Scrolled past the banner: CapCut keeps a slimmer one pinned at the top.
   const [compact, setCompact] = useState(false);
@@ -629,8 +663,8 @@ const HomeScreen: React.FC = () => {
       </aside>
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <header className="h-11 shrink-0 flex items-center justify-end px-4 [&_button]:!w-6 [&_button]:!h-6 [&_button]:!border-0 [&_button]:!bg-transparent [&_button:hover]:!bg-white/[0.06]">
-          <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+        <header className="h-11 shrink-0 flex items-center justify-end px-4">
+          <GearMenu />
         </header>
         <main
           className="flex-1 min-h-0 overflow-y-auto custom-scrollbar"

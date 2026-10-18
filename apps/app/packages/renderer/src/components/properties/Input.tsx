@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { preferences } from "@/lib/preferences";
 import React, { useEffect, useState } from "react";
 import { LuChevronDown, LuChevronUp } from "react-icons/lu";
 import { LuInfo } from "react-icons/lu";
@@ -79,6 +80,14 @@ const Input: React.FC<InputProps<string>> = ({
     } else if (e.key === "Escape") {
       setTempValue(value);
       e.currentTarget.blur();
+    } else if (canStep && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      // A step, or Settings › Edit › Adjust value many with ⇧.
+      const numValue = Number(value);
+      if (isNaN(numValue) || !isFinite(numValue)) return;
+      e.preventDefault();
+      const unit = step && step > 0 ? step : 1;
+      const by = (e.shiftKey ? unit * Math.max(1, preferences().adjustUnits) : unit) * (e.key === "ArrowUp" ? 1 : -1);
+      onChange(String(Math.min(max ?? Infinity, Math.max(min ?? -Infinity, Number((numValue + by).toFixed(6))))));
     }
   };
 

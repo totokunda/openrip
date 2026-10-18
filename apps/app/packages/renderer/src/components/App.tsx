@@ -26,6 +26,9 @@ import { initEnginePreview } from "@/lib/engine-preview";
 import { initHistory } from "@/lib/history";
 import { useShellStore } from "@/lib/shell";
 import HomeScreen from "./home/HomeScreen";
+import AppDialogs from "./dialogs/AppDialogs";
+import { initPreferences } from "@/lib/preferences";
+import { initKeymap } from "@/lib/keymap";
 
 /** The window while the projects (first) or a project (later) are loading. */
 const Loading: React.FC<{ title: string; note: string }> = ({ title, note }) => (
@@ -58,6 +61,10 @@ const App: React.FC = () => {
   // Undo and redo: telling one edit from the next by the user's presses.
   useEffect(() => {
     initHistory();
+  }, []);
+  // The Settings window's preferences, and the keys they bind (lib/keymap.ts).
+  useEffect(() => {
+    void initPreferences().then(() => initKeymap());
   }, []);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const layout = useLayoutConfigStore((s) => s.layout);
@@ -199,6 +206,7 @@ const App: React.FC = () => {
     return (
       <>
         <HomeScreen />
+        <AppDialogs />
         <Toaster />
       </>
     );
@@ -317,6 +325,7 @@ const App: React.FC = () => {
         </div>
       </main>
       <GlobalContextMenu />
+      <AppDialogs />
       <DragOverlay dropAnimation={null}>
         {activeDragItem ? (
           <div

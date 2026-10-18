@@ -15,7 +15,7 @@ import { useControlsStore } from "./control";
 import { useClipStore } from "./clip";
 import { useEnginePreviewStore } from "./engine-preview";
 import { useViewportStore } from "./viewport";
-import { DEFAULT_FPS } from "./settings";
+import { newProjectFps } from "./preferences";
 
 /** "Project <k>" with the smallest k no project uses. */
 export const nextProjectName = (projects: ProjectSettings[]) => {
@@ -37,12 +37,12 @@ export const openProject = (id: number | string) => {
   useShellStore.getState().setView("editor");
 };
 
-/** A new empty project, at the canvas size given (16:9 otherwise), opened in the editor. */
+/** A new empty project, at the canvas size given (16:9 otherwise) and Settings › Edit › Frame rate, opened in the editor. */
 export const createAndOpenProject = async (aspectRatio?: { width: number; height: number; id: string }) => {
   const store = useProjectsStore.getState();
   const res = await createProject<ProjectSettings>({
     name: nextProjectName(store.projects),
-    fps: useControlsStore.getState().fps || DEFAULT_FPS,
+    fps: newProjectFps(),
     aspectRatio,
   });
   if (!res?.success || !res.data) throw new Error(res?.error || "The project couldn't be created");
@@ -116,7 +116,7 @@ export const deleteProjectAnywhere = async (project: ProjectSettings) => {
     const others = store.projects.filter((p) => p.id !== project.id).sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0));
     let next = others[0]?.id;
     if (next == null) {
-      const res = await createProject<ProjectSettings>({ name: nextProjectName(store.projects), fps: useControlsStore.getState().fps || DEFAULT_FPS });
+      const res = await createProject<ProjectSettings>({ name: nextProjectName(store.projects), fps: newProjectFps() });
       if (!res?.success || !res.data) throw new Error(res?.error || "The project couldn't be replaced");
       store.addProject({ ...res.data, createdAt: Date.now(), lastModified: Date.now() });
       next = res.data.id;

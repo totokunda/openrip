@@ -17,6 +17,8 @@ import { useMaskStore } from "@/lib/mask";
 import { useViewportStore } from "@/lib/viewport";
 import { undo, redo } from "@/lib/history";
 import { handleTimelineKey, zoomTimelineTo } from "@/lib/timeline-shortcuts";
+import { actionFor } from "@/lib/keymap";
+import { appWindowOpen } from "@/lib/shell";
 import { removeTransition } from "@/lib/transitions";
 import {
   AddMarkerButton,
@@ -230,6 +232,9 @@ const Controls = () => {
         }
       })();
 
+      // A window over the app (Settings, Shortcuts, …) has the keys.
+      if (appWindowOpen()) return;
+
       const isMod = e.metaKey || e.ctrlKey;
       const controls = useControlsStore.getState();
       const clipsStore = useClipStore.getState();
@@ -237,21 +242,23 @@ const Controls = () => {
       const selectedIds = controls.selectedClipIds || [];
       const selectedLineId = drawingStore.selectedLineId;
       const selectedMaskId = controls.selectedMaskId;
+      // Which action the keys are (lib/keymap.ts; the Shortcuts window moves them).
+      const action = actionFor(e);
 
-      // Undo (Cmd/Ctrl + Z) and redo (Cmd/Ctrl + Shift + Z, Cmd/Ctrl + Y). A text field
-      // keeps these for its own typing (returned above).
-      if (isMod && (e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
+      // Undo (⌘Z) and redo (⇧⌘Z, ⌘Y). A text field keeps these for its own typing (returned
+      // above).
+      if (action === "undo" || action === "redo") {
         e.preventDefault();
-        if (e.key.toLowerCase() === "y" || e.shiftKey) redo();
+        if (action === "redo") redo();
         else undo();
         return;
       }
 
-      // CapCut's timeline keys: Space, ⌘B, Q / W, M, N, P, arrows, Home / End, [ / ], …
+      // CapCut's timeline and player keys: Space, ⌘B, Q / W, M, N, P, arrows, Home / End, [ / ], …
       if (handleTimelineKey(e)) return;
 
       // Delete selected clips, lines, or masks
-      if (e.key === "Delete" || e.key === "Backspace") {
+      if (action === "delete") {
         // Delete selected mask if it exists
         if (selectedMaskId && tool === "mask") {
           e.preventDefault();
@@ -317,7 +324,7 @@ const Controls = () => {
       }
 
       // Copy
-      if (isMod && e.key.toLowerCase() === "c") {
+      if (action === "copy") {
         if (hasTextSelection) return;
         if (selectedIds.length > 0) {
           e.preventDefault();
@@ -327,7 +334,7 @@ const Controls = () => {
       }
 
       // Cut
-      if (isMod && e.key.toLowerCase() === "x") {
+      if (action === "cut") {
         if (hasTextSelection) return;
         if (selectedIds.length > 0) {
           e.preventDefault();
@@ -338,17 +345,17 @@ const Controls = () => {
       }
 
       // Paste at current focus frame
-      if (isMod && e.key.toLowerCase() === "v") {
+      if (action === "paste") {
         e.preventDefault();
         const { focusFrame } = controls;
         clipsStore.pasteClips(focusFrame);
         return;
       }
 
-      // Group (Cmd/Ctrl + G) and Ungroup (Cmd/Ctrl + Shift + G)
-      if (isMod && e.key.toLowerCase() === "g") {
+      // Group (⌘G) and Ungroup (⇧⌘G)
+      if (action === "group" || action === "ungroup") {
         e.preventDefault();
-        if (e.shiftKey) {
+        if (action === "ungroup") {
           // Ungroup: if a single selected group, ungroup it; else if children of same group selected, ungroup that group
           const selected = controls.selectedClipIds || [];
           if (selected.length === 1) {
@@ -384,26 +391,10 @@ const Controls = () => {
         return;
       }
 
-      // Zoom shortcuts (viewport)
-      // Cmd/Ctrl + 0 => Zoom to Fit
-      // Cmd/Ctrl + 5 => 50%
-      // Cmd/Ctrl + 1 => 100%
-      // Cmd/Ctrl + 2 => 200%
+      // The player's zoom keys (⌘0, ⌘5, ⌘1, ⌘2, ⌥⇧+ …) are the keymap's player actions,
+      // handled with the timeline's above.
       const viewport = useViewportStore.getState();
       const key = e.key.toLowerCase();
-      if (isMod && (key === "0" || key === "1" || key === "2" || key === "5")) {
-        e.preventDefault();
-        if (key === "0") {
-          viewport.zoomToFit();
-        } else if (key === "5") {
-          viewport.setScalePercent(50);
-        } else if (key === "1") {
-          viewport.setScalePercent(100);
-        } else if (key === "2") {
-          viewport.setScalePercent(200);
-        }
-        return;
-      }
 
       // In-mode selections using number keys (no modifiers)
       // Shape mode: 1=Rectangle, 2=Ellipse, 3=Polygon, 4=Line, 5=Star
