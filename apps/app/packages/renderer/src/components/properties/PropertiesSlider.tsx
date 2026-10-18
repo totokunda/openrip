@@ -6,24 +6,50 @@ import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { preferences } from "@/lib/preferences";
 
+/**
+ * CapCut's slider: a 2 px #404040 track filled white up to the value, an 8×12 white thumb.
+ * `origin` fills from that value instead (a bipolar slider at 0 shows no fill); `track` paints
+ * the track (a colour slider's gradient) and shows no fill.
+ */
 const Slider = React.forwardRef<
   React.ElementRef<typeof SliderPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof SliderPrimitive.Root>
->(({ className, ...props }, ref) => (
-  <SliderPrimitive.Root
-    ref={ref}
-    className={cn(
-      "relative flex w-full touch-none select-none items-center group/slider",
-      className,
-    )}
-    {...props}
-  >
-    <SliderPrimitive.Track className="relative h-0.5 w-full grow overflow-hidden rounded-full bg-brand-hover">
-      <SliderPrimitive.Range className="absolute h-full bg-brand-lighter" />
-    </SliderPrimitive.Track>
-    <SliderPrimitive.Thumb className="block h-3 w-2 rounded-[2px] bg-white shadow transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent disabled:pointer-events-none disabled:opacity-50" />
-  </SliderPrimitive.Root>
-));
+  React.ComponentPropsWithoutRef<typeof SliderPrimitive.Root> & { origin?: number; track?: string }
+>(({ className, origin, track, ...props }, ref) => {
+  const min = props.min ?? 0;
+  const max = props.max ?? 100;
+  const v = (props.value ?? props.defaultValue ?? [min])[0];
+  const at = (x: number) => (max > min ? ((Math.min(max, Math.max(min, x)) - min) / (max - min)) * 100 : 0);
+  return (
+    <SliderPrimitive.Root
+      ref={ref}
+      className={cn(
+        "relative flex w-full h-3 touch-none select-none items-center group/slider",
+        className,
+      )}
+      {...props}
+    >
+      <SliderPrimitive.Track
+        className="relative h-0.5 w-full grow overflow-hidden rounded-full bg-brand-hover"
+        style={track ? { background: track } : undefined}
+      >
+        {origin === undefined && !track ? (
+          <SliderPrimitive.Range className="absolute h-full bg-brand-lighter" />
+        ) : (
+          <>
+            <SliderPrimitive.Range className="absolute h-full bg-transparent" />
+            {!track && (
+              <span
+                className="absolute h-full bg-brand-lighter"
+                style={{ left: `${Math.min(at(origin!), at(v))}%`, width: `${Math.abs(at(v) - at(origin!))}%` }}
+              />
+            )}
+          </>
+        )}
+      </SliderPrimitive.Track>
+      <SliderPrimitive.Thumb className="block h-3 w-2 rounded-[2px] bg-white shadow transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent disabled:pointer-events-none disabled:opacity-50" />
+    </SliderPrimitive.Root>
+  );
+});
 Slider.displayName = SliderPrimitive.Root.displayName;
 
 export { Slider };
@@ -42,6 +68,12 @@ interface PropertiesSliderProps {
   inputClass?: string;
   buttonClass?: string;
   disabled?: boolean;
+  /** After the stepper: a keyframe navigator. */
+  end?: React.ReactNode;
+  /** Fill from this value (a bipolar slider). */
+  origin?: number;
+  /** The track's paint (a colour slider's gradient). */
+  track?: string;
 }
 
 const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
@@ -58,6 +90,9 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
   inputClass,
   buttonClass,
   disabled = false,
+  end,
+  origin,
+  track,
 }) => {
   const [tempValue, setTempValue] = useState(value.toFixed(toFixed));
   const [isFocused, setIsFocused] = useState(false);
@@ -129,17 +164,20 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
     }
   };
 
+  // CapCut's label-over-slider row (43 px pitch): the label, then the slider, 18 px to a
+  // 54×22 field, its 16 px stepper and, when given, the keyframe navigator.
   return (
     <div className="flex flex-col items-start w-full min-w-0">
       <label
         className={cn(
-          "text-brand-light text-[12px] mb-1",
+          "text-[12px] mb-[3px]",
+          disabled ? "text-[#525252]" : "text-brand-light",
           labelClass,
         )}
       >
         {label}
       </label>
-      <div className="flex flex-row items-center gap-x-2.5 w-full min-w-0">
+      <div className="flex flex-row items-center gap-x-[18px] w-full min-w-0">
         <Slider
           value={[value]}
           onValueChange={(value) => onChange(value[0])}
@@ -147,8 +185,10 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
           max={max}
           step={step}
           disabled={disabled}
+          origin={origin}
+          track={track}
         />
-        <div className="flex flex-row items-center">
+        <div className="flex flex-row items-center shrink-0">
           <input
             className={cn(
               "w-[54px] h-[22px] px-1.5 text-center text-brand-lighter text-[12px] tabular-nums font-normal items-center p-1 rounded-[4px] bg-brand",
@@ -176,6 +216,7 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
             )}
           >
             <button
+              aria-label={`${label} up`}
               className="w-full h-full px-1 hover:bg-brand-light/10 transition-all duration-200"
               disabled={disabled}
               onClick={() => {
@@ -186,6 +227,7 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
               <LuChevronUp className="w-2 h-2 cursor-pointer text-brand-light" />
             </button>
             <button
+              aria-label={`${label} down`}
               className="w-full h-full px-1 hover:bg-brand-light/10 transition-all duration-200"
               disabled={disabled}
               onClick={() => {
@@ -196,6 +238,7 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
               <LuChevronDown className="w-2 h-2 cursor-pointer text-brand-light" />
             </button>
           </div>
+          {end && <div className="ml-[5px] flex items-center">{end}</div>}
         </div>
       </div>
     </div>

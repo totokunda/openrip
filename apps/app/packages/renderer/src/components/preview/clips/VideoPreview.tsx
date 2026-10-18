@@ -14,6 +14,7 @@ import { useViewportStore } from "@/lib/viewport";
 import { snapToGuides, snapResizeToGuides } from "@/lib/guides";
 import { DEFAULT_FPS } from "@/lib/settings";
 import { useClipStore } from "@/lib/clip";
+import { setShownTransform, useShownTransform } from "@/lib/keyframe-ui";
 import { WrappedCanvas } from "mediabunny";
 import { useWebGLFilters } from "@/components/preview/webgl-filters";
 import { BaseClipApplicator } from "./apply/base";
@@ -258,10 +259,14 @@ const VideoPreview: React.FC<
   const tool = useViewportStore((s) => s.tool);
   const scale = useViewportStore((s) => s.scale);
   const position = useViewportStore((s) => s.position);
-  const setClipTransform = useClipStore((s) => s.setClipTransform);
+  // The handles edit what's keyed at the playhead by CapCut's rule (lib/keyframe-ui.ts).
+  const setClipTransform = setShownTransform;
   const clipTransform = overrideClip
     ? overrideClip.transform
     : useClipStore((s) => s.getClipTransform(clipId));
+  // Where the handles sit: the keys' transform at the playhead when the clip is keyed.
+  const keyedTransform = useShownTransform(clipId, clipTransform);
+  const shownTransform = overrideClip ? clipTransform : keyedTransform;
 
   const removeClipSelection = useControlsStore((s) => s.removeClipSelection);
   const addClipSelection = useControlsStore((s) => s.addClipSelection);
@@ -1922,15 +1927,15 @@ const VideoPreview: React.FC<
           ref={imageRef}
           
           image={engineDraws ? undefined : imageSource || undefined}
-          x={clipTransform?.x ?? offsetX}
-          y={clipTransform?.y ?? offsetY}
+          x={shownTransform?.x ?? offsetX}
+          y={shownTransform?.y ?? offsetY}
           width={nodeWidth}
           height={nodeHeight}
-          scaleX={clipTransform?.scaleX ?? 1}
-          scaleY={clipTransform?.scaleY ?? 1}
-          rotation={clipTransform?.rotation ?? 0}
+          scaleX={shownTransform?.scaleX ?? 1}
+          scaleY={shownTransform?.scaleY ?? 1}
+          rotation={shownTransform?.rotation ?? 0}
           cornerRadius={safeCornerRadius}
-          opacity={(clipTransform?.opacity ?? 100) / 100}
+          opacity={(shownTransform?.opacity ?? 100) / 100}
           crop={pixelCrop}
           onDragMove={handleDragMove}
           onDragStart={handleDragStart}
