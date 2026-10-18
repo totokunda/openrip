@@ -1,12 +1,12 @@
 // A change in the tab with nothing after it (after newtext): Typewriter on the text, or with
-// QUICK=video White Flash on the video (its row found from the project), then the app is closed a
+// QUICK=video Fade In on the video (its row found from the project), then the app is closed a
 // second and a half later: the project file must have it by then. quickcheck, after a restart,
 // finds it too.
 import { rulerMap, tab } from "./_preview.mjs";
 import { checks, choose, rowOf, savedClips } from "./_anim.mjs";
 
 export const QUICK = process.env.QUICK === "video"
-  ? { type: "video", label: "Transition", value: "White Flash" }
+  ? { type: "video", label: "In", value: "Fade In" }
   : { type: "text", label: "Animation", value: "Typewriter" };
 
 export default async (ctx) => {
@@ -19,7 +19,7 @@ export default async (ctx) => {
   await tab(win, "Animation");
   await choose(win, QUICK.label, QUICK.value);
   const clips = await savedClips(win, ctx.udDir);
-  const saved = clips.some((c) => c.animationIn?.name === QUICK.value || c.transitionOut?.name === QUICK.value);
+  const saved = clips.some((c) => c.animationIn?.name === QUICK.value);
   const { check, report } = checks();
   check(`${QUICK.value} in the project file 1.5 s later`, saved);
   return report();

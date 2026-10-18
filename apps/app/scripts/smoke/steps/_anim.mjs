@@ -1,15 +1,49 @@
-// Animation tab helpers: its rows' selects, the Duration slider and the note under a section;
-// the project as saved; and a log of checks.
+// Animation tab helpers: its sub-tabs' cards (In, Out, Combo, Loop; "Animation" is In), the
+// caption style's select ("Words"), the Duration slider and the note under the cards; the
+// transition on a cut (its marker, the Transitions tab's cards and its inspector); the project
+// as saved; and a log of checks.
 import fs from "node:fs";
 import path from "node:path";
 import { now, rulerMap, seek, settled, tab, timelineRect } from "./_preview.mjs";
 
-// The select in the panel row labelled `label` ("Animation", "Words", "Transition"): its
-// shown value, or null when there's no such row.
-export const selected = (win, label) => win.evaluate((label) => {
-  const h = [...document.querySelectorAll("[data-testid=inspector] [role=tabpanel] h4")].find((e) => e.innerText.trim() === label);
-  return h?.parentElement?.querySelector("[role=combobox]")?.innerText.trim() ?? null;
-}, label);
+// The Animation tab's sub-tab a label names.
+const KIND = { Animation: "In", In: "In", Out: "Out", Combo: "Combo", Loop: "Loop" };
+
+// Open the Animation tab's sub-tab `name` ("In", …) if the clip has it; false if not.
+const openKind = async (win, name) => {
+  const at = await win.evaluate((name) => {
+    const el = [...document.querySelectorAll("[data-testid=inspector] [role=tab]")].find((e) => (e.innerText || "").trim() === name);
+    if (!el) return null;
+    if (el.getAttribute("data-state") === "active") return "active";
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, name);
+  if (!at) return false;
+  if (at !== "active") {
+    await win.mouse.click(at.x, at.y);
+    await win.waitForTimeout(300);
+  }
+  return true;
+};
+
+// The names on the open sub-tab's cards, and which is chosen.
+const cards = (win) =>
+  win.evaluate(() =>
+    [...document.querySelectorAll("[data-testid=inspector] [role=tabpanel] [data-testid=anim-card]")].map((b) => ({ name: b.getAttribute("title"), on: b.getAttribute("aria-pressed") === "true" })),
+  );
+
+// The chosen card on the Animation tab's sub-tab `label` ("Animation" or "In", "Out", …), or
+// the caption style's select ("Words"): its shown value, or null when the clip has no such row.
+export const selected = async (win, label) => {
+  if (KIND[label]) {
+    if (!(await openKind(win, KIND[label]))) return null;
+    return (await cards(win)).find((c) => c.on)?.name ?? null;
+  }
+  return win.evaluate((label) => {
+    const h = [...document.querySelectorAll("[data-testid=inspector] [role=tabpanel] h4")].find((e) => e.innerText.trim() === label);
+    return h?.parentElement?.querySelector("[role=combobox]")?.innerText.trim() ?? null;
+  }, label);
+};
 
 const openSelect = async (win, label) => {
   const at = await win.evaluate((label) => {
@@ -22,8 +56,12 @@ const openSelect = async (win, label) => {
   await win.waitForTimeout(400);
 };
 
-// What the row's select offers.
+// What the sub-tab's cards (or the row's select) offer, in order.
 export const options = async (win, label) => {
+  if (KIND[label]) {
+    if (!(await openKind(win, KIND[label]))) throw new Error(`no ${label} sub-tab`);
+    return (await cards(win)).map((c) => c.name);
+  }
   await openSelect(win, label);
   const names = await win.getByRole("option").allInnerTexts();
   await win.keyboard.press("Escape");
@@ -31,10 +69,109 @@ export const options = async (win, label) => {
   return names.map((n) => n.trim());
 };
 
-// Pick `option` in the row's select and wait for the engine's picture.
+// Pick the card `option` on the sub-tab (or the option in the row's select) and wait for the
+// engine's picture.
 export const choose = async (win, label, option) => {
+  if (KIND[label]) {
+    if (!(await openKind(win, KIND[label]))) throw new Error(`no ${label} sub-tab`);
+    const card = win.locator(`[data-testid=inspector] [role=tabpanel] [data-testid=anim-card][title="${option}"]`).first();
+    await card.scrollIntoViewIfNeeded();
+    await settled(win, () => card.click());
+    return;
+  }
   await openSelect(win, label);
   await settled(win, () => win.getByRole("option", { name: option, exact: true }).click());
+};
+
+// ---- transitions on cuts --------------------------------------------------------------------
+
+// The transitions' ids by the names the steps use.
+export const TRANSITION_IDS = {
+  Mix: "mix",
+  "Black Fade": "black_fade",
+  "White Flash": "white_flash",
+  "White Fade": "white_fade",
+  "Pull in": "pull_in",
+  "Pull out": "pull_out",
+  Blur: "blur",
+  Blink: "blink",
+  Slide: "slide",
+  Push: "push",
+  Wipe: "wipe",
+  Circle: "circle",
+  Spin: "spin",
+};
+
+// Where the marker of the transition after a saved clip is: on its cut, on its row.
+export const markerAt = async (ctx, doc, id) => {
+  ctx.map ??= await rulerMap(ctx.win);
+  const clip = doc.timeline.clips.find((c) => c.clipId.startsWith(id));
+  if (!clip) throw new Error(`no clip ${id}`);
+  const [, y] = await bar(ctx, doc, clip.clipId);
+  return [ctx.map.x(+clip.endTick / 1e6), y];
+};
+
+// Select the transition after a saved clip by clicking its marker; true when its inspector
+// shows. A playhead on the cut would take the click (its line grabs 6 px either side): it
+// moves half a second before the cut first.
+export const pickTransition = async (ctx, doc, id) => {
+  const [x, y] = await markerAt(ctx, doc, id);
+  const clip = doc.timeline.clips.find((c) => c.clipId.startsWith(id));
+  if (Math.abs(ctx.map.x(await now(ctx.win)) - x) < 12) await seek(ctx.win, ctx.map, Math.round((+clip.endTick / 1e6 - 0.5) * 24) / 24);
+  await ctx.win.mouse.click(x, y);
+  await ctx.win.waitForTimeout(500);
+  return (await ctx.win.locator("[data-testid=inspector-transition]").count()) > 0;
+};
+
+// The selected transition's name in its inspector, or null when it isn't shown.
+export const transitionName = async (win) => {
+  const el = win.locator("[data-testid=transition-name]");
+  return (await el.count()) ? (await el.innerText()).trim() : null;
+};
+
+// The Transitions tab, on the category with the card for `name` (its column lists them).
+export const openTransitionCard = async (win, name) => {
+  const type = TRANSITION_IDS[name] ?? name;
+  await win.locator("[data-testid=assets-tab-transitions]").click();
+  await win.waitForTimeout(300);
+  const card = win.locator(`[data-testid=transition-${type}]`);
+  if (await card.count()) return card;
+  for (const s of await win.locator("[data-testid=assets] nav[aria-label=Sections] [data-testid^=assets-section-]").all()) {
+    await s.click();
+    await win.waitForTimeout(250);
+    if (await card.count()) return card;
+  }
+  return null;
+};
+
+// The transitions the Transitions tab offers, by name, across its categories.
+export const transitionsOffered = async (win) => {
+  await win.locator("[data-testid=assets-tab-transitions]").click();
+  await win.waitForTimeout(300);
+  const names = [];
+  for (const s of await win.locator("[data-testid=assets] nav[aria-label=Sections] [data-testid^=assets-section-]").all()) {
+    await s.click();
+    await win.waitForTimeout(250);
+    for (const t of await win.locator("[data-testid^=transition-card-] [title]").all()) names.push(await t.getAttribute("title"));
+  }
+  return names;
+};
+
+// Give the selected clip's cut the transition `name` by its card's "+" in the Transitions tab;
+// the transition is then selected (its inspector shows) and the engine's picture settled.
+export const addTransition = async (win, name) => {
+  const card = await openTransitionCard(win, name);
+  if (!card) throw new Error(`no ${name} card`);
+  await card.scrollIntoViewIfNeeded();
+  await card.hover();
+  await win.waitForTimeout(200);
+  await settled(win, () => win.locator(`[data-testid=transition-add-${TRANSITION_IDS[name] ?? name}]`).click());
+};
+
+// Delete the selected transition (⌫, nothing focused).
+export const deleteTransition = async (win) => {
+  await win.evaluate(() => document.activeElement?.blur?.());
+  await settled(win, () => win.keyboard.press("Backspace"));
 };
 
 // The Duration slider's value in seconds, its bounds, or null when it isn't shown.
@@ -132,11 +269,13 @@ export const pick = async (ctx, doc, id, at) => {
   await tab(ctx.win, "Animation");
 };
 
-// PASS/FAIL lines; `report` is what a step returns.
+// PASS/FAIL lines; `report` is what a step returns. CHECKS_LIVE=1 prints each as it's made
+// (a step that throws later doesn't return its report).
 export const checks = () => {
   const lines = [];
   const check = (name, ok, detail = "") => {
     lines.push(`${ok ? "PASS" : "FAIL"} ${name}${detail === "" ? "" : ` (${detail})`}`);
+    if (process.env.CHECKS_LIVE) console.log(`  live: ${lines[lines.length - 1]}`);
     return ok;
   };
   const report = () => `${lines.filter((l) => l.startsWith("PASS")).length}/${lines.length} passed\n  ${lines.join("\n  ")}`;

@@ -23,7 +23,7 @@ export default async (ctx) => {
   }
   await shot("i1-tab");
   await pick(ctx, doc, t1);
-  check("offers None, Type 1, Type 2, Typewriter", (await options(win, "Animation")).join() === "None,Type 1,Type 2,Typewriter");
+  check("offers None, the typing ones and the text's moves", (await options(win, "Animation")).join() === "None,Type 1,Type 2,Typewriter,Fade In,Zoom In,Zoom Out,Slide");
 
   // Type 1: typing at 1 s, whole at 2.5 s; over 0.8 s, whole at 1 s.
   await at(0, "d@0");

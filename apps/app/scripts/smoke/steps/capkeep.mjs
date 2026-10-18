@@ -17,7 +17,7 @@ export default async (ctx) => {
   await shot("k1-tab");
   check("listed by name with the note, no duration", (await selected(win, "Animation")) === `${name} (CapCut)` && /doesn't draw/.test(await note(win)) && (await duration(win)) === null, `${await selected(win, "Animation")} | ${await note(win)}`);
   const opts = await options(win, "Animation");
-  check("offered with the engine's own", opts.join() === `None,Type 1,Type 2,Typewriter,${name} (CapCut)`, opts.join());
+  check("a card of its own after None, then the engine's", opts.join() === `None,${name} (CapCut),Type 1,Type 2,Typewriter,Fade In,Zoom In,Zoom Out,Slide`, opts.join());
   // Trim its end by a fifth.
   const [x, y] = await bar(ctx, doc, clip.clipId, end);
   await settled(win, () => drag(win, x - 1, y, map.x(end - (end - start) / 5), y));
@@ -38,6 +38,6 @@ export default async (ctx) => {
   check("replaced by Type 1", saved.animationIn?.type === "type_1" && changed > 0, `${JSON.stringify(saved.animationIn)}; changed ${changed}`);
   await pick(ctx, doc, clip.clipId);
   const after = await options(win, "Animation");
-  check("no longer offered once replaced", after.join() === "None,Type 1,Type 2,Typewriter", after.join());
+  check("no longer offered once replaced", after.join() === "None,Type 1,Type 2,Typewriter,Fade In,Zoom In,Zoom Out,Slide", after.join());
   return report();
 };

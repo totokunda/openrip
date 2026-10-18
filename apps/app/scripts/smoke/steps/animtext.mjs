@@ -32,7 +32,11 @@ export default async (ctx) => {
   await shot("t1-tab");
   check("tab shows None and no duration", (await selected(win, "Animation")) === "None" && (await duration(win)) === null, await selected(win, "Animation"));
   const opts = await options(win, "Animation");
-  check("offers None, Type 1, Type 2, Typewriter", opts.join() === "None,Type 1,Type 2,Typewriter", opts.join());
+  check("In offers None, the typing ones and the text's moves", opts.join() === "None,Type 1,Type 2,Typewriter,Fade In,Zoom In,Zoom Out,Slide", opts.join());
+  const outs = await options(win, "Out");
+  check("Out offers None, Fade Out, Zoom In, Zoom Out, Slide", outs.join() === "None,Fade Out,Zoom In,Zoom Out,Slide", outs.join());
+  const loops = await options(win, "Loop");
+  check("Loop offers None, Pulse, Swing, Shake, Float, Blink", loops.join() === "None,Pulse,Swing,Shake,Float,Blink", loops.join());
   check("no Captions row without spoken words", (await selected(win, "Words")) === null);
   for (const name of ["Type 1", "Type 2", "Typewriter"]) {
     await select();
@@ -71,5 +75,28 @@ export default async (ctx) => {
   check("None: text whole", (await diff(win, "none@0.25", "a@0.25")).n === 0);
   clips = await savedClips(win, udDir);
   check("None: saved as null", clips.find((c) => c.type === "text")?.animationIn === null, JSON.stringify(clips.find((c) => c.type === "text")?.animationIn));
+
+  // An Out fades the text's end and nothing before it; a Loop moves it all along; None, each.
+  await at(2.85, "none@2.85");
+  await select();
+  await choose(win, "Out", "Fade Out");
+  await at(2.85, "o@2.85");
+  await at(1.4, "o@1.4");
+  const outEnd = (await diff(win, "none@2.85", "o@2.85")).n;
+  const outMid = (await diff(win, "none@1.4", "o@1.4")).n;
+  clips = await savedClips(win, udDir);
+  check("Fade Out: saved, the end fading, the middle not", clips.find((c) => c.type === "text")?.animationOut?.type === "fade_out" && outEnd > 100 && outMid === 0, `changed ${outEnd}, ${outMid}`);
+  await select();
+  await choose(win, "Out", "None");
+  await choose(win, "Loop", "Pulse");
+  check("Pulse: 1 s a round", (await duration(win))?.value === 1, JSON.stringify(await duration(win)));
+  await at(1.2, "l@1.2");
+  const pulsed = (await diff(win, "none@1.2", "l@1.2")).n;
+  clips = await savedClips(win, udDir);
+  check("Pulse: saved as the Loop, the text moving mid-clip", clips.find((c) => c.type === "text")?.animationLoop?.type === "pulse" && pulsed > 100, `changed ${pulsed}`);
+  await select();
+  await choose(win, "Loop", "None");
+  await at(1.2, "l@1.2");
+  check("Loop None: the text as without", (await diff(win, "none@1.2", "l@1.2")).n === 0);
   return report();
 };

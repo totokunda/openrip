@@ -1,8 +1,8 @@
 // Export through the engine (after animsetup) and check the file's frames with ffmpeg: white
 // at the White Flash cut (5 s), not a second before it; the text hidden at the start of its
-// Type 1 and whole after it (bright pixels in the middle band where the text box is). For
-// another project, EXPORT_WHITE and EXPORT_PLAIN give the times to compare and EXPORT_TYPED=""
-// skips the text. Finder isn't opened.
+// Type 1, whole after it and fading near its end with its Fade Out (bright pixels in the middle
+// band where the text box is). For another project, EXPORT_WHITE and EXPORT_PLAIN give the
+// times to compare and EXPORT_TYPED="" skips the text. Finder isn't opened.
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -52,6 +52,12 @@ export default async ({ app, win, shot, outDir, fs }) => {
   if (typed.length) {
     const [start, after] = typed.map(frame);
     check("text hidden as it starts typing, whole after", after.white > start.white + 0.002, `white in the band ${(start.white * 100).toFixed(2)}%, ${(after.white * 100).toFixed(2)}%`);
+    // animsetup's Fade Out: the text fading in its last half second.
+    const fade = Number(process.env.EXPORT_FADED ?? "2.9");
+    if (fade) {
+      const faded = frame(fade);
+      check(`text fading out by ${fade} s (its Out)`, faded.white < after.white - 0.001, `white in the band ${(faded.white * 100).toFixed(2)}% vs ${(after.white * 100).toFixed(2)}%`);
+    }
   }
   return report();
 };

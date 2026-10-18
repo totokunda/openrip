@@ -51,17 +51,17 @@ export default async (ctx) => {
   await win.waitForTimeout(800);
   check("Text tab: one undo takes it back", (await doc()).timeline.clips.filter((c) => c.type === "text").length === texts);
 
-  // A transition from the Transitions tab, on the video (nothing follows it: the note says so).
+  // The Transitions tab with the lone video selected: it has no cut, so the tab says so and its
+  // cards' + is off (transui puts them on cuts).
   await select(ctx, await doc(), (await clipOf("video")).clipId, 6);
   await left("transitions");
-  await win.locator("[data-testid=transition-white_flash]").click();
-  await win.waitForTimeout(800);
-  const v = await clipOf("video");
-  check("Transitions tab: White Flash given to the video", v.transitionOut?.type === "white_flash", JSON.stringify(v.transitionOut));
-  check("Transitions tab: the inspector shows Animation", (await win.locator("[data-testid=inspector] [role=tab][data-state=active]").first().innerText()).trim() === "Animation");
+  const tnote = (await win.locator("[data-testid=assets-content]").innerText()).replace(/\s+/g, " ");
+  check("Transitions tab: a lone clip has no cut, the tab says so", /between two clips/.test(tnote), tnote.slice(0, 80));
+  await win.locator("[data-testid=transition-white_flash]").hover();
+  await win.waitForTimeout(300);
+  check("Transitions tab: its cards' + is off", await win.locator("[data-testid=transition-add-white_flash]").isDisabled());
   await shot("l-transition");
-  await win.keyboard.press("Meta+z");
-  await win.waitForTimeout(800);
+  check("Transitions tab: nothing given to the video", !(await clipOf("video")).transitionOut);
   await left("media");
 
   // Safe areas (the player's menu) and the ratio menu, under the player.

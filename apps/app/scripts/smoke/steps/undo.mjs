@@ -4,7 +4,7 @@
 // _undo.mjs). Then everything is undone at once back to the start and redone, by the
 // toolbar's buttons. UNDO_CASES="a,b" runs some of the cases only.
 import { clickSplit, drag, previewRect, seek, settled, timelineRect } from "./_preview.mjs";
-import { bar, checks, choose, savedProject, select } from "./_anim.mjs";
+import { addTransition, bar, checks, choose, savedProject, select } from "./_anim.mjs";
 import { field, openTab, press, state, thumb, typeInto, undoCase } from "./_undo.mjs";
 
 export default async (ctx) => {
@@ -109,11 +109,10 @@ export default async (ctx) => {
       await pick("video", 0, 2);
       await settled(win, () => clickSplit(win));
     },
-    // A White Flash into the second half, seen at the cut.
+    // A White Flash on the cut into the second half (the Transitions tab's +), seen at the cut.
     transition: async () => {
       await pick("video", 0, 2);
-      await openTab(win, "Animation");
-      await choose(win, "Transition", "White Flash");
+      await addTransition(win, "White Flash");
     },
     delete: async () => {
       await pick("text", 0);

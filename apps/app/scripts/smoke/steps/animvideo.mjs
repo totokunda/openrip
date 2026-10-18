@@ -1,11 +1,25 @@
-// Transitions between the app's own video clips (after import timeline, the 10 s standard
-// clip): split at 5 s into two adjacent clips; White Flash and White Fade on the first, into
-// the second, with their duration and None; the second has no clip after it, so it shows the
-// note and draws nothing; no Blink without CapCut's image sequence. Then the first half split
-// again at 2.5 s: its transition stays on the half that ends at the cut. Compares the engine's
-// frames with the clips drawn without a transition. The video's row is found from the project.
-import { clickSplit, diff, grab, rulerMap, seek, settled, tab } from "./_preview.mjs";
-import { checks, choose, duration, note, options, rowOf, savedClips, selected, setDuration } from "./_anim.mjs";
+// Transitions between the app's own video clips (after import timeline, the standard clip):
+// split at 5 s into two adjacent clips; White Flash put on the cut by the Transitions tab's +
+// with the first half selected, then White Fade in its place, their duration (at most the
+// shorter clip) and ⌫; no Blink without CapCut's image sequence; + with the last clip selected
+// goes on the cut before it, nothing at its end. Then the first half split again at 2.5 s: the
+// transition stays on the half that ends at the cut. Compares the engine's frames with the
+// clips drawn without a transition. The video's row is found from the project.
+import { clickSplit, diff, grab, rulerMap, seek, settled } from "./_preview.mjs";
+import {
+  addTransition,
+  checks,
+  deleteTransition,
+  duration,
+  pickTransition,
+  rowOf,
+  savedClips,
+  savedProject,
+  select,
+  setDuration,
+  transitionName,
+  transitionsOffered,
+} from "./_anim.mjs";
 
 const TIMES = [2.5, 4.5, 4.6, 4.875, 4.9, 5, 5.4, 9.9];
 
@@ -18,11 +32,7 @@ export default async (ctx) => {
     await seek(win, map, s);
     await grab(win, name);
   };
-  const select = async (s) => {
-    await win.mouse.click(map.x(s), ROW);
-    await win.waitForTimeout(600);
-    await tab(win, "Animation");
-  };
+  const doc = () => savedProject(win, udDir);
   const videos = async () => (await savedClips(win, udDir)).filter((c) => c.type === "video").sort((a, b) => +a.startTick - +b.startTick);
   for (const s of TIMES) await at(s, `none@${s}`);
   // Two clips: split at 5 s.
@@ -30,16 +40,15 @@ export default async (ctx) => {
   await win.mouse.click(map.x(2), ROW);
   await win.waitForTimeout(600);
   await settled(win, () => clickSplit(win));
-  check("split in two", (await videos()).length === 2, (await videos()).map((c) => `${c.startTick}-${c.endTick}`).join());
+  let v = await videos();
+  check("split in two", v.length === 2, v.map((c) => `${c.startTick}-${c.endTick}`).join());
 
-  await select(2);
+  const opts = await transitionsOffered(win);
+  check("the Transitions tab offers White Flash and White Fade, no Blink", opts.includes("White Flash") && opts.includes("White Fade") && !opts.includes("Blink"), opts.join());
+  await select(ctx, await doc(), v[0].clipId, 2);
   await shot("v1-tab");
-  check("first: None, no note (a clip follows)", (await selected(win, "Transition")) === "None" && (await note(win)) === "", await note(win));
-  const opts = await options(win, "Transition");
-  check("offers None, White Flash, White Fade (no Blink)", opts.join() === "None,White Flash,White Fade", opts.join());
-
-  await choose(win, "Transition", "White Flash");
-  check("White Flash: chosen, 0.5 s", (await selected(win, "Transition")) === "White Flash" && (await duration(win))?.value === 0.5, JSON.stringify(await duration(win)));
+  await addTransition(win, "White Flash");
+  check("White Flash: chosen, 0.5 s", (await transitionName(win)) === "White Flash" && (await duration(win))?.value === 0.5, JSON.stringify(await duration(win)));
   await at(5, "a@5");
   const cut = await diff(win, "none@5", "a@5");
   await at(4.875, "a@4.875");
@@ -51,45 +60,42 @@ export default async (ctx) => {
   check("White Flash: white at the cut, half way a quarter before, nothing outside", cut.light > 0.99 && quarter.n > 0 && quarter.light < 0.95 && before === 0 && after === 0, `light ${cut.light.toFixed(2)}, ${quarter.light.toFixed(2)}; changed ${before}, ${after}`);
   await shot("v2-flash");
 
-  await select(2);
-  await choose(win, "Transition", "White Fade");
+  await pickTransition(ctx, await doc(), v[0].clipId);
+  await addTransition(win, "White Fade");
   await at(5, "a@5");
   const fadeCut = await diff(win, "none@5", "a@5");
   await at(4.9, "a@4.9");
   const fadeIn = await diff(win, "none@4.9", "a@4.9");
   check("White Fade: white at the cut, rising before it", fadeCut.light > 0.99 && fadeIn.n > 0 && fadeIn.light < fadeCut.light, `light ${fadeCut.light.toFixed(2)}, ${fadeIn.light.toFixed(2)}`);
-  let v = await videos();
+  v = await videos();
   check("saved on the first clip", v[0]?.transitionOut?.type === "white_fade" && !v[1]?.transitionOut, JSON.stringify(v.map((c) => c.transitionOut)));
 
-  await select(2);
+  await pickTransition(ctx, await doc(), v[0].clipId);
   await setDuration(win, 1);
   check("duration 1 s", (await duration(win))?.value === 1, JSON.stringify(await duration(win)));
   await at(4.6, "a@4.6");
   const early = (await diff(win, "none@4.6", "a@4.6")).n;
   check("duration: starts half a second before the cut", early > 0, `changed ${early}`);
-  await select(2);
+  await pickTransition(ctx, await doc(), v[0].clipId);
   await setDuration(win, 9);
   const big = await duration(win);
-  check("duration at most 2 s", big?.value === 2 && big?.max === 2, JSON.stringify(big));
+  check("duration at most the shorter clip (5 s)", big?.value === 5 && big?.max === 5, JSON.stringify(big));
 
-  await choose(win, "Transition", "None");
-  check("None: no duration", (await duration(win)) === null);
+  await deleteTransition(win);
+  check("⌫: the inspector goes back to the project's", (await transitionName(win)) === null);
   await at(5, "a@5");
-  check("None: nothing at the cut", (await diff(win, "none@5", "a@5")).n === 0);
+  check("⌫: nothing at the cut", (await diff(win, "none@5", "a@5")).n === 0);
 
-  // The second clip has none after it.
-  await select(7);
-  check("last clip: the note says a clip must follow", /starts right where this one ends/.test(await note(win)), await note(win));
-  await choose(win, "Transition", "White Flash");
+  // The second clip has none after it: + puts the transition on the cut before it.
+  await select(ctx, await doc(), v[1].clipId, 7);
+  await addTransition(win, "White Flash");
+  v = await videos();
+  check("last clip: + goes on the cut before it", v[0].transitionOut?.type === "white_flash" && !v[1].transitionOut, JSON.stringify(v.map((c) => c.transitionOut?.type ?? null)));
   await at(9.9, "a@9.9");
   const end = (await diff(win, "none@9.9", "a@9.9")).n;
   check("last clip: nothing drawn at its end", end === 0, `changed ${end}`);
-  await select(7);
-  await choose(win, "Transition", "None");
 
   // A transition stays at the cut it leads into when its clip is split.
-  await select(2);
-  await choose(win, "Transition", "White Flash");
   await seek(win, map, 2.5);
   await win.mouse.click(map.x(1), ROW);
   await win.waitForTimeout(600);
@@ -102,7 +108,6 @@ export default async (ctx) => {
   await at(5, "a@5");
   const kept = await diff(win, "none@5", "a@5");
   check("split: nothing at the new cut, the flash still at 5 s", split === 0 && kept.light > 0.99, `changed ${split}; light ${kept.light.toFixed(2)}`);
-  await select(1);
-  check("split: the first part's tab shows None", (await selected(win, "Transition")) === "None", await selected(win, "Transition"));
+  check("split: no marker at the new cut", !(await pickTransition(ctx, await doc(), v[0].clipId)));
   return report();
 };

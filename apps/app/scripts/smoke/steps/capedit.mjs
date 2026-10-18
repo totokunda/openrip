@@ -2,7 +2,7 @@
 // a time on the first and Type 2 over 1 s on the second; on a draft with transitions, the
 // first one 1 s long and the second one replaced by White Fade.
 import { rulerMap, tallTimeline } from "./_preview.mjs";
-import { choose, pick, savedProject, setDuration } from "./_anim.mjs";
+import { addTransition, choose, pick, pickTransition, savedProject, setDuration } from "./_anim.mjs";
 
 export default async (ctx) => {
   const { win, udDir } = ctx;
@@ -20,9 +20,9 @@ export default async (ctx) => {
     await setDuration(win, 1);
     return "one word at a time on the first caption, Type 2 over 1 s on the second";
   }
-  await pick(ctx, doc, transitions[0].clipId);
+  await pickTransition(ctx, doc, transitions[0].clipId);
   await setDuration(win, 1);
-  await pick(ctx, doc, transitions[1].clipId);
-  await choose(win, "Transition", "White Fade");
+  await pickTransition(ctx, doc, transitions[1].clipId);
+  await addTransition(win, "White Fade");
   return "the first transition 1 s, the second White Fade";
 };

@@ -1,8 +1,8 @@
-// The app's own project with an animation and a transition (after import timeline newtext):
-// Type 1 over 1 s on the text (0–3 s), the video split at 5 s with White Flash into its second
-// half. For persist and animexport.
+// The app's own project with animations and a transition (after import timeline newtext):
+// Type 1 over 1 s and Fade Out on the text (0–3 s), the video split at 5 s with White Flash on
+// the cut (the Transitions tab's + with the first half selected). For persist and animexport.
 import { clickSplit, rulerMap, seek, settled, tab } from "./_preview.mjs";
-import { choose, rowOf, setDuration } from "./_anim.mjs";
+import { addTransition, choose, rowOf, setDuration } from "./_anim.mjs";
 
 export default async (ctx) => {
   const { win, shot } = ctx;
@@ -17,12 +17,14 @@ export default async (ctx) => {
   await select(map.x(1.5), ROW);
   await choose(win, "Animation", "Type 1");
   await setDuration(win, 1);
+  await choose(win, "Out", "Fade Out");
   await seek(win, map, 5);
   await win.mouse.click(map.x(2), video);
   await win.waitForTimeout(600);
   await settled(win, () => clickSplit(win));
-  await select(map.x(2), video);
-  await choose(win, "Transition", "White Flash");
+  await win.mouse.click(map.x(2), video);
+  await win.waitForTimeout(600);
+  await addTransition(win, "White Flash");
   await shot("s1-setup");
-  return "Type 1 on the text, White Flash at 5 s";
+  return "Type 1 and Fade Out on the text, White Flash at 5 s";
 };

@@ -1,11 +1,12 @@
-// What the Animation tab shows for the project's animated clips (up to four: an In animation,
-// a caption style or a transition) and the engine's frames at PERSIST_TIMES (seconds): this
-// step writes them to PERSIST_FILE (default <outDir>/persist.json); persistcheck compares them
-// after the project was reopened or the app restarted.
+// What the Animation tab shows for the project's animated clips (up to four: an In or Out
+// animation, a caption style), what the inspector of each transition on a cut shows, and the
+// engine's frames at PERSIST_TIMES (seconds): this step writes them to PERSIST_FILE (default
+// <outDir>/persist.json); persistcheck compares them after the project was reopened or the app
+// restarted.
 import fs from "node:fs";
 import path from "node:path";
 import { engineFrame, rulerMap, seek, tallTimeline } from "./_preview.mjs";
-import { checks, duration, pick, savedProject, selected } from "./_anim.mjs";
+import { checks, duration, pick, pickTransition, savedProject, selected, transitionName } from "./_anim.mjs";
 
 export const run = async (ctx, mode) => {
   const { win, udDir, outDir } = ctx;
@@ -13,11 +14,19 @@ export const run = async (ctx, mode) => {
   if (process.env.PERSIST_TALL) await tallTimeline(win);
   const map = (ctx.map = await rulerMap(win));
   const doc = await savedProject(win, udDir);
-  const animated = doc.timeline.clips.filter((c) => c.animationIn || c.transitionOut || (c.captionStyle && c.captionStyle !== "none")).slice(0, 4);
+  const animated = doc.timeline.clips.filter((c) => c.animationIn || c.animationOut || c.transitionOut || (c.captionStyle && c.captionStyle !== "none")).slice(0, 4);
   const now = { clips: {}, frames: {} };
   for (const c of animated) {
-    await pick(ctx, doc, c.clipId);
-    now.clips[c.clipId] = { in: await selected(win, "Animation"), words: await selected(win, "Words"), transition: await selected(win, "Transition"), duration: (await duration(win))?.value ?? null };
+    const shown = {};
+    if (c.animationIn || c.animationOut || (c.captionStyle && c.captionStyle !== "none")) {
+      await pick(ctx, doc, c.clipId);
+      Object.assign(shown, { in: await selected(win, "Animation"), duration: (await duration(win))?.value ?? null, words: await selected(win, "Words"), out: await selected(win, "Out") });
+    }
+    if (c.transitionOut) {
+      await pickTransition(ctx, doc, c.clipId);
+      Object.assign(shown, { transition: await transitionName(win), transitionDuration: (await duration(win))?.value ?? null });
+    }
+    now.clips[c.clipId] = shown;
   }
   for (const s of (process.env.PERSIST_TIMES || "0.5,5").split(",").map(Number)) {
     await seek(win, map, s);
