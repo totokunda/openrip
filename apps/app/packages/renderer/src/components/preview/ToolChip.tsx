@@ -74,7 +74,9 @@ const ToolChip: React.FC = () => {
       ? `Drag out ${SHAPE[shape] ?? "a shape"} on the canvas`
       : tool === "text"
         ? "Click the canvas to add a text"
-        : maskTool === "lasso"
+        : maskTool === "pen"
+          ? "Click to add points, drag for curves; click the first point to close"
+          : maskTool === "lasso"
           ? "Draw a lasso mask over the clip"
           : maskTool === "draw"
             ? "Paint a mask over the clip"

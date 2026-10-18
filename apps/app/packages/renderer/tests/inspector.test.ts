@@ -8,6 +8,16 @@ import { editProperties, keyNavOf, toggleKeys, transformAt } from "../src/lib/in
 import {
   boundsCentre,
   changeMaskShape,
+  defaultText,
+  editAllPoses,
+  MASK_SHAPES,
+  isEmptyMask,
+  newBrushMask,
+  newEmptyMask,
+  remakeMask,
+  newPenMask,
+  poseBox,
+  textBox,
   editMaskPose,
   heartPoints,
   isMaskKeyed,
@@ -124,4 +134,74 @@ test("the heart spans its box's width and 0.9 of its height, as the engine draws
   assert.ok(Math.abs(Math.max(...ys) - Math.min(...ys) - 90) < 0.6);
   // Its point at the bottom.
   assert.ok(Math.abs(Math.max(...ys) - 95) < 0.6);
+});
+
+test("the tiles are CapCut's, in its order", () => {
+  assert.deepEqual(
+    MASK_SHAPES.map((s) => s.name),
+    ["Split", "Filmstrip", "Circle", "Rectangle", "Stars", "Heart", "Text", "Brush", "Pen"],
+  );
+});
+
+test("a text mask: CapCut's default words, its box round them, re-measured with its style", () => {
+  const m = newShapeMask(video(), "text", 0);
+  const pose = m.keyframes[0];
+  assert.deepEqual(pose.text, defaultText(transform));
+  assert.equal(pose.text!.content, "Default text");
+  const sized = textBox(pose.text!);
+  assert.deepEqual([pose.shapeBounds!.width, pose.shapeBounds!.height], [sized.width, sized.height]);
+  // Centred on the picture.
+  const c = boundsCentre(pose.shapeBounds!);
+  assert.ok(Math.abs(c[0] - 100) < 1e-9 && Math.abs(c[1] - 50) < 1e-9);
+  // Two lines with line spacing are taller; letter spacing widens.
+  const two = textBox({ ...pose.text!, content: "a\nb", lineSpacing: 0.5 });
+  assert.ok(Math.abs(two.height - (2 * 1.2 + 0.5) * pose.text!.size) < 1e-9);
+  assert.ok(textBox({ ...pose.text!, letterSpacing: 1 }).width > sized.width);
+  // Words go on every pose.
+  const keyed = editMaskPose(toggleMaskPose(m, 0, 24), 30, 24, (p) => ({ ...p, shapeBounds: { ...p.shapeBounds!, rotation: 20 } }));
+  assert.equal(posesOf(keyed).length, 2);
+  const worded = editAllPoses(keyed, (p) => ({ ...p, text: { ...p.text!, content: "Hi" } }));
+  assert.ok(posesOf(worded).every(([, d]) => d.text!.content === "Hi"));
+});
+
+test("a pen mask: a closed path, its box round its anchors and handles, poses that travel", () => {
+  const pts = [
+    { x: 10, y: 10, ix: 10, iy: 10, ox: 10, oy: 10 },
+    { x: 50, y: 10, ix: 40, iy: 0, ox: 60, oy: 20 },
+    { x: 30, y: 40, ix: 30, iy: 40, ox: 30, oy: 40 },
+  ];
+  let m = newPenMask(video(), pts, 0);
+  assert.equal(m.tool, "pen");
+  assert.deepEqual(m.keyframes[0].penPath, { points: pts, closed: true });
+  const box = poseBox(m.keyframes[0]);
+  assert.deepEqual([box.x, box.y, box.width, box.height], [10, 0, 50, 40]);
+  // Keyed: halfway, the anchors are halfway; the expansion too.
+  m = toggleMaskPose(m, 0, 24);
+  m = editMaskPose(m, 20, 24, (p) => ({ ...p, penPath: { closed: true, points: p.penPath!.points.map((a) => ({ ...a, x: a.x + 20, ix: a.ix + 20, ox: a.ox + 20 })) }, expansion: 40 }));
+  const mid = poseAt(m, 10, 24)!;
+  assert.deepEqual(mid.penPath!.points.map((a) => Math.round(a.x * 1e3) / 1e3), [20, 60, 40]);
+  assert.ok(Math.abs(mid.expansion! - 20) < 1e-3);
+  // A pen changed to a shape is the box round it.
+  const rect = changeMaskShape(newPenMask(video(), pts, 0), "rectangle", transform).keyframes[0];
+  assert.deepEqual([rect.penPath, rect.shapeBounds!.width, rect.shapeBounds!.height], [undefined, 50, 40]);
+});
+
+test("a brush mask: its first stroke, the feather and expansion on the mask while static", () => {
+  let m = newBrushMask(video(), { points: [0, 0, 10, 10], size: 20 }, 0);
+  assert.equal(m.tool, "draw");
+  m = editMaskPose(m, 30, 24, (p) => ({ ...p, expansion: -30, featherAmount: 10 }));
+  assert.deepEqual([m.expansion, m.featherAmount, (m.keyframes[0] as any).expansion], [-30, 10, undefined]);
+  assert.equal(poseAt(m, 0, 24)!.expansion, -30);
+});
+
+test("the Pen and Brush tiles make the selected mask an empty one, keeping its place and settings", () => {
+  let rect = newShapeMask(video(), "rectangle", 0);
+  rect = editMaskPose(toggleMaskPose(rect, 0, 24), 30, 24, (p) => ({ ...p, shapeBounds: { ...p.shapeBounds!, x: 5 } }));
+  rect = { ...rect, inverted: true, featherAmount: 30 };
+  const pen = remakeMask(rect, newEmptyMask(video(), "pen", 12));
+  assert.deepEqual([pen.id, pen.tool, pen.inverted, pen.featherAmount, pen.keyed, Object.keys(pen.keyframes)], [rect.id, "pen", true, 30, false, ["12"]]);
+  assert.equal(isEmptyMask(pen), true);
+  assert.equal(isEmptyMask(newEmptyMask(video(), "draw", 0)), true);
+  assert.equal(isEmptyMask(newBrushMask(video(), { points: [0, 0], size: 4 }, 0)), false);
+  assert.equal(isEmptyMask(rect), false);
 });

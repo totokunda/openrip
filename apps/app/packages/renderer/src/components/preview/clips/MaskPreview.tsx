@@ -3,16 +3,17 @@ import { Group } from "react-konva";
 import Konva from "konva";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
-import { AnyClipProps, ClipTransform, MaskClipProps, MaskShapeTool } from "@/lib/types";
+import { AnyClipProps, ClipTransform, MaskClipProps } from "@/lib/types";
 import { useViewportStore } from "@/lib/viewport";
 import { useMaskStore } from "@/lib/mask";
 import { useInspectorStore } from "@/lib/inspector";
 import { transformAt } from "@/lib/inspector-edits";
-import { maskFrame, poseAt } from "@/lib/mask-shapes";
+import { maskFrame, pictureBox, poseAt } from "@/lib/mask-shapes";
 import { getCropOffset } from "@/components/preview/mask/crop";
 
 import LassoMaskPreview from "./LassoMaskPreview";
-import ShapeMaskPreview from "./ShapeMaskPreview";
+import MaskHandles from "./MaskHandles";
+import PenTool from "./PenTool";
 
 interface MaskPreviewProps {
   clips: AnyClipProps[];
@@ -53,6 +54,7 @@ const MaskPreview: React.FC<MaskPreviewProps> = ({ clips, sortClips, filterClips
   const inspectorMask = useInspectorStore((s) => s.tab === "video" && s.sub.video === "mask");
   const setIsOverMask = useMaskStore((s) => s.setIsOverMask);
   const isOverMask = useMaskStore((s) => s.isOverMask);
+  const maskTool = useMaskStore((s) => s.tool);
   const ref = useRef<Konva.Group>(null);
 
   const editing = tool === "mask" || inspectorMask;
@@ -77,6 +79,8 @@ const MaskPreview: React.FC<MaskPreviewProps> = ({ clips, sortClips, filterClips
     if (isOverMask && items.length === 0) setIsOverMask(false);
   }, [items.length, isOverMask, setIsOverMask]);
 
+  // The Pen draws over the selected clip, in its mask units.
+  const penClip = tool === "mask" && maskTool === "pen" ? clips.find((c) => c.clipId === selectedClip && (c.type === "video" || c.type === "image")) : undefined;
   if (!editing) return null;
 
   return (
@@ -85,7 +89,9 @@ const MaskPreview: React.FC<MaskPreviewProps> = ({ clips, sortClips, filterClips
         const pose = poseAt(mask, maskFrame(clip, focusFrame), fps);
         if (!pose) return null;
         const { outer, inner } = groupTransforms(shown, mask);
-        if (mask.tool === "lasso" && pose.lassoPoints && pose.lassoPoints.length >= 6) {
+        const mt = mask.transform ?? shown ?? clip.transform!;
+        // The mask tool's lasso keeps its own overlay; everything else has CapCut's handles.
+        if (mask.tool === "lasso" && tool === "mask" && maskTool === "lasso" && pose.lassoPoints && pose.lassoPoints.length >= 6) {
           const closed = [...pose.lassoPoints, pose.lassoPoints[0], pose.lassoPoints[1]];
           return (
             <Group key={`mask-${mask.id}`} {...outer}>
@@ -95,34 +101,33 @@ const MaskPreview: React.FC<MaskPreviewProps> = ({ clips, sortClips, filterClips
             </Group>
           );
         }
-        const b = pose.shapeBounds;
-        if ((mask.tool === "shape" || (mask.tool as any) === "rectangle") && b) {
-          return (
-            <Group key={`mask-${mask.id}`} {...outer}>
-              <Group {...inner}>
-                <ShapeMaskPreview
-                  mask={mask}
-                  x={b.x}
-                  y={b.y}
-                  width={b.width}
-                  height={b.height}
-                  rotation={b.rotation ?? 0}
-                  shapeType={(b.shapeType || "rectangle") as MaskShapeTool}
-                  scaleX={b.scaleX ?? 1}
-                  scaleY={b.scaleY ?? 1}
-                  cornerRadius={b.cornerRadius ?? 0}
-                  animationOffset={0}
-                  rectWidth={rectWidth}
-                  rectHeight={rectHeight}
-                  interactive={editing}
-                  tint={tool === "mask"}
-                />
-              </Group>
+        return (
+          <Group key={`mask-${mask.id}`} {...outer}>
+            <Group {...inner}>
+              <MaskHandles
+                mask={mask}
+                clipId={clip.clipId}
+                pose={pose}
+                picture={pictureBox(mt)}
+                scale={inner.scaleX ?? 1}
+                interactive={editing && !penClip}
+                tint={tool === "mask" && maskTool !== "draw"}
+              />
             </Group>
-          );
-        }
-        return null;
+          </Group>
+        );
       })}
+      {penClip && (() => {
+        const shown = transformAt(penClip, focusFrame, fps);
+        const { outer, inner } = groupTransforms(shown, { transform: penClip.transform } as MaskClipProps);
+        return (
+          <Group {...outer}>
+            <Group {...inner}>
+              <PenTool clipId={penClip.clipId} scale={inner.scaleX ?? 1} reach={Math.max(rectWidth, rectHeight) * 2} />
+            </Group>
+          </Group>
+        );
+      })()}
     </Group>
   );
 };

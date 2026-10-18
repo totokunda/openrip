@@ -598,6 +598,8 @@ export type VideoClipProps = ClipProps &
     fadeIn?: number;
     fadeOut?: number;
     masks: MaskClipProps[];
+    /** The Mask section's checkbox unticked: the masks stay, none is drawn. */
+    masksOff?: boolean;
     transitionOut?: ClipTransition | null;
     animationIn?: ClipAnimation | null;
     animationOut?: ClipAnimation | null;
@@ -618,6 +620,8 @@ export type ImageClipProps = ClipProps &
     mediaHeight?: number;
     mediaAspectRatio?: number; // width / height
     masks: MaskClipProps[];
+    /** The Mask section's checkbox unticked: the masks stay, none is drawn. */
+    masksOff?: boolean;
     transitionOut?: ClipTransition | null;
     animationIn?: ClipAnimation | null;
     animationOut?: ClipAnimation | null;
@@ -855,12 +859,12 @@ export type DrawingClipProps = ClipProps & {
 
 export type MaskTransform = ClipTransform;
 
-export type MaskTool = "lasso" | "shape" | "draw";
+export type MaskTool = "lasso" | "shape" | "draw" | "pen";
 /**
  * A shape mask's shape: the app's rectangle, ellipse, triangle ("polygon") and star, and
  * CapCut's Split ("linear"), Filmstrip ("mirror") and heart from the inspector's Mask tab.
  */
-export type MaskShapeTool = "rectangle" | "ellipse" | "polygon" | "star" | "linear" | "mirror" | "heart";
+export type MaskShapeTool = "rectangle" | "ellipse" | "circle" | "polygon" | "star" | "linear" | "mirror" | "heart" | "text";
 
 export interface MaskData {
   // For lasso tool - closed path points
@@ -885,6 +889,8 @@ export interface MaskData {
     renderOnce?: boolean;
     // A rectangle's round corners, 0–100 as CapCut's slider (of its shorter half-side)
     cornerRadius?: number;
+    // A draft heart's or star's own picture (CapCut's bundle), drawn as CapCut draws it
+    picture?: string;
   };
   // For the brush tool: strokes in world units at the mask's transform, as the lasso's points
   brushStrokes?: MaskBrushStroke[];
@@ -894,6 +900,37 @@ export interface MaskData {
   // The feather at this pose (0–100) when the mask is keyed (lib/mask-shapes.ts); the
   // mask's own `featherAmount` otherwise
   featherAmount?: number;
+  // Likewise the expansion (−100…100, CapCut's Expansion on a brush or pen mask)
+  expansion?: number;
+  // A pen mask's closed path (tool "pen"): anchors in world units at the mask's transform,
+  // each with the handle it arrives by (ix, iy) and leaves by (ox, oy)
+  penPath?: { points: MaskPenPoint[]; closed: boolean };
+  // A text mask's words and style (shapeType "text"); its box is shapeBounds
+  text?: MaskTextStyle;
+}
+
+/** One anchor of a pen mask's path, its handles absolute. */
+export interface MaskPenPoint {
+  x: number;
+  y: number;
+  ix: number;
+  iy: number;
+  ox: number;
+  oy: number;
+}
+
+/** A text mask's words and style (CapCut's Text mask): `size` in world units at the mask's
+ * transform, spacing in ems. */
+export interface MaskTextStyle {
+  content: string;
+  font: string;
+  size: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  letterSpacing?: number;
+  lineSpacing?: number;
+  align?: "left" | "center" | "right";
 }
 
 /** One stroke of a brush mask: its points, its width (`size`) and whether it erases. */
@@ -922,6 +959,10 @@ export type MaskClipProps = {
   // Its keyframe diamond was pressed: an edit sets a pose at the playhead even while it has
   // only one (lib/mask-shapes.ts)
   keyed?: boolean;
+  // CapCut's Expansion (−100…100) on a brush or pen mask
+  expansion?: number;
+  // A converted CapCut clip's mask: the draft's material it shows (engine/crates/v1)
+  draftMask?: string;
   backgroundColor?: string;
   backgroundOpacity?: number;
   backgroundColorEnabled?: boolean;

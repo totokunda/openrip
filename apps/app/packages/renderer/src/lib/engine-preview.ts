@@ -188,11 +188,13 @@ async function withOriginalMedia<T>(snapshot: T): Promise<T> {
 /**
  * While the mask tool's lasso (or shape) is out, clips show unmasked, so the outline can be
  * drawn on the whole picture (as the app's own preview does). The brush paints onto the
- * masked picture, so its strokes show as they're kept.
+ * masked picture, so its strokes show as they're kept, and the Pen draws over it (the mask it
+ * draws is empty until its path closes, as CapCut's).
  */
 function withoutMasksWhileEditing<T>(snapshot: T): T {
   const clips = (snapshot as any)?.timeline?.clips;
-  if (useViewportStore.getState().tool !== "mask" || useMaskStore.getState().tool === "draw" || !Array.isArray(clips)) return snapshot;
+  const maskTool = useMaskStore.getState().tool;
+  if (useViewportStore.getState().tool !== "mask" || maskTool === "draw" || maskTool === "pen" || !Array.isArray(clips)) return snapshot;
   const s = snapshot as any;
   return { ...s, timeline: { ...s.timeline, clips: clips.map((c: any) => (c?.masks?.length ? { ...c, masks: [] } : c)) } };
 }

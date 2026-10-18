@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { LuBan, LuBrush, LuCircle, LuHeart, LuLink2, LuPenTool, LuPlus, LuStar, LuUnlink2, LuX } from "react-icons/lu";
-import { TbSquareToggle } from "react-icons/tb";
+import { LuBold, LuBrush, LuCircle, LuEraser, LuHeart, LuItalic, LuLink2, LuPenTool, LuPlus, LuStar, LuTrash2, LuType, LuUnderline, LuUnlink2, LuX } from "react-icons/lu";
+import { TbAlignCenter, TbAlignLeft, TbAlignRight, TbSquareToggle } from "react-icons/tb";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { useViewportStore } from "@/lib/viewport";
@@ -12,66 +12,70 @@ import {
   MaskShape,
   boundsCentre,
   changeMaskShape,
+  editAllPoses,
   editMaskPose,
+  isEmptyMask,
   maskFrame,
   maskNav,
   maskShapeName,
+  newEmptyMask,
   newShapeMask,
   pictureBox,
   placeBounds,
   poseAt,
+  poseBox,
+  remakeMask,
+  textBox,
   toggleMaskPose,
 } from "@/lib/mask-shapes";
-import type { AnyClipProps, MaskClipProps, MaskData, MediaClipProps } from "@/lib/types";
+import type { AnyClipProps, MaskClipProps, MaskData, MaskTextStyle, MediaClipProps } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import Section from "../Section";
 import PropertyRow from "../PropertyRow";
 import PropertiesSlider from "../PropertiesSlider";
 import { KeyframeNavigator } from "../KeyframeButton";
-import { Dial, NumberField, Toggle } from "../controls";
+import { ButtonGroup, Dial, GroupButton, InspectorSelect, NumberField } from "../controls";
 import { useWorld } from "../VideoBasicProperties";
 import MaskOperationsProperties from "./MaskOperationsProperties";
 import TrackMaskSection from "./TrackMaskSection";
 
 /**
- * Video ▸ Mask, as CapCut lays it out (docs/plan/capcut-ui-spec.md §4.8c, §6.17): the clip's
- * masks as chips with "+" to add one, the shapes as tiles (None, Split, Filmstrip, Circle,
- * Rectangle, Stars, Heart and the app's Pen, which draws a lasso on the picture), then Mask
- * settings: invert, Position, Rotation, Size (linked or not), Feather and, on a rectangle,
- * Round corners. Each row keys the mask's pose at the playhead (lib/mask-shapes.ts); the
- * engine draws the masks, with their outline and handles on the canvas while this tab is open.
+ * Video ▸ Mask, as CapCut's (docs/plan/capcut-ui-spec.md §4.8c, §6.17; 18-inspector-video
+ * 013–017): the section's checkbox switches the clip's masks on and off; with none, "Add
+ * mask"; else the masks as 24 px chips with "+" to add one (a centred rectangle, selected).
+ * Then the tiles in CapCut's order (Split, Filmstrip, Circle, Rectangle, Stars, Heart, Text,
+ * Brush, Pen), greyed until there's a mask: each gives the selected mask its shape; Brush and
+ * Pen make it an empty brush or pen mask and turn on the canvas's brush or pen for it.
+ * Then the mask's own controls: a text's words, font, size, B / U / I, spacing and alignment;
+ * Mask settings with invert, reset and the pose navigator: for a shape Position, Rotation,
+ * Size (linked), Feather and a rectangle's Round corners; for Split Position, Rotation and
+ * Feather; for the brush Brush / Eraser / Clear, Brush size, Feather and Expansion; for a pen
+ * Transform, Feather and Expansion. Every row keys the mask's pose at the playhead
+ * (lib/mask-shapes.ts); the engine draws the masks, with CapCut's handles on the canvas
+ * (MaskHandles). A converted CapCut clip's masks show here too.
  */
 
-/** Small glyphs for Split and Filmstrip (OpenRip's own drawings). */
-const SplitGlyph = () => (
+/** Small glyphs for Split, Filmstrip and Rectangle (OpenRip's own drawings). */
+const Glyph: React.FC<{ d: string }> = ({ d }) => (
   <svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" strokeWidth="1.6">
     <rect x="3" y="3" width="20" height="20" rx="1" />
-    <path d="M3 13 H23" />
-  </svg>
-);
-const FilmstripGlyph = () => (
-  <svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" strokeWidth="1.6">
-    <rect x="3" y="3" width="20" height="20" rx="1" />
-    <path d="M3 9 H23 M3 17 H23" />
-  </svg>
-);
-const RectGlyph = () => (
-  <svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" strokeWidth="1.6">
-    <rect x="3" y="3" width="20" height="20" rx="1" />
-    <rect x="8" y="9" width="10" height="8" />
+    <path d={d} />
   </svg>
 );
 const GLYPHS: Record<string, React.ReactNode> = {
-  none: <LuBan className="w-6 h-6" />,
-  linear: <SplitGlyph />,
-  mirror: <FilmstripGlyph />,
-  ellipse: <LuCircle className="w-6 h-6" />,
-  rectangle: <RectGlyph />,
+  linear: <Glyph d="M3 13 H23" />,
+  mirror: <Glyph d="M3 9 H23 M3 17 H23" />,
+  circle: <LuCircle className="w-6 h-6" />,
+  rectangle: <Glyph d="M8 9 H18 V17 H8 Z" />,
   star: <LuStar className="w-6 h-6" />,
   heart: <LuHeart className="w-6 h-6" />,
+  text: <LuType className="w-6 h-6" />,
   brush: <LuBrush className="w-6 h-6" />,
-  lasso: <LuPenTool className="w-6 h-6" />,
+  pen: <LuPenTool className="w-6 h-6" />,
 };
+
+/** Fonts the engine finds on the system for a text mask; "System" is the app's default. */
+const MASK_FONTS = ["", "Arial", "Helvetica", "Times New Roman", "Georgia", "Verdana", "Courier New", "Trebuchet MS", "Impact", "Comic Sans MS"];
 
 type Media = MediaClipProps;
 
@@ -79,25 +83,22 @@ const MaskPropertiesPanel: React.FC<{ clipId: string }> = ({ clipId }) => {
   const clip = useClipStore((s) => s.getClipById(clipId)) as Media | undefined;
   const selectedMaskId = useControlsStore((s) => s.selectedMaskId);
   const setSelectedMaskId = useControlsStore((s) => s.setSelectedMaskId);
-  // The canvas tool the Brush and Pen tiles bring out (the mask tool's brush or lasso).
+  // The canvas tool the Brush and Pen tiles bring out (the mask tool's brush or pen).
   const maskToolOut = useViewportStore((s) => s.tool === "mask");
   const canvasTool = useMaskStore((s) => s.tool);
   const brushSize = useMaskStore((s) => s.brushSize);
   const erase = useMaskStore((s) => s.erase);
-  const drawing = maskToolOut ? (canvasTool === "lasso" ? "lasso" : canvasTool === "draw" ? "brush" : null) : null;
+  const drawing = maskToolOut ? (canvasTool === "pen" ? "pen" : canvasTool === "draw" ? "brush" : canvasTool === "lasso" ? "lasso" : null) : null;
   const { frame, fps } = usePlayhead();
   const { px } = useWorld();
-  // "+" pressed: the next shape makes a new mask instead of changing the selected one.
-  const [adding, setAdding] = useState(false);
   const [linked, setLinked] = useState(true);
   const masks: MaskClipProps[] = (clip as any)?.masks ?? [];
-  const mask = masks.find((m) => m.id === selectedMaskId) ?? (adding || drawing ? undefined : masks[0]);
+  const mask = masks.find((m) => m.id === selectedMaskId) ?? masks[0];
   // Select the first mask when none is (outside render: it updates another store).
   useEffect(() => {
-    if (!adding && !drawing && masks.length && !masks.some((m) => m.id === selectedMaskId)) setSelectedMaskId(masks[0].id);
-  }, [adding, drawing, masks.length, selectedMaskId]);
-  // A lasso closed with Pen is a new mask: back to the pointer with it selected, as CapCut's
-  // pen finishes.
+    if (masks.length && !masks.some((m) => m.id === selectedMaskId)) setSelectedMaskId(masks[0].id);
+  }, [masks.length, selectedMaskId]);
+  // The old lasso tool's closed outline is a new mask: back to the pointer with it selected.
   const count = useRef(masks.length);
   useEffect(() => {
     if (drawing === "lasso" && masks.length > count.current) {
@@ -113,41 +114,48 @@ const MaskPropertiesPanel: React.FC<{ clipId: string }> = ({ clipId }) => {
   const setMasks = (next: MaskClipProps[]) => store().updateClip(clipId, { masks: next } as Partial<AnyClipProps>);
   const replace = (m: MaskClipProps) => setMasks(((now() as any).masks ?? []).map((x: MaskClipProps) => (x.id === m.id ? m : x)));
   const current = () => ((now() as any).masks ?? []).find((m: MaskClipProps) => m.id === mask?.id) as MaskClipProps | undefined;
+  const playheadFrame = () => maskFrame(now(), useControlsStore.getState().focusFrame);
 
-  const pick = (id: string) => {
+  // The canvas's brush or pen for the selected mask: the strokes go on it (its first stroke
+  // makes a mask of another shape a brush mask), a closed path becomes it.
+  const drawFor = (tool: "draw" | "pen", eraser = false) => {
+    const ms = useMaskStore.getState();
+    ms.setTool(tool);
+    ms.setErase(eraser);
+    ms.setActiveMaskId(mask?.id ?? null);
+    useViewportStore.getState().setTool("mask");
+  };
+  const brushOn = (eraser: boolean) => drawFor("draw", eraser);
+  // Add mask / "+": a rectangle centred on the picture, selected (CapCut's new mask).
+  const addMask = () => {
     const c = now();
-    if (id === "none") {
-      if (!mask) return;
-      setMasks(masks.filter((m) => m.id !== mask.id));
-      setSelectedMaskId(null);
-      return;
-    }
-    if (id === "lasso" || id === "brush") {
-      // Pen draws an outline on the picture with the mask tool's lasso (a new mask when it
-      // closes); Brush paints strokes onto the selected brush mask, or a new one.
-      useMaskStore.getState().setTool(id === "lasso" ? "lasso" : "draw");
-      useViewportStore.getState().setTool("mask");
-      if (id === "lasso" || mask?.tool !== "draw") setSelectedMaskId(null);
-      // The brush mask the strokes go on: the selected one, else the first stroke's new one.
-      useMaskStore.getState().setActiveMaskId(id === "brush" && mask?.tool === "draw" ? mask.id : null);
-      setAdding(false);
-      return;
-    }
-    if (mask && !adding) {
-      replace(changeMaskShape(mask, id as MaskShape, mask.transform ?? c.transform!));
-      return;
-    }
-    const m = newShapeMask(c, id as MaskShape, maskFrame(c, useControlsStore.getState().focusFrame));
+    if (useViewportStore.getState().tool === "mask") useViewportStore.getState().setTool("pointer");
+    const m = newShapeMask(c, "rectangle", maskFrame(c, useControlsStore.getState().focusFrame));
     setMasks([...((c as any).masks ?? []), m]);
     setSelectedMaskId(m.id);
-    setAdding(false);
   };
+  // A tile gives the selected mask its shape. Brush and Pen make it an empty brush or pen mask
+  // (the clip shows whole until something is drawn, as CapCut's) and bring out the canvas's
+  // brush or pen for it; a pen path already drawn is edited by its handles instead.
+  const pick = (id: string) => {
+    if (!mask) return;
+    const tool = id === "pen" ? "pen" : id === "brush" ? "draw" : null;
+    if (tool) {
+      if (mask.tool !== tool && !(tool === "pen" && mask.tool === "lasso")) replace(remakeMask(mask, newEmptyMask(now(), tool, playheadFrame())));
+      if (tool === "pen" && !isEmptyMask(mask) && (mask.tool === "pen" || mask.tool === "lasso")) {
+        if (useViewportStore.getState().tool === "mask") useViewportStore.getState().setTool("pointer");
+        return;
+      }
+      return drawFor(tool);
+    }
+    if (useViewportStore.getState().tool === "mask") useViewportStore.getState().setTool("pointer");
+    replace(changeMaskShape(mask, id as MaskShape, mask.transform ?? now().transform!));
+  };
+  const masksOn = !(clip as any).masksOff;
 
-  const f = maskFrame(clip, frame);
-  const pose: MaskData | undefined = mask ? poseAt(mask, f, fps) : undefined;
+  const pose: MaskData | undefined = mask ? poseAt(mask, maskFrame(clip, frame), fps) : undefined;
   const b = pose?.shapeBounds as Bounds | undefined;
-  const lasso = mask?.tool === "lasso" ? (pose?.lassoPoints ?? []) : null;
-  const shapeType = (b?.shapeType ?? "rectangle") as MaskShape;
+  const shapeType = (mask?.tool === "shape" ? (b?.shapeType ?? "rectangle") : mask?.tool) as string | undefined;
   // The mask's units against the canvas's pixels: the picture as drawn now over the scale the
   // mask was drawn at (the engine scales a mask with its clip).
   const mt = mask?.transform ?? clip.transform;
@@ -155,64 +163,94 @@ const MaskPropertiesPanel: React.FC<{ clipId: string }> = ({ clipId }) => {
   const kx = ((shown.scaleX || 1) / (mt.scaleX || 1)) * px;
   const ky = ((shown.scaleY || 1) / (mt.scaleY || 1)) * px;
   const { w: W, h: H } = pictureBox(mt);
-  const box = lasso
-    ? (() => {
-        const xs = lasso.filter((_, i) => i % 2 === 0);
-        const ys = lasso.filter((_, i) => i % 2 === 1);
-        return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
-      })()
-    : null;
-  const centre: [number, number] = b ? boundsCentre(b) : box ? [box.x + box.w / 2, box.y + box.h / 2] : [W / 2, H / 2];
-  const size: [number, number] = b ? [b.width * (b.scaleX ?? 1), b.height * (b.scaleY ?? 1)] : box ? [box.w, box.h] : [0, 0];
+  const box = pose ? poseBox(pose) : null;
+  const centre: [number, number] = b ? boundsCentre(b) : box ? [box.x + box.width / 2, box.y + box.height / 2] : [W / 2, H / 2];
+  const size: [number, number] = box ? [box.width * (box.scaleX ?? 1), box.height * (box.scaleY ?? 1)] : [0, 0];
 
   // An edit of the pose at the playhead (CapCut's rule), from the mask as the store has it.
   const edit = (fn: (p: MaskData) => MaskData) => {
     const m = current();
-    if (m) replace(editMaskPose(m, maskFrame(now(), useControlsStore.getState().focusFrame), fps, fn));
+    if (m) replace(editMaskPose(m, playheadFrame(), fps, fn));
   };
   const moveTo = (c: [number, number]) =>
     edit((p) => {
       if (p.shapeBounds) return { ...p, shapeBounds: placeBounds(p.shapeBounds as Bounds, c) };
-      if (!p.lassoPoints) return p;
       const [dx, dy] = [c[0] - centre[0], c[1] - centre[1]];
-      return { ...p, lassoPoints: p.lassoPoints.map((v, i) => v + (i % 2 ? dy : dx)) };
+      if (p.penPath) return { ...p, penPath: { closed: true, points: p.penPath.points.map((a) => ({ x: a.x + dx, y: a.y + dy, ix: a.ix + dx, iy: a.iy + dy, ox: a.ox + dx, oy: a.oy + dy })) } };
+      if (p.lassoPoints) return { ...p, lassoPoints: p.lassoPoints.map((v, i) => v + (i % 2 ? dy : dx)) };
+      return p;
     });
   const resize = (w: number, h: number) =>
     edit((p) => {
-      if (p.shapeBounds) {
-        const sb = p.shapeBounds as Bounds;
-        return { ...p, shapeBounds: placeBounds({ ...sb, width: Math.max(1, w), height: Math.max(1, h), scaleX: 1, scaleY: 1 }, boundsCentre(sb)) };
-      }
-      if (!p.lassoPoints || !box) return p;
-      const [sx, sy] = [w / Math.max(1e-6, box.w), h / Math.max(1e-6, box.h)];
-      return { ...p, lassoPoints: p.lassoPoints.map((v, i) => (i % 2 ? centre[1] + (v - centre[1]) * sy : centre[0] + (v - centre[0]) * sx)) };
+      const sb = p.shapeBounds as Bounds;
+      return sb ? { ...p, shapeBounds: placeBounds({ ...sb, width: Math.max(1, w), height: Math.max(1, h), scaleX: 1, scaleY: 1 }, boundsCentre(sb)) } : p;
     });
+  const turn = (r: number) => edit((p) => ({ ...p, shapeBounds: placeBounds({ ...(p.shapeBounds as Bounds), rotation: r }, boundsCentre(p.shapeBounds as Bounds)) }));
+  // A text's words or style: every pose (they hold one text), its box re-measured about its middle.
+  const setText = (patch: Partial<MaskTextStyle>) => {
+    const m = current();
+    if (!m) return;
+    replace(
+      editAllPoses(m, (p) => {
+        if (!p.text || !p.shapeBounds) return p;
+        const text = { ...p.text, ...patch };
+        const sized = textBox(text);
+        return { ...p, text, shapeBounds: placeBounds({ ...(p.shapeBounds as Bounds), ...sized, scaleX: 1, scaleY: 1 }, boundsCentre(p.shapeBounds as Bounds)) };
+      }),
+    );
+  };
 
   const nav = mask ? maskNav(mask, clip, frame) : { keyed: false, at: false };
-  const navigator = mask ? <KeyframeNavigator nav={nav} name={`mask:${mask.id}`} onToggle={() => replace(toggleMaskPose(current()!, maskFrame(now(), useControlsStore.getState().focusFrame), fps))} /> : null;
+  const navigator = mask ? <KeyframeNavigator nav={nav} name={`mask:${mask.id}`} onToggle={() => replace(toggleMaskPose(current()!, playheadFrame(), fps))} /> : null;
+  // Back to the shape's defaults: centred, its first size, upright, no feather, unkeyed.
   const reset = () => {
     const m = current();
-    if (!m || m.tool !== "shape") return;
-    const fresh = newShapeMask(now(), shapeType, maskFrame(now(), useControlsStore.getState().focusFrame));
-    replace({ ...m, keyframes: fresh.keyframes, featherAmount: 0, inverted: false, keyed: false, transform: fresh.transform });
+    if (!m) return;
+    if (m.tool === "shape") {
+      const fresh = newShapeMask(now(), (b?.shapeType ?? "rectangle") as MaskShape, playheadFrame());
+      const keep = pose?.text ? { text: pose.text } : {};
+      const first = Object.values(fresh.keyframes)[0] as MaskData;
+      replace({ ...m, keyframes: { [playheadFrame()]: { ...first, ...keep } }, featherAmount: 0, expansion: 0, inverted: false, keyed: false, transform: fresh.transform });
+    } else replace(editAllPoses({ ...m, featherAmount: 0, expansion: 0, inverted: false }, (p) => ({ ...p, featherAmount: undefined, expansion: undefined })));
   };
+  const feather = Math.round((pose as any)?.featherAmount ?? mask?.featherAmount ?? 0);
+  const expansion = Math.round((pose as any)?.expansion ?? mask?.expansion ?? 0);
+  const slider = (label: string, value: number, set: (v: number) => void, min: number, max: number, testId: string, origin?: number) => (
+    <div className="pb-[5px]" data-property={testId}>
+      <PropertiesSlider label={label} value={value} onChange={(v) => set(Math.max(min, Math.min(max, Math.round(v))))} min={min} max={max} step={1} toFixed={0} origin={origin} end={navigator} />
+    </div>
+  );
+  const text = pose?.text;
+  const isBrush = drawing === "brush" || mask?.tool === "draw";
 
   return (
     <div className="min-w-0 divide-y divide-brand-divider" data-testid="mask-panel">
-      <Section title="Mask" testId="section-mask">
-        {masks.length > 0 && (
+      <Section
+        title="Mask"
+        testId="section-mask"
+        checked={masksOn}
+        onCheckedChange={(on) => store().updateClip(clipId, { masksOff: on ? undefined : true } as Partial<AnyClipProps>)}
+      >
+        {masks.length === 0 ? (
+          <button
+            type="button"
+            data-testid="mask-add"
+            onClick={addMask}
+            className="self-start mb-3 h-[23px] px-3 rounded-full bg-brand-background-light hover:bg-brand-button text-[12px] text-brand-lighter flex flex-row items-center gap-1.5"
+          >
+            <LuPlus className="w-3.5 h-3.5" />
+            Add mask
+          </button>
+        ) : (
           <div className="flex flex-row flex-wrap items-center gap-2 mb-3">
             {masks.map((m, i) => (
               <div key={m.id} className="group relative">
                 <button
                   type="button"
                   data-testid={`mask-chip-${i}`}
-                  onClick={() => {
-                    setAdding(false);
-                    setSelectedMaskId(m.id);
-                  }}
+                  onClick={() => setSelectedMaskId(m.id)}
                   className={cn(
-                    "h-6 px-3 rounded-full text-[12px] whitespace-nowrap",
+                    "h-6 min-w-[112px] px-3 rounded-full text-[12px] whitespace-nowrap",
                     m.id === mask?.id ? "bg-brand-button text-brand-light" : "bg-brand-background-light text-[#949494] hover:text-brand-light",
                   )}
                 >
@@ -231,29 +269,26 @@ const MaskPropertiesPanel: React.FC<{ clipId: string }> = ({ clipId }) => {
             ))}
             <button
               type="button"
-              title="Add a mask"
-              aria-label="Add a mask"
-              aria-pressed={adding}
+              title="Add mask"
+              aria-label="Add mask"
               data-testid="mask-add"
-              onClick={() => setAdding(!adding)}
-              className={cn("w-6 h-6 rounded-full flex items-center justify-center", adding ? "bg-brand-accent text-white" : "bg-brand-background-light text-brand-light hover:bg-brand-button")}
+              onClick={addMask}
+              className="w-6 h-6 rounded-full flex items-center justify-center bg-brand-background-light text-brand-light hover:bg-brand-button"
             >
               <LuPlus className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
-        <div className="flex flex-row flex-wrap gap-x-[18px] gap-y-2">
+        {/* The tiles shape the selected mask; greyed until there is one. */}
+        <div className="flex flex-row flex-wrap gap-x-[17px] gap-y-2">
           {MASK_SHAPES.map((s) => {
-            const own = s.id === "lasso" ? "lasso" : s.id === "brush" ? "draw" : "shape";
-            const selected = drawing ? s.id === drawing : !adding && (s.id === "none" ? !mask : mask ? mask.tool === own && (own !== "shape" || shapeType === s.id) : false);
+            const own = s.id === "pen" ? ["pen", "lasso"] : s.id === "brush" ? ["draw"] : ["shape"];
+            const selected = drawing
+              ? s.id === (drawing === "lasso" ? "pen" : drawing)
+              : !!mask && own.includes(mask.tool) && (own[0] !== "shape" || shapeType === s.id || (s.id === "circle" && shapeType === "ellipse"));
             return (
-              <button key={s.id} type="button" data-testid={`mask-shape-${s.id}`} onClick={() => pick(s.id)} className="flex flex-col items-center gap-1 w-[60px] group">
-                <span
-                  className={cn(
-                    "w-[60px] h-[60px] rounded-[6px] bg-brand-background-light flex items-center justify-center text-brand-light group-hover:bg-brand-button",
-                    selected && "outline outline-[1.5px] outline-brand-accent",
-                  )}
-                >
+              <button key={s.id} type="button" disabled={!mask} data-testid={`mask-shape-${s.id}`} onClick={() => pick(s.id)} className="flex flex-col items-center gap-1 w-[60px] group disabled:opacity-30 disabled:cursor-default">
+                <span className={cn("w-[60px] h-[60px] rounded-[6px] bg-brand-background-light flex items-center justify-center text-brand-light", mask && "group-hover:bg-brand-button", selected && "outline outline-[1.5px] outline-brand-accent")}>
                   {GLYPHS[s.id]}
                 </span>
                 <span className="text-[12px] text-[#949494]">{s.name}</span>
@@ -261,107 +296,175 @@ const MaskPropertiesPanel: React.FC<{ clipId: string }> = ({ clipId }) => {
             );
           })}
         </div>
-        {/* The canvas's tool chip says the tool is on and ends it (Done, Esc or V). */}
-        {drawing && (
-          <p className="mt-3 text-[12px] text-[#949494] text-start" data-testid="mask-drawing">
-            {drawing === "lasso" ? "Draw the outline on the picture; it closes when you let go." : "Paint on the picture; hold ⌥ (or turn on Eraser) to erase."}
-          </p>
-        )}
+        {drawing === "pen" && <p className="mt-3 text-[12px] text-[#949494] text-start" data-testid="mask-drawing">Click to add points on the picture, drag to curve, click the first point to close.</p>}
       </Section>
-      {(drawing === "brush" || mask?.tool === "draw") && (
-        <Section title="Brush" testId="section-mask-brush">
-          {/* The brush's size and eraser, for the strokes still to paint (OpenRip's brush). */}
-          <div className="pb-[5px]">
-            <PropertiesSlider label="Brush size" value={brushSize} onChange={(v) => useMaskStore.getState().setBrushSize(Math.max(1, Math.min(200, v)))} min={1} max={200} step={1} toFixed={0} />
-          </div>
-          <PropertyRow label="Eraser">
-            <div className="flex-1" />
-            <Toggle on={erase} label="Eraser" onChange={(on) => useMaskStore.getState().setErase(on)} />
+
+      {/* A text mask's words and style (CapCut's 015). */}
+      {mask && text && (
+        <section className="px-3 pt-3 pb-2 min-w-0 text-left" data-testid="section-mask-text">
+          <textarea
+            aria-label="Mask text"
+            value={text.content}
+            onChange={(e) => setText({ content: e.target.value })}
+            className="w-full h-16 rounded-[4px] bg-brand px-2.5 py-2 text-[12px] text-brand-lighter resize-none outline-none"
+          />
+          <PropertyRow label="Font">
+            <InspectorSelect label="Mask font" value={text.font || "system"} onChange={(v) => setText({ font: v === "system" ? "" : v })} options={MASK_FONTS.map((f) => ({ value: f || "system", label: f || "System" }))} />
           </PropertyRow>
-        </Section>
+          <div className="pb-[5px]">
+            <PropertiesSlider label="Font size" value={Math.round(text.size * ky)} onChange={(v) => setText({ size: Math.max(1, v) / ky })} min={1} max={300} step={1} toFixed={0} />
+          </div>
+          <PropertyRow label="Pattern">
+            <div className="flex flex-row gap-3">
+              {(
+                [
+                  ["bold", "Bold", LuBold],
+                  ["underline", "Underline", LuUnderline],
+                  ["italic", "Italic", LuItalic],
+                ] as const
+              ).map(([key, title, Icon]) => (
+                <button
+                  key={key}
+                  type="button"
+                  title={title}
+                  aria-label={title}
+                  aria-pressed={!!text[key]}
+                  onClick={() => setText({ [key]: !text[key] })}
+                  className={cn("w-[26px] h-[22px] rounded-[4px] flex items-center justify-center", text[key] ? "bg-brand text-brand-lighter" : "bg-brand-background-light text-brand-light hover:bg-brand-button")}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                </button>
+              ))}
+            </div>
+          </PropertyRow>
+          <PropertyRow label="Character">
+            <NumberField label="Character spacing" value={Math.round((text.letterSpacing ?? 0) * 100)} onChange={(v) => setText({ letterSpacing: v / 100 })} />
+            <span className="ml-3 mr-2 text-[12px] text-brand-light">Line</span>
+            <NumberField label="Line spacing" value={Math.round((text.lineSpacing ?? 0) * 100)} onChange={(v) => setText({ lineSpacing: v / 100 })} />
+          </PropertyRow>
+          <PropertyRow label="Alignment">
+            <ButtonGroup>
+              {(
+                [
+                  ["left", "Align left", TbAlignLeft],
+                  ["center", "Centre", TbAlignCenter],
+                  ["right", "Align right", TbAlignRight],
+                ] as const
+              ).map(([a, title, Icon]) => (
+                <GroupButton key={a} title={title} active={(text.align ?? "center") === a} onClick={() => setText({ align: a })}>
+                  <Icon className="w-4 h-4" />
+                </GroupButton>
+              ))}
+            </ButtonGroup>
+          </PropertyRow>
+        </section>
       )}
-      {mask && pose && (
+
+      {(mask && pose) || isBrush ? (
         <Section
           title="Mask settings"
-          onReset={mask.tool === "shape" ? reset : undefined}
+          onReset={mask ? reset : undefined}
           actions={
-            <button
-              type="button"
-              title="Invert"
-              aria-label="Invert the mask"
-              aria-pressed={!!mask.inverted}
-              data-testid="mask-invert"
-              onClick={() => replace({ ...current()!, inverted: !mask.inverted })}
-              className={cn("w-[18px] h-[18px] rounded-[3px] flex items-center justify-center", mask.inverted ? "bg-brand-accent text-white" : "text-brand-light hover:text-brand-lighter")}
-            >
-              <TbSquareToggle className="w-[15px] h-[15px]" />
-            </button>
-          }
-          navigator={navigator}
-          testId="section-mask-settings"
-        >
-          {/* A mask's poses key all its settings at once: every row's navigator is the pose's. A
-              brush mask's strokes stay where they're painted: it has only the feather. */}
-          {mask.tool !== "draw" && (
-          <PropertyRow label="Position" navigator={navigator}>
-            <NumberField label="Mask position X" prefix="X" value={(centre[0] - W / 2) * kx} onChange={(x) => moveTo([W / 2 + x / kx, centre[1]])} />
-            <NumberField label="Mask position Y" prefix="Y" value={(H / 2 - centre[1]) * ky} onChange={(y) => moveTo([centre[0], H / 2 - y / ky])} className="ml-1.5" />
-          </PropertyRow>
-          )}
-          {b && (
-            <PropertyRow label="Rotation" navigator={navigator}>
-              <NumberField label="Mask rotation" value={b.rotation ?? 0} unit="°" digits={1} onChange={(r) => edit((p) => ({ ...p, shapeBounds: placeBounds({ ...(p.shapeBounds as Bounds), rotation: r }, boundsCentre(p.shapeBounds as Bounds)) }))} />
-              <div className="ml-[52px]">
-                <Dial value={b.rotation ?? 0} label="Mask rotation dial" onChange={(r) => edit((p) => ({ ...p, shapeBounds: placeBounds({ ...(p.shapeBounds as Bounds), rotation: r }, boundsCentre(p.shapeBounds as Bounds)) }))} />
-              </div>
-            </PropertyRow>
-          )}
-          {shapeType !== "linear" && mask.tool !== "draw" && (
-            <PropertyRow label="Size" navigator={navigator}>
-              <NumberField label="Mask width" prefix="W" value={size[0] * kx} min={1} onChange={(w) => resize(w / kx, linked && size[0] ? size[1] * (w / kx / size[0]) : size[1])} />
+            mask && (
               <button
                 type="button"
-                title={linked ? "Unlink width and height" : "Link width and height"}
-                aria-label={linked ? "Unlink width and height" : "Link width and height"}
-                aria-pressed={linked}
-                onClick={() => setLinked(!linked)}
-                className="mx-[3px] text-[#949494] hover:text-brand-light"
+                title="Invert"
+                aria-label="Invert the mask"
+                aria-pressed={!!mask.inverted}
+                data-testid="mask-invert"
+                disabled={isEmptyMask(mask)}
+                onClick={() => replace({ ...current()!, inverted: !mask.inverted })}
+                className={cn("w-[18px] h-[18px] rounded-[3px] flex items-center justify-center disabled:opacity-40", mask.inverted ? "bg-brand-accent text-white" : "text-brand-light hover:text-brand-lighter")}
               >
-                {linked ? <LuLink2 className="w-3 h-3" /> : <LuUnlink2 className="w-3 h-3" />}
+                <TbSquareToggle className="w-[15px] h-[15px]" />
               </button>
-              <NumberField label="Mask height" prefix="H" value={size[1] * ky} min={1} onChange={(h) => resize(linked && size[1] ? size[0] * (h / ky / size[1]) : size[0], h / ky)} />
-            </PropertyRow>
-          )}
-          <div className="pb-[5px]" data-property="mask-feather">
-            <PropertiesSlider
-              label="Feather"
-              value={Math.round((pose as any).featherAmount ?? mask.featherAmount ?? 0)}
-              onChange={(v) => edit((p) => ({ ...p, featherAmount: Math.max(0, Math.min(100, v)) }))}
-              min={0}
-              max={100}
-              step={1}
-              toFixed={0}
-              end={navigator}
-            />
-          </div>
-          {b && shapeType === "rectangle" && (
-            <div className="pb-[5px]" data-property="mask-corners">
-              <PropertiesSlider
-                label="Round corners"
-                value={Math.round(b.cornerRadius ?? 0)}
-                onChange={(v) => edit((p) => ({ ...p, shapeBounds: { ...(p.shapeBounds as Bounds), cornerRadius: Math.max(0, Math.min(100, v)) } }))}
-                min={0}
-                max={100}
-                step={1}
-                toFixed={0}
-                end={navigator}
-              />
-            </div>
+            )
+          }
+          navigator={navigator ?? undefined}
+          testId="section-mask-settings"
+        >
+          {isBrush ? (
+            <>
+              {/* CapCut's brush, eraser and clear (016). */}
+              <div className="flex flex-row items-center gap-3 h-[38px]">
+                <button type="button" title="Brush" aria-label="Brush" aria-pressed={drawing === "brush" && !erase} data-testid="mask-brush-paint" onClick={() => brushOn(false)} className={cn("w-7 h-7 rounded-[4px] flex items-center justify-center", drawing === "brush" && !erase ? "bg-brand text-brand-lighter" : "bg-brand-background-light text-brand-light hover:bg-brand-button")}>
+                  <LuBrush className="w-4 h-4" />
+                </button>
+                <button type="button" title="Eraser" aria-label="Eraser" aria-pressed={drawing === "brush" && erase} data-testid="mask-brush-erase" onClick={() => brushOn(true)} className={cn("w-7 h-7 rounded-[4px] flex items-center justify-center", drawing === "brush" && erase ? "bg-brand text-brand-lighter" : "bg-brand-background-light text-brand-light hover:bg-brand-button")}>
+                  <LuEraser className="w-4 h-4" />
+                </button>
+                <span className="w-px h-3 bg-brand-hover" />
+                <button
+                  type="button"
+                  title="Clear the strokes"
+                  aria-label="Clear the strokes"
+                  disabled={!mask || mask.tool !== "draw" || isEmptyMask(mask)}
+                  data-testid="mask-brush-clear"
+                  onClick={() => current() && replace(editAllPoses(current()!, (p) => ({ ...p, brushStrokes: [] })))}
+                  className="w-7 h-7 rounded-[4px] flex items-center justify-center bg-brand-background-light text-brand-light hover:bg-brand-button disabled:opacity-40"
+                >
+                  <LuTrash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="pb-[5px]">
+                <PropertiesSlider label="Brush size" value={brushSize} onChange={(v) => useMaskStore.getState().setBrushSize(Math.max(1, Math.min(200, Math.round(v))))} min={1} max={200} step={1} toFixed={0} />
+              </div>
+              {mask?.tool === "draw" && slider("Feather", feather, (v) => edit((p) => ({ ...p, featherAmount: v })), 0, 100, "mask-feather")}
+              {mask?.tool === "draw" && slider("Expansion", expansion, (v) => edit((p) => ({ ...p, expansion: v })), -100, 100, "mask-expansion", 0)}
+            </>
+          ) : mask?.tool === "pen" || mask?.tool === "lasso" ? (
+            <>
+              {/* The path's place keys with the pose: drag its anchors and handles on the picture. */}
+              <PropertyRow label="Transform" navigator={navigator} disabled>
+                <span />
+              </PropertyRow>
+              {slider("Feather", feather, (v) => edit((p) => ({ ...p, featherAmount: v })), 0, 100, "mask-feather")}
+              {slider("Expansion", expansion, (v) => edit((p) => ({ ...p, expansion: v })), -100, 100, "mask-expansion", 0)}
+            </>
+          ) : (
+            b && (
+              <>
+                <PropertyRow label="Position" navigator={navigator}>
+                  <NumberField label="Mask position X" prefix="X" value={(centre[0] - W / 2) * kx} onChange={(x) => moveTo([W / 2 + x / kx, centre[1]])} />
+                  <NumberField label="Mask position Y" prefix="Y" value={(H / 2 - centre[1]) * ky} onChange={(y) => moveTo([centre[0], H / 2 - y / ky])} className="ml-1.5" />
+                </PropertyRow>
+                <PropertyRow label="Rotation" navigator={navigator}>
+                  <NumberField label="Mask rotation" value={b.rotation ?? 0} unit="°" digits={1} onChange={turn} />
+                  <div className="ml-[52px]">
+                    <Dial value={b.rotation ?? 0} label="Mask rotation dial" onChange={turn} />
+                  </div>
+                </PropertyRow>
+                {shapeType !== "linear" && shapeType !== "text" && (
+                  <PropertyRow label="Size" navigator={navigator}>
+                    {shapeType !== "mirror" && (
+                      <>
+                        <NumberField label="Mask width" prefix="W" value={size[0] * kx} min={1} onChange={(w) => resize(w / kx, linked && size[0] ? size[1] * (w / kx / size[0]) : size[1])} />
+                        <button
+                          type="button"
+                          title={linked ? "Unlink width and height" : "Link width and height"}
+                          aria-label={linked ? "Unlink width and height" : "Link width and height"}
+                          aria-pressed={linked}
+                          onClick={() => setLinked(!linked)}
+                          className="mx-[3px] text-[#949494] hover:text-brand-light"
+                        >
+                          {linked ? <LuLink2 className="w-3 h-3" /> : <LuUnlink2 className="w-3 h-3" />}
+                        </button>
+                      </>
+                    )}
+                    <NumberField label="Mask height" prefix="H" value={size[1] * ky} min={1} onChange={(h) => resize(shapeType !== "mirror" && linked && size[1] ? size[0] * (h / ky / size[1]) : size[0], h / ky)} />
+                  </PropertyRow>
+                )}
+                {slider("Feather", feather, (v) => edit((p) => ({ ...p, featherAmount: v })), 0, 100, "mask-feather")}
+                {shapeType === "rectangle" &&
+                  slider("Round corners", Math.round(b.cornerRadius ?? 0), (v) => edit((p) => ({ ...p, shapeBounds: { ...(p.shapeBounds as Bounds), cornerRadius: v } })), 0, 100, "mask-corners")}
+              </>
+            )
           )}
         </Section>
-      )}
+      ) : null}
       {/* CapCut's Track mask, under the mask's settings (a shape mask on a video). */}
       {mask && <TrackMaskSection clipId={clipId} mask={mask} />}
+
       {/* The app's own mask colours (a matte), for masks that paint one; CapCut's cut the clip. */}
       {mask && (mask.maskColorEnabled || (mask.backgroundColorEnabled && (mask.backgroundOpacity ?? 100) > 0)) && (
         <Section title="Display" defaultOpen={false} testId="section-mask-display">

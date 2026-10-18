@@ -71,7 +71,7 @@ import {
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { lineHeight, shapeClip, shapeSize } from "@/lib/shape-presets";
 import { vertices } from "@/lib/shape-geometry";
-import { editMaskPose, maskFrame, newShapeMask } from "@/lib/mask-shapes";
+import { editMaskPose, maskFrame, newBrushMask } from "@/lib/mask-shapes";
 import Eyedropper from "./Eyedropper";
 
 // The applicators of a clip with none over it: one array, so clip previews keep their props.
@@ -1649,7 +1649,7 @@ const Preview: React.FC<PreviewProps> = () => {
           updateClip(targetClip.clipId, { masks: masks.map((m) => (m.id === current.id ? next : m)) });
           return;
         }
-        const brush = { ...newShapeMask(targetClip, "rectangle", f), tool: "draw" as const, keyframes: { [f]: { brushStrokes: [stroke] } }, transform: clipTransform ? { ...clipTransform } : undefined };
+        const brush = { ...newBrushMask(targetClip, stroke, f), ...(clipTransform ? { transform: { ...clipTransform } } : {}) };
         updateClip(targetClip.clipId, { masks: [...masks, brush] });
         setSelectedMaskId(brush.id);
         useMaskStore.getState().setActiveMaskId(brush.id);

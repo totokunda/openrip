@@ -1,42 +1,48 @@
 // A video or photo's masks as CapCut's Mask tab edits them: its shapes (Split, Filmstrip,
-// Circle, Rectangle, Stars, Heart; the app's lasso as Pen), a new mask centred on the
-// picture, a mask's poses over time and the keyframe rule for them, and the heart's outline.
-// Pure helpers returning new objects (the undo history shares clips); `node --test
-// tests/*.test.ts` in packages/renderer checks them.
+// Circle, Rectangle, Stars, Heart, Text, Brush, Pen), a new mask centred on the picture, a
+// mask's poses over time and the keyframe rule for them, a pen's path, a text's box, and the
+// heart's outline. Pure helpers returning new objects (the undo history shares clips);
+// `node --test tests/*.test.ts` in packages/renderer checks them.
 //
-// A mask keeps poses by frame (`keyframes`: shape bounds or lasso points, and optionally its
-// own feather), in the clip's source frames for a video ((timeline frame − start + trimStart)
-// × speed, as the engine reads them) and clip frames for a photo. One pose and no `keyed` flag
-// is a static mask: an edit changes that pose wherever the playhead is. Keyed (the diamond
-// pressed, or several poses), an edit sets the pose at the playhead, starting from the pose
-// the mask has there, which travels between poses of one shape as the engine draws it
-// (linearly, or by the first pose's easing).
-import type { AnyClipProps, ClipTransform, KeyframeEase, MaskClipProps, MaskData, MaskShapeTool } from "./types";
+// A mask keeps poses by frame (`keyframes`: shape bounds, a pen's path, a text's box, brush
+// strokes or lasso points, and optionally its own feather and expansion), in the clip's
+// source frames for a video ((timeline frame − start + trimStart) × speed, as the engine reads
+// them) and clip frames for a photo. One pose and no `keyed` flag is a static mask: an edit
+// changes that pose wherever the playhead is. Keyed (the diamond pressed, or several poses),
+// an edit sets the pose at the playhead, starting from the pose the mask has there, which
+// travels between poses of one shape as the engine draws it (linearly, or by the first
+// pose's easing).
+import type { AnyClipProps, ClipTransform, KeyframeEase, MaskClipProps, MaskData, MaskPenPoint, MaskShapeTool, MaskTextStyle } from "./types";
 import { sampleKeyframes } from "./keyframes.ts";
 
 /** The shapes the inspector offers, with CapCut's names; `polygon` is the app's triangle. */
 export type MaskShape = MaskShapeTool;
 export type Bounds = NonNullable<MaskData["shapeBounds"]>;
 
-/** The tiles in CapCut's order; Brush and Pen start the canvas's brush and lasso. */
-export const MASK_SHAPES: { id: MaskShape | "none" | "brush" | "lasso"; name: string }[] = [
-  { id: "none", name: "None" },
+/**
+ * The tiles in CapCut's order (its Mask tab, 18-inspector-video/013–014): each gives the
+ * selected mask its shape; Brush and Pen start the canvas's brush and pen for it.
+ */
+export const MASK_SHAPES: { id: MaskShape | "brush" | "pen"; name: string }[] = [
   { id: "linear", name: "Split" },
   { id: "mirror", name: "Filmstrip" },
-  { id: "ellipse", name: "Circle" },
+  { id: "circle", name: "Circle" },
   { id: "rectangle", name: "Rectangle" },
   { id: "star", name: "Stars" },
   { id: "heart", name: "Heart" },
+  { id: "text", name: "Text" },
   { id: "brush", name: "Brush" },
-  { id: "lasso", name: "Pen" },
+  { id: "pen", name: "Pen" },
 ];
 
 /** A mask's name in its chip ("Rectangle", "Pen", …). */
 export const maskShapeName = (mask: MaskClipProps): string => {
-  if (mask.tool === "lasso") return "Pen";
+  if (mask.tool === "pen") return "Pen";
+  if (mask.tool === "lasso") return "Lasso";
   if (mask.tool === "draw") return "Brush";
   const first = posesOf(mask)[0]?.[1];
   const t = (first?.shapeBounds as Bounds | undefined)?.shapeType ?? "rectangle";
+  if (t === "ellipse") return "Circle";
   return MASK_SHAPES.find((s) => s.id === t)?.name ?? (t === "polygon" ? "Triangle" : t);
 };
 
@@ -74,9 +80,16 @@ const withPoses = (mask: MaskClipProps, poses: [number, MaskData][], extra: Part
 });
 
 /** Whether the mask moves over time: the diamond was pressed, or it has several poses. */
-export const isMaskKeyed = (mask: MaskClipProps) => !!(mask as any).keyed || posesOf(mask).length > 1;
+export const isMaskKeyed = (mask: MaskClipProps) => !!mask.keyed || posesOf(mask).length > 1;
 
 const SAME = 1e-3;
+
+/** The settings a pose keeps of its own when the mask is keyed (the mask's when static). */
+const PER_POSE = ["featherAmount", "expansion"] as const;
+type PerPose = (typeof PER_POSE)[number];
+const ownOf = (mask: MaskClipProps, d: MaskData, k: PerPose): number => (d as any)[k] ?? (mask as any)[k] ?? 0;
+/** A pose with its feather and expansion filled in from the mask's. */
+const withOwn = (mask: MaskClipProps, d: MaskData): MaskData => ({ ...d, featherAmount: ownOf(mask, d, "featherAmount"), expansion: ownOf(mask, d, "expansion") });
 
 /** The centre of a shape's box (a rectangle turns about its top-left, the others about their centre). */
 export const boundsCentre = (b: Bounds): [number, number] => {
@@ -112,23 +125,23 @@ const mix = (x: number, y: number, p: number) => x + (y - x) * p;
 
 /**
  * The pose a mask has at mask frame `f`: a pose there, else between the poses either side
- * when they're of one shape (centre, size, turn, round corners and feather travelling, a
- * lasso's points too when it has as many), else the last pose before (the first before it).
- * `featherAmount` is the pose's feather, the mask's own when the poses don't keep one.
+ * when they're of one shape (centre, size, turn, round corners, feather and expansion
+ * travelling; a pen's anchors and handles, or a lasso's points, when it has as many), else the
+ * last pose before (the first before it). `featherAmount` and `expansion` are the pose's, the
+ * mask's own when the poses don't keep them.
  */
 export const poseAt = (mask: MaskClipProps, f: number, fps: number): MaskData | undefined => {
   const poses = posesOf(mask);
   if (!poses.length) return undefined;
-  const feather = (d: MaskData) => (d as any).featherAmount ?? mask.featherAmount ?? 0;
-  const withFeather = (d: MaskData): MaskData => ({ ...d, featherAmount: feather(d) } as MaskData);
   const i = poses.findIndex(([k]) => k > f + SAME);
-  if (i === 0) return withFeather(poses[0][1]);
-  if (i < 0) return withFeather(poses[poses.length - 1][1]);
+  if (i === 0) return withOwn(mask, poses[0][1]);
+  if (i < 0) return withOwn(mask, poses[poses.length - 1][1]);
   const [[fa, a], [fb, b]] = [poses[i - 1], poses[i]];
-  if (Math.abs(fa - f) < SAME) return withFeather(a);
-  if (a.ease === "hold") return withFeather(a);
+  if (Math.abs(fa - f) < SAME) return withOwn(mask, a);
+  if (a.ease === "hold") return withOwn(mask, a);
   const p = progress(fa, fb, f, a.ease, fps);
-  const out: any = { ...a, featherAmount: mix(feather(a), feather(b), p) };
+  const out: any = { ...a };
+  for (const k of PER_POSE) out[k] = mix(ownOf(mask, a, k), ownOf(mask, b, k), p);
   const ba = a.shapeBounds as Bounds | undefined;
   const bb = b.shapeBounds as Bounds | undefined;
   if (ba && bb && (ba.shapeType ?? "rectangle") === (bb.shapeType ?? "rectangle")) {
@@ -145,26 +158,35 @@ export const poseAt = (mask: MaskClipProps, f: number, fps: number): MaskData | 
     out.shapeBounds = placeBounds(sized, [mix(ca[0], cb[0], p), mix(ca[1], cb[1], p)]);
     return out;
   }
+  const pa = a.penPath?.points;
+  const pb = b.penPath?.points;
+  if (pa && pb && pa.length === pb.length) {
+    out.penPath = { closed: true, points: pa.map((q, k) => Object.fromEntries((["x", "y", "ix", "iy", "ox", "oy"] as const).map((c) => [c, mix(q[c], pb[k][c], p)])) as unknown as MaskPenPoint) };
+    return out;
+  }
   if (a.lassoPoints && b.lassoPoints && a.lassoPoints.length === b.lassoPoints.length) {
     out.lassoPoints = a.lassoPoints.map((v, k) => mix(v, b.lassoPoints![k], p));
     return out;
   }
-  return withFeather(a);
+  return withOwn(mask, a);
 };
 
 /**
  * An edit of the mask's pose at mask frame `f` by CapCut's rule: keyed, the pose there is set
- * (from the pose the mask has there); static, its one pose changes. The feather goes on the
- * pose when keyed, on the mask when static.
+ * (from the pose the mask has there); static, its one pose changes. The feather and expansion
+ * go on the pose when keyed, on the mask when static.
  */
 export const editMaskPose = (mask: MaskClipProps, f: number, fps: number, edit: (pose: MaskData) => MaskData): MaskClipProps => {
   const poses = posesOf(mask);
   if (!isMaskKeyed(mask) && poses.length) {
     const [frame, data] = poses[0];
-    const next = edit({ ...data, featherAmount: (data as any).featherAmount ?? mask.featherAmount ?? 0 } as MaskData) as any;
-    const featherAmount = next.featherAmount;
-    delete next.featherAmount;
-    return withPoses(mask, [[frame, next]], { featherAmount: featherAmount ?? mask.featherAmount });
+    const next = edit(withOwn(mask, data)) as any;
+    const own: Partial<MaskClipProps> = {};
+    for (const k of PER_POSE) {
+      (own as any)[k] = next[k] ?? (mask as any)[k];
+      delete next[k];
+    }
+    return withPoses(mask, [[frame, next]], own);
   }
   const base = poseAt(mask, f, fps) ?? {};
   const next = edit({ ...base });
@@ -175,6 +197,13 @@ export const editMaskPose = (mask: MaskClipProps, f: number, fps: number, edit: 
   if (at?.ease === undefined) delete (pose as any).ease;
   return withPoses(mask, [...kept, [f, pose] as [number, MaskData]].sort((x, y) => x[0] - y[0]));
 };
+
+/** An edit of the mask's own settings (invert, a text's words…) or, keyed or not, of the poses all at once. */
+export const editAllPoses = (mask: MaskClipProps, edit: (pose: MaskData) => MaskData): MaskClipProps =>
+  withPoses(
+    mask,
+    posesOf(mask).map(([f, d]) => [f, edit(d)]),
+  );
 
 /** The navigator's state for a mask at a timeline frame (its keys in timeline frames). */
 export const maskNav = (mask: MaskClipProps, clip: AnyClipProps, timelineFrame: number) => {
@@ -199,23 +228,23 @@ export const maskNav = (mask: MaskClipProps, clip: AnyClipProps, timelineFrame: 
 export const toggleMaskPose = (mask: MaskClipProps, f: number, fps: number): MaskClipProps => {
   const poses = posesOf(mask);
   if (!poses.length) return mask;
-  const featherOf = (d: MaskData) => (d as any).featherAmount ?? mask.featherAmount ?? 0;
-  if (!isMaskKeyed(mask)) {
-    return withPoses(mask, [[f, { ...poses[0][1], featherAmount: featherOf(poses[0][1]) } as MaskData]], { keyed: true } as any);
-  }
+  if (!isMaskKeyed(mask)) return withPoses(mask, [[f, withOwn(mask, poses[0][1])]], { keyed: true });
   const here = poses.find(([k]) => Math.abs(k - f) < SAME);
   if (here) {
     const rest = poses.filter(([k]) => Math.abs(k - f) >= SAME);
-    if (rest.length) return withPoses(mask, rest, { keyed: true } as any);
+    if (rest.length) return withPoses(mask, rest, { keyed: true });
     const data = { ...here[1] } as any;
-    const featherAmount = featherOf(data);
-    delete data.featherAmount;
+    const own: Partial<MaskClipProps> = { keyed: false };
+    for (const k of PER_POSE) {
+      (own as any)[k] = ownOf(mask, data, k);
+      delete data[k];
+    }
     delete data.ease;
-    return withPoses(mask, [[here[0], data]], { keyed: false, featherAmount } as any);
+    return withPoses(mask, [[here[0], data]], own);
   }
   const pose = poseAt(mask, f, fps)!;
   delete (pose as any).ease;
-  return withPoses(mask, [...poses, [f, pose] as [number, MaskData]].sort((x, y) => x[0] - y[0]), { keyed: true } as any);
+  return withPoses(mask, [...poses, [f, pose] as [number, MaskData]].sort((x, y) => x[0] - y[0]), { keyed: true });
 };
 
 // ---- shapes -------------------------------------------------------------------------------
@@ -223,42 +252,102 @@ export const toggleMaskPose = (mask: MaskClipProps, f: number, fps: number): Mas
 /** The picture's box in the mask's units: the clip's box at its own scale. */
 export const pictureBox = (t: ClipTransform) => ({ w: (t.width || 0) * (t.scaleX || 1), h: (t.height || 0) * (t.scaleY || 1) });
 
-/** A shape's box when it's new: centred on the picture, half its shorter side (Split and Filmstrip across it, a third as tall). */
+/** A text mask's words and style when it's new: CapCut's "Default text", a twelfth of the picture's height. */
+export const defaultText = (t: ClipTransform): MaskTextStyle => ({ content: "Default text", font: "", size: pictureBox(t).h / 12, align: "center" });
+
+/**
+ * A text's box (its block of lines) in world units: measured on a canvas when there's one,
+ * else about half an em a character; the handles go round it (the engine lays the text out
+ * itself and ignores the box's size).
+ */
+export const textBox = (s: MaskTextStyle): { width: number; height: number } => {
+  const lines = (s.content || " ").split("\n");
+  const size = Math.max(1, s.size);
+  let width = 0;
+  const canvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
+  const g = canvas?.getContext("2d");
+  for (const line of lines) {
+    let w = line.length * size * 0.55;
+    if (g) {
+      g.font = `${s.italic ? "italic " : ""}${s.bold ? "bold " : ""}${size}px ${s.font ? `"${s.font}"` : "-apple-system, sans-serif"}`;
+      w = g.measureText(line).width;
+    }
+    width = Math.max(width, w + Math.max(0, line.length - 1) * (s.letterSpacing ?? 0) * size);
+  }
+  const height = lines.length * size * 1.2 + (lines.length - 1) * (s.lineSpacing ?? 0) * size;
+  return { width: Math.max(size, width), height };
+};
+
+/** A shape's box when it's new: centred on the picture, half its shorter side (Split and Filmstrip across it, a third as tall; a text round its words). */
 export const defaultBounds = (shape: MaskShape, t: ClipTransform): Bounds => {
   const { w, h } = pictureBox(t);
   const s = 0.5 * Math.min(w, h);
-  const [bw, bh] = shape === "linear" || shape === "mirror" ? [w, h / 3] : [s, s];
+  const text = shape === "text" ? textBox(defaultText(t)) : null;
+  const [bw, bh] = text ? [text.width, text.height] : shape === "linear" || shape === "mirror" ? [w, h / 3] : [s, s];
   return { x: (w - bw) / 2, y: (h - bh) / 2, width: bw, height: bh, rotation: 0, scaleX: 1, scaleY: 1, shapeType: shape, ...(shape === "rectangle" ? { cornerRadius: 0 } : {}) };
 };
 
-const newId = () => (globalThis.crypto?.randomUUID?.() ?? `mask-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+const newId = () => globalThis.crypto?.randomUUID?.() ?? `mask-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-/**
- * A new mask of `shape` on the clip, centred on its picture, as CapCut adds one: it shows the
- * clip inside and nothing outside, with no feather, static at mask frame `f`.
- */
-export const newShapeMask = (clip: AnyClipProps, shape: MaskShape, f: number): MaskClipProps => {
-  const t = clip.transform!;
+/** A new mask's own settings: the clip inside and a clear colour outside (the clip cut to the shape, as CapCut's), no feather. */
+const freshMask = (clip: AnyClipProps, tool: MaskClipProps["tool"], keyframes: Record<number, MaskData>): MaskClipProps => {
   const now = Date.now();
   return {
     id: newId(),
     clipId: clip.clipId,
-    tool: "shape",
+    tool,
     featherAmount: 0,
-    keyframes: { [f]: { shapeBounds: defaultBounds(shape, t) } },
+    keyframes,
     createdAt: now,
     lastModified: now,
     inverted: false,
-    // The clip inside, and outside a clear colour: the clip cut to the shape, as CapCut's.
     maskColorEnabled: false,
     backgroundColor: "#000000",
     backgroundOpacity: 0,
     backgroundColorEnabled: true,
-    transform: { ...t },
+    transform: { ...clip.transform! },
   };
 };
 
-/** The bounds of a lasso's points. */
+/** A new mask of `shape` on the clip, centred on its picture, as CapCut adds one, static at mask frame `f`. */
+export const newShapeMask = (clip: AnyClipProps, shape: MaskShape, f: number): MaskClipProps => {
+  const t = clip.transform!;
+  return freshMask(clip, "shape", { [f]: { shapeBounds: defaultBounds(shape, t), ...(shape === "text" ? { text: defaultText(t) } : {}) } });
+};
+
+/** A new pen mask on the clip, its closed path through `points`, static at mask frame `f`. */
+export const newPenMask = (clip: AnyClipProps, points: MaskPenPoint[], f: number): MaskClipProps => freshMask(clip, "pen", { [f]: { penPath: { points, closed: true } } });
+
+/** A new brush mask on the clip with its first stroke, static at mask frame `f`. */
+export const newBrushMask = (clip: AnyClipProps, stroke: NonNullable<MaskData["brushStrokes"]>[number], f: number): MaskClipProps =>
+  freshMask(clip, "draw", { [f]: { brushStrokes: [stroke] } });
+
+/**
+ * An empty pen or brush mask: CapCut's Pen or Brush tile before anything is drawn (the clip
+ * shows whole; the engine skips a mask with no path or strokes).
+ */
+export const newEmptyMask = (clip: AnyClipProps, tool: "pen" | "draw", f: number): MaskClipProps =>
+  freshMask(clip, tool, { [f]: tool === "pen" ? { penPath: { points: [], closed: false } } : { brushStrokes: [] } });
+
+/** Whether a pen or brush mask has nothing drawn yet. */
+export const isEmptyMask = (mask: MaskClipProps) =>
+  (mask.tool === "pen" || mask.tool === "draw") && posesOf(mask).every(([, d]) => (mask.tool === "pen" ? (d.penPath?.points.length ?? 0) < 3 : !d.brushStrokes?.length));
+
+/**
+ * The mask `old` drawn again as `made` (a Pen or Brush tile picked for it, a pen path closed
+ * on it): its place in the list, invert, feather and expansion kept, the new tool and one
+ * static pose taken.
+ */
+export const remakeMask = (old: MaskClipProps, made: MaskClipProps): MaskClipProps => ({
+  ...old,
+  tool: made.tool,
+  keyframes: made.keyframes,
+  transform: made.transform,
+  keyed: false,
+  lastModified: made.lastModified,
+});
+
+/** The bounds of flat points. */
 const pointsBox = (pts: number[]) => {
   let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
   for (let i = 0; i + 1 < pts.length; i += 2) {
@@ -267,23 +356,39 @@ const pointsBox = (pts: number[]) => {
     y0 = Math.min(y0, pts[i + 1]);
     y1 = Math.max(y1, pts[i + 1]);
   }
-  return { x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0) };
+  return Number.isFinite(x0) ? { x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0) } : { x: 0, y: 0, width: 1, height: 1 };
+};
+
+/** A pen path's anchors (and handles) as flat points. */
+export const penFlat = (pts: MaskPenPoint[]) => pts.flatMap((p) => [p.x, p.y, p.ix, p.iy, p.ox, p.oy]);
+
+/** The box round a pose: its shape's, a pen's anchors and handles, a lasso's points. */
+export const poseBox = (d: MaskData) => {
+  if (d.shapeBounds) return d.shapeBounds as Bounds;
+  if (d.penPath) return { ...pointsBox(penFlat(d.penPath.points)), rotation: 0 } as Bounds;
+  return { ...pointsBox(d.lassoPoints ?? d.brushStrokes?.flatMap((s) => s.points) ?? []), rotation: 0 } as Bounds;
 };
 
 /**
- * The mask with another shape, each pose keeping its centre, size and turn (a lasso's poses
- * become boxes round their points). Split and Filmstrip span the picture's width.
+ * The mask with another shape, each pose keeping its centre, size and turn (a pen's, lasso's or
+ * brush's poses become boxes round their points; a text gets CapCut's default words). Split
+ * and Filmstrip span the picture's width.
  */
 export const changeMaskShape = (mask: MaskClipProps, shape: MaskShape, t: ClipTransform): MaskClipProps => {
   const poses = posesOf(mask).map(([f, d]): [number, MaskData] => {
-    const old: Bounds = (d.shapeBounds as Bounds) ?? { ...pointsBox(d.lassoPoints ?? []), rotation: 0, shapeType: "rectangle" };
+    const old: Bounds = { shapeType: "rectangle", ...poseBox(d) };
     const c = boundsCentre(old);
     const sized: Bounds = { ...old, shapeType: shape, scaleX: 1, scaleY: 1, width: old.width * (old.scaleX ?? 1), height: old.height * (old.scaleY ?? 1) };
     if (shape === "linear" || shape === "mirror") sized.width = Math.max(sized.width, pictureBox(t).w);
     if (shape !== "rectangle") delete sized.cornerRadius;
-    const next: any = { ...d, shapeBounds: placeBounds(sized, c) };
-    delete next.lassoPoints;
-    delete next.lassoPointsBinPath;
+    delete sized.picture;
+    const next: any = { ...d };
+    if (shape === "text") {
+      next.text = d.text ?? defaultText(t);
+      Object.assign(sized, textBox(next.text));
+    } else delete next.text;
+    next.shapeBounds = placeBounds(sized, c);
+    for (const k of ["lassoPoints", "lassoPointsBinPath", "penPath", "brushStrokes"]) delete next[k];
     return [f, next];
   });
   return withPoses(mask, poses, { tool: "shape" });

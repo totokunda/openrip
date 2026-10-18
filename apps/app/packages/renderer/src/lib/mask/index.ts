@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type MaskTool = "lasso" | "shape" | "draw";
+export type MaskTool = "lasso" | "shape" | "draw" | "pen";
 export type MaskShapeTool = "rectangle" | "ellipse" | "polygon" | "star";
 
 interface MaskState {
