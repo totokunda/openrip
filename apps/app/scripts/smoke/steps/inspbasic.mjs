@@ -5,7 +5,7 @@
 // (the calibration frame by default).
 import fs from "node:fs";
 import { drag, previewRect, settled } from "./_preview.mjs";
-import { checks } from "./_anim.mjs";
+import { checks, savedProject } from "./_anim.mjs";
 import { undoCase } from "./_undo.mjs";
 import { at, choose, click, diamondOn, frame, keyCase, mediaClip, open, pressDiamond, rowNav, savedClip, sectionNav, typeIn } from "./_inspector.mjs";
 
@@ -64,7 +64,19 @@ export default async (ctx) => {
       },
     ]);
   }
+  // A square picture on a square canvas (the calibration frame is one) fits, fills and stretches
+  // alike: there fit and stretch change nothing after fill, and that's what's checked.
+  const doc0 = await savedProject(win, ctx.udDir);
+  const box = doc0.timeline.clips.find((c) => c.clipId === id).transform;
+  const aspect = doc0.settings.aspectRatio;
+  const square = Math.abs(box.width / box.height - 1) < 1e-3 && Math.abs(aspect.width / aspect.height - 1) < 1e-3;
   for (const [name, edit] of cases) {
+    if (square && (name === "fit" || name === "stretch")) {
+      const before = JSON.stringify((await savedClip(ctx, id)).transform);
+      await edit();
+      check(`${name}: on a square picture it agrees with fill`, JSON.stringify((await savedClip(ctx, id)).transform) === before);
+      continue;
+    }
     try {
       const r = await undoCase(ctx, check, name, edit);
       if (!r.ok) await shot(`ib-fail-${name.replace(/\W+/g, "-")}`);
