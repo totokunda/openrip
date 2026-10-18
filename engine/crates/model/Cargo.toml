@@ -11,3 +11,7 @@ publish.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid = { version = "1", features = ["v4"] }
+
+# New ids on the web take their randomness from the browser (getrandom's wasm_js backend).
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+uuid = { version = "1", features = ["v4", "js"] }

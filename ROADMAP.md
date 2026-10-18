@@ -57,6 +57,7 @@ Lessons from the current-app inventory that shape the engine:
 
 - **UI:** React/TypeScript in **Electron** (Chromium). This is the same idea as CapCut's embedded Chromium, without having to write a browser host.
 - **Engine:** **Rust**, owning decode, compositing, effects, audio and export. It mirrors CapCut's native engine, which runs in its own helper process (`VEHelper`).
+- **Portable core:** the engine is an API core (`openrip-core`) meant to run on desktop, iOS, Android and the web; the Electron app is one client, through a thin Node addon. Platform code (FFmpeg, VideoToolbox, cpal, IOSurface/Metal, files, threads) sits behind seams with portable fallbacks, and `engine/scripts/check-targets.sh` checks the iOS, Android and wasm builds. Layers, seams, per-target status and the rule for new code: [portability.md](docs/plan/portability.md).
 - **Frame transport:** Electron's **`sharedTexture`** (experimental, Electron 44). The engine hands IOSurface / DXGI / dmabuf GPU textures to the renderer, which draws them with WebGPU. There is no copy, and the HTML UI (handles, menus, overlays) composites normally on top.
 
 Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
@@ -78,6 +79,10 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
 
 | Crate | Responsibility |
 |---|---|
+| `openrip-core` | The engine's API as plain Rust, for every binding: projects in, preview sessions (frames, playback clock, edits), thumbnails and waveforms, export, CapCut conversion ([portability.md](docs/plan/portability.md)) |
+| `openrip-node` | The Electron app's binding: napi conversion over `openrip-core` |
+| `openrip-platform` | Seams for asset access (files today; handles, URLs and blobs later) and background tasks (OS threads today) |
+| `openrip-frame` | Decoded pictures and pixel types, shared by the decoders and the compositor |
 | `openrip-model` | Project and timeline data model mirroring CapCut's concepts (tracks → segments → materials, microsecond time, `Animated<T>` keyframes with bezier easing, render order); undo/redo as commands; v1 JSON importer; v2 format |
 | `openrip-capcut` | CapCut draft import (and later export), with versioned schema adapters. Unmappable proprietary library items (effects, stickers, templates, fonts) become placeholders in an import report. |
 | `openrip-media` | Demux/decode through FFmpeg (`ffmpeg-next`/`rsmpeg`) with hardware decode: VideoToolbox, D3D11VA/NVDEC, VAAPI. Also frame cache, thumbnails, waveform peaks and proxies. |

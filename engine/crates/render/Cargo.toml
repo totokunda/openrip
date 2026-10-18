@@ -23,6 +23,12 @@ objc2-metal = { version = "0.3.2", default-features = false, features = ["std", 
 objc2-io-surface = { version = "0.3", default-features = false, features = ["std", "IOSurfaceRef", "IOSurfaceTypes", "objc2-core-foundation"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "objc2-io-surface"] }
 
+# On the web (wasm without threads) wgpu's objects aren't Send, and the engine's types that
+# hold them are Send for its worker threads. A web build has no other threads, which is
+# what this feature relies on (see docs/plan/portability.md).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "30", features = ["fragile-send-sync-non-atomic-wasm"] }
+
 [dev-dependencies]
 # Frames to draw in the tests come from the decoder.
 openrip-media = { workspace = true, features = ["ffmpeg"] }
