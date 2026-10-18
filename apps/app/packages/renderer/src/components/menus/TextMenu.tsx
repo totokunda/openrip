@@ -94,12 +94,14 @@ const TextMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
   const [query, setQuery] = React.useState("");
   usePresetDrop();
 
-  // CapCut's single "Default text" tile.
+  // CapCut's single "Default text" tile: where texts are added (the player has no tool row),
+  // so it says how.
   const add = (
-    <div className="flex flex-row flex-wrap gap-4" data-testid="add-text-view">
+    <div className="flex flex-col gap-3" data-testid="add-text-view">
       <PresetTile preset={TEXT_PRESETS[0]} label="" testId="add-text">
         <span className="text-[13px] text-brand-light">Default text</span>
       </PresetTile>
+      <p className="text-[12px] leading-snug text-[#949494] text-left">Click it, or drag it onto the timeline, to add a text at the playhead; Presets has styled ones. T lets you click the canvas to place one.</p>
     </div>
   );
 
