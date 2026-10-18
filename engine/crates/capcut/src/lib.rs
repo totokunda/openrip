@@ -376,6 +376,22 @@ const BUILTIN_TRANSITIONS: &[(&str, &str)] = &[
     ("6724239388189921806", "black_fade"),
 ];
 
+/// CapCut's blend modes (`mix_mode` effects): the resource and effect ids of the bundles it
+/// ships (`Resources/MixMode/MixMode.json`), their names in the English and Chinese menus,
+/// and the mode each draws (from each bundle's shader; docs/parity/compositing.md).
+const MIX_MODES: &[(&str, &str, &[&str], BlendMode)] = &[
+    ("6758325170760323597", "871339", &["Screen", "滤色"], BlendMode::Screen),
+    ("6758324839670354445", "871342", &["Darken", "变暗"], BlendMode::Darken),
+    ("6758324919789949453", "871341", &["Brighten", "Lighten", "变亮"], BlendMode::Lighten),
+    ("6758324989931295240", "871340", &["Overlay", "叠加"], BlendMode::Overlay),
+    ("6758325264670790152", "871338", &["Hard light", "强光"], BlendMode::HardLight),
+    ("6758325439212556814", "871337", &["Soft light", "柔光"], BlendMode::SoftLight),
+    ("6758325619253056013", "871336", &["Linear burn", "线性加深"], BlendMode::LinearBurn),
+    ("6758325724848853518", "871335", &["Color burn", "颜色加深"], BlendMode::ColorBurn),
+    ("6758325800031752712", "871334", &["Color dodge", "颜色减淡"], BlendMode::ColorDodge),
+    ("6758325895519277582", "871333", &["Multiply", "正片叠底"], BlendMode::Multiply),
+];
+
 /// CapCut transitions by their English name, for those whose resource ids aren't known here.
 const NAMED_TRANSITIONS: &[(&str, &str)] = &[("Mix", "mix"), ("Black Fade", "black_fade"), ("Pull in", "pull_in"), ("Pull out", "pull_out")];
 
@@ -755,6 +771,40 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                     });
                     true
                 }
+                "effects" if s(m, "type") == "mix_mode" => {
+                    // A blend mode: one of the bundles CapCut ships (`Resources/MixMode`), by its
+                    // resource or effect id, else by name.
+                    let lib = library_ref(m);
+                    let (effect_id, name) = (s(m, "effect_id"), s(m, "name"));
+                    let mode = MIX_MODES.iter().find(|(resource, effect, names, _)| *resource == lib.resource_id || *effect == effect_id || names.contains(&name.as_str())).map(|(.., mode)| *mode);
+                    if mode.is_none() {
+                        bump(&mut report.unmapped_library, format!("blend mode: {name} ({})", lib.resource_id));
+                    }
+                    out.effects.push(Effect {
+                        id,
+                        category: EffectCategory::Blend,
+                        name,
+                        params: BTreeMap::new(),
+                        builtin: mode.map(|m| m.name().to_string()),
+                        resource: Some(s(m, "path")).filter(|p| !p.is_empty()),
+                        library: Some(lib),
+                        text_style: None,
+                    });
+                    true
+                }
+                // The chroma key (Remove BG › Chroma key): the picked colour and the sliders, 0…1.
+                "chromas" => {
+                    let unit = |k: &str| f(m, k, 0.0).clamp(0.0, 1.0) as f32;
+                    out.chromas.push(Chroma {
+                        id,
+                        color: Rgba::from_hex(&s(m, "color")).unwrap_or(Rgba::BLACK),
+                        intensity: unit("intensity_value"),
+                        shadow: unit("shadow_value"),
+                        edge_smooth: unit("edge_smooth_value"),
+                        spill: unit("spill_value"),
+                    });
+                    true
+                }
                 "effects" | "video_effects" | "audio_effects" => {
                     let ty = s(m, "type");
                     let adjust = ADJUST_TYPES.iter().find(|(capcut, _)| *capcut == ty).map(|(_, ours)| *ours);
@@ -1084,8 +1134,10 @@ mod tests {
                 "texts": [{"id": "T1", "font_name": "Inter", "alignment": 1, "has_shadow": true, "shadow_color": "#000000", "shadow_alpha": 0.5,
                     "content": "{\"text\":\"Hello\",\"styles\":[{\"range\":[0,5],\"size\":15,\"fill\":{\"content\":{\"render_type\":\"solid\",\"solid\":{\"color\":[1,0,0]}}},\"strokes\":[{\"content\":{\"solid\":{\"color\":[0,0,0]}},\"width\":0.08}]}]}"}],
                 "speeds": [{"id": "S1", "type": "speed", "mode": 0, "speed": 2.0}],
-                "effects": [{"id": "E1", "type": "brightness", "value": 0.2}, {"id": "E2", "type": "text_effect", "name": "Glow", "resource_id": "R9"}],
+                "effects": [{"id": "E1", "type": "brightness", "value": 0.2}, {"id": "E2", "type": "text_effect", "name": "Glow", "resource_id": "R9"},
+                    {"id": "E3", "type": "mix_mode", "name": "Screen", "resource_id": "6758325170760323597", "effect_id": "871339", "value": 1.0}],
                 "canvases": [{"id": "C1", "type": "canvas_color", "color": "#ff0000"}],
+                "chromas": [{"id": "CH1", "type": "chroma", "color": "#00FF00FF", "intensity_value": 0.6, "shadow_value": 0.1, "edge_smooth_value": 0.2, "spill_value": 0.3, "path": ""}],
                 "audio_fades": [{"id": "F1", "fade_in_duration": 500_000, "fade_out_duration": 250_000}],
                 "stickers": [{"id": "K1", "name": "star"}],
                 "vocal_separations": [{"id": "X1"}]
@@ -1096,7 +1148,7 @@ mod tests {
                     "source_timerange": {"start": 1_000_000, "duration": 4_000_000},
                     "target_timerange": {"start": 0, "duration": 2_000_000},
                     "clip": {"alpha": 0.8, "rotation": 15.0, "scale": {"x": 1.2, "y": 1.2}, "transform": {"x": 0.25, "y": -0.5}, "flip": {"horizontal": true, "vertical": false}},
-                    "extra_material_refs": ["S1", "C1", "F1"],
+                    "extra_material_refs": ["S1", "C1", "F1", "E3", "CH1"],
                     // In source time (the media from 1 s, at 2×).
                     "common_keyframes": [
                         {"property_type": "KFTypeGlobalAlpha", "keyframe_list": [
@@ -1135,8 +1187,14 @@ mod tests {
         assert_eq!(seg.opacity.sample(Micros(500_000)), 0.5);
         let p = seg.transform.position.sample(Micros(1_000_000));
         assert!((p.x - 0.0).abs() < 1e-9 && (p.y + 0.5).abs() < 1e-9);
-        assert_eq!(report.unmapped_keyframes.get("KFTypeChromaIntensity"), Some(&1));
-        assert_eq!(seg.attachments.len(), 3);
+        assert_eq!(seg.attachments.len(), 5);
+        // The blend mode by its bundle, and the chroma key with its keyed intensity.
+        let blend = project.materials.effects.iter().find(|e| e.id.0 == "E3").unwrap();
+        assert_eq!((blend.category, blend.blend_mode()), (EffectCategory::Blend, Some(BlendMode::Screen)));
+        let chroma = &project.materials.chromas[0];
+        assert_eq!((chroma.color, chroma.intensity, chroma.shadow, chroma.edge_smooth, chroma.spill), (Rgba { r: 0.0, g: 1.0, b: 0.0, a: 1.0 }, 0.6, 0.1, 0.2, 0.3));
+        assert_eq!(seg.chroma_at(chroma, Micros(500_000)).intensity, 0.3);
+        assert!(report.unmapped_keyframes.is_empty(), "{:?}", report.unmapped_keyframes);
 
         // Text styling
         let text = &project.materials.texts[0];

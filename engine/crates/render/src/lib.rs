@@ -16,6 +16,7 @@
 //! compositor needs decoded pictures, not the decoder.
 
 pub mod adjust;
+pub mod blend;
 pub mod grade;
 mod interop;
 pub mod shape;
@@ -23,6 +24,7 @@ pub mod text;
 mod upload;
 
 pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
+pub use blend::BlendMode;
 pub use grade::{CurvePoint, Curves, Hsl};
 pub use interop::Surface;
 pub use upload::Uploader;
@@ -74,6 +76,45 @@ impl Lut3d {
             .collect();
         Some(Lut3d { key, size: n, rgb, edge_aligned: true })
     }
+
+    /// An Adobe / Resolve `.cube` 3D table (the LUTs editors import, and CapCut's Adjust ›
+    /// LUT takes): `LUT_3D_SIZE n`, then n³ lines of RGB, red fastest, entries at the cube's
+    /// corners. Its input domain is read as 0–1 (`DOMAIN_MIN`/`DOMAIN_MAX` other than that
+    /// are rare in grading tables and aren't applied); a 1D table (`LUT_1D_SIZE`) isn't read.
+    pub fn from_cube(text: &str, key: u64) -> Option<Lut3d> {
+        let mut size = 0u32;
+        let mut rgb = Vec::new();
+        for line in text.lines() {
+            let line = line.split('#').next().unwrap_or("").trim();
+            let mut words = line.split_whitespace();
+            let Some(first) = words.next() else { continue };
+            match first {
+                "LUT_3D_SIZE" => size = words.next()?.parse().ok()?,
+                "LUT_1D_SIZE" => return None,
+                _ => {
+                    // Keywords (TITLE, DOMAIN_MIN, …) aren't numbers.
+                    let Ok(r) = first.parse::<f32>() else { continue };
+                    let v: Vec<f32> = words.filter_map(|w| w.parse().ok()).collect();
+                    if v.len() != 2 {
+                        return None;
+                    }
+                    rgb.extend([r, v[0], v[1]]);
+                }
+            }
+        }
+        (size >= 2 && size <= 128 && rgb.len() == (size * size * size * 3) as usize).then_some(Lut3d { key, size, rgb, edge_aligned: true })
+    }
+}
+
+/// CapCut's chroma key over a layer's own pixels (chroma.wgsl): the picked colour (straight
+/// RGB, 0–1) and its intensity, shadow, edge smoothing and spill (0–1, the panel's 0–100).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ChromaKey {
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub shadow: f32,
+    pub edge_smooth: f32,
+    pub spill: f32,
 }
 
 pub use openrip_frame::RgbaImage;
@@ -216,6 +257,13 @@ pub struct Layer<'a> {
     pub multiply: bool,
     /// The app's own clip filters, after the mattes.
     pub app_filters: Option<AppFilters>,
+    /// How it's put over the layers below it (CapCut's Blend › Mode); `Normal` is "over".
+    pub blend: BlendMode,
+    /// A chroma key on its own pixels, first of all.
+    pub chroma: Option<ChromaKey>,
+    /// A lookup table on its own pixels (a LUT on the clip) and its strength, after the
+    /// chroma key and before the colour grade, as CapCut orders them.
+    pub lut: Option<(&'a Lut3d, f32)>,
 }
 
 /// The app's own clip filters (`components/preview/webgl-filters`), on its scales.
@@ -290,7 +338,28 @@ impl<'a> Layer<'a> {
     /// A layer that isn't an image placed on the canvas (a filter, a blur, a group's start or
     /// end, a mix), which only its source describes.
     pub fn pass(source: Source<'a>) -> Self {
-        Layer { source, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None, mattes: Vec::new(), multiply: false, app_filters: None }
+        Layer {
+            source,
+            center: [0.0, 0.0],
+            size: [1.0, 1.0],
+            rotation: 0.0,
+            flip_h: false,
+            flip_v: false,
+            opacity: 1.0,
+            adjust: None,
+            mattes: Vec::new(),
+            multiply: false,
+            app_filters: None,
+            blend: BlendMode::Normal,
+            chroma: None,
+            lut: None,
+        }
+    }
+
+    /// An image placed at `center` (output pixels) at `size`, upright and opaque, with nothing
+    /// else on it.
+    pub fn placed(source: Source<'a>, center: [f64; 2], size: [f64; 2]) -> Self {
+        Layer { center, size, ..Layer::pass(source) }
     }
 
     /// Place an image the way the project model does: `position` in half-canvas units
@@ -323,6 +392,9 @@ impl<'a> Layer<'a> {
             mattes: Vec::new(),
             multiply: false,
             app_filters: None,
+            blend: BlendMode::Normal,
+            chroma: None,
+            lut: None,
         }
     }
 }
@@ -371,6 +443,13 @@ pub struct Compositor {
     /// Transitions putting two clips' groups together (mix.wgsl), onto RGBA and BGRA targets.
     mix: wgpu::RenderPipeline,
     mix_bgra: wgpu::RenderPipeline,
+    /// Placement with a blend mode over a copy of the canvas (blend.wgsl), onto RGBA and BGRA.
+    place_blend: wgpu::RenderPipeline,
+    place_blend_bgra: wgpu::RenderPipeline,
+    /// The chroma key's three passes (chroma.wgsl).
+    chroma_key: wgpu::RenderPipeline,
+    chroma_x: wgpu::RenderPipeline,
+    chroma_y: wgpu::RenderPipeline,
     appfx: AppFx,
     /// CapCut's colour features around the Adjust pass (grade.rs).
     grade: grade::GradeFx,
@@ -602,6 +681,11 @@ impl Compositor {
             },
             mix: mix_pipeline(&device, &yuv_pipeline_layout, CANVAS),
             mix_bgra: mix_pipeline(&device, &yuv_pipeline_layout, wgpu::TextureFormat::Bgra8Unorm),
+            place_blend: pass_pipeline(&device, &yuv_pipeline_layout, include_str!("blend.wgsl"), "fs_place_blend", CANVAS),
+            place_blend_bgra: pass_pipeline(&device, &yuv_pipeline_layout, include_str!("blend.wgsl"), "fs_place_blend", wgpu::TextureFormat::Bgra8Unorm),
+            chroma_key: pass_pipeline(&device, &yuv_pipeline_layout, include_str!("chroma.wgsl"), "fs_chroma_key", CANVAS),
+            chroma_x: pass_pipeline(&device, &yuv_pipeline_layout, include_str!("chroma.wgsl"), "fs_chroma_smooth_x", CANVAS),
+            chroma_y: pass_pipeline(&device, &yuv_pipeline_layout, include_str!("chroma.wgsl"), "fs_chroma_smooth_y", CANVAS),
             adjust: adjust_pipeline("fs_adjust"),
             grade: grade::GradeFx::new(&device, &yuv_pipeline_layout),
             luts: Default::default(),
@@ -982,6 +1066,17 @@ impl Compositor {
     }
 
     fn filter_canvas(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, place_pipeline: &wgpu::RenderPipeline, lut: &Lut3d, strength: f32, scratch: &mut Vec<wgpu::Texture>) {
+        let (w, h) = (canvas.width(), canvas.height());
+        let tmp = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+        self.lut_pass(enc, canvas, &tmp, lut, strength);
+        // Back onto the canvas, pixel for pixel (opaque, so "over" replaces).
+        let back = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0: [1.0, 0.0, 0.0, 0.0], inv1: [0.0, 1.0, 0.0, 0.0], misc: [1.0, 0.0, 0.0, 0.0] };
+        self.pass(enc, place_pipeline, &tmp, canvas, back, None);
+        scratch.push(tmp);
+    }
+
+    /// `src` looked up through `lut` and mixed in by `strength`, into `dst` (same size).
+    fn lut_pass(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, dst: &wgpu::Texture, lut: &Lut3d, strength: f32) {
         let n = lut.size;
         let table = {
             let mut cache = self.luts.lock().unwrap();
@@ -1020,42 +1115,50 @@ impl Compositor {
                 })
                 .clone()
         };
-        let (w, h) = (canvas.width(), canvas.height());
-        let tmp = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
         let params: [f32; 4] = [n as f32, strength.clamp(0.0, 1.0), if lut.edge_aligned { 1.0 } else { 0.0 }, 0.0];
         let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&params), usage: wgpu::BufferUsages::UNIFORM });
-        let (canvas_view, table_view, tmp_view) = (canvas.create_view(&Default::default()), table.create_view(&Default::default()), tmp.create_view(&Default::default()));
+        let (src_view, table_view, dst_view) = (src.create_view(&Default::default()), table.create_view(&Default::default()), dst.create_view(&Default::default()));
         let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.yuv_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&canvas_view) },
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&src_view) },
                 wgpu::BindGroupEntry { binding: 1, resource: buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&table_view) },
             ],
         });
-        {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &tmp_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.lut3d);
-            pass.set_bind_group(0, &bind, &[]);
-            pass.draw(0..3, 0..1);
-        }
-        // Back onto the canvas, pixel for pixel (opaque, so "over" replaces).
-        let back = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0: [1.0, 0.0, 0.0, 0.0], inv1: [0.0, 1.0, 0.0, 0.0], misc: [1.0, 0.0, 0.0, 0.0] };
-        self.pass(enc, place_pipeline, &tmp, canvas, back, None);
-        scratch.push(tmp);
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &dst_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.lut3d);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// CapCut's chroma key on a layer's own pixels (chroma.wgsl): the matte, smoothed across
+    /// and then down with the spill taken off. Returns the keyed picture (the intermediates
+    /// go in `scratch`).
+    fn chroma_pass(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, key: &ChromaKey, scratch: &mut Vec<wgpu::Texture>) -> wgpu::Texture {
+        let (w, h) = (src.width(), src.height());
+        let params = [key.color[0], key.color[1], key.color[2], 1.0, key.intensity, key.shadow, key.edge_smooth, key.spill, w as f32, h as f32, 0.0, 0.0];
+        let matte = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+        self.canvas_pass(enc, &self.chroma_key, src, src, &matte, &params);
+        let rows = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+        self.canvas_pass(enc, &self.chroma_x, src, &matte, &rows, &params);
+        let out = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+        self.canvas_pass(enc, &self.chroma_y, src, &rows, &out, &params);
+        scratch.extend([matte, rows]);
+        out
     }
 
     /// Whether a frame can go to the GPU without a copy (diagnostics).
@@ -1171,12 +1274,36 @@ impl Compositor {
                     stage
                 }
             };
+            // A keyed image's stage stays in the cache until a pass replaces it: then it must
+            // live until the submission, unrecycled.
+            let cached = matches!(layer.source, Source::Cached(..));
+            // The chroma key, then a LUT on the clip, on its own pixels (CapCut's order).
+            let (mut stage, mut adjusted) = (stage, false);
+            if let Some(key) = layer.chroma.filter(|k| k.intensity >= 0.001) {
+                let out = self.chroma_pass(enc, &stage, &key, &mut scratch);
+                if cached && !adjusted {
+                    keep.push(stage);
+                } else {
+                    scratch.push(stage);
+                }
+                (stage, adjusted) = (out, true);
+            }
+            if let Some((lut, strength)) = layer.lut.filter(|(_, s)| *s > 0.0) {
+                let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
+                self.lut_pass(enc, &stage, &out, lut, strength);
+                if cached && !adjusted {
+                    keep.push(stage);
+                } else {
+                    scratch.push(stage);
+                }
+                (stage, adjusted) = (out, true);
+            }
             // Adjust sliders on the clip's own pixels, before placement.
             let stage = match layer.adjust.as_ref().filter(|(a, _)| !a.is_identity()) {
                 Some((a, luts)) => {
                     let (out, middle) = self.grade(enc, &stage, a, *luts);
                     scratch.extend(middle);
-                    if matches!(layer.source, Source::Cached(..)) {
+                    if cached && !adjusted {
                         keep.push(stage);
                     } else {
                         scratch.push(stage);
@@ -1185,7 +1312,7 @@ impl Compositor {
                 }
                 None => stage,
             };
-            let adjusted = layer.adjust.as_ref().is_some_and(|(a, _)| !a.is_identity());
+            let adjusted = adjusted || layer.adjust.as_ref().is_some_and(|(a, _)| !a.is_identity());
             // Cut-outs and masks, before placement.
             let (mut stage, mut adjusted) = (stage, adjusted);
             for m in &layer.mattes {
@@ -1232,12 +1359,24 @@ impl Compositor {
                 inv1: [b[0] as f32, b[1] as f32, b[2] as f32, 0.0],
                 misc: [layer.opacity, 0.0, 0.0, 0.0],
             };
-            let pipeline = match (layer.multiply, canvas.format() == wgpu::TextureFormat::Bgra8Unorm) {
-                (false, _) => place_pipeline,
-                (true, false) => &self.place_multiply,
-                (true, true) => &self.place_multiply_bgra,
-            };
-            self.pass(enc, pipeline, &stage, canvas, place, None);
+            let bgra = canvas.format() == wgpu::TextureFormat::Bgra8Unorm;
+            if layer.blend != BlendMode::Normal && !layer.multiply {
+                // A blend mode reads the composite below: a copy of the canvas (pixel for
+                // pixel, see `blur_canvas`), then the layer placed and blended over it.
+                let backdrop = self.texture(width, height, CANVAS, wgpu::TextureUsages::empty());
+                let copy = Params { src_size: [width as f32, height as f32], dst_size: [width as f32, height as f32], inv0: [1.0, 0.0, 0.0, 0.0], inv1: [0.0, 1.0, 0.0, 0.0], misc: [1.0, 0.0, 0.0, 0.0] };
+                self.pass(enc, &self.place, canvas, &backdrop, copy, Some(wgpu::Color::TRANSPARENT));
+                let blended = Params { misc: [layer.opacity, layer.blend.index(), 0.0, 0.0], ..place };
+                self.pass_with(enc, if bgra { &self.place_blend_bgra } else { &self.place_blend }, &stage, Some(&backdrop), canvas, blended, None);
+                scratch.push(backdrop);
+            } else {
+                let pipeline = match (layer.multiply, bgra) {
+                    (false, _) => place_pipeline,
+                    (true, false) => &self.place_multiply,
+                    (true, true) => &self.place_multiply_bgra,
+                };
+                self.pass(enc, pipeline, &stage, canvas, place, None);
+            }
             // A keyed image's stage lives on in the cache; anything else is scratch.
             if matches!(layer.source, Source::Cached(..)) && !adjusted {
                 keep.push(stage);
@@ -1306,6 +1445,28 @@ fn mix_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, format: wg
             entry_point: Some("fs_mix"),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
+        }),
+        primitive: Default::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// A pass writing `entry` of the WGSL `source` to a target of `format` as it is (no
+/// blending), with the three-binding layout (texture, parameters, second texture).
+fn pass_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, source: &str, entry: &str, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(entry), source: wgpu::ShaderSource::Wgsl(source.into()) });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(entry),
+        layout: Some(layout),
+        vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some(entry),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
         }),
         primitive: Default::default(),
         depth_stencil: None,

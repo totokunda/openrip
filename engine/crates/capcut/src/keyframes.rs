@@ -91,6 +91,14 @@ const MASK_KEYS: &[(&str, Param)] = &[
     ("KFTypeCommonMaskRoundCorner", Param::MaskRoundCorner),
 ];
 
+/// The chroma key's keyframed sliders (CapCut's `ChromaKeyframe`), on the draft's 0…1.
+const CHROMA_KEYS: &[(&str, Param)] = &[
+    ("KFTypeChromaIntensity", Param::ChromaIntensity),
+    ("KFTypeChromaShadow", Param::ChromaShadow),
+    ("KFTypeChromaEdgeSmooth", Param::ChromaEdgeSmooth),
+    ("KFTypeChromaSpill", Param::ChromaSpill),
+];
+
 /// Map a segment's keyframes onto it: the transform, opacity and volume on the segment, the
 /// rest as its materials' parameter keyframes. Keyframes of properties the engine doesn't
 /// draw (or on tracks it doesn't draw) go in the report. Call once the segment's own material
@@ -185,15 +193,20 @@ pub(crate) fn apply(seg_json: &Value, seg: &mut Segment, kind: TrackKind, materi
         });
         push(seg, id, Param::Intensity, scalar(&ctx, &c, 0, 1.0));
     }
-    // A filter bar's strength.
+    // A filter bar's strength, or a filter's on the clip (its LUT).
     if let Some(c) = take("KFTypeFilter") {
-        match materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter) {
-            Some(e) => {
-                let id = e.id.clone();
-                push(seg, id, Param::Intensity, scalar(&ctx, &c, 0, 1.0));
-            }
-            // A filter on a clip isn't drawn (only filter bars are).
-            None => *report.unmapped_keyframes.entry("KFTypeFilter (a filter on a clip)".into()).or_insert(0) += c.keys.len(),
+        let bar = materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter).map(|e| e.id.clone());
+        match bar.or_else(|| attachment(seg, &c.material, |id| materials.effects.iter().any(|e| &e.id == id && e.category == EffectCategory::Filter))) {
+            Some(id) => push(seg, id, Param::Intensity, scalar(&ctx, &c, 0, 1.0)),
+            None => *report.unmapped_keyframes.entry("KFTypeFilter (no filter)".into()).or_insert(0) += c.keys.len(),
+        }
+    }
+    // The chroma key's sliders.
+    for (ty, param) in CHROMA_KEYS {
+        let Some(c) = take(ty) else { continue };
+        match attachment(seg, &c.material, |id| materials.chromas.iter().any(|m| &m.id == id)) {
+            Some(id) => push(seg, id, *param, scalar(&ctx, &c, 0, 1.0)),
+            None => *report.unmapped_keyframes.entry(format!("{ty} (no chroma key)")).or_insert(0) += c.keys.len(),
         }
     }
     if let Some(c) = take("KFTypePrimaryColorWheelIntensity") {
@@ -440,7 +453,8 @@ mod tests {
     }
 
     /// Adjust, HSL and mask keys drive their materials; a slider the clip doesn't have yet
-    /// is made; types the engine doesn't draw are reported.
+    /// is made; keys of a material the clip doesn't have (a chroma key) and types the engine
+    /// doesn't draw are reported.
     #[test]
     fn material_keys_find_their_materials() {
         let k2 = |a: f64, b: f64| vec![key(10_000_000, json!([a]), "Line", (0.0, 0.0), (0.0, 0.0)), key(11_000_000, json!([b]), "Line", (0.0, 0.0), (0.0, 0.0))];
@@ -450,6 +464,7 @@ mod tests {
             prop("KFTypeHslHueIntensity", "H", k2(0.0, 50.0)),
             prop("KFTypeCommonMaskPositionX", "M", k2(-0.5, 0.5)),
             prop("KFTypeChromaIntensity", "", k2(0.0, 1.0)),
+            prop("KFTypeColorDehaze", "", k2(0.0, 1.0)),
         ]);
         let (p, report) = import(props, json!([]));
         let s = seg(&p, "S");
@@ -461,7 +476,7 @@ mod tests {
         assert!((s.effect_at(c, half).params["intensity"] + 0.2).abs() < 1e-9);
         assert_eq!(s.hsl_at(&p.materials.hsl[0], half).hue, 25.0);
         assert_eq!(s.mask_at(&p.materials.masks[0], half).center, [0.0, 0.0]);
-        assert_eq!(report.unmapped_keyframes.keys().collect::<Vec<_>>(), vec!["KFTypeChromaIntensity"]);
+        assert_eq!(report.unmapped_keyframes.keys().collect::<Vec<_>>(), vec!["KFTypeChromaIntensity (no chroma key)", "KFTypeColorDehaze"]);
     }
 
     #[test]

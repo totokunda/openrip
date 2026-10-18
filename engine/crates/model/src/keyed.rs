@@ -69,6 +69,11 @@ pub enum Param {
     MaskRotation,
     MaskFeather,
     MaskRoundCorner,
+    /// A chroma key's intensity, shadow, edge smoothing and spill (0…1).
+    ChromaIntensity,
+    ChromaShadow,
+    ChromaEdgeSmooth,
+    ChromaSpill,
 }
 
 /// Keyframes of one parameter of one of a segment's materials.
@@ -174,6 +179,22 @@ impl Segment {
         text
     }
 
+    /// A chroma key with its keyframed intensity, shadow, edge smoothing and spill at local
+    /// time `t`.
+    pub fn chroma_at(&self, c: &Chroma, t: Micros) -> Chroma {
+        let mut c = c.clone();
+        if !self.has_keyed(&c.id) {
+            return c;
+        }
+        let id = c.id.clone();
+        let k = |p: Param| self.keyed(&id, p, t).map(|v| v as f32);
+        c.intensity = k(Param::ChromaIntensity).unwrap_or(c.intensity);
+        c.shadow = k(Param::ChromaShadow).unwrap_or(c.shadow);
+        c.edge_smooth = k(Param::ChromaEdgeSmooth).unwrap_or(c.edge_smooth);
+        c.spill = k(Param::ChromaSpill).unwrap_or(c.spill);
+        c
+    }
+
     /// A mask with its keyframed place, size, rotation, feather and rounded corners at local
     /// time `t`.
     pub fn mask_at(&self, m: &Mask, t: Micros) -> Mask {
@@ -255,6 +276,15 @@ mod tests {
         let at = s.text_at(&text, Micros(250_000));
         assert_eq!((at.runs[0].fill.r, at.runs[0].fill.g), (0.25, 1.0));
         assert_eq!(at.runs[0].stroke.map(|s| s.width), Some(0.1));
+    }
+
+    #[test]
+    fn a_chroma_keys_sliders_follow_their_keys() {
+        let s = segment(vec![keys("k", Param::ChromaIntensity, &[(0, 0.0), (1_000_000, 0.8)]), keys("k", Param::ChromaSpill, &[(0, 0.5)])]);
+        let c = Chroma { id: MaterialId("k".into()), color: Rgba { r: 0.0, g: 1.0, b: 0.0, a: 1.0 }, intensity: 0.3, shadow: 0.2, edge_smooth: 0.1, spill: 0.0 };
+        let at = s.chroma_at(&c, Micros(500_000));
+        assert_eq!((at.intensity, at.shadow, at.edge_smooth, at.spill), (0.4, 0.2, 0.1, 0.5));
+        assert!(!at.is_off() && s.chroma_at(&c, Micros(0)).is_off());
     }
 
     #[test]

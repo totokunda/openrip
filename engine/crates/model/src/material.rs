@@ -52,6 +52,8 @@ pub struct Materials {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stickers: Vec<Sticker>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chromas: Vec<Chroma>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreign: Vec<Foreign>,
 }
 
@@ -73,6 +75,7 @@ pub enum MaterialRef<'a> {
     Animations(&'a Animations),
     Loudness(&'a Loudness),
     Sticker(&'a Sticker),
+    Chroma(&'a Chroma),
     Foreign(&'a Foreign),
 }
 
@@ -95,6 +98,7 @@ impl MaterialRef<'_> {
             MaterialRef::Animations(m) => AnyMaterial::Animations(m.clone()),
             MaterialRef::Loudness(m) => AnyMaterial::Loudness(m.clone()),
             MaterialRef::Sticker(m) => AnyMaterial::Sticker(m.clone()),
+            MaterialRef::Chroma(m) => AnyMaterial::Chroma(m.clone()),
             MaterialRef::Foreign(m) => AnyMaterial::Foreign(m.clone()),
         }
     }
@@ -124,6 +128,7 @@ impl Materials {
         find!(animations, Animations);
         find!(loudness, Loudness);
         find!(stickers, Sticker);
+        find!(chromas, Chroma);
         find!(foreign, Foreign);
         None
     }
@@ -148,6 +153,7 @@ impl Materials {
             + self.animations.len()
             + self.loudness.len()
             + self.stickers.len()
+            + self.chromas.len()
             + self.foreign.len()
     }
 
@@ -589,11 +595,112 @@ pub enum CanvasFillKind {
     Image { path: String },
 }
 
-/// What fills the canvas behind a segment that doesn't cover it.
+/// What fills the canvas behind a segment that doesn't cover it (CapCut's Canvas: a colour,
+/// the clip itself blurred, or an image). Only a clip on the main track (the lowest video
+/// track) fills the canvas, as in CapCut, while it's shown; black draws nothing.
+/// - `Color`: the colour (CapCut's `#RRGGBBAA`; its default "" is black).
+/// - `Blur`: the clip's own picture covering the canvas, blurred by `amount` (CapCut's four
+///   levels are 0.0625, 0.375, 0.75 and 1).
+/// - `Image`: a picture covering the canvas.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CanvasFill {
     pub id: MaterialId,
     pub fill: CanvasFillKind,
+}
+
+impl CanvasFill {
+    /// Whether the fill draws anything (black is the canvas's own colour).
+    pub fn is_black(&self) -> bool {
+        match &self.fill {
+            CanvasFillKind::Color { color } => color.r <= 0.0 && color.g <= 0.0 && color.b <= 0.0 || color.a <= 0.0,
+            CanvasFillKind::Blur { amount } => *amount <= 0.0,
+            CanvasFillKind::Image { path } => path.is_empty(),
+        }
+    }
+}
+
+/// CapCut's chroma key (Remove BG › Chroma key): the picked colour keyed out of the clip's
+/// own picture, before its colour grade. Each value is 0…1, the panel's 0…100.
+/// - `intensity`: how far from the colour is keyed out (0 keys nothing);
+/// - `shadow`: keeps the colour's darker shades (shadows cast on the screen);
+/// - `edge_smooth`: softens the matte's edge;
+/// - `spill`: takes the colour's cast off what's left.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Chroma {
+    pub id: MaterialId,
+    pub color: Rgba,
+    pub intensity: f32,
+    #[serde(default)]
+    pub shadow: f32,
+    #[serde(default)]
+    pub edge_smooth: f32,
+    #[serde(default)]
+    pub spill: f32,
+}
+
+impl Chroma {
+    /// Whether it keys nothing out (CapCut's shader passes the clip through at 0 intensity).
+    pub fn is_off(&self) -> bool {
+        self.intensity < 0.001
+    }
+}
+
+/// How a clip is put over what's under it (CapCut's Blend › Mode, a `mix_mode` effect): the
+/// clip's pixels mixed with the running composite below by a separable blend function,
+/// then by its opacity (docs/parity/compositing.md).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlendMode {
+    #[default]
+    Normal,
+    Darken,
+    Screen,
+    Overlay,
+    Multiply,
+    /// CapCut's "Brighten".
+    Lighten,
+    ColorBurn,
+    ColorDodge,
+    LinearBurn,
+    SoftLight,
+    HardLight,
+}
+
+impl BlendMode {
+    pub const ALL: [BlendMode; 11] = [
+        BlendMode::Normal,
+        BlendMode::Darken,
+        BlendMode::Screen,
+        BlendMode::Overlay,
+        BlendMode::Multiply,
+        BlendMode::Lighten,
+        BlendMode::ColorBurn,
+        BlendMode::ColorDodge,
+        BlendMode::LinearBurn,
+        BlendMode::SoftLight,
+        BlendMode::HardLight,
+    ];
+
+    /// The mode's name (an effect's `builtin`, the app's `blendMode`).
+    pub fn name(self) -> &'static str {
+        match self {
+            BlendMode::Normal => "normal",
+            BlendMode::Darken => "darken",
+            BlendMode::Screen => "screen",
+            BlendMode::Overlay => "overlay",
+            BlendMode::Multiply => "multiply",
+            BlendMode::Lighten => "lighten",
+            BlendMode::ColorBurn => "color_burn",
+            BlendMode::ColorDodge => "color_dodge",
+            BlendMode::LinearBurn => "linear_burn",
+            BlendMode::SoftLight => "soft_light",
+            BlendMode::HardLight => "hard_light",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<BlendMode> {
+        BlendMode::ALL.into_iter().find(|m| m.name() == name)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -708,6 +815,9 @@ pub enum EffectCategory {
     Adjust,
     /// A sound effect on a clip's audio (CapCut's voice filters).
     Audio,
+    /// How the clip is put over what's under it (CapCut's `mix_mode`): `builtin` names the
+    /// [`BlendMode`].
+    Blend,
     Other,
 }
 
@@ -729,6 +839,13 @@ pub struct Effect {
     /// A library text style's layers, for an effect attached to a text clip.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_style: Option<Box<TextEffect>>,
+}
+
+impl Effect {
+    /// The blend mode a blend effect names (`None` for any other effect).
+    pub fn blend_mode(&self) -> Option<BlendMode> {
+        (self.category == EffectCategory::Blend).then(|| self.builtin.as_deref().and_then(BlendMode::from_name)).flatten()
+    }
 }
 
 /// A layered text style (CapCut's library "text styles"): shadows at the back, then
@@ -960,6 +1077,7 @@ pub enum AnyMaterial {
     Animations(Animations),
     Loudness(Loudness),
     Sticker(Sticker),
+    Chroma(Chroma),
     Foreign(Foreign),
 }
 
@@ -981,6 +1099,7 @@ impl AnyMaterial {
             AnyMaterial::Animations(m) => &m.id,
             AnyMaterial::Loudness(m) => &m.id,
             AnyMaterial::Sticker(m) => &m.id,
+            AnyMaterial::Chroma(m) => &m.id,
             AnyMaterial::Foreign(m) => &m.id,
         }
     }
@@ -1009,6 +1128,7 @@ impl Materials {
             AnyMaterial::Animations(m) => put(&mut self.animations, m, index),
             AnyMaterial::Loudness(m) => put(&mut self.loudness, m, index),
             AnyMaterial::Sticker(m) => put(&mut self.stickers, m, index),
+            AnyMaterial::Chroma(m) => put(&mut self.chromas, m, index),
             AnyMaterial::Foreign(m) => put(&mut self.foreign, m, index),
         }
     }
@@ -1037,6 +1157,7 @@ impl Materials {
         take!(animations, Animations);
         take!(loudness, Loudness);
         take!(stickers, Sticker);
+        take!(chromas, Chroma);
         take!(foreign, Foreign);
         None
     }
@@ -1045,6 +1166,23 @@ impl Materials {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blend_modes_by_name_and_fills_that_draw_nothing() {
+        for m in BlendMode::ALL {
+            assert_eq!(BlendMode::from_name(m.name()), Some(m));
+        }
+        assert_eq!(BlendMode::from_name("dissolve"), None);
+        let blend = Effect { id: "b".into(), category: EffectCategory::Blend, name: String::new(), params: BTreeMap::new(), builtin: Some("soft_light".into()), resource: None, library: None, text_style: None };
+        assert_eq!(blend.blend_mode(), Some(BlendMode::SoftLight));
+        assert_eq!(Effect { category: EffectCategory::Adjust, ..blend }.blend_mode(), None);
+        let fill = |fill: CanvasFillKind| CanvasFill { id: "c".into(), fill };
+        assert!(fill(CanvasFillKind::Color { color: Rgba::BLACK }).is_black());
+        assert!(fill(CanvasFillKind::Color { color: Rgba { r: 1.0, g: 0.0, b: 0.0, a: 0.0 } }).is_black());
+        assert!(!fill(CanvasFillKind::Color { color: Rgba { r: 0.0, g: 0.0, b: 0.1, a: 1.0 } }).is_black());
+        assert!(fill(CanvasFillKind::Blur { amount: 0.0 }).is_black() && !fill(CanvasFillKind::Blur { amount: 0.0625 }).is_black());
+        assert!(fill(CanvasFillKind::Image { path: String::new() }).is_black());
+    }
 
     #[test]
     fn identity_and_bezier_curves() {

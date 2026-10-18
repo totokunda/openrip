@@ -10,7 +10,7 @@ use std::path::Path;
 
 pub use openrip_media::load_png;
 use openrip_media::{open_video, Decoder, DecoderOptions, MediaError, ReverseReader, VideoFrame};
-use openrip_model::{Animation, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
+use openrip_model::{Animation, CanvasFillKind, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_platform::assets;
 use openrip_render::text::{self, Align, Font, TextStyle};
 use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError, RgbaImage, Source, Surface, Uploader};
@@ -155,7 +155,25 @@ enum Pixels {
     End,
     /// The transition's groups put together.
     Mix(openrip_render::Mix),
+    /// A main-track clip's own picture covering the canvas and blurred (its canvas fill), the
+    /// blur's taps this many output pixels apart.
+    Backdrop(Backdrop, f32),
 }
+
+/// The picture a blurred canvas fill is made of: the clip's frame (and its turn), or its
+/// still.
+enum Backdrop {
+    Video(VideoFrame, i32),
+    Image(std::sync::Arc<RgbaImage>, u64),
+}
+
+/// How far CapCut's canvas blur reaches at its strongest (`amount` 1): the blur's standard
+/// deviation as a fraction of the canvas's shorter side. Provisional: no local draft blurs
+/// its canvas, so it's judged from the panel's previews of the four levels, not measured.
+const CANVAS_BLUR: f64 = 0.1;
+
+/// The standard deviation of one blur pass (filter.wgsl's `fs_blur` weights), in taps.
+const BLUR_SIGMA_TAPS: f64 = 4.03;
 
 /// The media file a segment plays (for a reversed clip, the copy played backward when it has
 /// one; see `timing`).
@@ -339,6 +357,9 @@ pub struct PreviewEngine {
     following: bool,
     /// The frame is for a preview surface (shown at its size), not an export or a still.
     preview_surface: bool,
+    /// The canvas colour of the frame gathered last: its main-track clip's canvas fill, if
+    /// it's a colour, else black.
+    background: [u8; 3],
 }
 
 impl PreviewEngine {
@@ -374,6 +395,7 @@ impl PreviewEngine {
             last_time: None,
             following: false,
             preview_surface: false,
+            background: [0, 0, 0],
         })
     }
 
@@ -432,7 +454,7 @@ impl PreviewEngine {
         let layers = self.layers(&pixels, t, width, height);
         let t2 = std::time::Instant::now();
         let written = self.compositor.pixels_written();
-        let frame = self.compositor.render(width, height, [0, 0, 0], &layers);
+        let frame = self.compositor.render(width, height, self.background, &layers);
         if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 30 {
             let ms = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1e3;
             let mp = (self.compositor.pixels_written() - written) as f64 / 1e6;
@@ -452,7 +474,7 @@ impl PreviewEngine {
         let layers = self.layers(&pixels, t, w, h);
         let t2 = std::time::Instant::now();
         let written = self.compositor.pixels_written();
-        self.compositor.render_into(target, [0, 0, 0], &layers)?;
+        self.compositor.render_into(target, self.background, &layers)?;
         if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 30 {
             let ms = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1e3;
             let now = std::time::Instant::now();
@@ -478,7 +500,7 @@ impl PreviewEngine {
         self.preview_surface = false;
         let (pixels, report) = self.gather(t, w, h);
         let layers = self.layers(&pixels, t, w, h);
-        self.compositor.render_to_nv12(target, [0, 0, 0], &layers)?;
+        self.compositor.render_to_nv12(target, self.background, &layers)?;
         Ok(report)
     }
 
@@ -573,12 +595,14 @@ impl PreviewEngine {
         }
         let mut report = FrameReport::default();
         let mut out = Vec::new();
+        self.background = [0, 0, 0];
         let active = self.active(t);
         if !self.scrubbing && !self.measure_only {
             self.load_stills_beside(&active);
         }
         for seg in active {
             self.load_exposure_luts(&seg);
+            self.load_clip_lut(&seg, &mut report);
             // A transition at the cut before or after this clip, and what it draws now.
             let cut = crate::transition::transition_at(&self.project, &seg, t).map(|c| (crate::transition::steps(c.transition, c.progress), c.outgoing.clone(), c.incoming.clone()));
             let (steps, clips) = match cut {
@@ -591,25 +615,45 @@ impl PreviewEngine {
             });
             match (mix, clips) {
                 // A transition that mixes the clips draws each into a group of its own, the
-                // other one at this time too (on past its end, or ahead of its start). With
-                // nothing under them they carry the canvas's black, as CapCut's main track
-                // carries its canvas.
+                // other one at this time too (on past its end, or ahead of its start). Main-track
+                // clips carry their canvas fill, as CapCut's main track carries its canvas; with
+                // none, clips with nothing under them carry the canvas's black.
                 (Some(m), Some((outgoing, incoming))) => {
-                    let backdrop = out.is_empty().then_some([0u8, 0, 0]);
+                    let nothing_under = out.is_empty();
                     for (clip, drawn) in [(&outgoing, m.outgoing.is_some()), (&incoming, m.incoming.is_some())] {
                         if !drawn {
                             continue;
                         }
                         if clip.id != seg.id {
                             self.load_exposure_luts(clip);
+                            self.load_clip_lut(clip, &mut report);
                         }
+                        let fill = self.fill_of(clip);
+                        let backdrop = match &fill {
+                            Some(CanvasFillKind::Color { color }) => Some(rgb8(color)),
+                            Some(_) => Some([0, 0, 0]),
+                            None => nothing_under.then_some([0u8, 0, 0]),
+                        };
                         out.push((clip.clone(), Pixels::Begin(backdrop)));
+                        let at = out.len();
                         self.draw(clip, t, w, h, &mut out, &mut report);
+                        if let Some(fill) = fill {
+                            self.insert_fill(clip, &fill, at, w, h, &mut out, &mut report);
+                        }
                         out.push((clip.clone(), Pixels::End));
                     }
                     out.push((seg.clone(), Pixels::Mix(mix_pixels(&m, w, h))));
                 }
-                _ => self.draw(&seg, t, w, h, &mut out, &mut report),
+                _ => {
+                    self.draw(&seg, t, w, h, &mut out, &mut report);
+                    // A main-track clip's canvas fill, under everything: a colour is the
+                    // frame's background; a blur or an image goes first.
+                    match self.fill_of(&seg) {
+                        Some(CanvasFillKind::Color { color }) => self.background = rgb8(&color),
+                        Some(fill) => self.insert_fill(&seg, &fill, 0, w, h, &mut out, &mut report),
+                        None => {}
+                    }
+                }
             }
             // Any other transition works on the canvas over the clip.
             for step in steps {
@@ -649,6 +693,136 @@ impl PreviewEngine {
                 report.missing.push((path, why));
             }
         }
+    }
+
+    /// The canvas fill of a clip on the main track (the lowest video track), unless it's
+    /// black; other clips fill nothing, as in CapCut.
+    fn fill_of(&self, seg: &Segment) -> Option<CanvasFillKind> {
+        let main = self.project.tracks.iter().find(|t| t.kind == TrackKind::Video)?;
+        if !main.segments.iter().any(|s| s.id == seg.id) {
+            return None;
+        }
+        let fill = seg.attachments.iter().find_map(|id| self.project.materials.canvas_fills.iter().find(|c| &c.id == id))?;
+        (!fill.is_black()).then(|| fill.fill.clone())
+    }
+
+    /// Put a main-track clip's blurred picture or image fill into `out` at `at`, under the
+    /// clip just drawn from there on.
+    #[allow(clippy::too_many_arguments)]
+    fn insert_fill(&mut self, seg: &Segment, fill: &CanvasFillKind, at: usize, w: u32, h: u32, out: &mut Vec<(Segment, Pixels)>, report: &mut FrameReport) {
+        let px = match fill {
+            CanvasFillKind::Color { .. } => return,
+            CanvasFillKind::Blur { amount } => {
+                let source = out[at..].iter().find(|(s, _)| s.id == seg.id).and_then(|(_, p)| match p {
+                    Pixels::Video(f, o, _) => f.try_clone().ok().map(|f| Backdrop::Video(f, *o)),
+                    Pixels::Image(img, key, _) => Some(Backdrop::Image(img.clone(), *key)),
+                    _ => None,
+                });
+                let Some(source) = source else { return };
+                // Two rounds of the blur, each with half the variance.
+                let sigma = *amount as f64 * CANVAS_BLUR * w.min(h) as f64;
+                Pixels::Backdrop(source, (sigma / (BLUR_SIGMA_TAPS * std::f64::consts::SQRT_2)) as f32)
+            }
+            CanvasFillKind::Image { path } => {
+                if self.failed.contains_key(path) {
+                    return;
+                }
+                let img = match self.still(path) {
+                    Some(img) => img,
+                    None => match load_still(Path::new(path)) {
+                        Ok(img) => self.keep_still(path, img),
+                        Err(why) => {
+                            self.failed.insert(path.clone(), why.clone());
+                            report.missing.push((path.clone(), why));
+                            return;
+                        }
+                    },
+                };
+                Pixels::Cover(img, still_key(path))
+            }
+        };
+        out.insert(at, (seg.clone(), px));
+    }
+
+    /// A clip's LUT (a filter attached to a video or photo, as CapCut's Adjust › LUT and the
+    /// app's own), read once per file.
+    fn load_clip_lut(&mut self, seg: &Segment, report: &mut FrameReport) {
+        if !self.project.materials.media.iter().any(|m| m.id == seg.material) {
+            return;
+        }
+        let Some(effect) = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Filter)).cloned() else { return };
+        if let Err((path, why)) = self.filter_lut(&effect) {
+            if !report.missing.iter().any(|(p, _)| p == &path) {
+                report.missing.push((path, why));
+            }
+        }
+    }
+
+    /// A filter's lookup table, read once per file: the app's Hald CLUT image (`lut`), a
+    /// `.cube` file (`cube`), or CapCut's table in its bundle.
+    fn filter_lut(&mut self, effect: &openrip_model::Effect) -> Result<std::sync::Arc<Lut3d>, (String, String)> {
+        let Some(bundle) = effect.resource.clone() else { return Err((effect.name.clone(), "the filter has no table".into())) };
+        if let Some(why) = self.failed.get(&bundle) {
+            return Err((bundle.clone(), why.clone()));
+        }
+        if !self.filters.contains_key(&bundle) {
+            let lut = match effect.builtin.as_deref() {
+                Some("lut") => load_still(Path::new(&bundle)).and_then(|img| Lut3d::from_hald(&img, key_of(&bundle)).ok_or_else(|| "not a Hald CLUT image".to_string())),
+                Some("cube") => assets::read_to_string(Path::new(&bundle)).map_err(|e| e.to_string()).and_then(|text| Lut3d::from_cube(&text, key_of(&bundle)).ok_or_else(|| "not a 3D .cube table".to_string())),
+                _ => load_filter(Path::new(&bundle), key_of(&bundle)),
+            };
+            match lut {
+                Ok(lut) => {
+                    self.filters.insert(bundle.clone(), std::sync::Arc::new(lut));
+                }
+                Err(why) => {
+                    self.failed.insert(bundle.clone(), why.clone());
+                    return Err((bundle, why));
+                }
+            }
+        }
+        Ok(self.filters[&bundle].clone())
+    }
+
+    /// The clip's LUT and its strength at local time `local` (with its keyframes), if read.
+    fn lut_of(&self, seg: &Segment, local: Micros) -> Option<(&Lut3d, f32)> {
+        let effect = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Filter))?;
+        let lut = self.filters.get(effect.resource.as_deref()?)?;
+        let strength = seg.effect_at(effect, local).params.get("intensity").copied().unwrap_or(1.0) as f32;
+        Some((lut.as_ref(), strength.clamp(0.0, 1.0)))
+    }
+
+    /// The clip's blend mode (CapCut's `mix_mode`; Normal without one).
+    fn blend_of(&self, seg: &Segment) -> openrip_render::BlendMode {
+        use openrip_model::BlendMode as M;
+        use openrip_render::BlendMode as R;
+        let mode = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id).and_then(|e| e.blend_mode()));
+        match mode.unwrap_or_default() {
+            M::Normal => R::Normal,
+            M::Darken => R::Darken,
+            M::Screen => R::Screen,
+            M::Overlay => R::Overlay,
+            M::Multiply => R::Multiply,
+            M::Lighten => R::Lighten,
+            M::ColorBurn => R::ColorBurn,
+            M::ColorDodge => R::ColorDodge,
+            M::LinearBurn => R::LinearBurn,
+            M::SoftLight => R::SoftLight,
+            M::HardLight => R::HardLight,
+        }
+    }
+
+    /// The clip's chroma key at local time `local` (with its keyframes), if it keys anything.
+    fn chroma_of(&self, seg: &Segment, local: Micros) -> Option<openrip_render::ChromaKey> {
+        let c = seg.attachments.iter().find_map(|id| self.project.materials.chromas.iter().find(|c| &c.id == id))?;
+        let c = seg.chroma_at(c, local);
+        (!c.is_off()).then_some(openrip_render::ChromaKey {
+            color: [c.color.r, c.color.g, c.color.b],
+            intensity: c.intensity.clamp(0.0, 1.0),
+            shadow: c.shadow.clamp(0.0, 1.0),
+            edge_smooth: c.edge_smooth.clamp(0.0, 1.0),
+            spill: c.spill.clamp(0.0, 1.0),
+        })
     }
 
     fn step_pixels(&mut self, step: crate::transition::Step, w: u32) -> Option<Pixels> {
@@ -1031,23 +1205,14 @@ impl PreviewEngine {
             return Ok(Some(Pixels::Shape(layers, at)));
         }
         // A filter track's segment: CapCut's lookup table from the filter's bundle.
-        if let Some(effect) = self.project.materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter) {
-            let strength = seg.effect_at(effect, seg.local_time(t)).params.get("intensity").copied().unwrap_or(1.0) as f32;
-            let Some(bundle) = effect.resource.clone() else { return Ok(None) };
-            if let Some(why) = self.failed.get(&bundle) {
-                return Err((bundle.clone(), why.clone()));
+        if let Some(effect) = self.project.materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter).cloned() {
+            let strength = seg.effect_at(&effect, seg.local_time(t)).params.get("intensity").copied().unwrap_or(1.0) as f32;
+            if effect.resource.is_none() {
+                return Ok(None);
             }
-            if !self.filters.contains_key(&bundle) {
-                // The app's own filters are Hald CLUT images; CapCut's are bundles with a table.
-                let lut = if effect.builtin.as_deref() == Some("lut") {
-                    load_still(Path::new(&bundle)).and_then(|img| Lut3d::from_hald(&img, key_of(&bundle)).ok_or_else(|| "not a Hald CLUT image".to_string()))
-                } else {
-                    load_filter(Path::new(&bundle), key_of(&bundle))
-                }
-                .map_err(|why| (bundle.clone(), why))?;
-                self.filters.insert(bundle.clone(), std::sync::Arc::new(lut));
-            }
-            return Ok(Some(Pixels::Filter(self.filters[&bundle].clone(), strength)));
+            // The app's own filters are Hald CLUT images (or .cube files); CapCut's are
+            // bundles with a table.
+            return Ok(Some(Pixels::Filter(self.filter_lut(&effect)?, strength)));
         }
         // A library sticker: its image, or its GIF's frame now.
         if let Some(sticker) = self.project.materials.stickers.iter().find(|m| m.id == seg.material) {
@@ -1350,66 +1515,45 @@ impl PreviewEngine {
                 let mut layer = match p {
                     Pixels::Image(i, key, mattes) => Layer { mattes: painted(mattes), ..Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot) },
                     Pixels::Video(f, orientation, mattes) => Layer { mattes: painted(mattes), ..Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation) },
-                    Pixels::Filter(lut, strength) => Layer {
-                        source: Source::Filter(lut, *strength),
-                        center: [0.0, 0.0],
-                        size: [1.0, 1.0],
-                        rotation: 0.0,
-                        flip_h: false,
-                        flip_v: false,
-                        opacity: 1.0,
-                        adjust: None,
-                        mattes: Vec::new(),
-                        multiply: false,
-                        app_filters: None,
-                    },
+                    Pixels::Filter(lut, strength) => Layer::pass(Source::Filter(lut, *strength)),
                     // Twice the canvas, so the image's soft edge is off it.
-                    Pixels::Wash(img, key, amount) => Layer {
-                        source: Source::Cached(*key, img),
-                        center: [w as f64 / 2.0, h as f64 / 2.0],
-                        size: [2.0 * w as f64, 2.0 * h as f64],
-                        rotation: 0.0,
-                        flip_h: false,
-                        flip_v: false,
-                        opacity: *amount,
-                        adjust: None,
-                        mattes: Vec::new(),
-                        multiply: false,
-                        app_filters: None,
-                    },
+                    Pixels::Wash(img, key, amount) => Layer { opacity: *amount, ..Layer::placed(Source::Cached(*key, img), [w as f64 / 2.0, h as f64 / 2.0], [2.0 * w as f64, 2.0 * h as f64]) },
                     Pixels::Cover(img, key) => {
                         let fit = (w as f64 / img.width as f64).max(h as f64 / img.height as f64);
-                        Layer {
-                            source: Source::Cached(*key, img),
-                            center: [w as f64 / 2.0, h as f64 / 2.0],
-                            size: [img.width as f64 * fit, img.height as f64 * fit],
-                            rotation: 0.0,
-                            flip_h: false,
-                            flip_v: false,
-                            opacity: 1.0,
-                            adjust: None,
-                        mattes: Vec::new(),
-                        multiply: false,
-                        app_filters: None,
-                        }
+                        Layer::placed(Source::Cached(*key, img), [w as f64 / 2.0, h as f64 / 2.0], [img.width as f64 * fit, img.height as f64 * fit])
                     }
-                    Pixels::Blur(px) => Layer { source: Source::Blur(*px), center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None, mattes: Vec::new(), multiply: false, app_filters: None },
+                    // The main clip's own picture covering the canvas, then blurred (its canvas
+                    // fill): two rounds of the blur, each half the variance.
+                    Pixels::Backdrop(source, step) => {
+                        let src = match source {
+                            Backdrop::Video(f, _) => Source::Video(f),
+                            Backdrop::Image(img, key) => Source::Cached(*key, img),
+                        };
+                        let orientation = match source {
+                            Backdrop::Video(_, o) => *o,
+                            Backdrop::Image(..) => 0,
+                        };
+                        let (sw, sh) = src.size();
+                        let (uw, uh) = if orientation.rem_euclid(180) == 90 { (sh, sw) } else { (sw, sh) };
+                        let cover = (w as f64 / uw as f64).max(h as f64 / uh as f64) / (w as f64 / uw as f64).min(h as f64 / uh as f64);
+                        return vec![
+                            Layer::from_model_oriented(src, [w, h], [0.0, 0.0], [cover, cover], 0.0, orientation),
+                            Layer::pass(Source::Blur(*step)),
+                            Layer::pass(Source::Blur(*step)),
+                        ];
+                    }
+                    Pixels::Blur(px) => Layer::pass(Source::Blur(*px)),
                     Pixels::Shape(layers, at) => {
                         let opacity = seg.opacity.sample(local);
                         return layers
                             .iter()
                             .map(|(img, key, multiply)| Layer {
-                                source: Source::Cached(*key, img),
-                                center: *at,
-                                size: [img.width as f64, img.height as f64],
                                 rotation: rot,
                                 flip_h: tr.flip_h,
                                 flip_v: tr.flip_v,
                                 opacity,
-                                adjust: None,
-                                mattes: Vec::new(),
                                 multiply: *multiply,
-                                app_filters: None,
+                                ..Layer::placed(Source::Cached(*key, img), *at, [img.width as f64, img.height as f64])
                             })
                             .collect();
                     }
@@ -1418,34 +1562,20 @@ impl PreviewEngine {
                     Pixels::Sticker(img, key) => {
                         let [sw, sh] = crate::sticker::size_on_canvas(img.width, img.height, w);
                         Layer {
-                            source: Source::Cached(*key, img),
-                            center: [w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0],
-                            size: [sw * scale[0].abs(), sh * scale[1].abs()],
                             rotation: rot,
                             flip_h: scale[0] < 0.0,
                             flip_v: scale[1] < 0.0,
-                            opacity: 1.0,
-                            adjust: None,
-                            mattes: Vec::new(),
-                            multiply: false,
-                            app_filters: None,
+                            ..Layer::placed(Source::Cached(*key, img), [w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0], [sw * scale[0].abs(), sh * scale[1].abs()])
                         }
                     }
                     Pixels::Text(img, key, at) => {
                         // An animation moves and scales the text's picture.
                         let (k, shift) = motion.map_or((1.0, [0.0, 0.0]), |m| (m.scale, [m.offset[0] * w as f64 / 2.0, -m.offset[1] * h as f64 / 2.0]));
                         Layer {
-                            source: Source::Cached(*key, img),
-                            center: [at[0] + shift[0], at[1] + shift[1]],
-                            size: [img.width as f64 * k, img.height as f64 * k],
                             rotation: rot,
                             flip_h: tr.flip_h,
                             flip_v: tr.flip_v,
-                            opacity: 1.0,
-                            adjust: None,
-                            mattes: Vec::new(),
-                            multiply: false,
-                            app_filters: None,
+                            ..Layer::placed(Source::Cached(*key, img), [at[0] + shift[0], at[1] + shift[1]], [img.width as f64 * k, img.height as f64 * k])
                         }
                     }
                     Pixels::Begin(colour) => Layer::pass(Source::BeginGroup(*colour)),
@@ -1464,11 +1594,22 @@ impl PreviewEngine {
                     let tex_scale = if sideways { scale[0] } else { scale[1] };
                     layer.app_filters = self.app_filters_of(seg, layer.source.size().1, layer.size[1] / tex_scale.abs().max(1e-9), h, t);
                     layer.adjust = self.adjust_of(seg, t);
+                    layer.chroma = self.chroma_of(seg, local);
+                    layer.lut = self.lut_of(seg, local);
+                }
+                if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Text(..) | Pixels::Sticker(..)) {
+                    layer.blend = self.blend_of(seg);
                 }
                 vec![layer]
             })
             .collect()
     }
+}
+
+/// A colour as 8-bit RGB over black (a canvas fill's).
+fn rgb8(c: &openrip_model::Rgba) -> [u8; 3] {
+    let a = c.a.clamp(0.0, 1.0);
+    [c.r, c.g, c.b].map(|v| (v.clamp(0.0, 1.0) * a * 255.0).round() as u8)
 }
 
 /// A transition's mix in output pixels: each clip's move, scale and turn about the canvas
