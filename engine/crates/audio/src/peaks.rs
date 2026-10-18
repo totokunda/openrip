@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::{AudioDecoder, AudioError, CHANNELS, RATE};
+use crate::{open_audio, AudioError, CHANNELS, RATE};
 
 /// Per bucket of `1 / per_second` s, of the mono mix (the mean of the channels): the largest
 /// absolute sample and the RMS, both 0..1 (above 1 if the file clips).
@@ -20,7 +20,7 @@ pub fn peaks(path: &Path, per_second: u32) -> Result<Option<Peaks>, AudioError> 
     if per_second == 0 || RATE % per_second != 0 {
         return Err(AudioError::Other(format!("{per_second} buckets per second doesn't divide {RATE}")));
     }
-    let Some(mut d) = AudioDecoder::open(path, RATE)? else { return Ok(None) };
+    let Some(mut d) = open_audio(path, RATE)? else { return Ok(None) };
     let bucket = (RATE / per_second) as usize;
     let mut out = Peaks { per_second, peak: Vec::new(), rms: Vec::new() };
     // Read a second at a time.

@@ -8,61 +8,9 @@ use crate::error::check;
 use crate::info::video_info;
 use crate::nal;
 use crate::util::{Input, MICROS};
-use crate::{MediaError, Micros, VideoFrame, VideoInfo};
-
-/// Whether to decode on the GPU.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-pub enum HardwareMode {
-    /// Hardware when the platform and codec support it, software otherwise.
-    #[default]
-    Auto,
-    /// Always decode in software.
-    Off,
-    /// Fail rather than fall back to software.
-    Require,
-}
-
-#[derive(Clone, Debug)]
-pub struct DecoderOptions {
-    pub hardware: HardwareMode,
-    /// Software decoding threads; 0 picks automatically.
-    pub threads: u32,
-    /// Drive VideoToolbox directly for H.264/HEVC in MP4/MOV, instead of through FFmpeg's
-    /// hwaccel: several frames in flight instead of one, and frames a seek only needs as
-    /// references are never output. Several times faster; on by default.
-    pub native_videotoolbox: bool,
-    /// Memory for recently decoded frames (so stepping backward doesn't re-decode a GOP
-    /// per frame). 0 disables the cache.
-    pub cache_bytes: usize,
-    /// Smaller pictures for stand-ins shown small (scrubbing): when non-zero, pictures are
-    /// shrunk by the largest whole factor that keeps their long side at least this many
-    /// pixels. VideoToolbox scales them as it decodes; only the native VideoToolbox path
-    /// does this, other frames come at the stream's size.
-    pub shrink_to: u32,
-}
-
-impl Default for DecoderOptions {
-    fn default() -> Self {
-        DecoderOptions { hardware: HardwareMode::Auto, threads: 0, native_videotoolbox: true, cache_bytes: 384 << 20, shrink_to: 0 }
-    }
-}
-
-/// Counters for benchmarks and diagnostics.
-#[derive(Copy, Clone, Debug, Default)]
-pub struct DecodeStats {
-    /// Pictures decoded, including ones only needed as references while seeking.
-    pub frames_decoded: u64,
-    /// Demuxer seeks performed.
-    pub seeks: u64,
-    /// Packets the decoder rejected (skipped).
-    pub decode_errors: u64,
-    /// Hardware sessions restarted after seeking to an open-GOP keyframe.
-    pub sessions_reset: u64,
-    /// Requests answered from the frame cache.
-    pub cache_hits: u64,
-    /// Pictures nothing references, skipped (not decoded) on the way to a seek target.
-    pub skipped_disposable: u64,
-}
+use crate::backend::{Decoder, VideoBackend, VideoSource};
+use crate::still::StillBackend;
+use crate::{DecodeStats, DecoderOptions, HardwareMode, MediaError, Micros, RgbaImage, VideoFrame, VideoInfo};
 
 /// Frames worth decoding forward rather than seeking (a seek flushes and refills the decoder).
 const SEEK_COST_FRAMES: i64 = 8;
@@ -822,6 +770,82 @@ impl VideoDecoder {
                 }
             }
         }
+    }
+}
+
+/// FFmpeg's demuxers and decoders, with VideoToolbox on Apple platforms: the built-in video
+/// backend.
+pub(crate) struct Ffmpeg;
+
+impl VideoBackend for Ffmpeg {
+    fn name(&self) -> &'static str {
+        "ffmpeg"
+    }
+
+    fn open(&self, path: &Path, opts: &DecoderOptions) -> Result<Decoder, MediaError> {
+        Ok(Box::new(VideoDecoder::open(path, opts)?))
+    }
+}
+
+impl StillBackend for Ffmpeg {
+    /// The stream's first picture, decoded in software.
+    fn decode(&self, path: &Path) -> Option<Result<RgbaImage, String>> {
+        let decode = || -> Result<RgbaImage, String> {
+            let mut d = VideoDecoder::open(path, &DecoderOptions { hardware: HardwareMode::Off, ..Default::default() }).map_err(|e| e.to_string())?;
+            let rgb = d.next_frame().map_err(|e| e.to_string())?.ok_or("no picture")?.to_rgb().map_err(|e| e.to_string())?;
+            Ok(RgbaImage { width: rgb.width, height: rgb.height, data: rgb.data.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect() })
+        };
+        Some(decode())
+    }
+}
+
+impl VideoSource for VideoDecoder {
+    fn info(&self) -> &VideoInfo {
+        VideoDecoder::info(self)
+    }
+
+    fn hardware(&self) -> bool {
+        VideoDecoder::hardware(self)
+    }
+
+    fn quick_keyframes(&self) -> bool {
+        self.native_videotoolbox()
+    }
+
+    fn stats(&self) -> DecodeStats {
+        VideoDecoder::stats(self)
+    }
+
+    fn next_frame(&mut self) -> Result<Option<VideoFrame>, MediaError> {
+        VideoDecoder::next_frame(self)
+    }
+
+    fn frame_at(&mut self, t: Micros) -> Result<Option<VideoFrame>, MediaError> {
+        VideoDecoder::frame_at(self, t)
+    }
+
+    fn frame_near(&self, t: Micros, tolerance: Micros) -> Option<(VideoFrame, bool)> {
+        VideoDecoder::frame_near(self, t, tolerance)
+    }
+
+    fn keyframe_at(&mut self, t: Micros) -> Result<Option<VideoFrame>, MediaError> {
+        VideoDecoder::keyframe_at(self, t)
+    }
+
+    fn keyframe_time(&self, t: Micros) -> Option<Micros> {
+        VideoDecoder::keyframe_time(self, t)
+    }
+
+    fn keyframe_times(&self) -> Vec<Micros> {
+        VideoDecoder::keyframe_times(self)
+    }
+
+    fn position(&self) -> (Option<Micros>, Micros) {
+        VideoDecoder::position(self)
+    }
+
+    fn reachable_without_seek(&self, t: Micros) -> bool {
+        VideoDecoder::reachable_without_seek(self, t)
     }
 }
 

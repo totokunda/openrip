@@ -8,7 +8,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use openrip_media::{DecoderOptions, MediaError, VideoDecoder, VideoFrame};
+pub use openrip_media::load_png;
+use openrip_media::{open_video, Decoder, DecoderOptions, MediaError, VideoFrame};
 use openrip_model::{Animation, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_platform::assets;
 use openrip_render::text::{self, Align, Font, TextStyle};
@@ -42,7 +43,7 @@ struct PrefetchJob {
 
 enum Prefetched {
     /// Segment, media path, decoder.
-    Decoder(String, String, Box<VideoDecoder>),
+    Decoder(String, String, Decoder),
     Still(String, RgbaImage),
     /// The job's key (segment or still path): it failed, and the render thread will find out
     /// why itself.
@@ -76,10 +77,10 @@ impl Prefetcher {
                         Err(_) => Prefetched::Failed(job.path),
                     }
                 } else {
-                    let opened = VideoDecoder::open(Path::new(&job.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() });
+                    let opened = open_video(Path::new(&job.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() });
                     // Decode the first frame now (it stays in the decoder's cache).
                     match opened.map(|mut d| d.frame_at(job.at).is_ok().then_some(d)) {
-                        Ok(Some(d)) => Prefetched::Decoder(job.segment, job.path, Box::new(d)),
+                        Ok(Some(d)) => Prefetched::Decoder(job.segment, job.path, d),
                         _ => Prefetched::Failed(job.segment),
                     }
                 };
@@ -259,7 +260,7 @@ pub(crate) fn still_key(path: &str) -> u64 {
 }
 
 struct OpenDecoder {
-    decoder: VideoDecoder,
+    decoder: Decoder,
     last_used: u64,
 }
 
@@ -456,7 +457,7 @@ impl PreviewEngine {
                 // The project may have been edited since: keep it only if the clip still
                 // plays that file.
                 if self.media_path(&segment).as_deref() == Some(path.as_str()) {
-                    self.decoders.entry(segment).or_insert(OpenDecoder { decoder: *decoder, last_used: self.tick });
+                    self.decoders.entry(segment).or_insert(OpenDecoder { decoder, last_used: self.tick });
                 }
             }
             Prefetched::Still(path, img) => {
@@ -1011,7 +1012,7 @@ impl PreviewEngine {
         let key = seg.id.clone();
         self.await_prefetch(&key);
         if !self.decoders.contains_key(&key) {
-            let decoder = VideoDecoder::open(Path::new(&media.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() }).map_err(|e| fail(&e))?;
+            let decoder = open_video(Path::new(&media.path), &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() }).map_err(|e| fail(&e))?;
             self.decoders.insert(key.clone(), OpenDecoder { decoder, last_used: 0 });
         }
         let d = self.decoders.get_mut(&key).unwrap();
@@ -1027,7 +1028,7 @@ impl PreviewEngine {
         let near_ahead = pos.is_some_and(|p| at >= p && at.0 - p.0 <= 3 * step.0);
         let frame = if self.scrubbing && !near_ahead && !d.decoder.frame_near(at, Micros::ZERO).is_some_and(|(_, exact)| exact) {
             // The keyframe's stand-in, if the workers got it ready (see `ScrubAhead`).
-            self.scrub.learn_index(&media.path, || crate::scrub::stand_in_keys(&d.decoder));
+            self.scrub.learn_index(&media.path, || crate::scrub::stand_in_keys(d.decoder.as_ref()));
             match d.decoder.frame_near(at, Micros(500_000)) {
                 Some((f, _)) => Some(f),
                 None => match d.decoder.keyframe_time(at).and_then(|k| self.scrub.keyframe(&media.path, k)) {
@@ -1307,14 +1308,9 @@ fn load_filter(bundle: &Path, key: u64) -> Result<Lut3d, String> {
     Lut3d::from_vf(&assets::read(file).map_err(|e| e.to_string())?, key).ok_or_else(|| format!("unreadable lookup table {}", file.display()))
 }
 
-/// Decode a still image: PNG directly (keeps alpha), anything else through FFmpeg.
+/// Decode a still image: PNG directly (keeps alpha), anything else through a still backend.
 pub(crate) fn load_still(path: &Path) -> Result<RgbaImage, String> {
-    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) {
-        return load_png(path).map_err(|e| e.to_string());
-    }
-    let mut d = VideoDecoder::open(path, &DecoderOptions { hardware: openrip_media::HardwareMode::Off, ..Default::default() }).map_err(|e| e.to_string())?;
-    let rgb = d.next_frame().map_err(|e| e.to_string())?.ok_or("no picture")?.to_rgb().map_err(|e| e.to_string())?;
-    Ok(RgbaImage { width: rgb.width, height: rgb.height, data: rgb.data.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect() })
+    openrip_media::decode_still(path)
 }
 
 /// A font file for a family name: an installed font whose file is named after it (e.g.
@@ -1370,25 +1366,4 @@ fn shift_hsb([r, g, b]: [f32; 3], hue: f32, saturation: f32, brightness: f32) ->
     };
     let m = v - c;
     [r + m, g + m, b + m]
-}
-
-pub fn load_png(path: &Path) -> Result<RgbaImage, Box<dyn std::error::Error>> {
-    let mut dec = png::Decoder::new(std::io::BufReader::new(assets::open(path)?));
-    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = dec.read_info()?;
-    let mut buf = vec![0; reader.output_buffer_size().ok_or("png too large")?];
-    let info = reader.next_frame(&mut buf)?;
-    let px = &buf[..info.buffer_size()];
-    let data = match info.color_type {
-        // Already RGBA: keep the buffer (a 4K still is 33 MB to copy).
-        png::ColorType::Rgba => {
-            buf.truncate(info.buffer_size());
-            buf
-        }
-        png::ColorType::Rgb => px.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
-        png::ColorType::GrayscaleAlpha => px.chunks_exact(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect(),
-        png::ColorType::Grayscale => px.iter().flat_map(|&g| [g, g, g, 255]).collect(),
-        png::ColorType::Indexed => return Err("indexed png after EXPAND".into()),
-    };
-    Ok(RgbaImage { width: info.width, height: info.height, data })
 }

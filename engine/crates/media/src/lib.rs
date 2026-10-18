@@ -11,21 +11,25 @@
 //! Frames are [`VideoFrame`]s of `openrip-frame`, which the compositor takes without
 //! depending on this crate; FFmpeg's and VideoToolbox's buffers are their pixels here.
 
+mod backend;
 mod cache;
 mod decode;
 mod error;
 mod frame;
 mod info;
 mod nal;
+mod still;
 mod util;
 #[cfg(target_os = "macos")]
 mod vt;
 
-pub use decode::{DecodeStats, DecoderOptions, HardwareMode, VideoDecoder};
+pub use backend::{add_video_backend, open_video, video_backends, DecodeStats, Decoder, DecoderOptions, HardwareMode, VideoBackend, VideoSource};
+pub use decode::VideoDecoder;
 pub use error::MediaError;
 pub use openrip_frame::{FrameError, FramePixels, Matrix, PixelFormat, RgbImage, RgbaImage, Transfer, VideoFrame};
 pub use info::{probe, AudioInfo, ColorInfo, MediaInfo, VideoInfo};
 pub use openrip_model::{FrameRate, Micros};
+pub use still::{add_still_backend, decode_still, load_png, StillBackend};
 
 /// Start the platform's hardware decoder in the background. The first VideoToolbox session
 /// in a process costs ~80 ms (later ones ~2 ms), so call this at engine start to keep it off

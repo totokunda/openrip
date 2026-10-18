@@ -12,6 +12,7 @@
 mod decode;
 pub mod fx;
 mod peaks;
+mod source;
 mod tempo;
 
 use std::collections::HashMap;
@@ -21,6 +22,7 @@ use openrip_model::{AudioFade, EffectCategory, MediaKind, Micros, Project, Segme
 
 pub use decode::AudioDecoder;
 pub use peaks::{peaks, Peaks};
+pub use source::{add_audio_backend, open_audio, AudioBackend, AudioSource};
 
 /// The mixer's default rate (playback); export uses CapCut's 44.1 kHz.
 pub const RATE: u32 = 48_000;
@@ -90,7 +92,7 @@ pub struct Mixer {
     stretches: HashMap<String, Stretch>,
     reversed: HashMap<String, ReverseWindow>,
     /// One decoder per clip; `None` once a clip turned out to have no usable audio.
-    decoders: HashMap<String, Option<AudioDecoder>>,
+    decoders: HashMap<String, Option<Box<dyn AudioSource>>>,
     /// Voice filters by clip; `None` when a clip's filter couldn't be loaded.
     voices: HashMap<String, Option<Voice>>,
     /// The output limiter's gain, and the sample it continues at (a jump resets it).
@@ -144,7 +146,7 @@ impl Mixer {
             }
             let path = media.path.clone();
             if !self.decoders.contains_key(&seg.id) {
-                let d = match AudioDecoder::open(Path::new(&path), self.rate) {
+                let d = match open_audio(Path::new(&path), self.rate) {
                     Ok(d) => d,
                     Err(_) => {
                         report.missing.push(path.clone());
@@ -158,9 +160,9 @@ impl Mixer {
             let (from, to) = (start.max(s0), end.min(s1));
             let n = (to - from) as usize;
             let local = from - s0;
-            let fetched = match self.voice_of(&seg, local, &mut decoder, &mut report) {
+            let fetched = match self.voice_of(&seg, local, decoder.as_mut(), &mut report) {
                 // The filter runs `latency` samples ahead: feed it from where it's got to.
-                Some(at) => self.clip_samples(&seg, &mut decoder, at, n).map(|mut block| {
+                Some(at) => self.clip_samples(&seg, decoder.as_mut(), at, n).map(|mut block| {
                         if let Some(Some(voice)) = self.voices.get_mut(&seg.id) {
                             voice.chain.process(&mut block);
                             voice.next_feed += n as i64;
@@ -168,7 +170,7 @@ impl Mixer {
                         }
                         block
                     }),
-                None => self.clip_samples(&seg, &mut decoder, local, n),
+                None => self.clip_samples(&seg, decoder.as_mut(), local, n),
             };
             self.decoders.insert(seg.id.clone(), Some(decoder));
             let samples = fetched?;
@@ -223,7 +225,7 @@ impl Mixer {
     }
     /// A clip's sound for `n` samples from clip-local sample `local`, speed and direction
     /// applied (interleaved stereo).
-    fn clip_samples(&mut self, seg: &Segment, decoder: &mut AudioDecoder, local: i64, n: usize) -> Result<Vec<f32>, AudioError> {
+    fn clip_samples(&mut self, seg: &Segment, decoder: &mut dyn AudioSource, local: i64, n: usize) -> Result<Vec<f32>, AudioError> {
         let rate = self.rate;
         let source_start = seg.source.map_or(0, |s| sample_at(s.start, rate));
         let speed = if seg.speed > 0.0 { seg.speed } else { 1.0 };
@@ -296,7 +298,7 @@ impl Mixer {
 
     /// The clip's voice filter, ready for the block at clip-local `local`: where its input
     /// for that block starts, or `None` for a clip without one (or whose filter can't load).
-    fn voice_of(&mut self, seg: &Segment, local: i64, decoder: &mut AudioDecoder, report: &mut MixReport) -> Option<i64> {
+    fn voice_of(&mut self, seg: &Segment, local: i64, decoder: &mut dyn AudioSource, report: &mut MixReport) -> Option<i64> {
         let effect = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Audio))?.clone();
         let continuous = matches!(self.voices.get(&seg.id), Some(Some(v)) if v.next_out == local);
         if !continuous {

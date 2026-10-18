@@ -4,6 +4,7 @@ use std::path::Path;
 
 use ffmpeg_sys_next as ff;
 
+use crate::source::{AudioBackend, AudioSource};
 use crate::{AudioError, CHANNELS};
 
 fn check(op: &'static str, code: i32) -> Result<i32, AudioError> {
@@ -37,6 +38,25 @@ pub struct AudioDecoder {
 }
 
 unsafe impl Send for AudioDecoder {}
+
+/// FFmpeg's demuxers and decoders: the built-in audio backend.
+pub(crate) struct Ffmpeg;
+
+impl AudioBackend for Ffmpeg {
+    fn open(&self, path: &Path, rate: u32) -> Result<Option<Box<dyn AudioSource>>, AudioError> {
+        Ok(AudioDecoder::open(path, rate)?.map(|d| Box::new(d) as Box<dyn AudioSource>))
+    }
+}
+
+impl AudioSource for AudioDecoder {
+    fn read(&mut self, at: i64, out: &mut [f32]) -> Result<(), AudioError> {
+        AudioDecoder::read(self, at, out)
+    }
+
+    fn end(&self) -> Option<i64> {
+        AudioDecoder::end(self)
+    }
+}
 
 impl AudioDecoder {
     /// `None` if the file has no audio stream.

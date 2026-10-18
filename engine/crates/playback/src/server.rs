@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use openrip_media::{DecoderOptions, MediaError, Micros, VideoDecoder, VideoFrame};
+use openrip_media::{open_video, Decoder, DecoderOptions, MediaError, Micros, VideoFrame, VideoSource};
 use openrip_platform::tasks::{self, Task};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -73,7 +73,7 @@ impl FrameServer {
     /// Open `path` (errors are reported here) and start its worker. `deliver` runs on the
     /// worker thread for every request that wasn't superseded.
     pub fn open(path: &Path, opts: &DecoderOptions, deliver: impl Fn(Delivered) + Send + 'static) -> Result<Self, MediaError> {
-        let decoder = VideoDecoder::open(path, opts)?;
+        let decoder = open_video(path, opts)?;
         let shared = Arc::new(Shared { slot: Mutex::new(Slot::default()), cond: Condvar::new() });
         let worker = {
             let shared = shared.clone();
@@ -119,7 +119,7 @@ impl Drop for FrameServer {
     }
 }
 
-fn run(mut decoder: VideoDecoder, shared: &Shared, deliver: impl Fn(Delivered)) {
+fn run(mut decoder: Decoder, shared: &Shared, deliver: impl Fn(Delivered)) {
     loop {
         let req = {
             let mut slot = shared.slot.lock().unwrap();
@@ -136,7 +136,7 @@ fn run(mut decoder: VideoDecoder, shared: &Shared, deliver: impl Fn(Delivered)) 
                 slot = shared.cond.wait(slot).unwrap();
             }
         };
-        let result = serve(&mut decoder, &req);
+        let result = serve(decoder.as_mut(), &req);
         {
             let mut slot = shared.slot.lock().unwrap();
             match &result {
@@ -149,8 +149,8 @@ fn run(mut decoder: VideoDecoder, shared: &Shared, deliver: impl Fn(Delivered)) 
     }
 }
 
-fn serve(decoder: &mut VideoDecoder, req: &Request) -> Result<(VideoFrame, Quality), MediaError> {
-    let exact = |d: &mut VideoDecoder| -> Result<(VideoFrame, Quality), MediaError> {
+fn serve(decoder: &mut dyn VideoSource, req: &Request) -> Result<(VideoFrame, Quality), MediaError> {
+    let exact = |d: &mut dyn VideoSource| -> Result<(VideoFrame, Quality), MediaError> {
         let f = d.frame_at(req.time)?.ok_or_else(|| MediaError::Ffmpeg { op: "frame_at", code: -1, msg: "stream has no frames".into() })?;
         Ok((f, Quality::Exact))
     };

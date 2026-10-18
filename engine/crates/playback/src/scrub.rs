@@ -22,7 +22,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use openrip_media::{DecoderOptions, PixelFormat, VideoDecoder, VideoFrame};
+use openrip_media::{open_video, Decoder, DecoderOptions, PixelFormat, VideoFrame, VideoSource};
 use openrip_model::{MediaKind, Micros, Project, TrackKind};
 use openrip_render::{RgbaImage, Uploader};
 
@@ -469,7 +469,7 @@ impl Drop for ScrubAhead {
 /// A worker: takes jobs off the queue until told to quit.
 fn work(shared: &Shared, ready: &Sender<Ready>, uploader: Option<&Uploader>) {
     // (path, size, decoder), most recently used last.
-    let mut decoders: Vec<(String, u32, VideoDecoder)> = Vec::new();
+    let mut decoders: Vec<(String, u32, Decoder)> = Vec::new();
     loop {
         let job = {
             let mut q = shared.queue.lock().unwrap();
@@ -485,7 +485,7 @@ fn work(shared: &Shared, ready: &Sender<Ready>, uploader: Option<&Uploader>) {
             }
         };
         let out = match &job {
-            Job::Index { path, size } => Ready::Index(path.clone(), decoder(&mut decoders, path, *size).map(|d| stand_in_keys(d)).filter(|k| !k.is_empty()).map(Arc::new)),
+            Job::Index { path, size } => Ready::Index(path.clone(), decoder(&mut decoders, path, *size).map(|d| stand_in_keys(d.as_ref())).filter(|k| !k.is_empty()).map(Arc::new)),
             Job::Keyframe { path, at, seek, size } => Ready::Keyframe(
                 path.clone(),
                 *at,
@@ -526,11 +526,11 @@ fn work(shared: &Shared, ready: &Sender<Ready>, uploader: Option<&Uploader>) {
     }
 }
 
-/// The keyframes worth getting ready for a video: all of them when VideoToolbox decodes it
-/// natively (small, quick stand-ins), none otherwise (software-decoded frames come at full
-/// size; ProRes, intra-only, would plan every frame).
-pub(crate) fn stand_in_keys(d: &VideoDecoder) -> Vec<Micros> {
-    if d.native_videotoolbox() {
+/// The keyframes worth getting ready for a video: all of them when its keyframes come quickly
+/// and small (VideoToolbox decoding it natively), none otherwise (software-decoded frames
+/// come at full size; ProRes, intra-only, would plan every frame).
+pub(crate) fn stand_in_keys(d: &dyn VideoSource) -> Vec<Micros> {
+    if d.quick_keyframes() {
         d.keyframe_times()
     } else {
         Vec::new()
@@ -539,14 +539,14 @@ pub(crate) fn stand_in_keys(d: &VideoDecoder) -> Vec<Micros> {
 
 /// A worker's decoder for `path` at `size`, opened if need be (closing the least recently
 /// used beyond `WORKER_DECODERS`).
-fn decoder<'a>(decoders: &'a mut Vec<(String, u32, VideoDecoder)>, path: &str, size: u32) -> Option<&'a mut VideoDecoder> {
+fn decoder<'a>(decoders: &'a mut Vec<(String, u32, Decoder)>, path: &str, size: u32) -> Option<&'a mut Decoder> {
     match decoders.iter().position(|(p, s, _)| p == path && *s == size) {
         Some(i) => {
             let d = decoders.remove(i);
             decoders.push(d);
         }
         None => {
-            let d = VideoDecoder::open(Path::new(path), &DecoderOptions { cache_bytes: 0, shrink_to: size, ..Default::default() }).ok()?;
+            let d = open_video(Path::new(path), &DecoderOptions { cache_bytes: 0, shrink_to: size, ..Default::default() }).ok()?;
             if decoders.len() >= WORKER_DECODERS {
                 decoders.remove(0);
             }

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use openrip_media::{DecoderOptions, Micros, VideoDecoder, VideoFrame};
+use openrip_media::{open_video, Decoder, DecoderOptions, Micros, VideoFrame, VideoSource};
 use openrip_render::{Compositor, Layer, RgbaImage, Source};
 
 use crate::preview::{load_png, load_still};
@@ -43,7 +43,7 @@ pub enum Pass {
 }
 
 struct Open {
-    decoder: VideoDecoder,
+    decoder: Decoder,
     last_used: u64,
 }
 
@@ -95,7 +95,7 @@ impl Thumbnailer {
         self.tick += 1;
         let tick = self.tick;
         if !self.decoders.contains_key(path) {
-            let decoder = VideoDecoder::open(path, &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() })?;
+            let decoder = open_video(path, &DecoderOptions { cache_bytes: DECODER_CACHE, ..Default::default() })?;
             self.decoders.insert(path.to_path_buf(), Open { decoder, last_used: tick });
             while self.decoders.len() > MAX_DECODERS {
                 let oldest = self.decoders.iter().min_by_key(|(_, o)| o.last_used).map(|(k, _)| k.clone()).unwrap();
@@ -104,12 +104,12 @@ impl Thumbnailer {
         }
         let mut open = self.decoders.remove(path).unwrap();
         open.last_used = tick;
-        let result = self.decode(&mut open.decoder, &todo, height, pass, disk.as_deref(), &mut deliver);
+        let result = self.decode(open.decoder.as_mut(), &todo, height, pass, disk.as_deref(), &mut deliver);
         self.decoders.insert(path.to_path_buf(), open);
         result
     }
 
-    fn decode(&mut self, d: &mut VideoDecoder, todo: &[(usize, Micros)], height: u32, pass: Pass, disk: Option<&Path>, deliver: &mut impl FnMut(Thumb) -> bool) -> Result<(), PreviewError> {
+    fn decode(&mut self, d: &mut dyn VideoSource, todo: &[(usize, Micros)], height: u32, pass: Pass, disk: Option<&Path>, deliver: &mut impl FnMut(Thumb) -> bool) -> Result<(), PreviewError> {
         let rotation = d.info().rotation;
         let mut order = todo.to_vec();
         order.sort_by_key(|&(_, t)| t);
@@ -198,7 +198,7 @@ fn box_down(img: &RgbaImage, k: u32) -> RgbaImage {
 }
 
 /// Whether `frame` (a keyframe) is the frame shown at `t`: `t` falls before the next frame.
-fn shows(frame: &VideoFrame, d: &VideoDecoder, t: Micros) -> bool {
+fn shows(frame: &VideoFrame, d: &dyn VideoSource, t: Micros) -> bool {
     let step = d.info().frame_rate.map_or(Micros(33_333), |r| r.frame_duration());
     t >= frame.time && t.0 < frame.time.0 + step.0
 }

@@ -8,6 +8,9 @@ pub enum MediaError {
     NoVideoStream { path: PathBuf },
     #[error("no decoder for codec {0}")]
     NoDecoder(String),
+    /// A backend can't take this asset (another may).
+    #[error("{path}: {msg}")]
+    Unsupported { path: PathBuf, msg: String },
     #[error("{op} failed: {msg} ({code})")]
     Ffmpeg { op: &'static str, code: i32, msg: String },
     /// A frame from another backend failed.

@@ -1258,6 +1258,7 @@ dependencies = [
  "openrip-frame",
  "openrip-model",
  "openrip-platform",
+ "png",
  "serde",
  "thiserror 2.0.21",
 ]
