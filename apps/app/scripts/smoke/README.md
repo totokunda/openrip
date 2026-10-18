@@ -66,6 +66,13 @@ CAPCUT_DRAFT=… node session.mjs ../.. out/cc out/ud-cc x capcut perf
 - `freezeui` (case `freeze`): the toolbar's transform tools (Freeze at the playhead on the main track, off on a still; Reverse and back; Mirror) and the clip menu's Edit › Reverse and Freeze.
 - `keysui` (case `keys`, dev server): diamonds on the selected clip's bar at its keys, a click to the playhead, a drag moving the keys, the right-click menu's ease and Delete keyframe.
 
+## Motion tracking and slow-mo
+
+Both run on `~/Downloads/IMG_9079.MOV` (4K ProRes, 24 fps; `CLIP_NAME=IMG_9079`), in the built app (no dev server), with `OPENRIP_ENGINE_MUTE=1`.
+
+- `tracking` (after `import timeline newtext`): the text's tabs and its Tracking tab as CapCut's (the checkbox, None and Motion tracking, Direction, Scale, Distance, Rotation, Start); the text made green, Scale and Distance off; the region dragged onto the man's face and sized from a corner; Start with its progress, the position keys saved and undone and redone as one step; the engine's frames: the green text where its keys put it, and the face, found by block matching in the frames independently of the tracker, moving as the text does; None and ⌘Z; then a rectangle mask set on the face (its Transform fields), Mask ▸ Track mask's Direction, Hide and Track: the mask's poses saved and undoable, and the engine drawing the clip inside the mask where they put it.
+- `slowmo` (after `import timeline`): Speed ▸ Smooth slow-mo greyed at 1× with CapCut's note; 0.25×; frame by frame held frames repeat without it and none with it (a made frame lies between its neighbours), ⌘Z / ⇧⌘Z; Frame blending under its arrow; frames drawn a second while playing (also in `out/…/slowmo-playback.txt`); Video ▸ Basic ▸ Optical flow and Apply to all; an export whose frames ffmpeg reads, none a repeat of the one before.
+
 ## Animation tab
 
 `node anim-suite.mjs ../.. /path/to/IMG_9019.MOV [case...]` runs every case below, each on a fresh profile under `out/anim/`, and prints the checks. The CapCut cases take their drafts from `DRAFT_*` variables (what each needs is in the suite's header) and are skipped without them.
