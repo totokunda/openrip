@@ -359,7 +359,8 @@ pub struct Mask {
     /// Degrees, clockwise.
     #[serde(default)]
     pub rotation: f32,
-    /// CapCut's feather, 0 to 1.
+    /// CapCut's feather, 0 to 1: a soft edge in the mask's own units (its size), as CapCut's
+    /// shape draws it; the app's shapes soften the same way (docs/parity/masks.md).
     #[serde(default)]
     pub feather: f32,
     #[serde(default)]
@@ -368,16 +369,17 @@ pub struct Mask {
     pub inside: MaskPaint,
     #[serde(default = "MaskPaint::clear")]
     pub outside: MaskPaint,
-    /// Poses held from a time on (the app's mask keyframes), in order; before the first,
-    /// the shape and place above.
+    /// Poses over time (the app's mask keyframes), in order, the first being the shape and
+    /// place above. Before the first the first applies, after the last the last; between two
+    /// of the same shape the place, size, turn (and a lasso's points) travel by the first's
+    /// easing, else the first holds.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<MaskKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library: Option<LibraryRef>,
 }
 
-/// A mask's shape and place from `at` (time in the clip's source; for stills, in the clip)
-/// until the next key.
+/// A mask's shape and place at `at` (time in the clip's source; for stills, in the clip).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MaskKey {
     pub at: Micros,
@@ -386,6 +388,9 @@ pub struct MaskKey {
     pub size: [f32; 2],
     #[serde(default)]
     pub rotation: f32,
+    /// How the pose travels to the next key's.
+    #[serde(default)]
+    pub ease: crate::animated::Easing,
 }
 
 /// What one side of a mask shows.
@@ -431,8 +436,27 @@ pub enum MaskShape {
     /// CapCut's mirror: a band along a line through the centre, as tall as the box (its
     /// width doesn't apply).
     Mirror,
-    /// A shape not drawn yet, by CapCut's name for it (`circle`, `linear`, `heart`, …).
+    /// A shape drawn from a picture in the source app's bundle (CapCut's heart and star,
+    /// `pentagram`): a distance field whose 0.5 level is the outline, spanning 1.7 times the
+    /// box (so the shape fills it). `path` is the picture (`…/image/mask.png`); without it the
+    /// clip shows whole.
+    Picture { name: String, path: String },
+    /// The app's brush: strokes painted over the picture, round-ended, each `width` across
+    /// (a fraction of the picture's height), points in fractions of its width and height
+    /// from its top-left; an erasing stroke takes away what's under it. `center`, `size`
+    /// and `rotation` don't apply.
+    Brush { strokes: Vec<BrushStroke> },
+    /// A shape not drawn yet, by CapCut's name for it (`contour`, …).
     Other { name: String },
+}
+
+/// One stroke of the app's brush mask.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BrushStroke {
+    pub points: Vec<[f32; 2]>,
+    pub width: f32,
+    #[serde(default)]
+    pub erase: bool,
 }
 
 /// A vector graphic: shapes and drawings. Drawn in a box of its own units, `scale`d on each

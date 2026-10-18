@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use openrip_model::{CurvePoint, Project, Segment};
+use openrip_model::{CurvePoint, Micros, Project, Segment};
 use openrip_platform::assets;
 use openrip_render::{Curves, Hsl, RgbaImage};
 
@@ -28,12 +28,13 @@ pub fn fade_table(bundle: &Path) -> Option<RgbaImage> {
     ((info.width, info.height) == (289, 17)).then_some(RgbaImage { width: info.width, height: info.height, data })
 }
 
-/// The clip's HSL ranges: CapCut keeps one material per range (`range` 1–8 its named ones,
-/// 9 a colour picked with the eyedropper, up to ten).
-pub fn hsl_of(project: &Project, seg: &Segment) -> Hsl {
+/// The clip's HSL ranges at local time `t` (with their keyframes): CapCut keeps one material
+/// per range (`range` 1–8 its named ones, 9 a colour picked with the eyedropper, up to ten).
+pub fn hsl_of(project: &Project, seg: &Segment, t: Micros) -> Hsl {
     let mut hsl = Hsl::default();
     let mut picked = 0;
     for h in seg.attachments.iter().filter_map(|id| project.materials.hsl.iter().find(|h| &h.id == id)) {
+        let h = seg.hsl_at(h, t);
         let shift = [h.hue, h.saturation, h.lightness];
         match (h.range, h.custom_color) {
             (1..=8, _) => hsl.ranges[h.range as usize - 1] = shift,
@@ -81,6 +82,7 @@ mod tests {
             opacity: Animated::constant(1.0),
             volume: Animated::constant(1.0),
             attachments: vec![MaterialId("cu".into())],
+            keyframes: Vec::new(),
         };
         (p, seg)
     }
@@ -113,7 +115,7 @@ mod tests {
         let range = |id: &str, range: u8, custom: Option<&str>, h: f32, s: f32, l: f32| HslAdjust { id: MaterialId(id.into()), range, custom_color: custom.and_then(Rgba::from_hex), hue: h, saturation: s, lightness: l };
         p.materials.hsl.extend([range("h1", 2, None, 10.0, 0.0, -5.0), range("h2", 9, Some("#937d49"), 20.0, 21.0, 25.0), range("h3", 9, Some("#1149ff"), 0.0, 0.0, -3.0)]);
         seg.attachments.extend(["h1", "h2", "h3"].map(MaterialId::from));
-        let hsl = hsl_of(&p, &seg);
+        let hsl = hsl_of(&p, &seg, Micros::ZERO);
         assert_eq!(hsl.ranges[1], [10.0, 0.0, -5.0]);
         assert_eq!(hsl.ranges[0], [0.0; 3]);
         assert_eq!(hsl.picked[0].1, [20.0, 21.0, 25.0]);

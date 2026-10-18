@@ -290,6 +290,8 @@ pub struct PreviewEngine {
     scrub: crate::scrub::ScrubAhead,
     /// Background-removal masks by file, with the tick they were last used.
     mattes: HashMap<String, (std::sync::Arc<RgbaImage>, u64)>,
+    /// Picture masks' distance fields by path (`None` if unreadable).
+    mask_fields: HashMap<String, Option<std::sync::Arc<crate::mask::Field>>>,
     /// The frame times each background-removal folder has masks for.
     matte_times: HashMap<String, std::sync::Arc<Vec<i64>>>,
     /// CapCut's exposure tables by colour-bundle path (`None` if they couldn't be read).
@@ -328,6 +330,7 @@ impl PreviewEngine {
             scrub: crate::scrub::ScrubAhead::new(Some(uploader.clone())),
             measure_only: false,
             mattes: HashMap::new(),
+            mask_fields: HashMap::new(),
             matte_times: HashMap::new(),
             exposure_luts: HashMap::new(),
             filters: HashMap::new(),
@@ -600,14 +603,15 @@ impl PreviewEngine {
         })
     }
 
-    /// The clip's Adjust sliders (CapCut's colour adjustments), if any.
     /// The app's own filters on a clip, its working canvas scaled to a picture `tex_h` pixels
     /// tall shown `fit_h` output pixels tall (before its scale) on a canvas `canvas_h` tall.
     fn app_filters_of(&self, seg: &Segment, tex_h: u32, fit_h: f64, canvas_h: u32, t: Micros) -> Option<openrip_render::AppFilters> {
         let mut f = openrip_render::AppFilters::default();
         // The app's world is 600 units tall (the importer says so on each effect).
         let mut pixel = 1.0 / 600.0;
+        let local = seg.local_time(t);
         for e in seg.attachments.iter().filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Adjust)) {
+            let e = &seg.effect_at(e, local);
             let Some(name) = e.builtin.as_deref().and_then(|b| b.strip_prefix("v1:")) else { continue };
             let v = e.params.get("value").copied().unwrap_or(0.0) as f32;
             let slot = match name {
@@ -635,11 +639,13 @@ impl PreviewEngine {
         Some(f)
     }
 
-    fn adjust_of(&self, seg: &Segment) -> Option<(Adjust, Option<&ExposureLuts>)> {
+    /// The clip's Adjust sliders and colour materials at time `t` (with their keyframes).
+    fn adjust_of(&self, seg: &Segment, t: Micros) -> Option<(Adjust, Option<&ExposureLuts>)> {
         let mut a = Adjust::default();
         let mut bundle = None;
+        let local = seg.local_time(t);
         for e in seg.attachments.iter().filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Adjust)) {
-            let v = e.params.get("intensity").copied().unwrap_or(0.0) as f32;
+            let v = seg.effect_at(e, local).params.get("intensity").copied().unwrap_or(0.0) as f32;
             let slot = match e.builtin.as_deref() {
                 Some("brightness") => &mut a.brightness,
                 Some("contrast") => &mut a.contrast,
@@ -662,10 +668,11 @@ impl PreviewEngine {
         }
         // Primary colour wheels (log wheels aren't drawn yet).
         if let Some(w) = seg.attachments.iter().find_map(|id| self.project.materials.color_wheels.iter().find(|w| &w.id == id && !w.log)) {
+            let w = &seg.wheels_at(w, local);
             let wheel = |v: &openrip_model::WheelValue| openrip_render::Wheel { red: v.red as f32, green: v.green as f32, blue: v.blue as f32, luma: v.luma as f32, saturation: v.saturation as f32 };
             a.wheels = openrip_render::Wheels { lift: wheel(&w.lift), gamma: wheel(&w.gamma), gain: wheel(&w.gain), offset: wheel(&w.offset), intensity: w.intensity as f32 };
         }
-        a.hsl = crate::colour::hsl_of(&self.project, seg);
+        a.hsl = crate::colour::hsl_of(&self.project, seg, local);
         a.curves = crate::colour::curves_of(&self.project, seg);
         if a.is_identity() {
             return None;
@@ -748,7 +755,8 @@ impl PreviewEngine {
     }
 
     fn pixels(&mut self, seg: &Segment, t: Micros, w: u32, h: u32) -> Result<Option<Pixels>, (String, String)> {
-        if let Some(text) = self.project.materials.texts.iter().find(|m| m.id == seg.material).cloned() {
+        if let Some(text) = self.project.materials.texts.iter().find(|m| m.id == seg.material) {
+            let text = seg.text_at(text, seg.local_time(t));
             let Some(run) = text.runs.first() else { return Ok(None) };
             let path = if !run.font.path.is_empty() && assets::exists(Path::new(&run.font.path)) {
                 run.font.path.clone()
@@ -950,7 +958,7 @@ impl PreviewEngine {
         }
         // A filter track's segment: CapCut's lookup table from the filter's bundle.
         if let Some(effect) = self.project.materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter) {
-            let strength = effect.params.get("intensity").copied().unwrap_or(1.0) as f32;
+            let strength = seg.effect_at(effect, seg.local_time(t)).params.get("intensity").copied().unwrap_or(1.0) as f32;
             let Some(bundle) = effect.resource.clone() else { return Ok(None) };
             if let Some(why) = self.failed.get(&bundle) {
                 return Err((bundle.clone(), why.clone()));
@@ -997,7 +1005,7 @@ impl PreviewEngine {
                         small
                     }
                 };
-                let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), None);
+                let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), seg.local_time(t), None);
                 return Ok(Some(Pixels::Image(img, key_of(("scrub", &media.path)), mattes)));
             }
             self.await_prefetch(&media.path);
@@ -1014,7 +1022,7 @@ impl PreviewEngine {
                     None => self.keep_still(&media.path, load_still(Path::new(&media.path)).map_err(|e| fail(&e))?),
                 },
             };
-            let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), None);
+            let mattes = self.masked(seg, (img.width, img.height), 0, seg.local_time(t), seg.local_time(t), None);
             return Ok(Some(Pixels::Image(img, still_key(&media.path), mattes)));
         }
         let key = seg.id.clone();
@@ -1061,16 +1069,16 @@ impl PreviewEngine {
         let Some(frame) = frame else { return Ok(None) };
         let cutout = media.matte.as_deref().and_then(|dir| self.matte_at(dir, frame.time, orientation));
         let upright = if orientation.rem_euclid(180) == 90 { (frame.height(), frame.width()) } else { (frame.width(), frame.height()) };
-        let mattes = self.masked(seg, upright, orientation, at, cutout);
+        let mattes = self.masked(seg, upright, orientation, at, seg.local_time(t), cutout);
         Ok(Some(Pixels::Video(frame, orientation, mattes)))
     }
 
-    /// The clip's cut-out (if it has one) and masks at `at` (time in its source) over its
-    /// upright picture of `size`, in the stored picture's axes, each with what it shows
-    /// inside and outside.
-    fn masked(&mut self, seg: &Segment, size: (u32, u32), orientation: i32, at: Micros, cutout: Option<std::sync::Arc<RgbaImage>>) -> Vec<Painted> {
+    /// The clip's cut-out (if it has one) and masks at `at` (time in its source; `local` in the
+    /// segment, for keyframes) over its upright picture of `size`, in the stored picture's
+    /// axes, each with what it shows inside and outside.
+    fn masked(&mut self, seg: &Segment, size: (u32, u32), orientation: i32, at: Micros, local: Micros, cutout: Option<std::sync::Arc<RgbaImage>>) -> Vec<Painted> {
         let mut out: Vec<Painted> = cutout.into_iter().map(|c| (c, None, Some([0.0; 4]))).collect();
-        let masks: Vec<openrip_model::Mask> = self.project.materials.masks.iter().filter(|m| seg.attachments.contains(&m.id)).cloned().collect();
+        let masks: Vec<openrip_model::Mask> = self.project.materials.masks.iter().filter(|m| seg.attachments.contains(&m.id)).map(|m| seg.mask_at(m, local)).collect();
         // At the picture's size, up to 2048 pixels on its long side.
         let k = (2048.0 / size.0.max(size.1).max(1) as f64).min(1.0);
         let (w, h) = (((size.0 as f64 * k).round() as u32).max(1), ((size.1 as f64 * k).round() as u32).max(1));
@@ -1088,7 +1096,8 @@ impl PreviewEngine {
                 }
                 // Shapes not drawn yet leave the picture as it is.
                 None => {
-                    let Some(c) = crate::mask::coverage(m, at, w, h) else { continue };
+                    let field = self.mask_field(&m.shape);
+                    let Some(c) = crate::mask::coverage(m, at, w, h, field.as_deref()) else { continue };
                     let img = std::sync::Arc::new(turn_to_stored(&c, w, h, orientation));
                     self.mattes.insert(key, (img.clone(), tick));
                     img
@@ -1097,6 +1106,15 @@ impl PreviewEngine {
             out.push((image, paint(m.inside), paint(m.outside)));
         }
         out
+    }
+
+    /// A picture mask's distance field (CapCut's heart and star), read from its bundle once.
+    fn mask_field(&mut self, shape: &openrip_model::MaskShape) -> Option<std::sync::Arc<crate::mask::Field>> {
+        let openrip_model::MaskShape::Picture { path, .. } = shape else { return None };
+        self.mask_fields
+            .entry(path.clone())
+            .or_insert_with(|| load_png(Path::new(path)).ok().map(|img| std::sync::Arc::new(crate::mask::Field::from_rgba(img.width, img.height, &img.data))))
+            .clone()
     }
 
     /// The saved background-removal mask for the source frame at `at` (the last one at or
@@ -1297,7 +1315,7 @@ impl PreviewEngine {
                     let sideways = matches!(p, Pixels::Video(_, o, _) if o.rem_euclid(180) == 90);
                     let tex_scale = if sideways { scale[0] } else { scale[1] };
                     layer.app_filters = self.app_filters_of(seg, layer.source.size().1, layer.size[1] / tex_scale.abs().max(1e-9), h, t);
-                    layer.adjust = self.adjust_of(seg);
+                    layer.adjust = self.adjust_of(seg, t);
                 }
                 vec![layer]
             })

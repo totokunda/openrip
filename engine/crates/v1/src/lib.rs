@@ -11,7 +11,10 @@
 //! - **Audio.** v1 volume is dB; the model stores linear gain. Fades become materials.
 //! - **Tracks.** v1 lists tracks top row first; the model lists them bottom first.
 //!
-//! AI clips (`model`) are dropped; masks are reported until the model supports them.
+//! - **Keyframes.** A clip's `keyframes` (clip-local frames, values in its fields' units) become
+//!   the segment's keys in µs and model units (`keys.rs`).
+//!
+//! AI clips (`model`) are dropped.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -25,6 +28,7 @@ const APP: &str = "openrip-v1";
 pub(crate) const WORLD_H: f64 = 600.0;
 
 mod app;
+mod keys;
 pub use app::{relaid_texts, to_app_project};
 
 #[derive(Debug, thiserror::Error)]
@@ -312,9 +316,11 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
             }
         }
         // A clip converted from a CapCut draft (or any model project) carries its segment.
+        let canvas = project.canvas;
         let converted = match clip.get("engine").filter(|e| e.get("segment").is_some()) {
-            Some(engine) => engine_segment(clip, engine, &ty, &clock, &world, &mut project.materials, &mut report),
-            None => convert_clip(clip, &ty, &clock, &world, &mut project.materials, &mut report).map(|seg| {
+            Some(engine) => engine_segment(clip, engine, &ty, &clock, &world, canvas, &mut project.materials, &mut report),
+            None => convert_clip(clip, &ty, &clock, &world, &mut project.materials, &mut report).map(|mut seg| {
+                keys::apply(&mut seg, clip, None, clock.fps.as_f64(), &world, canvas, &mut project.materials);
                 let kind = match ty.as_str() {
                     "video" | "image" => TrackKind::Video,
                     "audio" => TrackKind::Audio,
@@ -419,7 +425,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
 /// A clip the app opened from a converted project (`app.rs`): its own segment and materials,
 /// with whatever the app changed since applied on top (timing, a move, resize or turn,
 /// opacity, volume, the text and its style, and the other panel fields `app.rs` writes).
-fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: &World, materials: &mut Materials, report: &mut ImportReport) -> Option<(Segment, TrackKind)> {
+fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: &World, canvas: Canvas, materials: &mut Materials, report: &mut ImportReport) -> Option<(Segment, TrackKind)> {
     let Ok(mut seg) = serde_json::from_value::<Segment>(engine.get("segment")?.clone()) else {
         report.warnings.push("a converted clip's segment couldn't be read; skipped".into());
         return None;
@@ -454,6 +460,7 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
         if target.duration.0 <= 0 {
             return None;
         }
+        let (was_start, was_source, was_speed) = (seg.target.start, seg.source, seg.speed);
         if seg.source.is_some() {
             let speed = f(clip, "speed", seg.speed).clamp(0.1, 100.0);
             let trim_start = clock.frame(clip, "trimStartTick", "trimStart").max(0);
@@ -461,6 +468,18 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
             seg.speed = speed;
         }
         seg.target = target;
+        // Keys stay on the media (on the clip's content for clips without media) through a
+        // trim or a new speed; the app moves the ones it shows itself (below).
+        match (was_source, seg.source) {
+            (Some(a), Some(b)) => {
+                let (old, new) = (was_speed, seg.speed);
+                keys::retime(&mut seg, |t| Micros(((t.0 as f64 * old + (a.start.0 - b.start.0) as f64) / new).round() as i64), old / new);
+            }
+            _ => {
+                let moved = target.start - was_start;
+                keys::retime(&mut seg, |t| t - moved, 1.0);
+            }
+        }
     }
     if changed("volume") {
         seg.volume = Animated::constant(10f64.powf(f(clip, "volume", 0.0) / 20.0) as f32);
@@ -518,6 +537,16 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
     }
     if ty == "text" && (["text", "fontSize", "color"].into_iter().any(changed) || app::TEXT_STYLE_KEYS.into_iter().any(differs)) {
         edit_text(&mut seg, clip, &base, materials);
+    }
+    // The app's keyframes for the properties it changed (on top of the draft's, which stay
+    // for the rest).
+    let props = |v: &Value| v.get("keyframes").and_then(Value::as_object).cloned().unwrap_or_default();
+    let (now, was) = (props(clip), props(&base));
+    let mut edited: Vec<String> = now.keys().chain(was.keys()).filter(|k| !same(now.get(*k), was.get(*k))).cloned().collect();
+    edited.sort();
+    edited.dedup();
+    if !edited.is_empty() {
+        keys::apply(&mut seg, clip, Some(&edited), clock.fps.as_f64(), world, canvas, materials);
     }
     Some((seg, kind))
 }
@@ -790,6 +819,7 @@ fn convert_clip(
         opacity: Animated::constant(opacity),
         volume,
         attachments,
+        keyframes: Vec::new(),
     })
 }
 
@@ -966,16 +996,17 @@ fn fit_animations(seg: &mut Segment, from: Micros, materials: &mut Materials) {
     }
 }
 
-/// The app's masks on a video or image clip (`components/preview/mask`), each keyframe's
-/// shape or lasso held until the next. Shapes and lasso points are in world units from the
-/// clip's top-left, at the scale the clip had when the mask was drawn (the mask's own
-/// `transform`), so they become fractions of the clip's box at that scale. A rectangle turns
-/// about its top-left corner, the other shapes about their centre.
+/// The app's masks on a video or image clip (`components/preview/mask`). Shapes, lassos and
+/// brush strokes are in world units from the clip's top-left, at the scale the clip had when
+/// the mask was drawn (the mask's own `transform`), so they become fractions of the clip's box
+/// at that scale. A rectangle turns about its top-left corner, the other shapes about their
+/// centre. Each keyframe travels to the next of the same shape by its `ease` (as the clip
+/// keyframes', `keys.rs`; linear without one), else holds.
 ///
 /// Each side shows the clip or a colour, as the app's WebGL canvas leaves it: the colour
 /// times its opacity, at the opacity squared (it blends the alpha too). Only the first mask
-/// paints outside itself. Crops, and the feather and invert the app stores but doesn't use,
-/// are left out.
+/// paints outside itself. The feather (`featherAmount`, 0–100 as CapCut's slider) softens the
+/// edge as CapCut's shapes do, and `inverted` swaps inside and out. Crops are left out.
 fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) -> Vec<Mask> {
     let t = clip.get("transform").cloned().unwrap_or(Value::Null);
     let (cw, ch) = (f(&t, "width", 0.0), f(&t, "height", 0.0));
@@ -996,7 +1027,7 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
     let mut out = Vec::new();
     for (index, m) in masks.iter().enumerate() {
         let tool = s(m, "tool");
-        if tool != "shape" && tool != "lasso" {
+        if !matches!(tool.as_str(), "shape" | "lasso" | "draw") {
             continue;
         }
         let mt = [m.get("transform"), clip.get("originalTransform"), clip.get("transform")].into_iter().flatten().find(|v| v.is_object()).cloned().unwrap_or(Value::Null);
@@ -1004,8 +1035,30 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
         let mut frames: Vec<(f64, &Value)> = m.get("keyframes").and_then(Value::as_object).into_iter().flatten().filter_map(|(k, v)| Some((k.parse::<f64>().ok()?, v))).collect();
         frames.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut keys: Vec<MaskKey> = Vec::new();
+        let mut eases: Vec<Value> = Vec::new();
         for (frame, data) in frames {
             let at = Micros::from_secs_f64(frame / fps);
+            let ease = data.get("ease").cloned().unwrap_or(Value::Null);
+            if tool == "draw" {
+                // Brush strokes: points and width in world units at the mask's scale.
+                let strokes: Vec<BrushStroke> = data
+                    .get("brushStrokes")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|st| {
+                        let pts: Vec<f64> = st.get("points")?.as_array()?.iter().filter_map(Value::as_f64).collect();
+                        let points: Vec<[f32; 2]> = pts.chunks_exact(2).map(|p| [(p[0] / bw) as f32, (p[1] / bh) as f32]).collect();
+                        (!points.is_empty()).then(|| BrushStroke { points, width: (f(st, "size", 10.0) / bh) as f32, erase: b(st, "erase") })
+                    })
+                    .collect();
+                if strokes.is_empty() {
+                    continue;
+                }
+                keys.push(MaskKey { at, shape: MaskShape::Brush { strokes }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, ease: Easing::Linear });
+                eases.push(ease);
+                continue;
+            }
             if tool == "lasso" {
                 let Some(pts) = data.get("lassoPoints").and_then(Value::as_array) else {
                     if data.get("lassoPointsBinPath").is_some() {
@@ -1014,7 +1067,8 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
                     continue;
                 };
                 let points: Vec<[f32; 2]> = pts.iter().filter_map(Value::as_f64).collect::<Vec<_>>().chunks_exact(2).map(|p| [(p[0] / bw) as f32, (p[1] / bh) as f32]).collect();
-                keys.push(MaskKey { at, shape: MaskShape::Polygon { points }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0 });
+                keys.push(MaskKey { at, shape: MaskShape::Polygon { points }, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, ease: Easing::Linear });
+                eases.push(ease);
                 continue;
             }
             let Some(b) = data.get("shapeBounds").filter(|b| b.is_object()) else { continue };
@@ -1040,24 +1094,31 @@ fn convert_masks(id: &str, clip: &Value, fps: f64, report: &mut ImportReport) ->
                 center: [(cx / bw * 2.0 - 1.0) as f32, (1.0 - cy / bh * 2.0) as f32],
                 size: [(w / bw) as f32, (h / bh) as f32],
                 rotation: rotation as f32,
+                ease: Easing::Linear,
             });
+            eases.push(ease);
         }
         if keys.is_empty() {
             continue;
         }
-        // Before the first key the mask takes the first key's shape.
-        let first = keys.remove(0);
+        // Each key's easing over the span to the next.
+        for i in 0..keys.len().saturating_sub(1) {
+            let span = (keys[i + 1].at.0 - keys[i].at.0) as f64;
+            keys[i].ease = keys::progress_ease(&eases[i], span, fps);
+        }
+        // The mask's own shape and place are its first key's (all its keys are kept).
+        let first = keys[0].clone();
         out.push(Mask {
             id: MaterialId(format!("{id}-mask{index}")),
             shape: first.shape,
             center: first.center,
             size: first.size,
             rotation: first.rotation,
-            feather: 0.0,
-            invert: false,
+            feather: (f(m, "featherAmount", 0.0) / 100.0).clamp(0.0, 1.0) as f32,
+            invert: b(m, "inverted"),
             inside: paint(m.get("maskColorEnabled").and_then(Value::as_bool).unwrap_or(false), &s(m, "maskColor"), "#ffffff", f(m, "maskOpacity", 100.0)),
             outside: paint(index == 0 && m.get("backgroundColorEnabled").and_then(Value::as_bool).unwrap_or(false), &s(m, "backgroundColor"), "#000000", f(m, "backgroundOpacity", 100.0)),
-            keys,
+            keys: if keys.len() > 1 { keys } else { Vec::new() },
             library: None,
         });
     }
@@ -1367,7 +1428,7 @@ mod tests {
     }
 
     #[test]
-    fn masks_become_fractions_of_the_clip_with_held_keys() {
+    fn masks_become_fractions_of_the_clip_with_their_keys() {
         let mut d = doc();
         let clip = &mut d["timeline"]["clips"][0];
         clip["masks"] = json!([
@@ -1387,7 +1448,7 @@ mod tests {
         assert_eq!(m.shape, MaskShape::Rectangle { round_corner: 0.0 });
         let close = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5;
         assert!(close(m.center, [-0.90625, 0.5]) && close(m.size, [0.1875, 1.0 / 6.0]), "{m:?}");
-        assert_eq!((m.keys.len(), m.keys[0].at, m.keys[0].shape.clone()), (1, Micros(1_000_000), MaskShape::Ellipse));
+        assert_eq!((m.keys.len(), m.keys[1].at, m.keys[1].shape.clone(), m.keys[0].ease), (2, Micros(1_000_000), MaskShape::Ellipse, Easing::Linear));
         assert_eq!(m.inside, MaskPaint::Color(Rgba { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }));
         assert_eq!(m.outside, MaskPaint::Color(Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.25 }));
         // Only the first mask paints outside itself.

@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 pub mod amg;
+mod keyframes;
 
 use openrip_model::*;
 use openrip_platform::assets;
@@ -219,6 +220,7 @@ pub fn import_draft_json(doc: &Value, name_hint: &str) -> Result<Imported, Impor
                         }
                     }
                 }
+                keyframes::apply(seg, &mut segment, kind, &mut project.materials, &mut report);
                 if !free_layers {
                     segment.render_index = seg
                         .get("track_render_index")
@@ -264,9 +266,7 @@ fn import_segment(seg: &Value, report: &mut ImportReport) -> Option<Segment> {
         transform.flip_v = b(&flip, "vertical", false);
         opacity = Animated::constant(f(c, "alpha", 1.0) as f32);
     }
-    let mut volume = Animated::constant(f(seg, "volume", 1.0) as f32);
-
-    apply_keyframes(seg, &mut transform, &mut opacity, &mut volume, report);
+    let volume = Animated::constant(f(seg, "volume", 1.0) as f32);
 
     Some(Segment {
         id: s(seg, "id"),
@@ -288,89 +288,21 @@ fn import_segment(seg: &Value, report: &mut ImportReport) -> Option<Segment> {
             .filter_map(Value::as_str)
             .map(MaterialId::from)
             .collect(),
+        keyframes: Vec::new(),
     })
 }
 
-/// CapCut stores keyframes per property (`KFTypePositionX`, …) with times
-/// relative to the segment start and a single value each.
-fn apply_keyframes(
-    seg: &Value,
-    transform: &mut Transform,
-    opacity: &mut Animated<f32>,
-    volume: &mut Animated<f32>,
-    report: &mut ImportReport,
-) {
-    let mut channels: BTreeMap<String, Vec<Keyframe<f64>>> = BTreeMap::new();
-    for prop in arr(seg, "common_keyframes") {
-        let ty = s(prop, "property_type");
-        for k in arr(prop, "keyframe_list") {
-            let curve = s(k, "curveType");
-            bump(&mut report.curve_types, if curve.is_empty() { "(none)".into() } else { curve.clone() });
-            let value = k.get("values").and_then(|v| v.get(0)).and_then(Value::as_f64).unwrap_or(0.0);
-            // TODO: map non-linear curve types to Easing::Bezier once CapCut's
-            // left/right control-point space is verified against exports.
-            channels.entry(ty.clone()).or_default().push(Keyframe {
-                at: Micros(i(k, "time_offset")),
-                value,
-                ease: Easing::Linear,
-            });
-        }
-    }
-    let to_anim = |keys: &[Keyframe<f64>], fallback: f64| {
-        let mut a = Animated::constant(fallback);
-        for k in keys {
-            a.set_key(k.clone());
-        }
-        a
-    };
-    let mut take = |name: &str| channels.remove(name);
-    let (px, py) = (take("KFTypePositionX"), take("KFTypePositionY"));
-    if px.is_some() || py.is_some() {
-        let base = transform.position.value;
-        let ax = to_anim(px.as_deref().unwrap_or(&[]), base.x);
-        let ay = to_anim(py.as_deref().unwrap_or(&[]), base.y);
-        transform.position = merge_vec2(&ax, &ay);
-    }
-    let (sx, sy) = (take("KFTypeScaleX"), take("KFTypeScaleY"));
-    if sx.is_some() || sy.is_some() {
-        let base = transform.scale.value;
-        let ax = to_anim(sx.as_deref().unwrap_or(&[]), base.x);
-        // CapCut often keyframes uniform scale on X only.
-        let ay = match sy.as_deref() {
-            Some(k) => to_anim(k, base.y),
-            None => ax.clone(),
-        };
-        transform.scale = merge_vec2(&ax, &ay);
-    }
-    if let Some(k) = take("KFTypeRotation") {
-        transform.rotation = to_anim(&k, transform.rotation.value);
-    }
-    if let Some(k) = take("KFTypeGlobalAlpha") {
-        *opacity = to_f32(&to_anim(&k, opacity.value as f64));
-    }
-    if let Some(k) = take("KFTypeVolume") {
-        *volume = to_f32(&to_anim(&k, volume.value as f64));
-    }
-    for (name, keys) in channels {
-        *report.unmapped_keyframes.entry(name).or_insert(0) += keys.len();
-    }
-}
-
-fn merge_vec2(x: &Animated<f64>, y: &Animated<f64>) -> Animated<Vec2> {
-    let mut times: Vec<Micros> = x.keys.iter().chain(y.keys.iter()).map(|k| k.at).collect();
-    times.sort();
-    times.dedup();
-    let mut out = Animated::constant(Vec2::new(x.value, y.value));
-    for t in times {
-        out.set_key(Keyframe { at: t, value: Vec2::new(x.sample(t), y.sample(t)), ease: Easing::Linear });
-    }
-    out
-}
-
-fn to_f32(a: &Animated<f64>) -> Animated<f32> {
-    Animated {
-        value: a.value as f32,
-        keys: a.keys.iter().map(|k| Keyframe { at: k.at, value: k.value as f32, ease: k.ease }).collect(),
+/// A track kind's name, for the report.
+fn kind_label(kind: TrackKind) -> &'static str {
+    match kind {
+        TrackKind::Video => "video",
+        TrackKind::Audio => "audio",
+        TrackKind::Text => "text",
+        TrackKind::Sticker => "sticker",
+        TrackKind::Effect => "effect",
+        TrackKind::Filter => "filter",
+        TrackKind::Adjustment => "adjustment",
+        TrackKind::Graphic => "graphic",
     }
 }
 
@@ -574,6 +506,20 @@ fn sticker_file(bundle: &Path) -> Option<(String, bool, u32, u32)> {
     Some((path.to_string_lossy().into_owned(), animated, i(&info, "singleWidth").max(0) as u32, i(&info, "singleHeight").max(0) as u32))
 }
 
+/// The shape picture of a mask bundle that draws one (CapCut's heart and star; the heart's
+/// effect is `lumi_heart_mask`): `amazingfeature/image/mask.png`, read by an effect whose
+/// mask shader decodes it as a distance field (its `/ 701.0`). `None` when the bundle isn't
+/// on this machine or draws its shape otherwise.
+fn mask_picture(bundle: &Path) -> Option<String> {
+    let feature = bundle.join("amazingfeature");
+    let picture = feature.join("image").join("mask.png");
+    if !assets::is_file(&picture) {
+        return None;
+    }
+    let decodes = |effect: &Path| assets::read_to_string(&effect.join("xshader").join("mask.frag")).is_ok_and(|frag| frag.contains("701.0"));
+    assets::list(&feature.join("effects")).ok()?.iter().any(|e| decodes(e)).then(|| picture.to_string_lossy().into_owned())
+}
+
 fn library_ref(m: &Value) -> LibraryRef {
     let resource = [s(m, "resource_id"), s(m, "effect_id"), s(m, "third_resource_id")]
         .into_iter()
@@ -703,6 +649,9 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         MaskShape::Linear
                     } else if is(&["mirror"], "1068046513") {
                         MaskShape::Mirror
+                    } else if let Some(picture) = mask_picture(Path::new(&path)) {
+                        // The heart and the star (`pentagram`): a distance field in the bundle.
+                        MaskShape::Picture { name: if ty.is_empty() { name.clone() } else { ty.clone() }, path: picture }
                     } else {
                         MaskShape::Other { name: ty }
                     };
@@ -1070,14 +1019,15 @@ mod tests {
                     "target_timerange": {"start": 0, "duration": 2_000_000},
                     "clip": {"alpha": 0.8, "rotation": 15.0, "scale": {"x": 1.2, "y": 1.2}, "transform": {"x": 0.25, "y": -0.5}, "flip": {"horizontal": true, "vertical": false}},
                     "extra_material_refs": ["S1", "C1", "F1"],
+                    // In source time (the media from 1 s, at 2×).
                     "common_keyframes": [
                         {"property_type": "KFTypeGlobalAlpha", "keyframe_list": [
-                            {"time_offset": 0, "values": [0.0], "curveType": "Line"},
-                            {"time_offset": 1_000_000, "values": [1.0], "curveType": "Line"}]},
+                            {"time_offset": 1_000_000, "values": [0.0], "curveType": "Line"},
+                            {"time_offset": 3_000_000, "values": [1.0], "curveType": "Line"}]},
                         {"property_type": "KFTypePositionX", "keyframe_list": [
-                            {"time_offset": 0, "values": [-1.0], "curveType": "Line"},
-                            {"time_offset": 2_000_000, "values": [1.0], "curveType": "Line"}]},
-                        {"property_type": "KFTypeSaturation", "keyframe_list": [{"time_offset": 0, "values": [0.3]}]}
+                            {"time_offset": 1_000_000, "values": [-1.0], "curveType": "Line"},
+                            {"time_offset": 5_000_000, "values": [1.0], "curveType": "Line"}]},
+                        {"property_type": "KFTypeChromaIntensity", "keyframe_list": [{"time_offset": 0, "values": [0.3]}]}
                     ]
                 }]},
                 {"id": "TR2", "type": "text", "attribute": 0, "segments": [{
@@ -1107,7 +1057,7 @@ mod tests {
         assert_eq!(seg.opacity.sample(Micros(500_000)), 0.5);
         let p = seg.transform.position.sample(Micros(1_000_000));
         assert!((p.x - 0.0).abs() < 1e-9 && (p.y + 0.5).abs() < 1e-9);
-        assert_eq!(report.unmapped_keyframes.get("KFTypeSaturation"), Some(&1));
+        assert_eq!(report.unmapped_keyframes.get("KFTypeChromaIntensity"), Some(&1));
         assert_eq!(seg.attachments.len(), 3);
 
         // Text styling
@@ -1308,6 +1258,24 @@ mod tests {
             let want = [MaskShape::Circle, MaskShape::Linear, MaskShape::Mirror, MaskShape::Other { name: "heart".into() }];
             assert_eq!(shape, want[k]);
         }
+    }
+
+    /// A heart or star mask draws the picture in its bundle; without the bundle it's kept
+    /// undrawn.
+    #[test]
+    fn a_heart_or_star_mask_takes_its_bundles_picture() {
+        let bundle = std::env::temp_dir().join(format!("openrip-heart-{}", std::process::id()));
+        std::fs::create_dir_all(bundle.join("amazingfeature/effects/lumi_heart_mask/xshader")).unwrap();
+        std::fs::create_dir_all(bundle.join("amazingfeature/image")).unwrap();
+        std::fs::write(bundle.join("amazingfeature/effects/lumi_heart_mask/xshader/mask.frag"), "float alpha = (col.r * 4.0 * 256.0 + col.g * 255.0) / 701.0;").unwrap();
+        std::fs::write(bundle.join("amazingfeature/image/mask.png"), b"png").unwrap();
+        let mut d = sample_draft();
+        d["materials"]["common_mask"] = json!([{"id": "M1", "resource_type": "pentagram", "name": "Stars", "path": bundle.to_string_lossy(), "config": {"width": 0.5, "height": 0.5}}]);
+        let shape = import_draft_json(&d, "hint").unwrap().project.materials.masks[0].shape.clone();
+        assert_eq!(shape, MaskShape::Picture { name: "pentagram".into(), path: bundle.join("amazingfeature/image/mask.png").to_string_lossy().into_owned() });
+        d["materials"]["common_mask"][0]["path"] = json!("/nowhere");
+        assert_eq!(import_draft_json(&d, "hint").unwrap().project.materials.masks[0].shape, MaskShape::Other { name: "pentagram".into() });
+        std::fs::remove_dir_all(&bundle).ok();
     }
 
     #[test]

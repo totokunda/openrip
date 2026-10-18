@@ -4,12 +4,14 @@
 
 pub mod animated;
 pub mod edit;
+pub mod keyed;
 pub mod material;
 pub mod project;
 pub mod time;
 
-pub use animated::{Animated, Easing, Keyframe, Lerp, Rgba, Vec2};
+pub use animated::{capcut_curve, capcut_solve, sample_keys, split_keys, Animated, Easing, Handle, Keyframe, Lerp, Rgba, Vec2};
 pub use edit::{ChangeSet, Document, Edge, Edit, EditError, Op, SegmentChange};
+pub use keyed::{Param, ParamKeys};
 pub use material::*;
 pub use project::*;
 pub use time::{FrameRate, Micros, TimeRange};

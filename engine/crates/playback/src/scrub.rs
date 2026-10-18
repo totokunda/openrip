@@ -681,6 +681,7 @@ mod tests {
             opacity: Animated::constant(1.0),
             volume: Animated::constant(1.0),
             attachments: Vec::new(),
+            keyframes: Vec::new(),
         };
         // A 20 s video from 10 s into its file, and stills of 1 s each above it.
         p.tracks.push(Track { id: "v".into(), kind: TrackKind::Video, name: String::new(), segments: vec![seg("v1", "video", 0, 20_000_000, 10_000_000)], muted: false, hidden: false, locked: false });

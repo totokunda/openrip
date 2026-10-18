@@ -516,29 +516,58 @@ fn plan_trim(p: &Project, segment_id: &str, edge: Edge, to: Micros) -> Result<Ve
 
 /// Shift every keyframe of a segment by `by` (segment-local time).
 fn shift_keys(seg: &mut Segment, by: Micros) {
-    fn shift<T>(a: &mut Animated<T>, by: Micros) {
-        for k in &mut a.keys {
+    fn shift<T>(keys: &mut [crate::Keyframe<T>], by: Micros) {
+        for k in keys {
             k.at = k.at + by;
         }
     }
-    shift(&mut seg.transform.position, by);
-    shift(&mut seg.transform.scale, by);
-    shift(&mut seg.transform.rotation, by);
-    shift(&mut seg.opacity, by);
-    shift(&mut seg.volume, by);
+    shift(&mut seg.transform.position.keys, by);
+    shift(&mut seg.transform.scale.keys, by);
+    shift(&mut seg.transform.rotation.keys, by);
+    shift(&mut seg.opacity.keys, by);
+    shift(&mut seg.volume.keys, by);
+    for p in &mut seg.keyframes {
+        shift(&mut p.keys, by);
+    }
 }
 
+/// Scale every keyframe's time (and its curve handles') by `factor`, for a speed change:
+/// the keys stay on the same media.
 fn scale_keys(seg: &mut Segment, factor: f64) {
-    fn sc<T>(a: &mut Animated<T>, factor: f64) {
-        for k in &mut a.keys {
+    fn sc<T>(keys: &mut [crate::Keyframe<T>], factor: f64) {
+        for k in keys {
             k.at = scale(k.at, factor);
+            if let crate::Easing::Curve { out, into, .. } = &mut k.ease {
+                out.t.iter_mut().chain(into.t.iter_mut()).for_each(|t| *t *= factor);
+            }
         }
     }
-    sc(&mut seg.transform.position, factor);
-    sc(&mut seg.transform.scale, factor);
-    sc(&mut seg.transform.rotation, factor);
-    sc(&mut seg.opacity, factor);
-    sc(&mut seg.volume, factor);
+    sc(&mut seg.transform.position.keys, factor);
+    sc(&mut seg.transform.scale.keys, factor);
+    sc(&mut seg.transform.rotation.keys, factor);
+    sc(&mut seg.opacity.keys, factor);
+    sc(&mut seg.volume.keys, factor);
+    for p in &mut seg.keyframes {
+        sc(&mut p.keys, factor);
+    }
+}
+
+/// A key at local time `t` in every keyframed property that hasn't one, keeping the motion
+/// (CapCut adds them where it splits a clip, so each half starts and ends where it was).
+fn split_keys_at(seg: &mut Segment, t: Micros) {
+    fn at<T: crate::Lerp>(keys: &mut Vec<crate::Keyframe<T>>, t: Micros) {
+        if !keys.is_empty() {
+            crate::split_keys(keys, t);
+        }
+    }
+    at(&mut seg.transform.position.keys, t);
+    at(&mut seg.transform.scale.keys, t);
+    at(&mut seg.transform.rotation.keys, t);
+    at(&mut seg.opacity.keys, t);
+    at(&mut seg.volume.keys, t);
+    for p in &mut seg.keyframes {
+        at(&mut p.keys, t);
+    }
 }
 
 fn plan_split(p: &Project, segment_id: &str, at: Micros, new_id: Option<String>) -> Result<Vec<Op>, EditError> {
@@ -551,6 +580,8 @@ fn plan_split(p: &Project, segment_id: &str, at: Micros, new_id: Option<String>)
         return Err(EditError::Invalid("split point must be at least one frame inside the clip".into()));
     }
     let left_len = at - seg.target.start;
+    let mut seg = seg.clone();
+    split_keys_at(&mut seg, left_len);
     let mut left = seg.clone();
     let mut right = seg.clone();
     left.target.duration = left_len;
@@ -794,6 +825,7 @@ mod tests {
             opacity: Animated::constant(1.0),
             volume: Animated::constant(1.0),
             attachments: Vec::new(),
+            keyframes: Vec::new(),
         }
     }
 

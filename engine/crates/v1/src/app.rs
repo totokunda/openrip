@@ -473,9 +473,14 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
         }
     }
 
+    // The segment's keyframes the app can show and edit (lib/keyframes.ts), at clip-local
+    // frames in its fields' units.
+    let keyframes = crate::keys::emit(seg, &Value::Object(clip.clone()), project, world);
+    clip.insert("keyframes".into(), Value::Object(keyframes));
+
     // What the engine needs to draw it as it was, and the app's fields as written, so an
     // import can tell what the app changed.
-    let base_keys = ["startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color", "animationIn", "captionStyle", "transitionOut"];
+    let base_keys = ["startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color", "animationIn", "captionStyle", "transitionOut", "keyframes"];
     let base: Map<String, Value> = base_keys
         .iter()
         .chain(TEXT_STYLE_KEYS.iter())
@@ -521,6 +526,7 @@ mod tests {
             opacity: Animated::constant(1.0),
             volume: Animated::constant(1.0),
             attachments: vec![MaterialId("fx".into())],
+            keyframes: Vec::new(),
         };
         p.materials.texts.push(Text {
             id: MaterialId("t".into()),

@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::animated::{Animated, Vec2};
+use crate::keyed::ParamKeys;
 use crate::material::{MaterialId, Materials};
 use crate::time::{FrameRate, Micros, TimeRange};
 
@@ -101,6 +102,10 @@ pub struct Segment {
     /// animations, effects, filters, masks, transitions, …
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<MaterialId>,
+    /// Keyframes of its materials' values (Adjust sliders, filter strength, text colours, mask
+    /// geometry, …), in its local time; see [`crate::keyed`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keyframes: Vec<ParamKeys>,
 }
 
 impl Segment {
@@ -241,6 +246,7 @@ mod tests {
             opacity: Animated::constant(1.0),
             volume: Animated::constant(1.0),
             attachments: vec![],
+            keyframes: vec![],
         }
     }
 

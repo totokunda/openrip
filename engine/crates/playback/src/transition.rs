@@ -107,6 +107,7 @@ mod tests {
             opacity: openrip_model::Animated::constant(1.0),
             volume: openrip_model::Animated::constant(1.0),
             attachments: attach.iter().map(|a| MaterialId((*a).into())).collect(),
+            keyframes: Vec::new(),
         };
         p.tracks.push(Track { id: "t".into(), kind: TrackKind::Video, name: String::new(), segments: vec![seg("a", 0, 2_000_000, &["tr"]), seg("b", 2_000_000, 2_000_000, &[])], muted: false, hidden: false, locked: false });
         p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: String::new(), duration: Micros(500_000), overlap: false, builtin: Some(builtin.into()), library: None, resource: Some("/b".into()) });
