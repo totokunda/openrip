@@ -143,6 +143,16 @@ fn flips_mirror_the_picture() {
     // Negative scales in the model's terms are flips too.
     let mirrored = c.render(W, H, [0, 0, 0], &[Layer::from_model(&quarters, [W, H], [0.0, 0.0], [-1.0, 1.0], 0.0)]);
     assert_eq!(corners(&mirrored), [tr, tl, br, bl]);
+    // A picture stored on its side (phone video, shown upright by a quarter turn) mirrors on
+    // screen too: a negative screen-x scale swaps its left and right, not its top and bottom.
+    let (sw, sh) = (H, W);
+    let stored = image(sw, sh, |x, y| px(&quarters, sh - 1 - y, x));
+    let upright = c.render(W, H, [0, 0, 0], &[Layer::from_model_oriented(&stored, [W, H], [0.0, 0.0], [1.0, 1.0], 0.0, 90)]);
+    let [tl, tr, bl, br] = corners(&upright);
+    assert_eq!([tl, tr, bl, br], corners(&draw(false, false)), "the stored picture shows upright");
+    let side = |scale: [f64; 2]| corners(&c.render(W, H, [0, 0, 0], &[Layer::from_model_oriented(&stored, [W, H], [0.0, 0.0], scale, 0.0, 90)]));
+    assert_eq!(side([-1.0, 1.0]), [tr, tl, br, bl], "mirrored left to right");
+    assert_eq!(side([1.0, -1.0]), [bl, br, tl, tr], "mirrored top to bottom");
 }
 
 /// A `.cube` table on a clip: an inverting table at full strength inverts it, at half it
