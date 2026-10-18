@@ -164,6 +164,13 @@ export function setEnginePreviewEnabled(on: boolean): Promise<void> {
   return ipcRenderer.invoke("settings:set-engine-preview", on);
 }
 
+// Electron's release() sends its IPC call without awaiting it: when main has let the texture
+// go already (its send gave up on a slow window), that call rejects with nothing to catch it.
+// It's harmless, so it's kept out of the page's errors; any other rejection still shows.
+window.addEventListener("unhandledrejection", (e) => {
+  if (String(e.reason?.message ?? e.reason).includes("IMPORT_SHARED_TEXTURE_RELEASE")) e.preventDefault();
+});
+
 // Frames arrive as shared GPU textures. This preload world draws them into the page's
 // canvas (the DOM is shared between worlds; a VideoFrame can't cross the bridge) and tells
 // the page with a DOM event.
