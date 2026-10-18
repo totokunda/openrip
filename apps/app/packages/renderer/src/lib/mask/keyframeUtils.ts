@@ -1,5 +1,6 @@
-import { getLocalFrame } from "@/lib/clip";
+import { useControlsStore } from "@/lib/control";
 import { AnyClipProps, MaskClipProps, MaskData } from "@/lib/types";
+import { editMaskPose, maskFrame, posesOf } from "@/lib/mask-shapes";
 
 type MaskKeyframes = Map<number, MaskData> | Record<number, MaskData>;
 
@@ -17,85 +18,33 @@ interface UpsertMaskKeyframeResult {
   previousFrame: number | undefined;
 }
 
-const cloneKeyframes = (keyframes: MaskKeyframes): MaskKeyframes =>
-  keyframes instanceof Map ? new Map(keyframes) : { ...keyframes };
-
-const getSortedFrames = (keyframes: MaskKeyframes): number[] => {
-  const frames =
-    keyframes instanceof Map
-      ? Array.from(keyframes.keys())
-      : Object.keys(keyframes).map((key) => Number(key));
-
-  return frames.sort((a, b) => a - b);
-};
-
-const hasFrame = (keyframes: MaskKeyframes, frame: number): boolean => {
-  if (keyframes instanceof Map) {
-    return keyframes.has(frame);
-  }
-  const record = keyframes as Record<number, MaskData>;
-  return Object.prototype.hasOwnProperty.call(record, frame);
-};
-
-const getFrameData = (
-  keyframes: MaskKeyframes,
-  frame: number,
-): MaskData | undefined => {
-  if (keyframes instanceof Map) {
-    return keyframes.get(frame);
-  }
-  const record = keyframes as Record<number, MaskData>;
-  return record[frame];
-};
-
+/**
+ * An edit of a mask's pose at the playhead, from its handles on the canvas or its panel, by
+ * CapCut's rule (lib/mask-shapes.ts): a keyed mask gets a pose at the playhead (from the pose
+ * it has there), a static one has its one pose changed. Returns the mask's new keyframes.
+ */
 export const upsertMaskKeyframe = ({
   mask,
   clip,
   focusFrame,
   updater,
 }: UpsertMaskKeyframeArgs): UpsertMaskKeyframeResult | null => {
-  const keyframes =
-    mask.keyframes instanceof Map
-      ? mask.keyframes
-      : (mask.keyframes as Record<number, MaskData>);
-
-  if (!keyframes) {
-    return null;
-  }
-
-  const frames = getSortedFrames(keyframes);
-  const hasExistingFrames = frames.length > 0;
-  const isVideoClip = clip?.type === "video";
-  const targetFrame = clip
-    ? isVideoClip
-      ? Math.max(0, Math.round(getLocalFrame(focusFrame, clip)))
-      : 0
-    : Math.max(0, Math.round(focusFrame));
-
-  const frameExists = hasFrame(keyframes, targetFrame);
-  const fallbackFrame = hasExistingFrames
-    ? (frames.filter((frame) => frame <= targetFrame).pop() ?? frames[0])
-    : undefined;
-
-  const baseFrame = frameExists ? targetFrame : fallbackFrame;
-  const baseData =
-    baseFrame !== undefined ? getFrameData(keyframes, baseFrame) : undefined;
-  const baseClone: MaskData = baseData ? { ...baseData } : {};
-  const updatedData = updater(baseClone);
-
-  const finalFrame = clip ? (isVideoClip ? targetFrame : 0) : targetFrame;
-
-  const clonedKeyframes = cloneKeyframes(keyframes);
-  if (clonedKeyframes instanceof Map) {
-    clonedKeyframes.set(finalFrame, updatedData);
-  } else {
-    (clonedKeyframes as Record<number, MaskData>)[finalFrame] = updatedData;
-  }
-
+  if (!mask.keyframes) return null;
+  const fps = useControlsStore.getState().fps || 24;
+  const frame = clip ? maskFrame(clip, focusFrame) : Math.max(0, Math.round(focusFrame));
+  const before = posesOf(mask).map(([f]) => f);
+  const next = editMaskPose(mask, frame, fps, (pose) => {
+    const out = updater(pose);
+    // The feather stays where editMaskPose keeps it: a handle doesn't change it.
+    if ((pose as any).featherAmount !== undefined && (out as any).featherAmount === undefined) (out as any).featherAmount = (pose as any).featherAmount;
+    return out;
+  });
+  const after = posesOf(next).map(([f]) => f);
+  const created = after.length > before.length;
   return {
-    keyframes: clonedKeyframes,
-    frame: finalFrame,
-    created: !frameExists && finalFrame !== baseFrame,
-    previousFrame: baseFrame,
+    keyframes: next.keyframes,
+    frame: created ? frame : (after.find((f) => !before.includes(f)) ?? after[0] ?? frame),
+    created,
+    previousFrame: before.filter((f) => f <= frame).pop(),
   };
 };

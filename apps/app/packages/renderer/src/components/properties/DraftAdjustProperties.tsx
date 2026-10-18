@@ -47,9 +47,10 @@ const DraftAdjustProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
   const notDrawn = list.some((e) => !e.drawn);
 
   return (
-    <div className="px-3 py-3.5 min-w-0">
-      <div className="flex flex-row items-center justify-between mb-4">
-        <h4 className="text-brand-lighter text-[12.5px] font-semibold text-start">From the CapCut draft</h4>
+    <div className="px-3 pb-4 min-w-0 text-left">
+      {/* A header as the tab's other sections have (Section.tsx). */}
+      <div className="flex flex-row items-center justify-between h-[55px]">
+        <h4 className="text-brand-light text-[12px] font-semibold text-start">From the CapCut draft</h4>
         {changed && (
           <span title="Put back the draft's adjustments" onClick={() => set(draft)} className="text-brand-light text-sm cursor-pointer">
             <IoRefreshOutline />

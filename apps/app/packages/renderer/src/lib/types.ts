@@ -856,7 +856,11 @@ export type DrawingClipProps = ClipProps & {
 export type MaskTransform = ClipTransform;
 
 export type MaskTool = "lasso" | "shape" | "draw";
-export type MaskShapeTool = "rectangle" | "ellipse" | "polygon" | "star";
+/**
+ * A shape mask's shape: the app's rectangle, ellipse, triangle ("polygon") and star, and
+ * CapCut's Split ("linear"), Filmstrip ("mirror") and heart from the inspector's Mask tab.
+ */
+export type MaskShapeTool = "rectangle" | "ellipse" | "polygon" | "star" | "linear" | "mirror" | "heart";
 
 export interface MaskData {
   // For lasso tool - closed path points
@@ -879,12 +883,17 @@ export interface MaskData {
     scaleX?: number;
     scaleY?: number;
     renderOnce?: boolean;
+    // A rectangle's round corners, 0–100 as CapCut's slider (of its shorter half-side)
+    cornerRadius?: number;
   };
   // For the brush tool: strokes in world units at the mask's transform, as the lasso's points
   brushStrokes?: MaskBrushStroke[];
   // How this pose travels to the next keyframe's (linear without one; poses of different
   // shapes hold)
   ease?: KeyframeEase;
+  // The feather at this pose (0–100) when the mask is keyed (lib/mask-shapes.ts); the
+  // mask's own `featherAmount` otherwise
+  featherAmount?: number;
 }
 
 /** One stroke of a brush mask: its points, its width (`size`) and whether it erases. */
@@ -910,6 +919,9 @@ export type MaskClipProps = {
   lastModified: number;
   // Operation settings
   inverted?: boolean; // Invert the mask
+  // Its keyframe diamond was pressed: an edit sets a pose at the playhead even while it has
+  // only one (lib/mask-shapes.ts)
+  keyed?: boolean;
   backgroundColor?: string;
   backgroundOpacity?: number;
   backgroundColorEnabled?: boolean;

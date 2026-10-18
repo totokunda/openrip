@@ -20,7 +20,7 @@ import {
 import { useViewportStore } from "@/lib/viewport";
 import { isRestoredAspect } from "@/lib/history";
 import { sortClipsForStacking } from "@/lib/clipOrdering";
-import { getLocalFrame, useClipStore } from "@/lib/clip";
+import { useClipStore } from "@/lib/clip";
 import { KonvaEventObject } from "konva/lib/Node";
 import { BASE_LONG_SIDE, DEFAULT_FPS } from "@/lib/settings";
 
@@ -71,6 +71,8 @@ import {
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { lineHeight, shapeClip, shapeSize } from "@/lib/shape-presets";
 import { vertices } from "@/lib/shape-geometry";
+import { editMaskPose, maskFrame, newShapeMask } from "@/lib/mask-shapes";
+import Eyedropper from "./Eyedropper";
 
 // The applicators of a clip with none over it: one array, so clip previews keep their props.
 const NO_APPLICATORS: ReturnType<typeof getApplicatorsForClip> = [];
@@ -1233,10 +1235,8 @@ const Preview: React.FC<PreviewProps> = () => {
         )
           return;
 
-        const localFrame =
-          targetClip.type === "image"
-            ? 0
-            : getLocalFrame(focusFrame, targetClip);
+        // The mask frame: the clip's source frame for a video, as the engine reads it (lib/mask-shapes.ts).
+        const localFrame = maskFrame(targetClip, focusFrame);
         const clipTransform =
           getClipTransform(targetClip.clipId) ?? targetClip.transform;
         const normalizedLasso = normalizeFlatPointsForRotation(
@@ -1256,11 +1256,12 @@ const Preview: React.FC<PreviewProps> = () => {
           },
           createdAt: Date.now(),
           lastModified: Date.now(),
+          // As CapCut's masks: the clip inside, a clear colour outside (the clip cut to the shape).
           maskColor: "#FFFFFF",
           maskOpacity: 100,
-          maskColorEnabled: true,
+          maskColorEnabled: false,
           backgroundColor: "#000000",
-          backgroundOpacity: 100,
+          backgroundOpacity: 0,
           backgroundColorEnabled: true,
           transform: clipTransform ? { ...clipTransform } : undefined,
         };
@@ -1448,10 +1449,8 @@ const Preview: React.FC<PreviewProps> = () => {
           }
         }
 
-        const localFrame =
-          targetClip.type === "image"
-            ? 0
-            : getLocalFrame(focusFrame, targetClip);
+        // The mask frame: the clip's source frame for a video, as the engine reads it (lib/mask-shapes.ts).
+        const localFrame = maskFrame(targetClip, focusFrame);
 
         // Create the mask
         const newMask = {
@@ -1474,11 +1473,12 @@ const Preview: React.FC<PreviewProps> = () => {
           },
           createdAt: Date.now(),
           lastModified: Date.now(),
+          // As CapCut's masks: the clip inside, a clear colour outside (the clip cut to the shape).
           maskColor: "#FFFFFF",
           maskOpacity: 100,
-          maskColorEnabled: true,
+          maskColorEnabled: false,
           backgroundColor: "#000000",
-          backgroundOpacity: 100,
+          backgroundOpacity: 0,
           backgroundColorEnabled: true,
           transform: clipTransform ? { ...clipTransform } : undefined,
         };
@@ -1621,6 +1621,32 @@ const Preview: React.FC<PreviewProps> = () => {
         setMaskRectStart(null);
         setMaskRectCurrent(null);
         resetMaskShapeDrawingRefs();
+        return;
+      }
+
+      // The mask brush (the Mask tab's Brush): a stroke goes on the selected brush mask of the
+      // clip under it, or starts one; ⌥ while drawing erases. Strokes are in the mask's units
+      // (the clip's, unturned), their width the brush's size, as the engine reads them.
+      if (tool === "mask" && maskTool === "draw" && isDrawingMaskBrush) {
+        setIsDrawingMaskBrush(false);
+        const points = maskBrushPoints;
+        setMaskBrushPoints([]);
+        const targetClip = getClipForMask() as MediaClipProps;
+        if (points.length < 2 || !targetClip || (targetClip.type !== "video" && targetClip.type !== "image")) return;
+        const clipTransform = getClipTransform(targetClip.clipId) ?? targetClip.transform;
+        const erase = useMaskStore.getState().erase || !!e?.evt?.altKey;
+        const stroke = { points: normalizeFlatPointsForRotation(points, clipTransform), size: maskBrushSize, ...(erase ? { erase: true } : {}) };
+        const f = maskFrame(targetClip, focusFrame);
+        const masks = targetClip.masks || [];
+        const current = masks.find((m) => m.id === useControlsStore.getState().selectedMaskId && m.tool === "draw");
+        if (current) {
+          const next = editMaskPose(current, f, useControlsStore.getState().fps || 24, (p) => ({ ...p, brushStrokes: [...(p.brushStrokes ?? []), stroke] }));
+          updateClip(targetClip.clipId, { masks: masks.map((m) => (m.id === current.id ? next : m)) });
+          return;
+        }
+        const brush = { ...newShapeMask(targetClip, "rectangle", f), tool: "draw" as const, keyframes: { [f]: { brushStrokes: [stroke] } }, transform: clipTransform ? { ...clipTransform } : undefined };
+        updateClip(targetClip.clipId, { masks: [...masks, brush] });
+        setSelectedMaskId(brush.id);
         return;
       }
 
@@ -2726,6 +2752,8 @@ const Preview: React.FC<PreviewProps> = () => {
                 {renderTempDrawingLine()}
                 {renderCursorPreview()}
                 {renderMaskCursorPreview()}
+                {/* The chroma key's and the Adjust tab's eyedropper, over everything. */}
+                <Eyedropper rectWidth={rectWidth} rectHeight={rectHeight} />
                 {/* Aspect editing edge bars */}
                 {isAspectEditing && (
                   <>

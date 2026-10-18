@@ -11,7 +11,14 @@ import LayoutProperties from '../properties/LayoutProperties'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import AppearanceProperties from '../properties/AppearanceProperties'
-import AdjustProperties from '../properties/AdjustProperties'
+import VideoBasicProperties from '../properties/VideoBasicProperties'
+import ChromaKeyProperties from '../properties/ChromaKeyProperties'
+import AdjustBasic from '../properties/adjust/AdjustBasic'
+import AdjustHsl from '../properties/adjust/AdjustHsl'
+import AdjustCurves from '../properties/adjust/AdjustCurves'
+import AdjustWheels from '../properties/adjust/AdjustWheels'
+import AutoAdjust from '../properties/adjust/AutoAdjust'
+import ColorMatch from '../properties/adjust/ColorMatch'
 import { cn } from '@/lib/utils'
 import TextBasicProperties from '../properties/text/TextBasicProperties'
 import TextEffectsProperties from '../properties/text/TextEffectsProperties'
@@ -112,12 +119,14 @@ const ClipPropertiesPanel: React.FC = () => {
     switch (type) {
       case 'video':
       case 'image':
+        // CapCut's tabs for a video and for a photo alike (a photo's first tab is "Video" too).
         return [
           {
             id: 'video',
-            label: type === 'video' ? 'Video' : 'Image',
+            label: 'Video',
             sections: [
-              { id: 'basic', label: 'Basic', content: type === 'video' ? stack(position, layout, appearance, <OpticalFlowProperties key="optical-flow" clipId={clipId} />) : stack(position, layout, appearance) },
+              { id: 'basic', label: 'Basic', content: type === 'video' ? stack(<VideoBasicProperties key="basic" clipId={clipId} />, <OpticalFlowProperties key="optical-flow" clipId={clipId} />) : <VideoBasicProperties clipId={clipId} /> },
+              { id: 'removebg', label: 'Remove BG', content: <ChromaKeyProperties clipId={clipId} /> },
               { id: 'mask', label: 'Mask', content: <MaskPropertiesPanel clipId={clipId} /> },
             ],
           },
@@ -125,7 +134,17 @@ const ClipPropertiesPanel: React.FC = () => {
           type === 'video' ? speed(true) : duration('Duration'),
           animation,
           ...(type === 'image' ? [tracking] : []),
-          { id: 'adjust', label: 'Adjust', sections: [{ id: 'adjust', label: 'Adjust', content: <AdjustProperties clipId={clipId} /> }] },
+          {
+            id: 'adjust',
+            label: 'Adjust',
+            sections: [
+              // CapCut's Basic opens with Auto adjust and Color match.
+              { id: 'basic', label: 'Basic', content: stack(<AutoAdjust key="auto" clipId={clipId} />, <ColorMatch key="match" clipId={clipId} />, <AdjustBasic key="basic" clipId={clipId} />) },
+              { id: 'hsl', label: 'HSL', content: <AdjustHsl clipId={clipId} /> },
+              { id: 'curves', label: 'Curves', content: <AdjustCurves clipId={clipId} /> },
+              { id: 'wheels', label: 'Color wheel', content: <AdjustWheels clipId={clipId} /> },
+            ],
+          },
         ];
       case 'text':
         // CapCut's Text tab: Basic (with the clip's Transform and Blend among its sections)
