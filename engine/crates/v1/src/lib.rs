@@ -28,6 +28,8 @@ const APP: &str = "openrip-v1";
 pub(crate) const WORLD_H: f64 = 600.0;
 
 mod app;
+mod color;
+mod compositing;
 mod keys;
 pub use app::{relaid_texts, to_app_project};
 
@@ -560,6 +562,31 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
     if matches!(ty, "video" | "image") && differs("draftAdjustments") {
         edit_draft_adjustments(&mut seg, clip, &base, materials);
     }
+    // The colour tools go on top of the draft's own; a blend mode, chroma key, canvas fill or
+    // flip the app changed replaces the draft's.
+    if matches!(ty, "video" | "image") {
+        if differs("color") {
+            color::attach(&seg.id.clone(), clip.get("color").unwrap_or(&Value::Null), materials, &mut seg.attachments);
+        }
+        if differs("chroma") {
+            let was: Vec<MaterialId> = seg.attachments.iter().filter(|a| materials.chromas.iter().any(|c| &c.id == *a)).cloned().collect();
+            compositing::set_chroma(&seg.id.clone(), clip.get("chroma"), materials, &mut seg.attachments);
+            // The draft key's keyframes drive the app's key.
+            let now = compositing::chroma_id(&seg.id);
+            if seg.attachments.contains(&now) {
+                seg.keyframes.iter_mut().filter(|k| was.contains(&k.material)).for_each(|k| k.material = now.clone());
+            }
+        }
+        if differs("canvas") {
+            compositing::set_canvas(&seg.id.clone(), clip.get("canvas"), materials, &mut seg.attachments);
+        }
+        if differs("flip") {
+            compositing::set_flip(&mut seg.transform, clip.get("flip"));
+        }
+    }
+    if matches!(ty, "video" | "image" | "text") && differs("blendMode") {
+        compositing::set_blend(&seg.id.clone(), clip.get("blendMode"), materials, &mut seg.attachments);
+    }
     if ty == "filter" && differs("intensity") {
         // A filter bar's strength (the Filter tab's intensity), on a copy of the draft's filter.
         if let Some(mut e) = materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter).cloned() {
@@ -843,6 +870,13 @@ fn convert_clip(
             attachments.push(m.id.clone());
             materials.masks.push(m);
         }
+        // The Adjust tab's colour tools, the chroma key and the canvas fill, as CapCut's.
+        color::attach(&id, clip.get("color").unwrap_or(&Value::Null), materials, &mut attachments);
+        compositing::set_chroma(&id, clip.get("chroma"), materials, &mut attachments);
+        compositing::set_canvas(&id, clip.get("canvas"), materials, &mut attachments);
+    }
+    if matches!(ty, "video" | "image" | "text") {
+        compositing::set_blend(&id, clip.get("blendMode"), materials, &mut attachments);
     }
 
     // Geometry.
@@ -872,6 +906,10 @@ fn convert_clip(
             convert_transform(world, t, center_pivot, fit)
         }
     };
+    let mut transform = transform;
+    if matches!(ty, "video" | "image") {
+        compositing::set_flip(&mut transform, clip.get("flip"));
+    }
 
     Some(Segment {
         id,

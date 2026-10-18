@@ -104,6 +104,50 @@ fn resolve(name: &str, clip: &Value, seg: &Segment, materials: &Materials, world
         },
         // The app's Adjust sliders, on their own scale.
         n if crate::app::ADJUST_KEYS.contains(&n) && matches!(ty.as_str(), "video" | "image") => prop(Target::Params(MaterialId(format!("{}-adj-{n}", seg.id)), vec![Param::Intensity]), 1, 1.0),
+        // The Adjust tab's colour tools (`color`): a slider on CapCut's scale, an HSL range's
+        // hue, saturation or lightness (−100…100), the wheels' and a LUT's strength (0–100).
+        n if n.starts_with("adjust:") && matches!(ty.as_str(), "video" | "image") => {
+            let slider = &n["adjust:".len()..];
+            if !crate::color::SLIDERS.contains(&slider) {
+                return None;
+            }
+            prop(Target::Params(crate::color::slider_id(&seg.id, slider), vec![Param::Intensity]), 1, 1.0 / crate::app::capcut_scale(slider))
+        }
+        n if n.starts_with("hsl:") && matches!(ty.as_str(), "video" | "image") => {
+            let (range, part) = n["hsl:".len()..].split_once(':')?;
+            if !crate::color::HSL_RANGES.contains(&range) {
+                return None;
+            }
+            let param = match part {
+                "hue" => Param::HslHue,
+                "saturation" => Param::HslSaturation,
+                "lightness" => Param::HslLightness,
+                _ => return None,
+            };
+            prop(Target::Params(crate::color::hsl_id(&seg.id, range), vec![param]), 1, 1.0)
+        }
+        "wheels:intensity" if matches!(ty.as_str(), "video" | "image") => prop(Target::Params(crate::color::wheels_id(&seg.id), vec![Param::WheelIntensity]), 1, 0.01),
+        "lut:intensity" if matches!(ty.as_str(), "video" | "image") => {
+            let id = crate::color::lut_id(&seg.id);
+            if !materials.contains(&id) && clip.pointer("/color/lut/path").and_then(Value::as_str).is_none_or(str::is_empty) {
+                return None;
+            }
+            prop(Target::Params(id, vec![Param::Intensity]), 1, 0.01)
+        }
+        // The chroma key's sliders (0–100).
+        n if n.starts_with("chroma:") && matches!(ty.as_str(), "video" | "image") => {
+            let param = match &n["chroma:".len()..] {
+                "intensity" => Param::ChromaIntensity,
+                "shadow" => Param::ChromaShadow,
+                "edgeSmooth" => Param::ChromaEdgeSmooth,
+                "spill" => Param::ChromaSpill,
+                _ => return None,
+            };
+            // The clip's own key, else a converted clip's draft key.
+            let own = crate::compositing::chroma_id(&seg.id);
+            let id = if materials.contains(&own) { own } else { seg.attachments.iter().find(|a| materials.chromas.iter().any(|c| &c.id == *a)).cloned().unwrap_or(own) };
+            prop(Target::Params(id, vec![param]), 1, 0.01)
+        }
         // A converted clip's own adjustments, on CapCut's scale (`draftAdjustments`).
         n if n.starts_with("draft:") => {
             let rest = &n["draft:".len()..];
@@ -352,6 +396,14 @@ pub(crate) fn apply(seg: &mut Segment, clip: &Value, names: Option<&[String]>, f
                 params.insert("pixel".to_string(), 1.0 / WORLD_H);
                 materials.effects.push(Effect { id: id.clone(), category: EffectCategory::Adjust, name: name.clone(), params, builtin: Some(format!("v1:{name}")), resource: None, library: None, text_style: None });
             }
+            // So with a colour tool or a chroma key the field leaves neutral.
+            if !materials.contains(id) {
+                let made = crate::color::keyed_material(&seg.id, &name, clip.get("color").unwrap_or(&Value::Null), materials)
+                    .or_else(|| name.starts_with("chroma:").then(|| AnyMaterial::Chroma(crate::compositing::chroma(&seg.id, clip.get("chroma").unwrap_or(&Value::Null)))));
+                if let Some(m) = made.filter(|m| m.id() == id) {
+                    materials.insert_at(m, None);
+                }
+            }
             if materials.contains(id) && !seg.attachments.contains(id) && *id != seg.material {
                 seg.attachments.push(id.clone());
             }
@@ -382,6 +434,10 @@ pub(crate) fn emit(seg: &Segment, clip: &Value, project: &Project, world: &World
     }
     let mut names: Vec<String> = ["position", "scale", "rotation", "opacity", "volume", "intensity", "color", "fontSize"].iter().map(|s| s.to_string()).collect();
     names.extend(TEXT_PROPS.iter().map(|(n, ..)| n.to_string()));
+    // The colour tools and the chroma key (the keys of a converted clip's own chroma key).
+    names.extend(crate::color::SLIDERS.iter().map(|n| format!("adjust:{n}")));
+    names.extend(crate::color::HSL_RANGES.iter().flat_map(|r| ["hue", "saturation", "lightness"].map(|p| format!("hsl:{r}:{p}"))));
+    names.extend(["wheels:intensity", "lut:intensity", "chroma:intensity", "chroma:shadow", "chroma:edgeSmooth", "chroma:spill"].map(String::from));
     for a in clip.get("draftAdjustments").and_then(Value::as_array).into_iter().flatten() {
         let id = s(a, "id");
         if a.get("values").is_some() {
@@ -635,5 +691,44 @@ mod tests {
         assert_eq!(a.keys[0].ease, Easing::Curve { out: Handle::uniform(0.0, 0.0), into: Handle::uniform(-400_000.0, 0.0), straight: 0 });
         let MaskShape::Brush { strokes } = &b.shape else { panic!("a brush") };
         assert_eq!((strokes[0].points.clone(), strokes[0].width), (vec![[0.0, 0.5], [1.0, 0.5]], 0.1));
+    }
+
+    /// The app's own clip: its colour tools, blend mode, chroma key, canvas fill and flips
+    /// become CapCut's materials, and their keys the materials' (a slider keyed but left at 0
+    /// gets its effect).
+    #[test]
+    fn colour_and_compositing_fields_and_their_keys() {
+        let video = json!({
+            "adjust:exposure": [{"frame": 0, "value": 0}, {"frame": 24, "value": 50}],
+            "hsl:blue:saturation": [{"frame": 0, "value": -100}, {"frame": 24, "value": 100}],
+            "chroma:intensity": [{"frame": 0, "value": 20}, {"frame": 24, "value": 80}],
+            "lut:intensity": [{"frame": 0, "value": 0}, {"frame": 24, "value": 100}],
+        });
+        let mut d = doc(video, json!({}));
+        let clip = &mut d["timeline"]["clips"][0];
+        clip["color"] = json!({"adjust": {"contrast": 20}, "lut": {"path": "/looks/a.cube", "intensity": 50}});
+        clip["blendMode"] = json!("soft_light");
+        clip["chroma"] = json!({"color": "#00ff00", "intensity": 50, "shadow": 0, "edgeSmooth": 0, "spill": 0});
+        clip["canvas"] = json!({"type": "image", "image": "file:///pics/bg%20one.png"});
+        clip["flip"] = json!({"horizontal": true, "vertical": false});
+        d["timeline"]["clips"][1]["blendMode"] = json!("screen");
+        let Imported { project, .. } = import_v1_json(&d).unwrap();
+        let v = seg(&project, "v");
+        let half = Micros(500_000);
+        let effect = |id: &str| project.materials.effects.iter().find(|e| e.id.0 == id && v.attachments.contains(&e.id)).unwrap();
+        assert_eq!(effect("v-color-contrast").params["intensity"], 0.4);
+        assert!((v.effect_at(effect("v-color-exposure"), half).params["intensity"] - 0.5).abs() < 1e-9);
+        assert!((v.effect_at(effect("v-lut"), half).params["intensity"] - 0.5).abs() < 1e-9);
+        assert_eq!(effect("v-blend").blend_mode(), Some(BlendMode::SoftLight));
+        let blue = project.materials.hsl.iter().find(|h| h.id.0 == "v-hsl-blue" && v.attachments.contains(&h.id)).unwrap();
+        assert_eq!((blue.range, v.hsl_at(blue, half).saturation), (6, 0.0));
+        let key = project.materials.chromas.iter().find(|k| v.attachments.contains(&k.id)).unwrap();
+        assert!((v.chroma_at(key, half).intensity - 0.5).abs() < 1e-6 && key.color.g == 1.0);
+        let fill = project.materials.canvas_fills.iter().find(|f| v.attachments.contains(&f.id)).unwrap();
+        assert_eq!(fill.fill, CanvasFillKind::Image { path: "/pics/bg one.png".into() });
+        assert!(v.transform.flip_h && !v.transform.flip_v);
+        // A text takes its blend mode.
+        let t = seg(&project, "t");
+        assert!(project.materials.effects.iter().any(|e| t.attachments.contains(&e.id) && e.blend_mode() == Some(BlendMode::Screen)));
     }
 }

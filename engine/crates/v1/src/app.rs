@@ -220,7 +220,7 @@ fn draft_adjustments(project: &Project, seg: &Segment) -> Vec<Value> {
                     let value = e.params.get("intensity").copied().unwrap_or(0.0) * scale;
                     json!({ "kind": name, "name": title, "value": num(value), "min": if scale == 100.0 { 0.0 } else { -50.0 }, "max": if scale == 100.0 { 100.0 } else { 50.0 }, "drawn": DRAWN_ADJUST.contains(&name) })
                 }
-                (EffectCategory::Adjust | EffectCategory::Audio, _) => continue,
+                (EffectCategory::Adjust | EffectCategory::Audio | EffectCategory::Blend, _) => continue,
                 (category, _) => {
                     let name = Some(e.name.clone()).filter(|n| !n.is_empty()).or_else(|| e.library.as_ref().map(|l| l.category.clone()).filter(|c| !c.is_empty()));
                     let (kind, fallback) = if category == EffectCategory::Filter { ("filter", "Filter") } else { ("effect", "Effect") };
@@ -449,6 +449,10 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                 clip.insert("transform".into(), Value::Object(b));
                 clip.insert("originalTransform".into(), Value::Object(original));
                 clip.insert("draftAdjustments".into(), Value::Array(draft_adjustments(project, seg)));
+                // The app's own colour tools start empty (the draft's are `draftAdjustments`);
+                // the blend mode, chroma key, canvas fill and flips show the draft's.
+                clip.insert("color".into(), Value::Null);
+                crate::compositing::emit(project, seg, &mut clip, true);
             }
         }
         (_, None, Some(t)) => {
@@ -502,6 +506,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
             let caption = anims.iter().find(|a| a.kind == AnimationKind::Caption);
             clip.insert("captionStyle".into(), json!(caption.map_or("none".to_string(), |a| builtin_or_empty(&a.builtin, &BUILTIN_CAPTION))));
             clip.insert("spokenWords".into(), json!(!t.words.is_empty()));
+            crate::compositing::emit(project, seg, &mut clip, false);
             let (w, h, c) = match block {
                 Some([l, top, w, h]) => {
                     let c = Vec2::new((l + w / 2.0) / project.canvas.width as f64 * 2.0 - 1.0, 1.0 - (top + h / 2.0) / project.canvas.height as f64 * 2.0);
@@ -555,8 +560,9 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
         .iter()
         .chain(TEXT_STYLE_KEYS.iter())
         .chain(ADJUST_KEYS.iter())
-        // The draft's own adjustments, and a filter bar's strength.
-        .chain(["draftAdjustments", "intensity"].iter())
+        // The draft's own adjustments, a filter bar's strength, and the colour and compositing
+        // fields.
+        .chain(["draftAdjustments", "intensity", "color", "blendMode", "chroma", "canvas", "flip"].iter())
         .filter_map(|k| clip.get(*k).map(|v| (k.to_string(), v.clone())))
         .collect();
     clip.insert(
@@ -1340,5 +1346,54 @@ mod tests {
         assert!(v.speed_curve(&back.materials).is_none());
         let still = back.materials.media.iter().find(|m| m.id == v.material).unwrap();
         assert_eq!(still.freeze.as_ref().map(|f| f.at), Some(Micros(2_000_000)));
+    }
+
+    /// A converted clip shows the draft's blend mode, chroma key, canvas fill and flips; they
+    /// come back exactly unedited, and an edit replaces the draft's (a chroma key keeping its
+    /// keyframes). The app's colour tools go on top of the draft's adjustments.
+    #[test]
+    fn compositing_fields_show_and_edits_replace_the_drafts() {
+        let mut p = project();
+        p.materials.effects.push(Effect { id: "mix".into(), category: EffectCategory::Blend, name: "Screen".into(), params: BTreeMap::new(), builtin: Some("screen".into()), resource: None, library: None, text_style: None });
+        p.materials.chromas.push(Chroma { id: "key".into(), color: Rgba { r: 0.0, g: 1.0, b: 0.0, a: 1.0 }, intensity: 0.5, shadow: 0.0, edge_smooth: 0.25, spill: 0.0 });
+        p.materials.canvas_fills.push(CanvasFill { id: "cv".into(), fill: CanvasFillKind::Blur { amount: 0.375 } });
+        let v = p.tracks[0].segments.iter_mut().find(|s| s.id == "v").unwrap();
+        v.attachments.extend(["mix".into(), "key".into(), "cv".into()]);
+        v.transform.flip_h = true;
+        v.keyframes.push(ParamKeys { material: "key".into(), param: Param::ChromaIntensity, keys: vec![Keyframe::new(Micros(0), 0.2), Keyframe::new(Micros(1_000_000), 0.6)] });
+        let before = segment(&p, "v").clone();
+        let doc = to_app_project(&p, &mut |_| None);
+        let clip = doc["timeline"]["clips"].as_array().unwrap().iter().find(|c| c["clipId"] == "v").unwrap();
+        assert_eq!((clip["blendMode"].as_str(), clip["flip"]["horizontal"].as_bool(), clip["color"].is_null()), (Some("screen"), Some(true), true));
+        assert_eq!((clip["chroma"]["color"].as_str(), clip["chroma"]["intensity"].as_f64(), clip["chroma"]["edgeSmooth"].as_f64()), (Some("#00ff00"), Some(50.0), Some(25.0)));
+        assert_eq!((clip["canvas"]["type"].as_str(), clip["canvas"]["blur"].as_f64()), (Some("blur"), Some(0.375)));
+        assert_eq!(clip["keyframes"]["chroma:intensity"][1]["value"].as_f64(), Some(60.0));
+        // The blend effect isn't one of the draft's adjustments.
+        assert!(clip["draftAdjustments"].as_array().unwrap().iter().all(|a| a["id"] != "mix"));
+        let back = import_v1_json(&doc).unwrap().project;
+        let v = segment(&back, "v");
+        assert_eq!((&v.attachments, &v.transform, &v.keyframes), (&before.attachments, &before.transform, &before.keyframes));
+        // Edited: each replaces the draft's.
+        let mut edited = doc.clone();
+        let c = clip_mut(&mut edited, "v");
+        c["blendMode"] = json!("overlay");
+        c["chroma"]["color"] = json!("#0000ff");
+        c["canvas"] = json!({"type": "color", "color": "#ff8000"});
+        c["flip"] = json!({"horizontal": false, "vertical": true});
+        c["color"] = json!({"adjust": {"exposure": 10}});
+        let back = import_v1_json(&edited).unwrap().project;
+        let v = segment(&back, "v");
+        let attached = |id: &MaterialId| v.attachments.contains(id);
+        assert!(!attached(&"mix".into()) && !attached(&"key".into()) && !attached(&"cv".into()) && attached(&"fx".into()));
+        let blend = back.materials.effects.iter().find(|e| attached(&e.id) && e.category == EffectCategory::Blend).unwrap();
+        assert_eq!(blend.blend_mode(), Some(BlendMode::Overlay));
+        let key = back.materials.chromas.iter().find(|k| attached(&k.id)).unwrap();
+        assert_eq!((key.color.b, key.intensity, key.edge_smooth), (1.0, 0.5, 0.25));
+        assert_eq!(v.chroma_at(key, Micros(500_000)).intensity, 0.4);
+        let fill = back.materials.canvas_fills.iter().find(|f| attached(&f.id)).unwrap();
+        assert_eq!(fill.fill, CanvasFillKind::Color { color: Rgba::from_hex("#ff8000").unwrap() });
+        assert!(!v.transform.flip_h && v.transform.flip_v);
+        let exposure = back.materials.effects.iter().find(|e| attached(&e.id) && e.builtin.as_deref() == Some("exposure")).unwrap();
+        assert_eq!(exposure.params["intensity"], 0.2);
     }
 }
