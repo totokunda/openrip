@@ -147,16 +147,16 @@ Spike results (`spikes/frame-transport`, Apple M2 Max, hardware HEVC decode):
 
 Match CapCut's layout and workflows. Don't copy its assets.
 
-- **Home screen ✅:** project grid with covers, sorted by last edited (or newest, or name) with a search; new projects at 16:9, 9:16, 1:1, 4:3, 4:5, 21:9 or 2:3; Open a CapCut project. The editor's top bar goes back home, and the engine's frame becomes the project's cover. Still to do: the first clip dropped on an empty timeline sets the canvas to its own ratio even when the project was made at a chosen size (CapCut keeps a chosen ratio).
+- **Home screen ✅:** a sidebar (Home, Templates, Library), a Create project banner with sizes (16:9, 9:16, 1:1, 4:3, 4:5, 21:9, 2:3), quick starts (Open a CapCut project, Import media, Continue), and the projects as a grid or list with covers, length and size, sorted by last edited (or newest, or name) with a search. The editor's top bar goes back home, and the engine's frame becomes the project's cover. Still to do: the first clip dropped on an empty timeline sets the canvas to its own ratio even when the project was made at a chosen size (CapCut keeps a chosen ratio).
 - **Left panel tabs:** Media, Audio, Text, Stickers, Effects, Transitions, Filters, Adjustment, Templates
-  - Done: the tab row; Media, Filters, Text (add text in eight styles, In animations) and Transitions (the engine's transitions on the selected clip) work; Audio, Stickers, Effects and Adjustment say what's coming. Still to do: their libraries, Templates, a detachable panel.
+  - Done: the tab row (with Captions) and each tab's column of sections; Media (search, grid or list, Added badges), Filters, Text (add text in eight styles, In animations) and Transitions (the engine's transitions on the selected clip) work; Audio, Stickers, Effects, Captions, Adjustment, Templates and the footage library say what's coming. Still to do: their libraries, recording, a detachable panel.
 - **Center:** player with canvas and ratio controls, safe areas, fullscreen
-  - Done: canvas tools and zoom in the player's header; time, transport, ratio menu, safe-area guides and full screen under it.
+  - Done: canvas tools, zoom and a menu (safe-area guides) in the player's header; the time as HH:MM:SS:FF, transport, preview quality (Full, Half, Quarter), zoom to fit, ratio menu and full screen under it.
 - **Right inspector:** Video / Audio / Speed / Animation / Adjust tabs
-  - Done: CapCut's tabs and sub-tabs (Video ▸ Basic / Mask, Audio, Speed, Animation, Adjust; Text ▸ Basic / Transform, Animation, Duration) over the existing panels; the project's details with nothing selected.
-- **Layout ✅:** top bar (Home, Menu, project name, layout, shortcuts, settings, Export), CapCut's panel arrangement and proportions, Default / Media / Inspector layouts that keep their panel sizes between sessions.
+  - Done: CapCut's tabs and sub-tabs (Video ▸ Basic / Mask, Audio, Speed, Animation, Adjust; Text ▸ Basic / Transform, Animation, Duration) over the existing panels; Project and Details with nothing selected.
+- **Layout ✅:** top bar (Home, Menu, project name, layout toggles, shortcuts, settings, Export), CapCut's panel arrangement and proportions, Default / Media / Inspector layouts that keep their panel sizes between sessions, and the system's UI font as CapCut's.
 - **Bottom timeline:** magnetic main track, keyframe diamonds, split/freeze/reverse, speed curves, linked audio
-  - Done: CapCut's toolbar arrangement (undo/redo, then the edit tools; the zoom on the right, with room for the timeline's switches).
+  - Done: CapCut's toolbar arrangement (undo/redo, then the edit tools; voiceover, zoom to fit and the zoom on the right), with slots for the timeline's own tools (add, select/split, delete left/right, marker, linked audio, magnet, snapping). Freeze and voiceover are placeholders. Still to do: track headers (lock, hide, mute, cover) and CapCut's clip colours, with the timeline work.
 - **New non-AI features:**
   - transitions
   - keyframes for every animatable property
