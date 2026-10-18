@@ -104,6 +104,16 @@ pub enum Source<'a> {
     /// Not an image: everything drawn below it blurred, horizontally then vertically, by
     /// CapCut's transition blur with its taps this many output pixels apart.
     Blur(f32),
+    /// Not an image: the layers after it, up to the matching `EndGroup`, draw into a group
+    /// of their own the canvas's size instead, over this colour (opaque) or clear. A
+    /// transition draws each of its clips so.
+    BeginGroup(Option<[u8; 3]>),
+    /// The group begun last is finished, and waits for a `Mix` layer.
+    EndGroup,
+    /// Not an image: the groups finished last put together over everything below (a
+    /// transition): the incoming clip's group the last one finished and the outgoing one's
+    /// before it, each only if the mix draws it.
+    Mix(Mix),
 }
 
 impl Source<'_> {
@@ -111,9 +121,42 @@ impl Source<'_> {
         match self {
             Source::Image(i) | Source::Cached(_, i) => (i.width, i.height),
             Source::Video(f) => (f.width(), f.height()),
-            Source::Filter(..) | Source::Blur(_) => (1, 1),
+            Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) => (1, 1),
         }
     }
+}
+
+/// Two clips' groups put together by a transition (see [`Source::Mix`]): each placed and
+/// faded, the incoming one over the outgoing one inside `mask`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mix {
+    pub outgoing: Option<Shot>,
+    pub incoming: Option<Shot>,
+    pub mask: MixMask,
+}
+
+/// One clip's group in a [`Mix`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shot {
+    /// Output pixel centre (x, y) → the group's texel coordinates: u = `inverse[0]` · (x, y,
+    /// 1), v = `inverse[1]` · (x, y, 1).
+    pub inverse: [[f32; 3]; 2],
+    pub alpha: f32,
+    /// CapCut's Pull in blur towards the canvas centre (0 for none; see mix.wgsl).
+    pub zoom_blur: f32,
+    /// Mirrored copies of the group outside it rather than nothing.
+    pub mirror: bool,
+}
+
+/// Where the incoming clip of a [`Mix`] shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MixMask {
+    All,
+    /// Where the distance from the canvas centre along `toward` (canvas fractions) is at
+    /// least `at`, softened over `feather` of the same units.
+    Edge { toward: [f32; 2], at: f32, feather: f32 },
+    /// Inside a circle about the canvas centre, `radius` and `feather` in canvas heights.
+    Circle { radius: f32, feather: f32 },
 }
 
 impl<'a> From<&'a RgbaImage> for Source<'a> {
@@ -244,6 +287,12 @@ struct AppFx {
 }
 
 impl<'a> Layer<'a> {
+    /// A layer that isn't an image placed on the canvas (a filter, a blur, a group's start or
+    /// end, a mix), which only its source describes.
+    pub fn pass(source: Source<'a>) -> Self {
+        Layer { source, center: [0.0, 0.0], size: [1.0, 1.0], rotation: 0.0, flip_h: false, flip_v: false, opacity: 1.0, adjust: None, mattes: Vec::new(), multiply: false, app_filters: None }
+    }
+
     /// Place an image the way the project model does: `position` in half-canvas units
     /// (+y up), `scale` relative to contain-fit, `rotation` clockwise degrees.
     pub fn from_model(source: impl Into<Source<'a>>, canvas: [u32; 2], position: [f64; 2], scale: [f64; 2], rotation: f64) -> Self {
@@ -319,6 +368,9 @@ pub struct Compositor {
     lut3d: wgpu::RenderPipeline,
     blur: wgpu::RenderPipeline,
     matte: wgpu::RenderPipeline,
+    /// Transitions putting two clips' groups together (mix.wgsl), onto RGBA and BGRA targets.
+    mix: wgpu::RenderPipeline,
+    mix_bgra: wgpu::RenderPipeline,
     appfx: AppFx,
     /// CapCut's colour features around the Adjust pass (grade.rs).
     grade: grade::GradeFx,
@@ -548,6 +600,8 @@ impl Compositor {
                     cache: None,
                 })
             },
+            mix: mix_pipeline(&device, &yuv_pipeline_layout, CANVAS),
+            mix_bgra: mix_pipeline(&device, &yuv_pipeline_layout, wgpu::TextureFormat::Bgra8Unorm),
             adjust: adjust_pipeline("fs_adjust"),
             grade: grade::GradeFx::new(&device, &yuv_pipeline_layout),
             luts: Default::default(),
@@ -885,6 +939,48 @@ impl Compositor {
         self.pass(enc, place_pipeline, &src, canvas, back, None);
     }
 
+    /// Put a transition's two groups together over `target` (see mix.wgsl); a group the mix
+    /// doesn't draw is `None`, and `blank` stands in for it.
+    fn mix_pass(&self, enc: &mut wgpu::CommandEncoder, mix: &Mix, outgoing: Option<&wgpu::Texture>, incoming: Option<&wgpu::Texture>, blank: &wgpu::Texture, target: &wgpu::Texture) {
+        let row = |s: Option<&Shot>, r: usize| s.map_or([0.0; 4], |s| [s.inverse[r][0], s.inverse[r][1], s.inverse[r][2], if r == 0 { s.alpha } else { s.zoom_blur }]);
+        let (a, b) = (mix.outgoing.as_ref().filter(|_| outgoing.is_some()), mix.incoming.as_ref().filter(|_| incoming.is_some()));
+        let on = |s: Option<&Shot>| if s.is_some() { 1.0 } else { 0.0 };
+        let mirror = |s: Option<&Shot>| if s.is_some_and(|s| s.mirror) { 1.0 } else { 0.0 };
+        let (mask, feather) = match mix.mask {
+            MixMask::All => ([0.0; 4], 0.0),
+            MixMask::Edge { toward, at, feather } => ([1.0, toward[0], toward[1], at], feather),
+            MixMask::Circle { radius, feather } => ([2.0, 0.0, 0.0, radius], feather),
+        };
+        let params: Vec<f32> = [row(a, 0), row(a, 1), row(b, 0), row(b, 1), [on(a), on(b), mirror(a), mirror(b)], mask, [feather, target.width() as f32, target.height() as f32, 0.0]].concat();
+        let buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&params), usage: wgpu::BufferUsages::UNIFORM });
+        let (a_view, b_view, dst_view) = (outgoing.unwrap_or(blank).create_view(&Default::default()), incoming.unwrap_or(blank).create_view(&Default::default()), target.create_view(&Default::default()));
+        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.yuv_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&a_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&b_view) },
+            ],
+        });
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &dst_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(if target.format() == wgpu::TextureFormat::Bgra8Unorm { &self.mix_bgra } else { &self.mix });
+        pass.set_bind_group(0, &bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
     fn filter_canvas(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, place_pipeline: &wgpu::RenderPipeline, lut: &Lut3d, strength: f32, scratch: &mut Vec<wgpu::Texture>) {
         let n = lut.size;
         let table = {
@@ -982,7 +1078,34 @@ impl Compositor {
         self.pass(enc, place_pipeline, &blank, canvas, off, Some(bg));
         let frame = self.frame.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let max = self.device.limits().max_texture_dimension_2d;
+        // Groups being drawn into (the innermost last), and finished ones waiting for a mix.
+        let mut open: Vec<wgpu::Texture> = Vec::new();
+        let mut finished: Vec<wgpu::Texture> = Vec::new();
         for layer in layers {
+            // Layers draw into the group begun last, else the canvas.
+            let canvas = open.last().unwrap_or(canvas);
+            let place_pipeline = if canvas.format() == wgpu::TextureFormat::Bgra8Unorm { &self.place_bgra } else { &self.place };
+            match layer.source {
+                Source::BeginGroup(colour) => {
+                    let group = self.texture(width, height, CANVAS, wgpu::TextureUsages::empty());
+                    let clear = colour.map_or(wgpu::Color::TRANSPARENT, |c| wgpu::Color { r: c[0] as f64 / 255.0, g: c[1] as f64 / 255.0, b: c[2] as f64 / 255.0, a: 1.0 });
+                    self.pass(enc, &self.place, &blank, &group, off, Some(clear));
+                    open.push(group);
+                    continue;
+                }
+                Source::EndGroup => {
+                    finished.extend(open.pop());
+                    continue;
+                }
+                Source::Mix(mix) => {
+                    let incoming = mix.incoming.and_then(|_| finished.pop());
+                    let outgoing = mix.outgoing.and_then(|_| finished.pop());
+                    self.mix_pass(enc, &mix, outgoing.as_ref(), incoming.as_ref(), &blank, canvas);
+                    scratch.extend(outgoing.into_iter().chain(incoming));
+                    continue;
+                }
+                _ => {}
+            }
             if let Source::Filter(lut, strength) = layer.source {
                 self.filter_canvas(enc, canvas, place_pipeline, lut, strength, &mut scratch);
                 continue;
@@ -1011,7 +1134,7 @@ impl Compositor {
                     let src = match layer.source {
                         Source::Image(img) => self.upload(enc, img, None, &mut scratch),
                         Source::Cached(key, img) => self.upload(enc, img, Some(key), &mut scratch),
-                        Source::Filter(..) | Source::Blur(_) => unreachable!("canvas passes are drawn above"),
+                        Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) => unreachable!("canvas passes are drawn above"),
                         Source::Video(frame) => match self.import_video(enc, frame) {
                             Some((rgba, planes)) => {
                                 keep.extend(planes);
@@ -1122,6 +1245,8 @@ impl Compositor {
                 scratch.push(stage);
             }
         }
+        // Groups left over (a frame cut short) are scratch too.
+        scratch.extend(open.into_iter().chain(finished));
         scratch.push(blank);
         self.cache.lock().unwrap().retain(|_, (_, last)| frame - *last < CACHE_FRAMES);
         self.uploaded.lock().unwrap().expire(frame);
@@ -1167,6 +1292,27 @@ impl Compositor {
         self.recycle(textures.scratch);
         RgbaImage { width, height, data }
     }
+}
+
+/// The transition pass (mix.wgsl) onto a target of `format`, blending "over" what's there.
+fn mix_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("mix"), source: wgpu::ShaderSource::Wgsl(include_str!("mix.wgsl").into()) });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("fs_mix"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs_mix"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
+        }),
+        primitive: Default::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 /// Average each `k`x`k` block (edges included as partial blocks).
