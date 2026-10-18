@@ -1391,6 +1391,31 @@ mod tests {
         assert_eq!((v.source, v.speed), (Some(TimeRange::new(Micros::ZERO, v.target.duration)), 1.0));
     }
 
+    /// A draft's sticker (a filter bar in the app, with no transform of its own) tracked in
+    /// the app: its position, scale and rotation keys reach the segment.
+    #[test]
+    fn a_converted_stickers_tracked_keys_reach_the_engine() {
+        let mut p = project();
+        p.materials.stickers.push(Sticker { id: MaterialId("st".into()), path: "/tmp/sticker.png".into(), animated: false, width: 200, height: 200, library: None });
+        let sticker = Segment { id: "s".into(), material: MaterialId("st".into()), source: None, target: TimeRange::new(Micros(0), Micros(2_000_000)), render_index: 15000, attachments: Vec::new(), keyframes: Vec::new(), ..segment(&p, "v").clone() };
+        p.tracks.push(Track { id: "ts".into(), kind: TrackKind::Sticker, name: String::new(), segments: vec![sticker], muted: false, hidden: false, locked: false });
+        let mut doc = to_app_project(&p, &mut |_| None);
+        // The canvas is 337.5 × 600 world units: its centre, then a quarter across and up.
+        clip_mut(&mut doc, "s")["keyframes"] = json!({
+            "position": [{"frame": 0, "value": [168.75, 300.0], "ease": "linear"}, {"frame": 30, "value": [253.125, 150.0], "ease": "linear"}],
+            "scale": [{"frame": 0, "value": [1.0, 1.0], "ease": "linear"}, {"frame": 30, "value": [2.0, 2.0], "ease": "linear"}],
+            "rotation": [{"frame": 0, "value": 10.0, "ease": "linear"}, {"frame": 30, "value": 40.0, "ease": "linear"}]
+        });
+        let back = import_v1_json(&doc).unwrap().project;
+        let t = &segment(&back, "s").transform;
+        let pos: Vec<(i64, f64, f64)> = t.position.keys.iter().map(|k| (k.at.0, k.value.x, k.value.y)).collect();
+        assert_eq!(pos.len(), 2);
+        assert!((pos[0].1).abs() < 1e-9 && (pos[0].2).abs() < 1e-9 && (pos[1].1 - 0.5).abs() < 1e-9 && (pos[1].2 - 0.5).abs() < 1e-9, "{pos:?}");
+        assert_eq!(pos[1].0, 1_000_000);
+        // Scale relative to the sticker's own (0.5 in the draft); rotation as it is.
+        assert!((t.scale.keys[1].value.x - 1.0).abs() < 1e-9 && (t.rotation.keys[1].value - 40.0).abs() < 1e-9, "{:?} {:?}", t.scale.keys, t.rotation.keys);
+    }
+
     #[test]
     fn smooth_slow_mo_and_optical_flow_go_both_ways() {
         // The app's own clip: off by default (it plays the asset), then each set.

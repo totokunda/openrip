@@ -62,7 +62,7 @@ The workspace's dependencies on media, audio, playback and export come without d
 
 ## What each target supports today
 
-`check-targets.sh` runs `cargo check` (nothing links) for these. The pure crates are model, platform, capcut, v1 and frame. "Engine" is render, media, audio, playback, export and core without default features.
+`check-targets.sh` runs `cargo check` (nothing links) for these. The pure crates are model, platform, motion, capcut, v1 and frame. "Engine" is render, media, audio, playback, export and core without default features.
 
 | Target | Checked by the script | Runs today | Still missing |
 |---|---|---|---|

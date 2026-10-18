@@ -309,6 +309,7 @@ mod tests {
             worst = (worst.0.max(pos), worst.1.max(scale), worst.2.max(rot));
         }
         // Within half a pixel, 1% of scale and half a degree, over 30 frames.
+        eprintln!("tracked square over 30 frames: worst position {:.3} px, scale {:.4}, rotation {:.3}°", worst.0, worst.1, worst.2);
         assert!(worst.0 < 0.5 && worst.1 < 0.01 && worst.2 < 0.5, "worst position {:.3} px, scale {:.4}, rotation {:.3}°", worst.0, worst.1, worst.2);
     }
 

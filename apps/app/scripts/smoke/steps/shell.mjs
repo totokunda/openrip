@@ -28,7 +28,7 @@ export default async (ctx) => {
 
   // The inspector's tabs follow the selection.
   await select(ctx, await doc(), (await clipOf("text")).clipId, 1.5);
-  check("a text's tabs: Text, Animation, Duration", (await tabs()).startsWith("Text,Animation,Duration"), await tabs());
+  check("a text's tabs: Text, Animation, Tracking, Duration", (await tabs()).startsWith("Text,Animation,Tracking,Duration"), await tabs());
   await openTab(win, "Transform");
   await shot("i-text-transform");
   await select(ctx, await doc(), (await clipOf("video")).clipId, 6);
