@@ -23,6 +23,7 @@ import {
 import { useClipStore } from "./clip";
 import { useControlsStore, setPlaybackDriver } from "./control";
 import { useViewportStore } from "./viewport";
+import { useMaskStore } from "./mask";
 import { useProjectsStore } from "./projects";
 import { getActiveProjectJsonSnapshot } from "./middlewares/json-persistence";
 import { withoutHistory } from "./history";
@@ -184,10 +185,14 @@ async function withOriginalMedia<T>(snapshot: T): Promise<T> {
   return out;
 }
 
-/** While the mask tool is out, clips show unmasked (as the app's own preview does). */
+/**
+ * While the mask tool's lasso (or shape) is out, clips show unmasked, so the outline can be
+ * drawn on the whole picture (as the app's own preview does). The brush paints onto the
+ * masked picture, so its strokes show as they're kept.
+ */
 function withoutMasksWhileEditing<T>(snapshot: T): T {
   const clips = (snapshot as any)?.timeline?.clips;
-  if (useViewportStore.getState().tool !== "mask" || !Array.isArray(clips)) return snapshot;
+  if (useViewportStore.getState().tool !== "mask" || useMaskStore.getState().tool === "draw" || !Array.isArray(clips)) return snapshot;
   const s = snapshot as any;
   return { ...s, timeline: { ...s.timeline, clips: clips.map((c: any) => (c?.masks?.length ? { ...c, masks: [] } : c)) } };
 }
@@ -257,6 +262,7 @@ export function initEnginePreview() {
   useFilterLibrary.subscribe((s, p) => {
     if (s.preview !== p.preview && useEnginePreviewStore.getState().enabled) scheduleSync(0);
   });
+  watch(useMaskStore.subscribe as any, (s: any) => [s.tool]);
   watch(useProjectsStore.subscribe as any, (s: any) => [s.activeProjectId, (s as any).projectsLoaded]);
 
   // Playback by the engine: its sound, and its clock moving the playhead. Each run has a
