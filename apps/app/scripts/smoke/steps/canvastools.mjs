@@ -69,13 +69,15 @@ export default async (ctx) => {
   await win.waitForTimeout(150);
   check("V goes back to select", (await chipTool()) === null, await chipTool());
 
-  // The Mask tab's tiles: Rectangle adds a rectangle mask on the video at once (as CapCut's);
-  // Brush turns the canvas's mask brush on, a stroke is painted, the chip's Done ends it.
+  // The Mask tab: Add mask puts a rectangle mask on the video at once (as CapCut's); "+" adds
+  // a second, whose Brush tile turns the canvas's mask brush on, a stroke is painted, the
+  // chip's Done ends it.
   const video = clipsWhere(doc, (c) => c.type === "video" || c.type === "image")[0];
   await select(ctx, doc, video.clipId);
   await tab(win, "Mask");
-  await settled(win, () => win.locator("[data-testid=mask-shape-rectangle]").click());
-  check("Rectangle adds a mask without a tool", (await chipTool()) === null, await chipTool());
+  await settled(win, () => win.locator("[data-testid=mask-add]").click());
+  check("Add mask adds a mask without a tool", (await chipTool()) === null, await chipTool());
+  await settled(win, () => win.locator("[data-testid=mask-add]").click());
   await win.locator("[data-testid=mask-shape-brush]").click();
   await win.waitForTimeout(200);
   check("Brush turns the mask tool on", (await chipTool()) === "mask", await chipTool());
