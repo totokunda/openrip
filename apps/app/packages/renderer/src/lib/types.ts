@@ -214,6 +214,17 @@ export type Marker = {
   note: string;
 };
 
+/**
+ * A guide on the player's canvas (lib/guides.ts): a horizontal one (`axis` "y") at a height,
+ * or a vertical one ("x") at a width, as a fraction of the canvas from its top or left edge
+ * (0.5 is the middle; it may lie off the canvas). Part of the project.
+ */
+export type Guide = {
+  id: string;
+  axis: "x" | "y";
+  at: number;
+};
+
 /** Visual media clips (video or image) that can carry masks. */
 export type MediaClipProps = VideoClipProps | ImageClipProps;
 

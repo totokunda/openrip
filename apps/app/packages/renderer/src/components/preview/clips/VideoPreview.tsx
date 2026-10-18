@@ -11,6 +11,7 @@ import { getMediaInfo, getMediaInfoCached } from "@/lib/media/utils";
 import { useControlsStore } from "@/lib/control";
 import Konva from "konva";
 import { useViewportStore } from "@/lib/viewport";
+import { snapToGuides, snapResizeToGuides } from "@/lib/guides";
 import { DEFAULT_FPS } from "@/lib/settings";
 import { useClipStore } from "@/lib/clip";
 import { WrappedCanvas } from "mediabunny";
@@ -524,6 +525,8 @@ const VideoPreview: React.FC<
         } else if (nextGuides.bottom) {
           deltaY += rectHeight - (client.y + client.height);
         }
+        // The player's guides, where the canvas's own lines didn't catch it (lib/guides.ts).
+        ({ deltaX, deltaY } = snapToGuides(client, rectWidth, rectHeight, thresholdLocal, deltaX, deltaY));
         if (deltaX !== 0 || deltaY !== 0) {
           node.x(node.x() + deltaX);
           node.y(node.y() + deltaY);
@@ -596,6 +599,9 @@ const VideoPreview: React.FC<
       }
 
       // Convert back to absolute space
+      // Moving edges onto the player's guides too.
+      snapResizeToGuides(local, _oldBox, position, scale, rectWidth, rectHeight, thresholdLocal);
+
       let adjusted = {
         ...newBox,
         x: position.x + local.x * scale,

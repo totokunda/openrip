@@ -22,6 +22,7 @@ import type {
   ViewTool,
   Point,
   Marker,
+  Guide,
 } from "../types";
 
 import _ from "lodash";
@@ -138,6 +139,8 @@ type ProjectJsonSnapshot = {
     aspectRatio?: { width: number; height: number; id: string };
     /** The main track magnet (CapCut's maintrack_adsorb). */
     mainTrackMagnet?: boolean;
+    /** The player's guides (lib/guides.ts). */
+    guides?: Guide[];
   };
   editorState: {
     duration: number;
@@ -363,6 +366,7 @@ const buildProjectJsonSnapshot = (
         aspectRatio: viewportState?.aspectRatio,
         defaultClipLength: controlsState.defaultClipLength,
         mainTrackMagnet: clipState.magnet,
+        guides: clipState.guides ?? [],
       },
       editorState: {
         duration: Number(clipState.clipDuration || 0),
@@ -802,6 +806,10 @@ const hydrateStoresFromProjectJson = async (
         .filter((m) => m && typeof m.id === "string" && Number.isFinite(m.frame))
         .map((m) => ({ id: m.id, frame: Math.max(0, Math.round(m.frame)), color: m.color || "#00C1CD", note: m.note ?? "" }))
         .sort((a, b) => a.frame - b.frame);
+      // The player's guides as saved.
+      const guides: Guide[] = (Array.isArray(doc.settings?.guides) ? doc.settings.guides : [])
+        .filter((g) => g && typeof g.id === "string" && (g.axis === "x" || g.axis === "y") && Number.isFinite(g.at))
+        .map((g) => ({ id: g.id, axis: g.axis, at: g.at }));
       // The magnet as saved (on for a project saved before it existed), but only over a main
       // track that's already gapless from the start: opening a project never moves its clips.
       const magnet =
@@ -818,6 +826,7 @@ const hydrateStoresFromProjectJson = async (
           clipDuration,
           markers,
           magnet,
+          guides,
           mainPreview: null,
           snapGuideX:
             typeof doc.editorState?.snapGuideX === "number"
@@ -988,6 +997,7 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
         const clipsEdited =
           (state as any)?.clips !== (prev as any)?.clips ||
           (state as any)?.markers !== (prev as any)?.markers ||
+          (state as any)?.guides !== (prev as any)?.guides ||
           (state as any)?.magnet !== (prev as any)?.magnet;
         if (clipsChanged || timelinesChanged || assetsChanged || clipsEdited) {
           scheduleJsonProjectSave(getProjectState);
@@ -1208,6 +1218,7 @@ export const withJsonProjectPersistence =
                 snapGuideX: null,
                 markers: [],
                 magnet: true,
+                guides: [],
                 mainPreview: null,
               } as any);
             } catch {

@@ -2,6 +2,7 @@ import { create, StateCreator } from "zustand";
 import {
   AnyClipProps,
   Marker,
+  Guide,
   TimelineProps,
   ClipTransform,
   TimelineType,
@@ -202,6 +203,8 @@ interface ClipStore {
   updateMarker: (id: string, patch: Partial<Omit<Marker, "id">>) => void;
   removeMarker: (id: string) => void;
   removeAllMarkers: () => void;
+  // The player's guides (lib/guides.ts edits them). Part of the project.
+  guides: Guide[];
   // While a clip is dragged over (or off) the main track with the magnet on: where its other
   // clips would start, so they make room as in CapCut. Null otherwise.
   mainPreview: Record<string, number> | null;
@@ -729,6 +732,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
     })),
   removeMarker: (id) => set((state) => ({ markers: state.markers.filter((m) => m.id !== id) })),
   removeAllMarkers: () => set({ markers: [] }),
+  guides: [],
   mainPreview: null,
   setMainPreview: (starts) => set({ mainPreview: starts }),
   addTrack: (type) => {

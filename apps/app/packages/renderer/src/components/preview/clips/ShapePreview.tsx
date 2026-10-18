@@ -15,6 +15,7 @@ import {
 } from "@/lib/types";
 import { useClipStore } from "@/lib/clip";
 import { useViewportStore } from "@/lib/viewport";
+import { snapToGuides, snapResizeToGuides } from "@/lib/guides";
 import { useControlsStore } from "@/lib/control";
 import RoundedRegularPolygon from "./custom/RoundedRegularPolygon";
 import { BaseClipApplicator } from "./apply/base";
@@ -269,6 +270,8 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
         } else if (nextGuides.bottom) {
           deltaY += rectHeight - (client.y + client.height);
         }
+        // The player's guides, where the canvas's own lines didn't catch it (lib/guides.ts).
+        ({ deltaX, deltaY } = snapToGuides(client, rectWidth, rectHeight, thresholdLocal, deltaX, deltaY));
         if (deltaX !== 0 || deltaY !== 0) {
           node.x(node.x() + deltaX);
           node.y(node.y() + deltaY);
@@ -366,6 +369,9 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
       } else if (Math.abs(h25 - bottom) <= thresholdLocal) {
         local.height = h25 - local.y;
       }
+
+      // Moving edges onto the player's guides too.
+      snapResizeToGuides(local, _oldBox, position, scale, rectWidth, rectHeight, thresholdLocal);
 
       let adjusted = {
         ...newBox,
