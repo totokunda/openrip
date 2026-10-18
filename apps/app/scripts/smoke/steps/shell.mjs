@@ -64,11 +64,10 @@ export default async (ctx) => {
   check("Transitions tab: nothing given to the video", !(await clipOf("video")).transitionOut);
   await left("media");
 
-  // Safe areas (the player's menu) and the ratio menu, under the player.
+  // Safe areas (the bottom bar's toggle, where CapCut has its platform overlay) and the ratio
+  // menu, under the player.
   const guides = async () => {
-    await win.locator("[data-testid=player-menu]").click();
-    await win.waitForTimeout(300);
-    await win.locator("[data-testid=safe-areas]").click();
+    await win.locator("[data-testid=safe-areas-button]").click();
     await win.waitForTimeout(300);
   };
   await guides();

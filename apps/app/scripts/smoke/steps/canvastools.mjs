@@ -1,5 +1,5 @@
 // The canvas tools with no tool row on the player (after import timeline): the player's
-// header holds only its name and its menu; the menu's zoom; Stickers ▸ Shapes adding a star at
+// header holds only its name and its menu; the zoom popover; Stickers ▸ Shapes adding a star at
 // the playhead; Stickers ▸ Draw's pen drawing a clip, with the tool chip and Esc; T and V; and
 // the Mask tab's picker starting a rectangle mask dragged on the clip.
 import { drag, previewRect, rulerMap, seek, settled, tab } from "./_preview.mjs";
@@ -21,16 +21,19 @@ export default async (ctx) => {
   });
   check("player header has only its menu", JSON.stringify(headerButtons) === JSON.stringify(["player-menu"]), JSON.stringify(headerButtons));
 
-  // The menu's zoom.
-  await win.locator("[data-testid=player-menu]").click();
-  await win.locator("[data-testid=player-zoom-200]").click();
+  // The zoom popover under the player (CapCut's; the header menu has no zoom).
+  const zoom = async () => +(await win.locator("[data-testid=zoom-slider]").getAttribute("data-zoom"));
+  await win.locator("[data-testid=zoom-button]").click();
   await win.waitForTimeout(300);
-  await win.locator("[data-testid=player-menu]").click();
-  const zoom = (await win.locator("[data-testid=player-zoom]").innerText()).trim();
-  check("menu zooms to 200%", zoom === "200%", zoom);
-  await shot("ct1-player-menu");
-  await win.locator("[data-testid=player-zoom-fit]").click();
+  for (let i = 0; i < 5; i++) await win.locator("[data-testid=zoom-in]").click();
   await win.waitForTimeout(300);
+  check("the zoom popover zooms to 150% of fit", Math.abs((await zoom()) - 1.5) < 0.01, String(await zoom()));
+  await shot("ct1-player-zoom");
+  for (let i = 0; i < 5; i++) await win.locator("[data-testid=zoom-out]").click();
+  await win.waitForTimeout(300);
+  check("and back to fit", Math.abs((await zoom()) - 1) < 0.01, String(await zoom()));
+  await win.keyboard.press("Escape");
+  await win.waitForTimeout(200);
 
   // Stickers ▸ Shapes: a star at the playhead.
   const before = await savedProject(win, udDir);
