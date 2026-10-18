@@ -117,3 +117,61 @@ fn mirrored_groups_repeat_their_edges() {
     assert_eq!(px(&c.render(32, 32, [0, 0, 0], &layers(true)), 6, 16), [255, 255, 255, 255]);
     assert_eq!(px(&c.render(32, 32, [0, 0, 0], &layers(false)), 6, 16), [0, 0, 0, 255]);
 }
+
+/// CapCut's Pull in (`VerticalZoomNear.frag`) worked by hand on the CPU: the picture sampled at
+/// 0.5 + (uv − 0.5)·k, 21 taps towards the centre `10/720 · i · (uv − 0.5) · 2 · blur` apart,
+/// mirrored at the edges, each tap bilinear with the texture clamped to its edge.
+fn zoom_near(src: &RgbaImage, k: f32, blur: f32) -> RgbaImage {
+    let (w, h) = (src.width as f32, src.height as f32);
+    let texel = |x: i32, y: i32| px(src, x.clamp(0, src.width as i32 - 1) as u32, y.clamp(0, src.height as i32 - 1) as u32).map(|v| v as f32);
+    let mix = |a: [f32; 4], b: [f32; 4], t: f32| [0, 1, 2, 3].map(|i| a[i] + (b[i] - a[i]) * t);
+    let bilinear = |u: f32, v: f32| {
+        let (x, y) = (u * w - 0.5, v * h - 0.5);
+        let (x0, y0) = (x.floor(), y.floor());
+        let (fx, fy) = (x - x0, y - y0);
+        let (x0, y0) = (x0 as i32, y0 as i32);
+        mix(mix(texel(x0, y0), texel(x0 + 1, y0), fx), mix(texel(x0, y0 + 1), texel(x0 + 1, y0 + 1), fx), fy)
+    };
+    let mirror = |c: f32| {
+        let c = c.abs();
+        if c > 1.0 {
+            2.0 - c
+        } else {
+            c
+        }
+    };
+    image(src.width, src.height, |x, y| {
+        let uv = [(x as f32 + 0.5) / w, (y as f32 + 0.5) / h];
+        let at = [0.5 + (uv[0] - 0.5) * k, 0.5 + (uv[1] - 0.5) * k];
+        let mut sum = [0.0f32; 4];
+        for i in -10..=10 {
+            let q = [0, 1].map(|c| mirror(at[c] + 10.0 / 720.0 * i as f32 * (at[c] - 0.5) * 2.0 * blur));
+            let s = bilinear(q[0], q[1]);
+            (0..4).for_each(|c| sum[c] += s[c]);
+        }
+        sum.map(|v| (v / 21.0).round() as u8)
+    })
+}
+
+#[test]
+fn pull_in_samples_as_capcuts_shader_does() {
+    let Some(c) = gpu() else { return };
+    let src = image(96, 54, |x, y| [(x * 255 / 95) as u8, (y * 255 / 53) as u8, (((x / 8) ^ (y / 8)) & 1) as u8 * 200, 255]);
+    // The incoming clip just after the cut (k = 2 − T for T a little over 0.5: two thirds of
+    // its size, mirrored around, blurred towards the centre), the outgoing one zoomed in, and
+    // neither.
+    for (k, blur) in [(1.45f32, 0.45f32), (0.7, 0.3), (1.0, 0.0)] {
+        let (cx, cy) = (48.0, 27.0);
+        let shot = Shot { inverse: [[k, 0.0, cx - k * cx], [0.0, k, cy - k * cy]], alpha: 1.0, zoom_blur: blur, mirror: true };
+        let layers = [
+            Layer::pass(Source::BeginGroup(Some([0, 0, 0]))),
+            Layer::from_model(&src, [96, 54], [0.0, 0.0], [1.0, 1.0], 0.0),
+            Layer::pass(Source::EndGroup),
+            Layer::pass(Source::Mix(Mix { outgoing: Some(shot), incoming: None, mask: MixMask::All })),
+        ];
+        let out = c.render(96, 54, [0, 0, 0], &layers);
+        let want = zoom_near(&src, k, blur);
+        let worst = out.data.iter().zip(&want.data).map(|(a, b)| (*a as i32 - *b as i32).abs()).max().unwrap();
+        assert!(worst <= 2, "k {k}, blur {blur}: off by {worst}");
+    }
+}
