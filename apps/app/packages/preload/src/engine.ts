@@ -85,9 +85,12 @@ export function engineDetectScenes(job: number, path: string, startSec: number, 
   return ipcRenderer.invoke("engine:detect-scenes", job, path, startSec, durationSec, sensitivity);
 }
 
-/** Color match: the colour statistics of `path`'s range, from frames spread across it. */
-export function engineColorStats(job: number, path: string, startSec: number, durationSec: number | null): Promise<EngineAnalysis<EngineColorStats>> {
-  return ipcRenderer.invoke("engine:color-stats", job, path, startSec, durationSec);
+/** A clip's look on its media, for its statistics: its Color match, then its Basic sliders (panel scale). */
+export type EngineLook = { matched?: EngineMatchOn | null } & Partial<Record<"brightness" | "contrast" | "saturation" | "highlights" | "shadows" | "whites" | "blacks" | "temperature" | "tint", number>>;
+
+/** Color match: the colour statistics of `path`'s range, from frames spread across it, through `look` (a reference as it looks). */
+export function engineColorStats(job: number, path: string, startSec: number, durationSec: number | null, look: EngineLook | null = null): Promise<EngineAnalysis<EngineColorStats>> {
+  return ipcRenderer.invoke("engine:color-stats", job, path, startSec, durationSec, look);
 }
 
 /** Auto adjust: the Basic sliders from the range's own statistics (through `matched`, a match on the clip). */

@@ -73,11 +73,43 @@ pub fn detect_scenes(path: &Path, start: Micros, duration: Option<Micros>, optio
 /// Frames sampled across a range for the colour tools.
 const COLOR_FRAMES: usize = 12;
 
+/// How a clip looks on top of its media, as far as its statistics follow it: its Color match,
+/// then the Adjust sliders the compositor's CPU reference draws (brightness, contrast,
+/// saturation, highlights, shadows, whites, blacks, temperature, tint; the rest of the grade
+/// isn't followed).
+#[derive(Clone, Debug, Default)]
+pub struct Look {
+    pub matched: Option<MatchOn>,
+    pub sliders: openrip_render::Adjust,
+}
+
+impl Look {
+    fn apply(&self, pixels: &mut [[f32; 3]]) {
+        if let Some(m) = self.matched.filter(|m| m.intensity > 0.0) {
+            let t = openrip_analysis::Transfer::between(&m.source, &m.reference);
+            let k = m.intensity.clamp(0.0, 1.0);
+            for p in pixels.iter_mut() {
+                let q = t.apply(*p);
+                *p = [0, 1, 2].map(|c| p[c] + (q[c] - p[c]) * k);
+            }
+        }
+        if !self.sliders.is_identity() {
+            for p in pixels.iter_mut() {
+                *p = self.sliders.apply_rgb(*p);
+            }
+        }
+    }
+}
+
 /// The colour statistics of `path` over `duration` from `start` (media time; to its end for
-/// `None`), from frames spread across it (Color match reads its Oklab moments).
-pub fn color_stats(path: &Path, start: Micros, duration: Option<Micros>, control: &AnalysisControl) -> Result<ColorStats> {
+/// `None`), from frames spread across it, seen through `look` when given (Color match reads
+/// its Oklab moments: a reference's as it looks, the clip's own as its media is).
+pub fn color_stats(path: &Path, start: Micros, duration: Option<Micros>, look: Option<&Look>, control: &AnalysisControl) -> Result<ColorStats> {
     let sample = openrip_playback::sample_colors(path, start, duration, COLOR_FRAMES, &mut |d, t| control.report(d, t))?;
-    Ok(sample.stats())
+    let Some(look) = look else { return Ok(sample.stats()) };
+    let mut pixels = sample.pixels().to_vec();
+    look.apply(&mut pixels);
+    Ok(ColorStats::of(&pixels))
 }
 
 /// A Color match already on the clip: what Auto adjust sees through it.
@@ -103,14 +135,7 @@ pub fn auto_adjust(path: &Path, start: Micros, duration: Option<Micros>, matched
     let sample = openrip_playback::sample_colors(path, start, duration, COLOR_FRAMES, &mut |d, t| control.report(d, t))?;
     let stats = sample.stats();
     let mut pixels = sample.pixels().to_vec();
-    if let Some(m) = matched.filter(|m| m.intensity > 0.0) {
-        let t = openrip_analysis::Transfer::between(&m.source, &m.reference);
-        let k = m.intensity.clamp(0.0, 1.0);
-        for p in pixels.iter_mut() {
-            let q = t.apply(*p);
-            *p = [0, 1, 2].map(|c| p[c] + (q[c] - p[c]) * k);
-        }
-    }
+    Look { matched, sliders: Default::default() }.apply(&mut pixels);
     let model = |s: &Sliders, rgb: [f32; 3]| {
         openrip_render::Adjust { brightness: s.brightness, contrast: s.contrast, saturation: s.saturation, temperature: s.temperature, tint: s.tint, whites: s.whites, blacks: s.blacks, ..Default::default() }.apply_rgb(rgb)
     };

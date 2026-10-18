@@ -80,7 +80,7 @@ export type EngineAddon = {
   /** Split scenes: shot changes in a file's range (media µs); progress and cancel by `job`. */
   detectScenes(job: number, path: string, startUs: number, durationUs: number | null, sensitivity: number | null): Promise<SceneCut[]>;
   /** Color match: a range's colour statistics (Oklab moments and more). */
-  colorStats(job: number, path: string, startUs: number, durationUs: number | null): Promise<ColorStats>;
+  colorStats(job: number, path: string, startUs: number, durationUs: number | null, look: Look | null): Promise<ColorStats>;
   /** Auto adjust: the Basic sliders (panel scale) from a range's statistics, through a match. */
   autoAdjust(job: number, path: string, startUs: number, durationUs: number | null, matched: MatchOn | null): Promise<AutoAdjustValues>;
   analysisProgress(job: number): { done: number; total: number } | null;
@@ -124,6 +124,8 @@ export type SceneCut = { timeUs: number; kind: "hard" | "dissolve" | "fade"; sta
 /** A range's colour statistics: Oklab means and spreads, luma, chroma, the cast. */
 export type ColorStats = { mean: number[]; std: number[]; lumaMean: number; lumaStd: number; lumaPercentiles: number[]; chroma: number; neutral: number[] | null; pixels: number };
 export type MatchOn = { sourceMean: number[]; sourceStd: number[]; referenceMean: number[]; referenceStd: number[]; intensity: number };
+/** A clip's look on its media for its statistics: its match, then its Basic sliders (panel scale). */
+export type Look = { matched?: MatchOn | null } & Partial<Record<"brightness" | "contrast" | "saturation" | "highlights" | "shadows" | "whites" | "blacks" | "temperature" | "tint", number>>;
 export type AutoAdjustValues = { brightness: number; contrast: number; saturation: number; temperature: number; tint: number; whites: number; blacks: number; stats: ColorStats };
 /** An analysis's answer, or why there's none (`cancelled` after a cancel). */
 export type AnalysisResult<T> = { ok: true; value: T } | { ok: false; cancelled?: boolean; error?: string };
@@ -479,8 +481,8 @@ export class EngineModule implements AppModule {
     ipcMain.handle("engine:detect-scenes", (_event, job: number, path: string, startSec: number, durationSec: number | null, sensitivity: number | null) =>
       analysis("split scenes", (e) => e.detectScenes(job, fileOf(path), us(startSec) ?? 0, us(durationSec), sensitivity ?? null)),
     );
-    ipcMain.handle("engine:color-stats", (_event, job: number, path: string, startSec: number, durationSec: number | null) =>
-      analysis("colour statistics", (e) => e.colorStats(job, fileOf(path), us(startSec) ?? 0, us(durationSec))),
+    ipcMain.handle("engine:color-stats", (_event, job: number, path: string, startSec: number, durationSec: number | null, look: Look | null) =>
+      analysis("colour statistics", (e) => e.colorStats(job, fileOf(path), us(startSec) ?? 0, us(durationSec), look ?? null)),
     );
     ipcMain.handle("engine:auto-adjust", (_event, job: number, path: string, startSec: number, durationSec: number | null, matched: MatchOn | null) =>
       analysis("auto adjust", (e) => e.autoAdjust(job, fileOf(path), us(startSec) ?? 0, us(durationSec), matched ?? null)),

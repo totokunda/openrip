@@ -35,12 +35,14 @@ use openrip_audio::AudioError;
 use openrip_export::ExportError;
 use openrip_playback::PreviewError;
 
-pub use analysis::{auto_adjust, color_stats, detect_scenes, AnalysisControl, AutoAdjust, ColorStats, CutKind, MatchOn, Moments, SceneCut, SceneOptions, Sliders};
+pub use analysis::{auto_adjust, color_stats, detect_scenes, AnalysisControl, AutoAdjust, ColorStats, CutKind, Look, MatchOn, Moments, SceneCut, SceneOptions, Sliders};
 pub use audio::{measure_loudness, set_audio_input, Level, Loudness, Recorder, Recording, ToneInput};
 pub use capcut::{capcut_to_app, AppProjectFromDraft};
 pub use export::{codec_named, export_project, Codec, ExportControl, ExportOptions, ExportProgress, ExportResult};
 pub use fonts::{font_face, font_families, register_fonts, FontFace, FontFamily};
 pub use openrip_model::{Micros, Project};
+/// The Adjust sliders (the draft's −1…1), for a [`Look`].
+pub use openrip_render::Adjust;
 pub use project::{load_project, parse_project_json, ProjectInfo, Source, TextBlock};
 pub use session::{DisplayFrame, FrameHandle, FrameJob, Image, RenderedFrame, Renderer, Session, Surface};
 pub use thumbs::{Beats, Thumbnail, Thumbnails, Waveform};

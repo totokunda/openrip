@@ -11,6 +11,7 @@ import {
   consistentPatches,
   consistentReference,
   consistentReferenceId,
+  lookOf,
   mainTrackClips,
   matchForEngine,
   removeAutoAdjust,
@@ -93,6 +94,16 @@ test("make colors consistent matches every main-track clip but the reference, an
   clips = clips.map((c) => apply(c, Object.fromEntries(off)[c.clipId] ?? {}));
   assert.ok(!consistentOn(clips, timelines));
   assert.ok((clips[3] as VideoClipProps).color?.match);
+});
+
+test("a reference is read through its match and the sliders the engine can follow", () => {
+  assert.equal(lookOf(video()), null);
+  let ref: AnyClipProps = video({ color: { adjust: { brightness: 10, temperature: -5, sharpen: 30, fade: 20 } } });
+  assert.deepEqual(lookOf(ref), { brightness: 10, temperature: -5, matched: null });
+  ref = apply(ref, applyColorMatch(ref, m(0.5), m(0.6), { clipId: "x" }, 50, true));
+  assert.equal(lookOf(ref)?.matched?.intensity, 0.5);
+  // Becoming Make colors consistent's reference, its consistent match is going.
+  assert.equal(lookOf(ref, true)?.matched, null);
 });
 
 test("split scenes splits where each shot starts, inside the clip, at its speed and trim", () => {

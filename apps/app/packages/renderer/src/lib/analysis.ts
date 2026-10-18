@@ -24,6 +24,7 @@ import {
   consistentOffPatches,
   consistentPatches,
   hasColorTools,
+  lookOf,
   mainTrackClips,
   matchForEngine,
   momentsOf,
@@ -109,13 +110,15 @@ const clipNamed = (clip: AnyClipProps | undefined) => {
 // Statistics already read, by media range.
 const statsCache = new Map<string, ColorMoments>();
 
-async function statsOf(clip: AnyClipProps, step: number, steps: number): Promise<ColorMoments | null> {
+/** A clip's colour statistics: as its media is, or (`asSeen`, a reference) through its look ("consistent": without a match Make colors consistent made). */
+async function statsOf(clip: AnyClipProps, step: number, steps: number, asSeen: false | "seen" | "consistent" = false): Promise<ColorMoments | null> {
   const src = sourceOf(clip);
   if (!src) return null;
-  const key = `${src.path}|${src.start.toFixed(3)}|${src.duration?.toFixed(3) ?? "-"}`;
+  const look = asSeen ? lookOf(clip, asSeen === "consistent") : null;
+  const key = `${src.path}|${src.start.toFixed(3)}|${src.duration?.toFixed(3) ?? "-"}|${JSON.stringify(look)}`;
   const hit = statsCache.get(key);
   if (hit) return hit;
-  const stats = await call(step, steps, (job) => engineColorStats(job, src.path, src.start, src.duration));
+  const stats = await call(step, steps, (job) => engineColorStats(job, src.path, src.start, src.duration, look));
   if (!stats) return null;
   const m = momentsOf(stats);
   statsCache.set(key, m);
@@ -190,7 +193,7 @@ export const colorMatch = (clipId: string, referenceId: string, intensity = 100)
     const clip = store.getClipById(clipId);
     const reference = store.getClipById(referenceId);
     if (!clip || !reference || clipId === referenceId) return null;
-    const target = await statsOf(reference, 0, 2);
+    const target = await statsOf(reference, 0, 2, "seen");
     const own = target && (await statsOf(clip, 1, 2));
     if (!target || !own) return null;
     const now = useClipStore.getState().getClipById(clipId);
@@ -210,7 +213,8 @@ export const makeColorsConsistent = (referenceId: string) =>
     const stats: Record<string, ColorMoments> = {};
     const order = [reference, ...targets.filter((c) => c.clipId !== referenceId)];
     for (let i = 0; i < order.length; i++) {
-      const m = await statsOf(order[i], i, order.length);
+      // The reference as it looks; the others as their media are (the match goes on first).
+      const m = await statsOf(order[i], i, order.length, i === 0 && "consistent");
       if (!m) {
         if (cancelled) return null;
         continue;

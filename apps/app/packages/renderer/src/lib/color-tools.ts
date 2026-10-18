@@ -127,6 +127,23 @@ export const matchForEngine = (clip: AnyClipProps) => {
   return m ? { sourceMean: m.source.mean, sourceStd: m.source.std, referenceMean: m.reference.mean, referenceStd: m.reference.std, intensity: m.intensity / 100 } : null;
 };
 
+/** The Basic sliders a clip's statistics can be read through (the engine's CPU reference of them). */
+const LOOK_SLIDERS: AdjustSlider[] = ["brightness", "contrast", "saturation", "highlights", "shadows", "whites", "blacks", "temperature", "tint"];
+
+/**
+ * A reference clip's look on its media, for reading its statistics as it looks: its own Color
+ * match and the Basic sliders the engine can follow (its HSL, curves, wheels and LUT aren't);
+ * null when it has none of them.
+ */
+export const lookOf = (clip: AnyClipProps, withoutConsistent = false) => {
+  if (!hasColorTools(clip)) return null;
+  const adjust = colorOf(clip).adjust ?? {};
+  const sliders = Object.fromEntries(LOOK_SLIDERS.filter((k) => adjust[k]).map((k) => [k, adjust[k]!]));
+  // A match Make colors consistent made is going when this clip becomes its reference.
+  const matched = withoutConsistent && colorOf(clip).match?.consistent ? null : matchForEngine(clip);
+  return matched || Object.keys(sliders).length ? { ...sliders, matched } : null;
+};
+
 /** The clips Make colors consistent matches: the main track's videos and photos. */
 export const mainTrackClips = (clips: AnyClipProps[], timelines: TimelineProps[]): (VideoClipProps | ImageClipProps)[] => {
   const main = mainTrackOf(timelines);

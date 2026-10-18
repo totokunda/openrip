@@ -964,6 +964,7 @@ pub struct ColorStatsTask {
     path: String,
     start: Micros,
     duration: Option<Micros>,
+    look: Option<openrip_core::Look>,
 }
 
 impl Task for ColorStatsTask {
@@ -971,7 +972,7 @@ impl Task for ColorStatsTask {
     type JsValue = ColorStats;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        openrip_core::color_stats(Path::new(&self.path), self.start, self.duration, &self.control).map_err(err)
+        openrip_core::color_stats(Path::new(&self.path), self.start, self.duration, self.look.as_ref(), &self.control).map_err(err)
     }
 
     fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<ColorStats> {
@@ -984,13 +985,56 @@ impl Task for ColorStatsTask {
     }
 }
 
+/// A clip's look on top of its media, for its statistics: its Color match, then its Basic
+/// sliders on the panel's scale (−50…50; those the statistics can follow).
+#[napi(object)]
+pub struct Look {
+    pub matched: Option<MatchOn>,
+    pub brightness: Option<f64>,
+    pub contrast: Option<f64>,
+    pub saturation: Option<f64>,
+    pub highlights: Option<f64>,
+    pub shadows: Option<f64>,
+    pub whites: Option<f64>,
+    pub blacks: Option<f64>,
+    pub temperature: Option<f64>,
+    pub tint: Option<f64>,
+}
+
+fn match_on(m: MatchOn) -> openrip_core::MatchOn {
+    openrip_core::MatchOn {
+        source: openrip_core::Moments { mean: three(&m.source_mean), std: three(&m.source_std) },
+        reference: openrip_core::Moments { mean: three(&m.reference_mean), std: three(&m.reference_std) },
+        intensity: m.intensity.clamp(0.0, 1.0) as f32,
+    }
+}
+
 /// The colour statistics of the video or photo at `path` over `durationUs` from `startUs`
-/// of its media (to its end for `null`), from frames spread across it, on a worker thread
-/// (Color match). Progress and cancel by `job`.
+/// of its media (to its end for `null`), from frames spread across it, through `look` when
+/// given (a reference clip as it looks), on a worker thread (Color match). Progress and
+/// cancel by `job`.
 #[napi]
-pub fn color_stats(job: u32, path: String, start_us: i64, duration_us: Option<i64>) -> AsyncTask<ColorStatsTask> {
+pub fn color_stats(job: u32, path: String, start_us: i64, duration_us: Option<i64>, look: Option<Look>) -> AsyncTask<ColorStatsTask> {
     let control = start_job(job);
-    AsyncTask::new(ColorStatsTask { job, control, path, start: Micros(start_us), duration: duration_us.map(Micros) })
+    let look = look.map(|l| {
+        let s = |v: Option<f64>| (v.unwrap_or(0.0) / 50.0).clamp(-1.0, 1.0) as f32;
+        openrip_core::Look {
+            matched: l.matched.map(match_on),
+            sliders: openrip_core::Adjust {
+                brightness: s(l.brightness),
+                contrast: s(l.contrast),
+                saturation: s(l.saturation),
+                highlights: s(l.highlights),
+                shadows: s(l.shadows),
+                whites: s(l.whites),
+                blacks: s(l.blacks),
+                temperature: s(l.temperature),
+                tint: s(l.tint),
+                ..Default::default()
+            },
+        }
+    });
+    AsyncTask::new(ColorStatsTask { job, control, path, start: Micros(start_us), duration: duration_us.map(Micros), look })
 }
 
 /// A Color match already on a clip, for Auto adjust to see through.
@@ -1065,10 +1109,6 @@ fn three(v: &[f64]) -> [f32; 3] {
 #[napi]
 pub fn auto_adjust(job: u32, path: String, start_us: i64, duration_us: Option<i64>, matched: Option<MatchOn>) -> AsyncTask<AutoAdjustTask> {
     let control = start_job(job);
-    let matched = matched.map(|m| openrip_core::MatchOn {
-        source: openrip_core::Moments { mean: three(&m.source_mean), std: three(&m.source_std) },
-        reference: openrip_core::Moments { mean: three(&m.reference_mean), std: three(&m.reference_std) },
-        intensity: m.intensity.clamp(0.0, 1.0) as f32,
-    });
+    let matched = matched.map(match_on);
     AsyncTask::new(AutoAdjustTask { job, control, path, start: Micros(start_us), duration: duration_us.map(Micros), matched })
 }

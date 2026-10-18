@@ -24,6 +24,10 @@ serde_json.workspace = true
 png = "0.18"
 thiserror.workspace = true
 
+[dev-dependencies]
+png = "0.18"
+openrip-render.workspace = true
+
 [features]
 default = ["ffmpeg", "audio-output"]
 # Decoding and encoding through FFmpeg (and VideoToolbox on Apple platforms).
