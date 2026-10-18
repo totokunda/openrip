@@ -17,8 +17,21 @@ CAPCUT_DRAFT=… node session.mjs ../.. out/cc out/ud-cc x capcut perf
 - Steps: `import`, `timeline`, `play`, `perf` (seek, scrub, playback, edit latency), `profstart`/`profstop` (renderer CPU profile), `capcut`, `capfolder` (a draft folder anywhere, `CAPCUT_FOLDER`), `seek`, `selcaption`, `capstyle`, `capanim`, `capbox` (a caption's box after a case and font change), `capadjust` (the draft's own adjustments in the Adjust tab), `capcolour` (clarity, vignette, fade, an HSL range and curves in the Adjust tab, on a clip that has them all), `capsticker` (a sticker drawn, and its opacity in the Filter tab), `capfilter` (a CapCut filter bar's intensity). Helpers for new steps are in `steps/_preview.mjs`.
 - Keyframes: `keyframes` (after `import timeline`): keys set through the store with `lib/keyframes.ts` on the clip (opacity and position), the engine's frames checked over time, CapCut's edit-at-the-playhead rule, a split, and the saved project; `keyframescheck` (after `reopen`): the keys come back from the file and the engine draws them. Both import the renderer's modules, so they need its dev server: `npx vite --port 5199` in `packages/renderer`, and the session run with `MODE=development VITE_DEV_SERVER_URL=http://localhost:5199` (and `CLIP_NAME` for a clip other than IMG_9019).
 - Undo: `undo` (after `import timeline newtext`: each kind of edit undone with ⌘Z and redone with ⇧⌘Z, the engine's frame and the saved project compared; then everything undone and redone by the toolbar), `capundo` (the same on a draft: a caption, a video, the timeline; `DRAFT_ADJUST` for the draft's own adjustments), `undoreopen` (after `reopen`: nothing left to undo). Helpers in `steps/_undo.mjs`.
-- Clicking the ruler seeks; draft-specific coordinates come from env vars (see each step). Clicking the ruler also drops the selection, and a click on the playhead's line grabs the playhead, not the clip under it.
+- Clicking the ruler seeks; draft-specific coordinates come from env vars (see each step). Clicking the ruler also drops the selection, and a click on the playhead's line grabs the playhead, not the clip under it (6 px either side of it). `seek` (`_preview.mjs`) clicks the ruler once and steps the rest a frame at a time with ← / →, so it lands on the frame asked for.
 - Steps print `PASS`/`FAIL` lines where they check something (`checks` in `steps/_anim.mjs`, with the Animation tab's helpers, the project as saved and where a clip's bar is).
+
+## Timeline editing
+
+`node tl-suite.mjs ../.. /path/to/clip [case...]` runs each case on a fresh profile under `out/tl/` (`CLIP_NAME` when the clip isn't IMG_9019; `TL_DRAFT` for the CapCut case). Every edit is undone and redone with the engine's frame and the saved project compared (`undoCase`); helpers in `steps/_timeline.mjs`.
+
+- `tlmagnet` (after `import timeline`): ⌘B splits the main track's clip; ripple delete; the magnet toggled off (a delete keeps its gap) and on; Q and W; a clip dragged to the front of the main track goes in there; one dragged off it leaves it closed up.
+- `tllink`: ⇧⌘S detaches the audio, linked (and the engine still draws the video); ⌘B cuts both; a trim, a move (magnet off) and a delete take the audio along; with linkage off (`) the video moves alone; Unlink.
+- `tlsnap` (after `newtext`): the text's start snaps to the playhead (guide line drawn; not with N off), its end to a marker and to the video's end, a trimmed edge to the playhead.
+- `tlmarkers`: M twice, tags under the ruler, ⌥← / ⌥→, the box's colour, name and time, a tag dragged (snapping), Delete, Delete all markers in timeline.
+- `tltracks` (after `newtext`): + ▸ Audio track (it stays empty through other edits), lock (the clip can't be selected, deleted, moved or trimmed), a header dragged to the top, a video track can't go under the main track, Delete track (from the "…" menu, then a right-click, with its clip).
+- `tlhandle` (after `newtext`): pressing a clip's trim handles changes nothing, and ⌘Z still undoes the edit before.
+- `tlkeys` (after `newtext`): ← / → and ⇧→, Home / End, ↓ / ↑ between edits, Space, ⌘= (the timeline zooms, not the page) and ⇧Z, the playhead's handle let go staying on its frame at every zoom, ] and ⌘A.
+- `tlcapcut` (after `capcut`): the draft's magnet from its config; ripple delete, Q, an insert and a detach on converted clips, drawn by the engine.
 
 ## Animation tab
 

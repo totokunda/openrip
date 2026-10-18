@@ -113,15 +113,17 @@ export const rulerMap = async (win, x1 = 100, x2 = 500) => {
   return { y, pps, x: (s) => tl.x + x1 + (s - s1) * pps };
 };
 // Move the playhead to `s` seconds (clicking the ruler) and wait for the engine's frame. A
-// pixel of ruler can be more than a frame: more than half a frame off (at 24 fps), it clicks
-// again, corrected. Times should fall on frames.
+// pixel of ruler can be more than a frame: more than half a frame off (at 24 fps), it steps
+// the rest a frame at a time with ← / →. (A second click would land next to the playhead,
+// on its line, which takes the click as a grab of the playhead.) Times should fall on frames.
 export const seek = async (win, map, s) => {
-  let x = Math.max(map.x(0) - 4, map.x(s));
-  for (let i = 0; i < 3; i++) {
+  if (Math.abs(s - (await now(win))) < 0.022) return;
+  await settled(win, () => win.mouse.click(Math.max(map.x(0) - 4, map.x(s)), map.y));
+  await win.evaluate(() => document.activeElement?.blur?.());
+  for (let i = 0; i < 12; i++) {
     const off = s - (await now(win));
     if (Math.abs(off) < 0.022) return;
-    if (i > 0) x += off * map.pps;
-    await settled(win, () => win.mouse.click(x, map.y));
+    await settled(win, () => win.keyboard.press(off > 0 ? "ArrowRight" : "ArrowLeft"), { quiet: 300, timeout: 2000 });
   }
 };
 // Keep the engine's current frame under `name`, for `diff`.

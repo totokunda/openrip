@@ -3,13 +3,34 @@
 import { engineFrame, settled, tab } from "./_preview.mjs";
 import { savedProject } from "./_anim.mjs";
 
-// What undo puts back of the saved project: tracks, clips, canvas and which media are used
-// (the editor's view, playhead and save times aren't part of it).
+// What undo puts back of the saved project: tracks, clips, markers, canvas, the main track
+// magnet and which media are used (the editor's view, playhead and save times aren't part of it).
 export const docOf = (p) =>
-  JSON.stringify({ tracks: p.timeline.tracks, clips: p.timeline.clips, aspect: p.settings.aspectRatio, assets: Object.keys(p.assets).sort() });
+  JSON.stringify({
+    tracks: p.timeline.tracks,
+    clips: p.timeline.clips,
+    markers: p.timeline.markers ?? [],
+    aspect: p.settings.aspectRatio,
+    magnet: p.settings.mainTrackMagnet,
+    assets: Object.keys(p.assets).sort(),
+  });
 
-// The engine's frame (its hash) and the saved project, once both have settled.
-export const state = async (ctx) => ({ frame: (await engineFrame(ctx.win)).sum, doc: docOf(await savedProject(ctx.win, ctx.udDir)) });
+// When the project file was last written.
+const savedAt = (ctx) => {
+  const dir = `${ctx.udDir}/projects-json`;
+  return Math.max(0, ...ctx.fs.readdirSync(dir).filter((f) => /^project-.*\.json$/.test(f)).map((f) => ctx.fs.statSync(`${dir}/${f}`).mtimeMs));
+};
+
+// The engine's frame (its hash) and the saved project, once both have settled. With `since`
+// (a time in ms), the project as written after it: the autosave can take a few seconds when
+// the app is busy, so it waits for a write after the action (up to 8 s; an action that
+// changes nothing writes nothing, and then it's the file as it was).
+export const state = async (ctx, since) => {
+  if (since != null) {
+    for (let i = 0; i < 40 && savedAt(ctx) <= since; i++) await ctx.win.waitForTimeout(200);
+  }
+  return { frame: (await engineFrame(ctx.win)).sum, doc: docOf(await savedProject(ctx.win, ctx.udDir)) };
+};
 
 // Keys with nothing focused (a field keeps ⌘Z for its own typing), then the picture settled.
 export const press = async (win, keys) => {
@@ -24,11 +45,11 @@ export const undoCase = async (ctx, check, name, edit, { frame = true } = {}) =>
   const s0 = await state(ctx);
   await edit();
   await ctx.win.evaluate(() => document.activeElement?.blur?.());
-  const s1 = await state(ctx);
+  const s1 = await state(ctx, Date.now() - 400);
   await press(ctx.win, "Meta+z");
-  const s2 = await state(ctx);
+  const s2 = await state(ctx, Date.now() - 400);
   await press(ctx.win, "Meta+Shift+z");
-  const s3 = await state(ctx);
+  const s3 = await state(ctx, Date.now() - 400);
   const changed = s1.doc !== s0.doc && (!frame || s1.frame !== s0.frame);
   const same = (a, b) => a.doc === b.doc && (!frame || a.frame === b.frame);
   const ok = check(

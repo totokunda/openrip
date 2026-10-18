@@ -1,8 +1,8 @@
 // Trim and split of the app's own text with an In animation (after animtext, whose frames
 // without an animation it compares with): Type 1 over 2 s; the clip trimmed to 1.5 s, so the
-// animation must end by then (whole at 1.4 s); then split at 0.75 s: the In stays on the first
-// half and the second shows whole from its start. SPLIT_AT is the timeline's split button in
-// CSS px.
+// animation must end by then (whole on its last frame, 1.46 s at 24 fps); then split at 0.75 s:
+// the In stays on the first half and the second shows whole from its start. SPLIT_AT is the
+// timeline's split button in CSS px.
 import { diff, drag, grab, rulerMap, seek, settled, tab } from "./_preview.mjs";
 import { checks, choose, duration, savedClips, selected, setDuration } from "./_anim.mjs";
 import { ROW } from "./animtext.mjs";
@@ -32,9 +32,10 @@ export default async (ctx) => {
   check("trimmed to 1.5 s", text.length === 1 && text[0].endTick === "1500000", text.map((c) => c.endTick).join());
   const d = await duration(win);
   check("trim: duration shown within the clip", d?.value <= 1.5 && d?.max <= 1.5, JSON.stringify(d));
-  await at(1.4, "a@1.4");
-  const end = (await diff(win, "none@1.4", "a@1.4")).n;
-  check("trim: whole by the clip's end (1.4 s)", end === 0, `pixels hidden ${end}`);
+  // Its last frame (1.4 s isn't a frame at 24 fps, and the one before the last still types).
+  await at(1.46, "a@1.46");
+  const end = (await diff(win, "none@1.46", "a@1.46")).n;
+  check("trim: whole by the clip's end (its last frame)", end === 0, `pixels hidden ${end}`);
   // Split at 0.75 s; the panel then shows the second half (both are selected, it the last).
   await seek(win, map, 0.75);
   await select(0.4);

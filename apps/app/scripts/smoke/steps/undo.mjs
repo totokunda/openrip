@@ -42,7 +42,8 @@ export default async (ctx) => {
     },
     mask: async () => {
       await pick("video", 0, 6);
-      await win.keyboard.press("m");
+      // The preview's Mask tool (M is CapCut's Add marker).
+      await win.locator("[title=Mask]").first().click();
       await win.keyboard.press("2");
       await win.waitForTimeout(300);
       await drag(win, mid.x - 70, mid.y + 60, mid.x + 70, mid.y + 200);
@@ -169,7 +170,7 @@ export default async (ctx) => {
       if (rail.x < 60) await drag(win, rail.x, rail.y + rail.height / 2, rail.x + 40, rail.y + rail.height / 2);
       await win.waitForTimeout(500);
       const eye = await win.evaluate((y) => {
-        const b = [...document.querySelectorAll("button")].map((e) => e.getBoundingClientRect()).filter((r) => r.x < 120 && Math.abs(r.y + r.height / 2 - y) < 20);
+        const b = [...document.querySelectorAll("button[title='Hide track']")].map((e) => e.getBoundingClientRect()).filter((r) => r.x < 200 && Math.abs(r.y + r.height / 2 - y) < 20);
         const r = b[b.length - 1];
         return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
       }, y);

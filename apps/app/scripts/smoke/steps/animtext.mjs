@@ -2,12 +2,15 @@
 // the clip's start, shows part of it at 0.25 s and all of it after its 0.5 s; a longer
 // duration moves that; None brings the text back. Compares the engine's frames with the text
 // drawn without an animation. TEXT_ROW is the text track's y in CSS px (from n1-text.png).
-import { diff, grab, rulerMap, seek, tab } from "./_preview.mjs";
+import { diff, grab, now, rulerMap, seek, tab } from "./_preview.mjs";
 import { checks, choose, duration, options, savedClips, selected, setDuration } from "./_anim.mjs";
 
 export const ROW = +(process.env.TEXT_ROW || 780);
+// Where to click the text's bar (0–3 s): at 1.5 s, or 2.4 s when the playhead is near there.
+// The playhead's line takes clicks 6 px either side of it, which can be under 0.1 s.
+export const textX = async (win, map) => map.x(Math.abs((await now(win)) - 1.5) < 0.4 ? 2.4 : 1.5);
 // The frames without an animation, by time, as `none@<s>`.
-export const TIMES = [0, 0.25, 0.6, 0.85, 1.2, 1.4, 1.6];
+export const TIMES = [0, 0.25, 0.6, 0.85, 1.2, 1.4, 1.46, 1.6];
 
 export default async (ctx) => {
   const { win, shot, udDir } = ctx;
@@ -19,7 +22,7 @@ export default async (ctx) => {
   };
   // Clicking the ruler drops the selection: select the text again before using the panel.
   const select = async () => {
-    await win.mouse.click(map.x(1.5), ROW);
+    await win.mouse.click(await textX(win, map), ROW);
     await win.waitForTimeout(600);
     await tab(win, "Animation");
   };
