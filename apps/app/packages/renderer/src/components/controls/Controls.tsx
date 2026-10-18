@@ -2,12 +2,8 @@ import { FiMinusCircle, FiPlusCircle } from "react-icons/fi";
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
-  BackButton,
-  RewindBackward,
-  RewindForward,
   SplitButton,
   TrashButton,
-  PlayPauseButton,
   SeparateButton,
   CropButton,
   UndoButton,
@@ -176,43 +172,15 @@ const TimelineZoom = () => {
   );
 };
 
-interface TimeControlProps {}
-
-const TimeControl: React.FC<TimeControlProps> = () => {
-  const { clipDuration } = useClipStore();
-  const { focusFrame, fps } = useControlsStore();
-
-  const formatTime = (frames: number) => {
-    if (
-      frames === 0 ||
-      frames === undefined ||
-      frames === null ||
-      isNaN(frames) ||
-      frames === Infinity ||
-      frames === -Infinity
-    )
-      return "00:00.00";
-    // convert frames to seconds
-    const totalSeconds = frames / fps;
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const remainingSeconds = totalSeconds % 60;
-
-    if (hours > 0) {
-      return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${remainingSeconds.toFixed(2).padStart(5, "0")}`;
-    }
-    return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toFixed(2).padStart(5, "0")}`;
-  };
-
-  return (
-    <div className="flex items-center gap-x-2 w-full">
-      <span className="text-brand-light/60 text-xs">
-        <span className="w-17 inline-block">{formatTime(focusFrame)}</span>/
-        <span className="w-16 inline-block">{formatTime(clipDuration)}</span>
-      </span>
-    </div>
-  );
-};
+/**
+ * A toolbar button's slot, named on hover (Undo and Redo name themselves): the button inside
+ * fills it, so a click anywhere on it counts. The transport moved under the player (PlayerBar).
+ */
+const Tool: React.FC<{ title?: string; id: string; children: React.ReactNode }> = ({ title, id, children }) => (
+  <div title={title} data-testid={`tool-${id}`} className="h-7 w-7 flex items-center justify-center [&>div]:h-full [&>div]:w-full [&>div]:py-0">
+    {children}
+  </div>
+);
 
 const Controls = () => {
   const { setIsOverMask, setIsMaskDragging } = useMaskStore();
@@ -520,37 +488,28 @@ const Controls = () => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [tool, selectedMaskId, selectedLineId, selectedIds]);
   return (
-    <div className="relative  flex items-center ">
-      <div className="flex items-center w-full bg-brand-background/30 justify-between border-b border-brand-light/5 px-5 py-1">
-        <div className="flex items-center gap-x-2">
+    <div data-testid="timeline-toolbar" className="relative flex items-center h-9 shrink-0 border-b border-brand-light/[0.06]">
+      <div className="flex items-center w-full justify-between px-2.5">
+        {/* CapCut's order, left to right; Undo and Redo name themselves. Split stays
+            right after Redo. */}
+        <div className="flex items-center gap-x-1 [&>div]:h-7 [&>div]:w-7 [&>div]:py-0">
           <UndoButton />
           <RedoButton />
-          <SplitButton />
-          <DeleteLeftButton />
-          <DeleteRightButton />
-          <TrashButton />
-          <AddMarkerButton />
-          <CropButton />
-          <SeparateButton />
+          <Tool title="Split" id="split"><SplitButton /></Tool>
+          <Tool id="delete-left"><DeleteLeftButton /></Tool>
+          <Tool id="delete-right"><DeleteRightButton /></Tool>
+          <Tool title="Delete" id="delete"><TrashButton /></Tool>
+          <Tool id="marker"><AddMarkerButton /></Tool>
+          <Tool title="Crop" id="crop"><CropButton /></Tool>
+          <Tool title="Detach audio" id="detach"><SeparateButton /></Tool>
         </div>
-        <div className=" flex items-center justify-center gap-x-4 absolute left-1/2 -translate-x-1/2">
-          <BackButton />
-          <div className="flex items-center gap-x-2">
-            <RewindBackward />
-            <RewindForward />
-          </div>
-          <PlayPauseButton />
-          <TimeControl />
-        </div>
-        <div className="flex items-center gap-x-2">
+        <div className="flex items-center gap-x-1">
           <MagnetToggle />
           <SnappingToggle />
           <LinkageToggle />
           <ToolbarDivider />
           <ZoomToFitButton />
-          <div className="ml-3">
-            <TimelineZoom />
-          </div>
+          <TimelineZoom />
         </div>
       </div>
     </div>
