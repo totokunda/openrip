@@ -10,6 +10,10 @@
 //! - `curves`: points (x, y in 0…1) per channel; the handles are CapCut's (below).
 //! - `wheels`: the primary wheels (CapCut's values, −1…1) and their strength in percent.
 //! - `lut`: a `.cube` file or a Hald image with its strength in percent, a filter on the clip.
+//! - `match`: Color match: the clip's and the reference's Oklab means and spreads
+//!   (`source`, `reference`: `{mean: [L, a, b], std: [L, a, b]}`) and `intensity` in percent;
+//!   an effect whose table the engine makes (openrip-analysis's transfer). `auto` (Auto
+//!   adjust's record of what it set) only changes the sliders, which carry its values.
 //!
 //! On a converted CapCut clip these go on top of the draft's own (its `draftAdjustments`):
 //! a slider or range set in both draws the app's.
@@ -47,11 +51,15 @@ fn curves_id(clip: &str) -> MaterialId {
     MaterialId(format!("{clip}-curves"))
 }
 
+pub(crate) fn match_id(clip: &str) -> MaterialId {
+    MaterialId(format!("{clip}-match"))
+}
+
 /// Every material id the colour tools of clip `clip` can have.
 fn all_ids(clip: &str) -> Vec<MaterialId> {
     let mut ids: Vec<MaterialId> = SLIDERS.iter().map(|n| slider_id(clip, n)).collect();
     ids.extend(HSL_RANGES.iter().map(|r| hsl_id(clip, r)));
-    ids.extend([curves_id(clip), wheels_id(clip), lut_id(clip)]);
+    ids.extend([curves_id(clip), wheels_id(clip), lut_id(clip), match_id(clip)]);
     ids
 }
 
@@ -128,6 +136,30 @@ pub(crate) fn lut(clip: &str, v: &Value) -> Option<Effect> {
     Some(Effect { id: lut_id(clip), category: EffectCategory::Filter, name, params, builtin: Some(builtin.into()), resource: Some(path), library: None, text_style: None })
 }
 
+/// Color match as the effect the engine draws (`builtin` "color_match", the playback crate's
+/// `colour::COLOR_MATCH`): both sides' statistics and the intensity (0–1). `None` without
+/// both sides.
+pub(crate) fn color_match(clip: &str, v: &Value) -> Option<Effect> {
+    let side = |key: &str| -> Option<[f64; 6]> {
+        let o = v.get(key)?;
+        let three = |k: &str| -> Option<[f64; 3]> {
+            let a = o.get(k)?.as_array()?;
+            Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+        };
+        let (m, d) = (three("mean")?, three("std")?);
+        Some([m[0], m[1], m[2], d[0], d[1], d[2]])
+    };
+    let (source, reference) = (side("source")?, side("reference")?);
+    let mut params = BTreeMap::new();
+    params.insert("intensity".to_string(), (f(v, "intensity", 100.0) / 100.0).clamp(0.0, 1.0));
+    for (name, values) in [("source", source), ("reference", reference)] {
+        for (k, value) in ["l", "a", "b", "l_std", "a_std", "b_std"].into_iter().zip(values) {
+            params.insert(format!("{name}_{k}"), value);
+        }
+    }
+    Some(Effect { id: match_id(clip), category: EffectCategory::Adjust, name: "Color match".into(), params, builtin: Some("color_match".into()), resource: None, library: None, text_style: None })
+}
+
 /// Give a segment the materials of its clip's `color` (the clip's id `clip`), replacing the
 /// ones it had from an earlier `color`. Tools left at their neutral values add nothing.
 pub(crate) fn attach(clip: &str, value: &Value, materials: &mut Materials, attachments: &mut Vec<MaterialId>) {
@@ -143,6 +175,9 @@ pub(crate) fn attach(clip: &str, value: &Value, materials: &mut Materials, attac
     let Some(c) = value.as_object() else { return };
     // In CapCut's order (its colour bundle's): LUT, HSL, curves, wheels, then the sliders. The
     // engine draws them in that order whatever their order here; this keeps the list tidy.
+    if let Some(e) = c.get("match").and_then(|v| color_match(clip, v)) {
+        add(AnyMaterial::Effect(e), materials, attachments);
+    }
     if let Some(e) = c.get("lut").and_then(|v| lut(clip, v)) {
         add(AnyMaterial::Effect(e), materials, attachments);
     }
@@ -255,5 +290,25 @@ mod tests {
         assert_eq!(m.effects[0].params["intensity"], 0.5);
         attach("c", &Value::Null, &mut m, &mut att);
         assert_eq!(att, vec![MaterialId("other".into())]);
+    }
+
+    /// Color match is an effect carrying both sides' statistics; one side missing adds none.
+    #[test]
+    fn color_match_becomes_its_effect() {
+        let mut m = Materials::default();
+        let mut att = Vec::new();
+        let color = json!({
+            "match": {"intensity": 80, "source": {"mean": [0.5, 0.01, -0.02], "std": [0.2, 0.03, 0.04]}, "reference": {"mean": [0.6, 0.0, 0.01], "std": [0.25, 0.02, 0.05]}, "ref": {"clipId": "r"}},
+            "auto": {"intensity": 100, "values": {"brightness": 6}},
+            "adjust": {"brightness": 6}
+        });
+        attach("c", &color, &mut m, &mut att);
+        let e = m.effects.iter().find(|e| e.id == match_id("c")).unwrap();
+        assert_eq!((e.category, e.builtin.as_deref(), e.params["intensity"]), (EffectCategory::Adjust, Some("color_match"), 0.8));
+        assert_eq!((e.params["source_l"], e.params["source_b_std"], e.params["reference_a"], e.params["reference_l_std"]), (0.5, 0.04, 0.0, 0.25));
+        // Auto adjust draws through the sliders alone.
+        assert_eq!(att, vec![match_id("c"), slider_id("c", "brightness")]);
+        attach("c", &json!({"match": {"source": {"mean": [0.5, 0.0, 0.0], "std": [0.2, 0.0, 0.0]}}}), &mut m, &mut att);
+        assert!(att.is_empty() && m.effects.is_empty());
     }
 }

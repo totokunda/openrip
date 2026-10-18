@@ -79,6 +79,11 @@
 //!   openrip-dev track <video> --region cx,cy,w,h[,deg] [--at S] [--from S] [--to S] [--direction both|forward|backward] [--save DIR]
 //!       Motion-track a region (fractions of the upright picture) as the Tracking tab does:
 //!       speed, the path, where it was lost, and the drift of a round trip forward and back.
+//!   openrip-dev scene-scan <media-file> [--start S] [--duration S] [--sensitivity X] [--json]
+//!       Split scenes on a file: each shot change's time, kind (hard, dissolve, fade), the
+//!       transition's span and its score; the speed of the scan.
+//!   openrip-dev color-scan <media-file> [--start S] [--duration S]
+//!       The colour statistics Color match reads, and Auto adjust's values (panel scale).
 //!   openrip-dev thumbs-bench <media-file> [--count N] [--height H]
 //!       Timeline thumbnails across the whole file (default 40 at 64 px): the quick pass
 //!       (one keyframe per GOP), the exact pass, and the exact pass again from the disk cache.
@@ -94,6 +99,7 @@ use std::time::Instant;
 use openrip_capcut::{import_draft_dir, ImportError, Imported};
 use openrip_model::Project;
 
+mod analysis;
 mod audio;
 mod motion;
 
@@ -123,6 +129,8 @@ fn main() -> ExitCode {
         Some("still-bench") if args.len() >= 2 => still_bench(&args).map_err(|e| e.to_string()),
         Some("export-parity") if args.len() >= 3 => export_parity(&args).map_err(|e| e.to_string()),
         Some("wrap-probe") if args.len() >= 3 => wrap_probe(Path::new(&args[1]), Path::new(&args[2])).map_err(|e| e.to_string()),
+        Some("scene-scan") if args.len() >= 2 => analysis::scene_scan(&args).map_err(|e| e.to_string()),
+        Some("color-scan") if args.len() >= 2 => analysis::color_scan(&args).map_err(|e| e.to_string()),
         Some("thumbs-bench") if args.len() >= 2 => thumbs_bench(&args).map_err(|e| e.to_string()),
         Some("scrub-bench") if args.len() >= 2 => scrub_bench(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("fonts") => fonts_cmd(&args),

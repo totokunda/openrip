@@ -24,6 +24,7 @@ pub mod output;
 pub mod pipeline;
 mod player;
 pub mod preview;
+mod scan;
 mod scrub;
 mod server;
 mod timing;
@@ -33,6 +34,7 @@ pub mod transition;
 mod waveform;
 
 pub use analysis::beats;
+pub use scan::{sample_colors, scan_scenes, ScanError};
 pub use input::{audio_input, set_audio_input, AudioInput, InputStream, Level, Recorder, Recording};
 pub use pipeline::{Clock, PipelineStats, PreviewPipeline, RenderedFrame, Surface};
 pub use output::{audio_output, set_audio_output, AudioOutput, OutputStream};

@@ -305,6 +305,10 @@ pub struct Layer<'a> {
     /// A lookup table on its own pixels (a LUT on the clip) and its strength, after the
     /// chroma key and before the colour grade, as CapCut orders them.
     pub lut: Option<(&'a Lut3d, f32)>,
+    /// Adjust ▸ Color match's table (generated from the clip's and the reference's colours)
+    /// and its intensity, on its own pixels after the chroma key and before `lut`, as the
+    /// Basic tab lists them.
+    pub match_lut: Option<(&'a Lut3d, f32)>,
 }
 
 /// The app's own clip filters (`components/preview/webgl-filters`), on its scales.
@@ -394,6 +398,7 @@ impl<'a> Layer<'a> {
             blend: BlendMode::Normal,
             chroma: None,
             lut: None,
+            match_lut: None,
         }
     }
 
@@ -438,6 +443,7 @@ impl<'a> Layer<'a> {
             blend: BlendMode::Normal,
             chroma: None,
             lut: None,
+            match_lut: None,
         }
     }
 }
@@ -1361,7 +1367,8 @@ impl Compositor {
             // A keyed image's stage stays in the cache until a pass replaces it: then it must
             // live until the submission, unrecycled.
             let cached = matches!(layer.source, Source::Cached(..));
-            // The chroma key, then a LUT on the clip, on its own pixels (CapCut's order).
+            // The chroma key, then Color match's table and a LUT on the clip, on its own pixels
+            // (CapCut's order).
             let (mut stage, mut adjusted) = (stage, false);
             if let Some(key) = layer.chroma.filter(|k| k.intensity >= 0.001) {
                 let out = self.chroma_pass(enc, &stage, &key, &mut scratch);
@@ -1372,7 +1379,7 @@ impl Compositor {
                 }
                 (stage, adjusted) = (out, true);
             }
-            if let Some((lut, strength)) = layer.lut.filter(|(_, s)| *s > 0.0) {
+            for (lut, strength) in [layer.match_lut, layer.lut].into_iter().flatten().filter(|(_, s)| *s > 0.0) {
                 let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
                 self.lut_pass(enc, &stage, &out, lut, strength);
                 if cached && !adjusted {

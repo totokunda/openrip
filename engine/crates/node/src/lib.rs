@@ -821,3 +821,254 @@ pub fn font_families() -> Vec<FontFamily> {
         .map(|f| FontFamily { name: f.name, weights: f.weights.into_iter().map(u32::from).collect(), italic: f.italic, bundled: f.registered })
         .collect()
 }
+
+// ---- analysis: Split scenes, Auto adjust, Color match ---------------------------
+
+type Control = std::sync::Arc<openrip_core::AnalysisControl>;
+
+/// Running analyses by the job number the app gave each, for their progress and cancel.
+fn analyses() -> &'static Mutex<std::collections::HashMap<u32, Control>> {
+    static A: OnceLock<Mutex<std::collections::HashMap<u32, Control>>> = OnceLock::new();
+    A.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn start_job(job: u32) -> Control {
+    let control = std::sync::Arc::new(openrip_core::AnalysisControl::new());
+    analyses().lock().unwrap().insert(job, control.clone());
+    control
+}
+
+fn end_job(job: u32, control: &Control) {
+    let mut jobs = analyses().lock().unwrap();
+    if jobs.get(&job).is_some_and(|c| std::sync::Arc::ptr_eq(c, control)) {
+        jobs.remove(&job);
+    }
+}
+
+#[napi(object)]
+pub struct AnalysisProgress {
+    pub done: f64,
+    pub total: f64,
+}
+
+/// A running analysis's progress in frames; `null` when job `job` isn't running.
+#[napi]
+pub fn analysis_progress(job: u32) -> Option<AnalysisProgress> {
+    analyses().lock().unwrap().get(&job).map(|c| {
+        let (done, total) = c.progress();
+        AnalysisProgress { done: done as f64, total: total as f64 }
+    })
+}
+
+/// Stop analysis `job`: its promise rejects with "cancelled".
+#[napi]
+pub fn cancel_analysis(job: u32) {
+    if let Some(c) = analyses().lock().unwrap().get(&job) {
+        c.cancel();
+    }
+}
+
+#[napi(object)]
+pub struct SceneCut {
+    /// The media time of the new shot's first frame.
+    pub time_us: i64,
+    /// "hard", "dissolve" or "fade".
+    pub kind: String,
+    /// The transition's first and last frames (both `timeUs` for a hard cut).
+    pub start_us: i64,
+    pub end_us: i64,
+    pub score: f64,
+}
+
+pub struct ScenesTask {
+    job: u32,
+    control: Control,
+    path: String,
+    start: Micros,
+    duration: Option<Micros>,
+    options: openrip_core::SceneOptions,
+}
+
+impl Task for ScenesTask {
+    type Output = Vec<openrip_core::SceneCut>;
+    type JsValue = Vec<SceneCut>;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        openrip_core::detect_scenes(Path::new(&self.path), self.start, self.duration, self.options, &self.control).map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<Vec<SceneCut>> {
+        let kind = |k: openrip_core::CutKind| match k {
+            openrip_core::CutKind::Hard => "hard",
+            openrip_core::CutKind::Dissolve => "dissolve",
+            openrip_core::CutKind::Fade => "fade",
+        };
+        Ok(out.into_iter().map(|c| SceneCut { time_us: c.time, kind: kind(c.kind).into(), start_us: c.start, end_us: c.end, score: c.score as f64 }).collect())
+    }
+
+    fn finally(self, _env: Env) -> Result<()> {
+        end_job(self.job, &self.control);
+        Ok(())
+    }
+}
+
+/// The shot changes in the video at `path` over `durationUs` from `startUs` of its media (to
+/// its end for `null`), on a worker thread (Split scenes). `sensitivity` 0–1 (0.5 when
+/// `null`). Progress and cancel by `job`, a number the caller picks.
+#[napi]
+pub fn detect_scenes(job: u32, path: String, start_us: i64, duration_us: Option<i64>, sensitivity: Option<f64>) -> AsyncTask<ScenesTask> {
+    let control = start_job(job);
+    let mut options = openrip_core::SceneOptions::default();
+    if let Some(s) = sensitivity {
+        options.sensitivity = s.clamp(0.0, 1.0) as f32;
+    }
+    AsyncTask::new(ScenesTask { job, control, path, start: Micros(start_us), duration: duration_us.map(Micros), options })
+}
+
+#[napi(object)]
+pub struct ColorStats {
+    /// Oklab means and standard deviations (L, a, b).
+    pub mean: Vec<f64>,
+    pub std: Vec<f64>,
+    /// BT.709 luma: mean, standard deviation, and the 0.5th, 5th, 50th, 95th and 99.5th
+    /// percentiles.
+    pub luma_mean: f64,
+    pub luma_std: f64,
+    pub luma_percentiles: Vec<f64>,
+    /// Mean Oklab chroma.
+    pub chroma: f64,
+    /// The near-neutral pixels' cast (a, b), or `null`.
+    pub neutral: Option<Vec<f64>>,
+    pub pixels: u32,
+}
+
+impl From<&openrip_core::ColorStats> for ColorStats {
+    fn from(s: &openrip_core::ColorStats) -> Self {
+        let v = |a: &[f32]| a.iter().map(|&x| x as f64).collect::<Vec<f64>>();
+        ColorStats {
+            mean: v(&s.lab.mean),
+            std: v(&s.lab.std),
+            luma_mean: s.luma_mean as f64,
+            luma_std: s.luma_std as f64,
+            luma_percentiles: v(&s.luma_percentiles),
+            chroma: s.chroma as f64,
+            neutral: s.neutral.map(|n| v(&n)),
+            pixels: s.pixels as u32,
+        }
+    }
+}
+
+pub struct ColorStatsTask {
+    job: u32,
+    control: Control,
+    path: String,
+    start: Micros,
+    duration: Option<Micros>,
+}
+
+impl Task for ColorStatsTask {
+    type Output = openrip_core::ColorStats;
+    type JsValue = ColorStats;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        openrip_core::color_stats(Path::new(&self.path), self.start, self.duration, &self.control).map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<ColorStats> {
+        Ok((&out).into())
+    }
+
+    fn finally(self, _env: Env) -> Result<()> {
+        end_job(self.job, &self.control);
+        Ok(())
+    }
+}
+
+/// The colour statistics of the video or photo at `path` over `durationUs` from `startUs`
+/// of its media (to its end for `null`), from frames spread across it, on a worker thread
+/// (Color match). Progress and cancel by `job`.
+#[napi]
+pub fn color_stats(job: u32, path: String, start_us: i64, duration_us: Option<i64>) -> AsyncTask<ColorStatsTask> {
+    let control = start_job(job);
+    AsyncTask::new(ColorStatsTask { job, control, path, start: Micros(start_us), duration: duration_us.map(Micros) })
+}
+
+/// A Color match already on a clip, for Auto adjust to see through.
+#[napi(object)]
+pub struct MatchOn {
+    pub source_mean: Vec<f64>,
+    pub source_std: Vec<f64>,
+    pub reference_mean: Vec<f64>,
+    pub reference_std: Vec<f64>,
+    /// 0–1.
+    pub intensity: f64,
+}
+
+#[napi(object)]
+pub struct AutoAdjustValues {
+    /// The Basic sliders on the panel's scale (−50…50).
+    pub brightness: i32,
+    pub contrast: i32,
+    pub saturation: i32,
+    pub temperature: i32,
+    pub tint: i32,
+    pub whites: i32,
+    pub blacks: i32,
+    pub stats: ColorStats,
+}
+
+pub struct AutoAdjustTask {
+    job: u32,
+    control: Control,
+    path: String,
+    start: Micros,
+    duration: Option<Micros>,
+    matched: Option<openrip_core::MatchOn>,
+}
+
+impl Task for AutoAdjustTask {
+    type Output = openrip_core::AutoAdjust;
+    type JsValue = AutoAdjustValues;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        openrip_core::auto_adjust(Path::new(&self.path), self.start, self.duration, self.matched, &self.control).map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<AutoAdjustValues> {
+        let p = |v: f32| (v * 50.0).round() as i32;
+        let s = out.sliders;
+        Ok(AutoAdjustValues {
+            brightness: p(s.brightness),
+            contrast: p(s.contrast),
+            saturation: p(s.saturation),
+            temperature: p(s.temperature),
+            tint: p(s.tint),
+            whites: p(s.whites),
+            blacks: p(s.blacks),
+            stats: (&out.stats).into(),
+        })
+    }
+
+    fn finally(self, _env: Env) -> Result<()> {
+        end_job(self.job, &self.control);
+        Ok(())
+    }
+}
+
+fn three(v: &[f64]) -> [f32; 3] {
+    [0, 1, 2].map(|i| v.get(i).copied().unwrap_or(0.0) as f32)
+}
+
+/// Auto adjust's Basic sliders for the video or photo at `path` over `durationUs` from
+/// `startUs` of its media, from its own statistics, on a worker thread; through the clip's
+/// Color match (`matched`) when it has one. Progress and cancel by `job`.
+#[napi]
+pub fn auto_adjust(job: u32, path: String, start_us: i64, duration_us: Option<i64>, matched: Option<MatchOn>) -> AsyncTask<AutoAdjustTask> {
+    let control = start_job(job);
+    let matched = matched.map(|m| openrip_core::MatchOn {
+        source: openrip_core::Moments { mean: three(&m.source_mean), std: three(&m.source_std) },
+        reference: openrip_core::Moments { mean: three(&m.reference_mean), std: three(&m.reference_std) },
+        intensity: m.intensity.clamp(0.0, 1.0) as f32,
+    });
+    AsyncTask::new(AutoAdjustTask { job, control, path, start: Micros(start_us), duration: duration_us.map(Micros), matched })
+}

@@ -18,7 +18,10 @@
 //!   fonts) for text, and the families text can be drawn in.
 //! - [`track_region`]: a region of a video followed through its frames (motion tracking), with
 //!   progress and cancel.
+//! - [`detect_scenes`], [`color_stats`] and [`auto_adjust`]: Split scenes, and the colour
+//!   statistics Color match and Auto adjust work from, with progress and cancel.
 
+mod analysis;
 mod audio;
 mod capcut;
 mod export;
@@ -32,6 +35,7 @@ use openrip_audio::AudioError;
 use openrip_export::ExportError;
 use openrip_playback::PreviewError;
 
+pub use analysis::{auto_adjust, color_stats, detect_scenes, AnalysisControl, AutoAdjust, ColorStats, CutKind, MatchOn, Moments, SceneCut, SceneOptions, Sliders};
 pub use audio::{measure_loudness, set_audio_input, Level, Loudness, Recorder, Recording, ToneInput};
 pub use capcut::{capcut_to_app, AppProjectFromDraft};
 pub use export::{codec_named, export_project, Codec, ExportControl, ExportOptions, ExportProgress, ExportResult};
@@ -75,6 +79,9 @@ pub enum Error {
     /// Motion tracking couldn't go on ("cancelled" when asked to stop).
     #[error("{0}")]
     Track(String),
+    /// An analysis stopped ("cancelled") or couldn't read its media.
+    #[error("{0}")]
+    Analysis(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

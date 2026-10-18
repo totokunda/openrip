@@ -4,9 +4,50 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use openrip_model::{CurvePoint, Micros, Project, Segment};
+use openrip_analysis::{Moments, Transfer};
+use openrip_model::{CurvePoint, Effect, EffectCategory, Micros, Project, Segment};
 use openrip_platform::assets;
-use openrip_render::{Curves, Hsl, RgbaImage};
+use openrip_render::{Curves, Hsl, Lut3d, RgbaImage};
+
+/// Color match's effect (`builtin` "color_match"): the clip's and the reference's Oklab
+/// means and spreads (`source_l`, `source_a`, `source_b`, `source_l_std`, …, the same for
+/// `reference_`) and its `intensity` (0–1).
+pub const COLOR_MATCH: &str = "color_match";
+
+/// The clip's Color match effect, if it has one.
+pub fn color_match_of<'a>(project: &'a Project, seg: &Segment) -> Option<&'a Effect> {
+    seg.attachments.iter().find_map(|id| project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Adjust && e.builtin.as_deref() == Some(COLOR_MATCH)))
+}
+
+fn moments(effect: &Effect, side: &str) -> Moments {
+    let get = |k: &str| effect.params.get(&format!("{side}_{k}")).copied().unwrap_or(0.0) as f32;
+    Moments { mean: [get("l"), get("a"), get("b")], std: [get("l_std"), get("a_std"), get("b_std")] }
+}
+
+/// What a Color match effect's table is made from (not its intensity, mixed in by the
+/// compositor), as a key for it.
+pub fn match_key(effect: &Effect) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    "color-match".hash(&mut h);
+    for side in ["source", "reference"] {
+        let m = moments(effect, side);
+        for v in m.mean.iter().chain(&m.std) {
+            v.to_bits().hash(&mut h);
+        }
+    }
+    h.finish()
+}
+
+/// Entries a side of Color match's table.
+const MATCH_SIZE: usize = 33;
+
+/// Color match's table: the clip's colours moved to the reference's (openrip-analysis's
+/// Reinhard transfer in Oklab).
+pub fn match_table(effect: &Effect, key: u64) -> Lut3d {
+    let t = Transfer::between(&moments(effect, "source"), &moments(effect, "reference"));
+    Lut3d { key, size: MATCH_SIZE as u32, rgb: t.lut(MATCH_SIZE), edge_aligned: true }
+}
 
 /// CapCut's fade lookup table from its colour bundle: a 289×17 PNG (17 grids of 17×17, as the
 /// exposure tables) stored inside `fade_max.texture`, an AmazingEngine texture file. `None`

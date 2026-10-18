@@ -1209,6 +1209,7 @@ dependencies = [
 name = "openrip-core"
 version = "0.1.0"
 dependencies = [
+ "openrip-analysis",
  "openrip-audio",
  "openrip-capcut",
  "openrip-export",
@@ -1229,6 +1230,7 @@ name = "openrip-dev"
 version = "0.1.0"
 dependencies = [
  "ffmpeg-sys-next",
+ "openrip-analysis",
  "openrip-audio",
  "openrip-capcut",
  "openrip-core",
@@ -1322,6 +1324,7 @@ dependencies = [
  "cpal",
  "objc2-core-foundation",
  "objc2-core-video",
+ "openrip-analysis",
  "openrip-audio",
  "openrip-media",
  "openrip-model",

@@ -370,6 +370,8 @@ pub struct PreviewEngine {
     exposure_luts: HashMap<String, Option<ExposureLuts>>,
     /// Filter lookup tables by bundle path.
     filters: HashMap<String, std::sync::Arc<Lut3d>>,
+    /// Color match's generated tables, by their parameters.
+    matches: HashMap<u64, std::sync::Arc<Lut3d>>,
     /// Styled text in pieces (see `PreparedText`), by everything but per-character opacity.
     prepared: HashMap<u64, (std::sync::Arc<text::PreparedText>, u64)>,
     /// Font files found for family names (see `font_file_for`).
@@ -417,6 +419,7 @@ impl PreviewEngine {
             matte_times: HashMap::new(),
             exposure_luts: HashMap::new(),
             filters: HashMap::new(),
+            matches: HashMap::new(),
             textures: HashMap::new(),
             stickers: Default::default(),
             font_files: HashMap::new(),
@@ -785,6 +788,16 @@ impl PreviewEngine {
         if !self.project.materials.media.iter().any(|m| m.id == seg.material) {
             return;
         }
+        // Color match's table, made from its parameters once.
+        if let Some(effect) = crate::colour::color_match_of(&self.project, seg) {
+            let key = crate::colour::match_key(effect);
+            if !self.matches.contains_key(&key) {
+                if self.matches.len() >= 64 {
+                    self.matches.clear();
+                }
+                self.matches.insert(key, std::sync::Arc::new(crate::colour::match_table(effect, key)));
+            }
+        }
         let Some(effect) = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Filter)).cloned() else { return };
         if let Err((path, why)) = self.filter_lut(&effect) {
             if !report.missing.iter().any(|(p, _)| p == &path) {
@@ -823,6 +836,14 @@ impl PreviewEngine {
     fn lut_of(&self, seg: &Segment, local: Micros) -> Option<(&Lut3d, f32)> {
         let effect = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Filter))?;
         let lut = self.filters.get(effect.resource.as_deref()?)?;
+        let strength = seg.effect_at(effect, local).params.get("intensity").copied().unwrap_or(1.0) as f32;
+        Some((lut.as_ref(), strength.clamp(0.0, 1.0)))
+    }
+
+    /// The clip's Color match table and its intensity, if made.
+    fn match_of(&self, seg: &Segment, local: Micros) -> Option<(&Lut3d, f32)> {
+        let effect = crate::colour::color_match_of(&self.project, seg)?;
+        let lut = self.matches.get(&crate::colour::match_key(effect))?;
         let strength = seg.effect_at(effect, local).params.get("intensity").copied().unwrap_or(1.0) as f32;
         Some((lut.as_ref(), strength.clamp(0.0, 1.0)))
     }
@@ -1748,6 +1769,7 @@ impl PreviewEngine {
                     layer.adjust = self.adjust_of(seg, t);
                     layer.chroma = self.chroma_of(seg, local);
                     layer.lut = self.lut_of(seg, local);
+                    layer.match_lut = self.match_of(seg, local);
                 }
                 if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Text(..) | Pixels::Sticker(..)) {
                     layer.blend = self.blend_of(seg);

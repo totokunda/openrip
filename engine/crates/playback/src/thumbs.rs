@@ -156,17 +156,23 @@ impl Thumbnailer {
 
     /// The picture upright and `height` tall, area-averaged down.
     fn scale(&mut self, source: Source<'_>, height: u32, rotation: i32) -> RgbaImage {
-        let (w, h) = source.size();
-        let (uw, uh) = if rotation.rem_euclid(180) == 90 { (h, w) } else { (w, h) };
-        let width = ((height as f64 * uw as f64 / uh.max(1) as f64).round() as u32).max(1);
-        // The GPU area filter loops over each output pixel's footprint, so a 4K frame down
-        // to 64 px is ~1,000 reads per pixel on few threads (9 ms). Stop the GPU at up to
-        // 6x reduction and finish with an exact box filter on the CPU.
-        let k = ((uh as f64 / height as f64 / 6.0).ceil() as u32).max(1);
-        let layer = Layer::from_model_oriented(source, [width * k, height * k], [0.0, 0.0], [1.0, 1.0], 0.0, rotation);
-        let big = self.compositor.render(width * k, height * k, [0, 0, 0], &[layer]);
-        box_down(&big, k)
+        shrink(&self.compositor, source, height, rotation)
     }
+}
+
+/// A picture upright (`rotation` the clockwise turn that shows it so) and `height` tall,
+/// area-averaged down.
+pub(crate) fn shrink(compositor: &Compositor, source: Source<'_>, height: u32, rotation: i32) -> RgbaImage {
+    let (w, h) = source.size();
+    let (uw, uh) = if rotation.rem_euclid(180) == 90 { (h, w) } else { (w, h) };
+    let width = ((height as f64 * uw as f64 / uh.max(1) as f64).round() as u32).max(1);
+    // The GPU area filter loops over each output pixel's footprint, so a 4K frame down
+    // to 64 px is ~1,000 reads per pixel on few threads (9 ms). Stop the GPU at up to
+    // 6x reduction and finish with an exact box filter on the CPU.
+    let k = ((uh as f64 / height as f64 / 6.0).ceil() as u32).max(1);
+    let layer = Layer::from_model_oriented(source, [width * k, height * k], [0.0, 0.0], [1.0, 1.0], 0.0, rotation);
+    let big = compositor.render(width * k, height * k, [0, 0, 0], &[layer]);
+    box_down(&big, k)
 }
 
 /// Average each `k`x`k` block (the image is an exact multiple of `k` on both sides).
@@ -203,7 +209,7 @@ fn shows(frame: &VideoFrame, d: &dyn VideoSource, t: Micros) -> bool {
     t >= frame.time && t.0 < frame.time.0 + step.0
 }
 
-fn is_still(path: &Path) -> bool {
+pub(crate) fn is_still(path: &Path) -> bool {
     let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
     matches!(ext.as_deref(), Some("png" | "jpg" | "jpeg" | "webp" | "bmp" | "tif" | "tiff" | "heic" | "gif"))
 }

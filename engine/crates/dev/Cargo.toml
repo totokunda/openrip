@@ -18,6 +18,7 @@ openrip-v1.workspace = true
 openrip-media = { workspace = true, features = ["ffmpeg"] }
 openrip-playback = { workspace = true, features = ["ffmpeg", "cpal"] }
 openrip-render.workspace = true
+openrip-analysis.workspace = true
 openrip-export = { workspace = true, features = ["ffmpeg"] }
 openrip-audio = { workspace = true, features = ["ffmpeg"] }
 openrip-core.workspace = true

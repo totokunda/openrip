@@ -98,11 +98,15 @@ const DIP: f32 = 0.15;
 /// The spans the gradual test compares across, seconds.
 const SPANS: [f64; 4] = [0.2, 0.4, 0.8, 1.6];
 /// A blend explains the middle frame when it's this much closer to it than either end is.
-const BLEND: f32 = 0.55;
+/// (Unrelated frames come out near 0.87; a clean cross-fade near 0, one between handheld
+/// shots up to about 0.7. On real footage nothing but a transition came under 0.75.)
+const BLEND: f32 = 0.7;
 /// Below this the ends are too alike to tell a blend from anything else.
 const MIN_END_DIFF: f32 = 0.015;
 /// The ends of a dissolve differ in structure at least this much (edge change ratio).
 const STRUCTURE: f32 = 0.25;
+/// A hard cut changes at least this share of the edges (unless neither frame has many).
+const CUT_EDGES: f32 = 0.2;
 /// A blank run longer than this is a scene of its own.
 const LONG_BLANK: f64 = 2.0;
 
@@ -211,6 +215,8 @@ struct Difference {
     hist: f32,
     edges: f32,
     pixels: f32,
+    /// Neither frame has enough edges for their change to mean anything (`edges` is 0).
+    edgeless: bool,
 }
 
 impl Difference {
@@ -291,14 +297,15 @@ fn best_shift(a: &Frame, b: &Frame) -> ((i32, i32), f32) {
     }
 }
 
-/// The edge change ratio of `b` against `a`, `b` shifted by `shift`, over their overlap.
-fn edge_change(a: &Frame, b: &Frame, shift: (i32, i32)) -> f32 {
+/// The edge change ratio of `b` against `a`, `b` shifted by `shift`, over their overlap;
+/// `None` when neither has enough edges to say.
+fn edge_change(a: &Frame, b: &Frame, shift: (i32, i32)) -> Option<f32> {
     let (w, h) = (a.w, a.h);
     let (x0, x1) = overlap(w, shift.0, BORDER);
     let (y0, y1) = overlap(h, shift.1, BORDER);
     let area = (x1 - x0) * (y1 - y0);
     if area == 0 {
-        return 1.0;
+        return Some(1.0);
     }
     let (mut ea, mut eb, mut entering, mut exiting) = (0usize, 0usize, 0usize, 0usize);
     for y in y0..y1 {
@@ -321,10 +328,10 @@ fn edge_change(a: &Frame, b: &Frame, shift: (i32, i32)) -> f32 {
     }
     let few = area / 200;
     match (ea < few, eb < few) {
-        (true, true) => 0.0,
+        (true, true) => None,
         // Edges appearing from nothing (or vanishing into it) are all change.
-        (true, false) | (false, true) => 1.0,
-        _ => (entering as f32 / eb as f32).max(exiting as f32 / ea as f32),
+        (true, false) | (false, true) => Some(1.0),
+        _ => Some((entering as f32 / eb as f32).max(exiting as f32 / ea as f32)),
     }
 }
 
@@ -336,7 +343,8 @@ fn hist_distance(a: &Frame, b: &Frame) -> f32 {
 
 fn compare(a: &Frame, b: &Frame) -> Difference {
     let (shift, pixels) = best_shift(a, b);
-    Difference { hist: hist_distance(a, b), edges: edge_change(a, b, shift), pixels }
+    let edges = edge_change(a, b, shift);
+    Difference { hist: hist_distance(a, b), edges: edges.unwrap_or(0.0), pixels, edgeless: edges.is_none() }
 }
 
 /// Mean absolute difference over the luma and chroma planes of `c` and `f(a, b)` per pixel.
@@ -397,8 +405,9 @@ pub struct SceneDetector {
     times: Vec<i64>,
     means: Vec<f32>,
     blank: Vec<bool>,
-    /// The difference between each frame and the one before (0 for the first).
+    /// The difference between each frame and the one before (0 for the first), and its parts.
     step: Vec<f32>,
+    parts: Vec<Difference>,
     /// For a pair that could be a cut: the smallest difference between a frame up to four
     /// before it and one up to three after (a flash or a glitch comes back to the shot).
     flash: Vec<f32>,
@@ -426,6 +435,7 @@ impl SceneDetector {
             means: Vec::new(),
             blank: Vec::new(),
             step: Vec::new(),
+            parts: Vec::new(),
             flash: Vec::new(),
             spans: halves.into_iter().map(|half| Span { half, diff: Vec::new(), blend: Vec::new() }).collect(),
             hard_floor,
@@ -460,8 +470,9 @@ impl SceneDetector {
             self.window.pop_front();
             self.first += 1;
         }
-        let step = if n >= 1 { compare(self.frame(n - 1), self.frame(n)).score() } else { 0.0 };
-        self.step.push(step);
+        let diff = if n >= 1 { compare(self.frame(n - 1), self.frame(n)) } else { Difference { hist: 0.0, edges: 0.0, pixels: 0.0, edgeless: true } };
+        self.step.push(diff.score());
+        self.parts.push(diff);
         self.flash.push(f32::INFINITY);
         if n >= 4 {
             self.check_flash(n - 3, n);
@@ -507,7 +518,7 @@ impl SceneDetector {
         let to_a = plane_mad(fc, fa, fb, |p, _| p);
         let to_b = plane_mad(fc, fa, fb, |_, q| q);
         let nearer = to_a.min(to_b);
-        let structural = fa.blank() || fb.blank() || edge_change(fa, fb, best_shift(fa, fb).0) >= STRUCTURE;
+        let structural = fa.blank() || fb.blank() || edge_change(fa, fb, best_shift(fa, fb).0).is_none_or(|e| e >= STRUCTURE);
         let dark = |f: &Frame| f.mean < DIP && f.std < 2.0 * BLANK_STD.max(0.02);
         // Where along the blend each frame is: the cut where it passes half way.
         let positions: Vec<f32> = (a..=b).map(|j| blend_position(self.frame(j), fa, fb)).collect();
@@ -557,6 +568,11 @@ impl SceneDetector {
             if self.flash[k] < 0.5 * s {
                 continue;
             }
+            // A change of light (exposure, white balance) leaves the edges where they were.
+            let p = self.parts[k];
+            if !p.edgeless && p.edges < CUT_EDGES {
+                continue;
+            }
             cuts.push(SceneCut { frame: k, time: self.times[k], kind: CutKind::Hard, start: self.times[k], end: self.times[k], score: s });
         }
 
@@ -568,7 +584,7 @@ impl SceneDetector {
             for c in half..n.saturating_sub(half) {
                 let d = span.diff[c];
                 let Some(b) = span.blend[c] else { continue };
-                if !(d >= self.gradual_floor) || b.ratio > BLEND || b.nearer < MIN_END_DIFF || !b.structural {
+                if d.is_nan() || d < self.gradual_floor || b.ratio > BLEND || b.nearer < MIN_END_DIFF || !b.structural {
                     continue;
                 }
                 if (c - half..=(c + half).min(n - 1)).any(|j| span.diff[j] > d) {
@@ -620,7 +636,7 @@ impl SceneDetector {
                 extents.push((fade(s), s, s));
                 extents.push((fade(e + 1), e + 1, e + 1));
             } else {
-                let mid = (s + e + 1) / 2;
+                let mid = (s + e).div_ceil(2);
                 extents.push((fade(mid), s, e));
             }
         }
