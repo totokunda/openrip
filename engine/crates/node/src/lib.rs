@@ -1,4 +1,4 @@
-//! Node/Electron addon: the engine's preview for the app.
+//! Node/Electron addon: the engine's API ([`openrip_core`]) for the app, as napi functions.
 //!
 //! ```js
 //! const engine = require("./openrip_node.node");
@@ -8,47 +8,21 @@
 //! engine.release(f.id); // when Electron no longer references it
 //! ```
 //!
-//! Frames are rendered into a small pool of IOSurface-backed buffers. A buffer is reused
-//! only after `release(id)`, so the app must release every frame it receives.
+//! Only the conversion to and from JavaScript lives here: the logic is in `openrip-core`,
+//! which other bindings wrap too. One project is open at a time (the addon's session);
+//! frames come from a small pool of IOSurface-backed buffers, reused only after
+//! `release(id)`, so the app must release every frame it receives.
 
-use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::sync::{Mutex, OnceLock};
 
 use napi::bindgen_prelude::{AsyncTask, Buffer, Float32Array};
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
-use openrip_model::{Micros, Project};
-use openrip_playback::{Player, PreviewEngine, PreviewPipeline};
+use openrip_core::{ExportControl, Micros, Session, Thumbnails};
 
 fn err(e: impl std::fmt::Display) -> Error {
     Error::from_reason(e.to_string())
-}
-
-/// A render target buffer; CoreVideo buffers may be used from any thread.
-#[cfg(target_os = "macos")]
-struct Surface(objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>);
-#[cfg(target_os = "macos")]
-unsafe impl Send for Surface {}
-
-struct Session {
-    project: Project,
-    engine: Arc<Mutex<PreviewEngine>>,
-    /// Audio output and master clock (absent when there is no output device).
-    player: Option<Arc<Player>>,
-    /// The render-ahead preview, created on the first `setPreviewSize`.
-    #[cfg(target_os = "macos")]
-    pipeline: Option<PreviewPipeline>,
-    /// Frames handed to the app by `frameForDisplay`, until it releases them.
-    #[cfg(target_os = "macos")]
-    shown: HashMap<u32, openrip_playback::pipeline::Surface>,
-    #[cfg(target_os = "macos")]
-    held: HashMap<u32, Surface>,
-    #[cfg(target_os = "macos")]
-    free: Vec<Surface>,
-    next_id: u32,
 }
 
 fn session() -> &'static Mutex<Option<Session>> {
@@ -82,28 +56,33 @@ pub struct TextBlock {
     pub height: f64,
 }
 
-/// Load a project: a CapCut draft folder, an OpenRip project JSON, or a v1 project file.
-fn load(path: &Path) -> Result<(Project, &'static str)> {
-    if path.is_dir() {
-        return Ok((openrip_capcut::import_draft_dir(path).map_err(err)?.project, "capcut"));
+impl From<openrip_core::ProjectInfo> for ProjectInfo {
+    fn from(i: openrip_core::ProjectInfo) -> Self {
+        ProjectInfo {
+            name: i.name,
+            width: i.width,
+            height: i.height,
+            fps: i.fps,
+            duration_us: i.duration_us,
+            tracks: i.tracks,
+            segments: i.segments,
+            source: i.source.as_str().into(),
+            text_blocks: i.text_blocks.into_iter().map(|b| TextBlock { segment: b.segment, left: b.left, top: b.top, width: b.width, height: b.height }).collect(),
+        }
     }
-    let text = std::fs::read_to_string(path).map_err(err)?;
-    if let Ok(p) = serde_json::from_str::<Project>(&text) {
-        return Ok((p, "openrip"));
-    }
-    Ok((openrip_v1::import_v1_file(path).map_err(err)?.project, "v1"))
 }
 
-/// Open a project for preview (replacing any open one).
 /// The addon's version, so the app can tell which engine it loaded.
 #[napi]
 pub fn version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+    openrip_core::version()
 }
 
+/// Open a project for preview (replacing any open one): a CapCut draft folder, an OpenRip
+/// project JSON, or a v1 project file.
 #[napi]
 pub fn open_project(path: String) -> Result<ProjectInfo> {
-    let (project, source) = load(Path::new(&path))?;
+    let (project, source) = openrip_core::load_project(Path::new(&path)).map_err(err)?;
     start_session(project, source)
 }
 
@@ -111,19 +90,8 @@ pub fn open_project(path: String) -> Result<ProjectInfo> {
 /// or a CapCut draft's `draft_info.json`.
 #[napi]
 pub fn open_project_json(json: String) -> Result<ProjectInfo> {
-    let (project, source) = parse_json(&json)?;
+    let (project, source) = openrip_core::parse_project_json(&json).map_err(err)?;
     start_session(project, source)
-}
-
-fn parse_json(json: &str) -> Result<(Project, &'static str)> {
-    if let Ok(p) = serde_json::from_str::<Project>(json) {
-        return Ok((p, "openrip"));
-    }
-    let doc: serde_json::Value = serde_json::from_str(json).map_err(err)?;
-    if doc.get("tracks").is_some() && doc.get("materials").is_some() {
-        return Ok((openrip_capcut::import_draft_json(&doc, "draft").map_err(err)?.project, "capcut"));
-    }
-    Ok((openrip_v1::import_v1_json(&doc).map_err(err)?.project, "v1"))
 }
 
 /// Replace the open project after an edit (same formats as `openProjectJson`). Decoders,
@@ -132,71 +100,21 @@ fn parse_json(json: &str) -> Result<(Project, &'static str)> {
 /// if none is open.
 #[napi]
 pub fn update_project(json: String) -> Result<ProjectInfo> {
-    let (project, source) = parse_json(&json)?;
+    let (project, source) = openrip_core::parse_project_json(&json).map_err(err)?;
     let mut guard = session().lock().unwrap();
     let Some(s) = guard.as_mut() else {
         drop(guard);
         return start_session(project, source);
     };
-    let mut info = project_info(&project, source);
-    let relaid = openrip_v1::relaid_texts(&s.project, &project);
-    {
-        let mut engine = s.engine.lock().unwrap();
-        engine.set_project(project.clone());
-        info.text_blocks = relaid
-            .into_iter()
-            .filter_map(|segment| {
-                let [left, top, width, height] = engine.text_block(&segment)?;
-                Some(TextBlock { segment, left, top, width, height })
-            })
-            .collect();
-    }
-    if let Some(p) = &s.player {
-        p.set_project(project.clone());
-    }
-    #[cfg(target_os = "macos")]
-    if let Some(p) = &s.pipeline {
-        p.set_project(project.clone());
-    }
-    s.project = project;
-    Ok(info)
+    Ok(s.update(project, source).into())
 }
 
-fn project_info(project: &Project, source: &str) -> ProjectInfo {
-    ProjectInfo {
-        name: project.name.clone(),
-        width: project.canvas.width,
-        height: project.canvas.height,
-        fps: project.fps.as_f64(),
-        duration_us: project.duration().0,
-        tracks: project.tracks.len() as u32,
-        segments: project.segment_count() as u32,
-        source: source.into(),
-        text_blocks: Vec::new(),
-    }
-}
-
-fn start_session(project: Project, source: &str) -> Result<ProjectInfo> {
-    let info = project_info(&project, source);
+fn start_session(project: openrip_core::Project, source: openrip_core::Source) -> Result<ProjectInfo> {
     // Close the old session (and its audio output) before opening the new one.
     session().lock().unwrap().take();
-    let player = Player::new(project.clone()).ok().map(Arc::new);
-    let engine = PreviewEngine::new(project.clone()).map_err(err)?;
-    *session().lock().unwrap() = Some(Session {
-        project,
-        engine: Arc::new(Mutex::new(engine)),
-        player,
-        #[cfg(target_os = "macos")]
-        pipeline: None,
-        #[cfg(target_os = "macos")]
-        shown: HashMap::new(),
-        #[cfg(target_os = "macos")]
-        held: HashMap::new(),
-        #[cfg(target_os = "macos")]
-        free: Vec::new(),
-        next_id: 0,
-    });
-    Ok(info)
+    let (s, info) = Session::open(project, source).map_err(err)?;
+    *session().lock().unwrap() = Some(s);
+    Ok(info.into())
 }
 
 #[napi]
@@ -226,56 +144,18 @@ pub struct RenderTask {
 }
 
 #[cfg(target_os = "macos")]
-pub struct Rendered {
-    surface: Surface,
-    ms: f64,
-    layers: u32,
-    skipped: u32,
-}
-
-#[cfg(target_os = "macos")]
 impl Task for RenderTask {
-    type Output = Rendered;
+    type Output = openrip_core::RenderedFrame;
     type JsValue = FrameHandle;
 
-    fn compute(&mut self) -> Result<Rendered> {
-        let (engine, surface) = {
-            let mut guard = session().lock().unwrap();
-            let s = guard.as_mut().ok_or_else(|| err("no project open"))?;
-            let (w, h) = (self.width, self.height);
-            let reusable = s.free.iter().position(|f| objc2_core_video::CVPixelBufferGetWidth(&f.0) == w as usize && objc2_core_video::CVPixelBufferGetHeight(&f.0) == h as usize);
-            let surface = match reusable {
-                Some(i) => s.free.swap_remove(i),
-                None => Surface(openrip_render::Compositor::output_surface(w, h).ok_or_else(|| err("can't allocate a frame surface"))?),
-            };
-            (s.engine.clone(), surface)
-        };
-        let t0 = Instant::now();
-        let report = {
-            let mut e = engine.lock().unwrap();
-            e.set_scrubbing(self.scrub);
-            e.render_to_surface(self.time, &surface.0).map_err(err)?
-        };
-        Ok(Rendered { surface, ms: t0.elapsed().as_secs_f64() * 1e3, layers: report.layers as u32, skipped: report.missing.len() as u32 })
+    fn compute(&mut self) -> Result<Self::Output> {
+        let job = session().lock().unwrap().as_mut().ok_or_else(|| err(openrip_core::Error::NoProject))?.frame_job(self.time, self.width, self.height, self.scrub).map_err(err)?;
+        job.render().map_err(err)
     }
 
-    fn resolve(&mut self, _env: Env, out: Rendered) -> Result<FrameHandle> {
-        let mut guard = session().lock().unwrap();
-        let s = guard.as_mut().ok_or_else(|| err("project closed"))?;
-        s.next_id = s.next_id.wrapping_add(1);
-        let id = s.next_id;
-        let ptr = objc2_core_video::CVPixelBufferGetIOSurface(Some(&out.surface.0)).map(|io| objc2_core_foundation::CFRetained::as_ptr(&io).as_ptr() as usize as u64).ok_or_else(|| err("frame has no IOSurface"))?;
-        s.held.insert(id, out.surface);
-        Ok(FrameHandle {
-            id,
-            io_surface: Buffer::from(ptr.to_ne_bytes().to_vec()),
-            width: self.width,
-            height: self.height,
-            time_us: self.time.0,
-            render_ms: out.ms,
-            layers: out.layers,
-            skipped: out.skipped,
-        })
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<FrameHandle> {
+        let f = session().lock().unwrap().as_mut().ok_or_else(|| err(openrip_core::Error::Closed))?.hand_out(out).map_err(err)?;
+        Ok(FrameHandle { id: f.id, io_surface: Buffer::from(f.io_surface.to_ne_bytes().to_vec()), width: f.width, height: f.height, time_us: f.time_us, render_ms: f.render_ms, layers: f.layers, skipped: f.skipped })
     }
 }
 
@@ -290,22 +170,9 @@ pub fn render_frame(time_us: i64, width: u32, height: u32, scrub: Option<bool>) 
 /// Let a frame's surface be reused (call when Electron releases it).
 #[napi]
 pub fn release(id: u32) {
-    #[cfg(target_os = "macos")]
     if let Some(s) = session().lock().unwrap().as_mut() {
-        if let Some(surface) = s.shown.remove(&id) {
-            if let Some(p) = &s.pipeline {
-                p.recycle(surface);
-            }
-            return;
-        }
-        if let Some(surface) = s.held.remove(&id) {
-            if s.free.len() < 4 {
-                s.free.push(surface);
-            }
-        }
+        s.release(id);
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = id;
 }
 
 #[napi(object)]
@@ -319,27 +186,21 @@ pub struct Image {
 /// Render the frame at `timeUs` and read it back (tests, thumbnails). Synchronous.
 #[napi]
 pub fn render_image(time_us: i64, width: u32, height: u32) -> Result<Image> {
-    let engine = session().lock().unwrap().as_ref().map(|s| s.engine.clone()).ok_or_else(|| err("no project open"))?;
-    let (img, _) = engine.lock().unwrap().render_image(Micros(time_us), width, height).map_err(err)?;
+    let renderer = session().lock().unwrap().as_ref().map(Session::renderer).ok_or_else(|| err(openrip_core::Error::NoProject))?;
+    let img = renderer.render_image(Micros(time_us), width, height).map_err(err)?;
     Ok(Image { width: img.width, height: img.height, data: Buffer::from(img.data) })
 }
 
 /// Start playback (audio, and the master clock) at `timeUs`. False without an output device.
 #[napi]
 pub fn play(time_us: i64) -> bool {
-    match session().lock().unwrap().as_ref().and_then(|s| s.player.as_ref()) {
-        Some(p) => {
-            p.play(Micros(time_us));
-            true
-        }
-        None => false,
-    }
+    session().lock().unwrap().as_ref().is_some_and(|s| s.play(Micros(time_us)))
 }
 
 #[napi]
 pub fn pause() {
-    if let Some(p) = session().lock().unwrap().as_ref().and_then(|s| s.player.as_ref()) {
-        p.pause();
+    if let Some(s) = session().lock().unwrap().as_ref() {
+        s.pause();
     }
 }
 
@@ -347,14 +208,14 @@ pub fn pause() {
 /// audio output.
 #[napi]
 pub fn position_us() -> i64 {
-    session().lock().unwrap().as_ref().and_then(|s| s.player.as_ref()).map_or(-1, |p| p.position().0)
+    session().lock().unwrap().as_ref().and_then(Session::position).map_or(-1, |t| t.0)
 }
 
 /// Output gain; 0 mutes (the clock keeps running).
 #[napi]
 pub fn set_volume(volume: f64) {
-    if let Some(p) = session().lock().unwrap().as_ref().and_then(|s| s.player.as_ref()) {
-        p.set_volume(volume as f32);
+    if let Some(s) = session().lock().unwrap().as_ref() {
+        s.set_volume(volume as f32);
     }
 }
 
@@ -364,60 +225,29 @@ pub fn set_volume(volume: f64) {
 #[cfg(target_os = "macos")]
 #[napi]
 pub fn set_preview_size(width: u32, height: u32) -> Result<()> {
-    let mut guard = session().lock().unwrap();
-    let s = guard.as_mut().ok_or_else(|| err("no project open"))?;
-    match &s.pipeline {
-        Some(p) => p.resize(width, height),
-        None => s.pipeline = Some(PreviewPipeline::new(s.project.clone(), width, height).map_err(err)?),
-    }
-    Ok(())
+    session().lock().unwrap().as_mut().ok_or_else(|| err(openrip_core::Error::NoProject))?.set_preview_size(width, height).map_err(err)
 }
 
 /// Play from `fromUs`: sound starts and frames render ahead of the audio clock.
 #[cfg(target_os = "macos")]
 #[napi]
 pub fn start_playback(from_us: i64) -> Result<()> {
-    let guard = session().lock().unwrap();
-    let s = guard.as_ref().ok_or_else(|| err("no project open"))?;
-    let p = s.pipeline.as_ref().ok_or_else(|| err("call setPreviewSize first"))?;
-    match &s.player {
-        Some(player) => {
-            player.play(Micros(from_us));
-            let player = player.clone();
-            p.play(Arc::new(move || player.position()));
-        }
-        None => {
-            // No audio device: run by the wall clock.
-            let start = Instant::now();
-            p.play(Arc::new(move || Micros(from_us + start.elapsed().as_micros() as i64)));
-        }
-    }
-    Ok(())
+    session().lock().unwrap().as_ref().ok_or_else(|| err(openrip_core::Error::NoProject))?.start_playback(Micros(from_us)).map_err(err)
 }
 
 /// Stop playing; the picture stays on the frame at the stop time.
 #[cfg(target_os = "macos")]
 #[napi]
 pub fn stop_playback() -> i64 {
-    let guard = session().lock().unwrap();
-    let Some(s) = guard.as_ref() else { return 0 };
-    let at = s.player.as_ref().map_or(Micros::ZERO, |p| {
-        let t = p.position();
-        p.pause();
-        t
-    });
-    if let Some(p) = &s.pipeline {
-        p.seek(at);
-    }
-    at.0
+    session().lock().unwrap().as_ref().map_or(0, |s| s.stop_playback().0)
 }
 
 /// Show the frame at `timeUs` (paused; scrubbing). The newest request wins.
 #[cfg(target_os = "macos")]
 #[napi]
 pub fn seek(time_us: i64) {
-    if let Some(p) = session().lock().unwrap().as_ref().and_then(|s| s.pipeline.as_ref()) {
-        p.seek(Micros(time_us));
+    if let Some(s) = session().lock().unwrap().as_ref() {
+        s.seek(Micros(time_us));
     }
 }
 
@@ -437,41 +267,21 @@ pub struct DisplayFrame {
 #[cfg(target_os = "macos")]
 #[napi]
 pub fn frame_for_display() -> Option<DisplayFrame> {
-    let mut guard = session().lock().unwrap();
-    let s = guard.as_mut()?;
-    let now = s.player.as_ref().map_or(Micros(i64::MAX), |p| p.position());
-    let f = s.pipeline.as_ref()?.frame(now)?;
-    let pb = &f.surface.0;
-    let ptr = objc2_core_video::CVPixelBufferGetIOSurface(Some(pb)).map(|io| objc2_core_foundation::CFRetained::as_ptr(&io).as_ptr() as usize as u64)?;
-    let (w, h) = (objc2_core_video::CVPixelBufferGetWidth(pb) as u32, objc2_core_video::CVPixelBufferGetHeight(pb) as u32);
-    s.next_id = s.next_id.wrapping_add(1);
-    let id = s.next_id;
-    s.shown.insert(id, f.surface);
-    Some(DisplayFrame { id, io_surface: Buffer::from(ptr.to_ne_bytes().to_vec()), width: w, height: h, time_us: f.time.0, render_ms: f.render_ms })
+    let f = session().lock().unwrap().as_mut()?.frame_for_display()?;
+    Some(DisplayFrame { id: f.id, io_surface: Buffer::from(f.io_surface.to_ne_bytes().to_vec()), width: f.width, height: f.height, time_us: f.time_us, render_ms: f.render_ms })
 }
 
 // ---- Timeline thumbnails ----
 
-/// One thumbnailer per pass, so a long exact pass doesn't hold up a quick one.
-struct Thumbnailers {
-    quick: Mutex<Option<openrip_playback::Thumbnailer>>,
-    exact: Mutex<Option<openrip_playback::Thumbnailer>>,
-    cache_dir: Mutex<Option<std::path::PathBuf>>,
-}
-
-fn thumbnailers() -> &'static Thumbnailers {
-    static T: OnceLock<Thumbnailers> = OnceLock::new();
-    T.get_or_init(|| Thumbnailers { quick: Mutex::new(None), exact: Mutex::new(None), cache_dir: Mutex::new(None) })
+fn thumbnails_service() -> &'static Thumbnails {
+    static T: Thumbnails = Thumbnails::new();
+    &T
 }
 
 /// Keep exact thumbnails in `dir` across runs (e.g. under the app's cache folder).
 #[napi]
 pub fn set_thumbnail_cache_dir(dir: String) {
-    let t = thumbnailers();
-    *t.cache_dir.lock().unwrap() = Some(dir.into());
-    // Rebuilt with the new folder on next use.
-    t.quick.lock().unwrap().take();
-    t.exact.lock().unwrap().take();
+    thumbnails_service().set_cache_dir(dir.into());
 }
 
 #[napi(object)]
@@ -495,36 +305,15 @@ pub struct ThumbnailTask {
     exact: bool,
 }
 
-pub struct RawThumb {
-    index: u32,
-    time: Micros,
-    exact: bool,
-    image: openrip_render::RgbaImage,
-}
-
 impl Task for ThumbnailTask {
-    type Output = Vec<RawThumb>;
+    type Output = Vec<openrip_core::Thumbnail>;
     type JsValue = Vec<Thumbnail>;
 
-    fn compute(&mut self) -> Result<Vec<RawThumb>> {
-        let t = thumbnailers();
-        let slot = if self.exact { &t.exact } else { &t.quick };
-        let mut guard = slot.lock().unwrap();
-        if guard.is_none() {
-            *guard = Some(openrip_playback::Thumbnailer::new(t.cache_dir.lock().unwrap().clone()).map_err(err)?);
-        }
-        let pass = if self.exact { openrip_playback::Pass::Exact } else { openrip_playback::Pass::Quick };
-        let mut out = Vec::with_capacity(self.times.len());
-        guard.as_mut().unwrap().thumbnails(Path::new(&self.path), &self.times, self.height, pass, |th| {
-            out.push(RawThumb { index: th.index as u32, time: th.time, exact: th.exact, image: th.image });
-            true
-        })
-        .map_err(err)?;
-        out.sort_by_key(|t| t.index);
-        Ok(out)
+    fn compute(&mut self) -> Result<Self::Output> {
+        thumbnails_service().thumbnails(Path::new(&self.path), &self.times, self.height, self.exact).map_err(err)
     }
 
-    fn resolve(&mut self, _env: Env, out: Vec<RawThumb>) -> Result<Vec<Thumbnail>> {
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<Vec<Thumbnail>> {
         Ok(out.into_iter().map(|t| Thumbnail { index: t.index, time_us: t.time.0, exact: t.exact, width: t.image.width, height: t.image.height, rgba: Buffer::from(t.image.data) }).collect())
     }
 }
@@ -554,12 +343,11 @@ pub struct WaveformTask {
 }
 
 impl Task for WaveformTask {
-    type Output = Option<openrip_audio::Peaks>;
+    type Output = Option<openrip_core::Waveform>;
     type JsValue = Option<Waveform>;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        let dir = thumbnailers().cache_dir.lock().unwrap().clone();
-        openrip_playback::waveform(Path::new(&self.path), self.per_second, dir.as_deref()).map_err(err)
+        thumbnails_service().waveform(Path::new(&self.path), self.per_second).map_err(err)
     }
 
     fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<Option<Waveform>> {
@@ -577,10 +365,8 @@ pub fn waveform(path: String, per_second: u32) -> AsyncTask<WaveformTask> {
 
 // ---- export -------------------------------------------------------------------
 
-/// The running export's frames done and total, and a request to stop it.
-static EXPORT_DONE: AtomicU64 = AtomicU64::new(0);
-static EXPORT_TOTAL: AtomicU64 = AtomicU64::new(0);
-static EXPORT_CANCEL: AtomicBool = AtomicBool::new(false);
+/// The running export's progress, and a request to stop it.
+static EXPORT: ExportControl = ExportControl::new();
 
 #[napi(object)]
 pub struct ExportOptions {
@@ -611,33 +397,15 @@ pub struct ExportProgress {
 pub struct ExportTask {
     json: String,
     path: String,
-    options: ExportOptions,
+    options: openrip_core::ExportOptions,
 }
 
 impl Task for ExportTask {
-    type Output = openrip_export::ExportStats;
+    type Output = openrip_core::ExportResult;
     type JsValue = ExportResult;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        let (project, _) = parse_json(&self.json)?;
-        let o = &self.options;
-        let options = openrip_export::ExportOptions {
-            width: o.width & !1,
-            height: o.height & !1,
-            fps: openrip_model::FrameRate::from_f64(o.fps),
-            codec: if o.codec.eq_ignore_ascii_case("hevc") || o.codec.eq_ignore_ascii_case("h265") { openrip_export::Codec::Hevc } else { openrip_export::Codec::H264 },
-            bitrate: o.bitrate.max(100_000.0) as u64,
-            audio: o.audio,
-        };
-        EXPORT_DONE.store(0, Ordering::Relaxed);
-        EXPORT_TOTAL.store(0, Ordering::Relaxed);
-        EXPORT_CANCEL.store(false, Ordering::Relaxed);
-        openrip_export::export(project, Path::new(&self.path), &options, |done, total| {
-            EXPORT_DONE.store(done, Ordering::Relaxed);
-            EXPORT_TOTAL.store(total, Ordering::Relaxed);
-            !EXPORT_CANCEL.load(Ordering::Relaxed)
-        })
-        .map_err(err)
+        openrip_core::export_project(&self.json, Path::new(&self.path), &self.options, &EXPORT).map_err(err)
     }
 
     fn resolve(&mut self, _env: Env, s: Self::Output) -> Result<ExportResult> {
@@ -649,19 +417,22 @@ impl Task for ExportTask {
 /// thread, independent of the open preview. Rejects with "cancelled" after `cancelExport()`.
 #[napi]
 pub fn export_project(json: String, path: String, options: ExportOptions) -> AsyncTask<ExportTask> {
+    let o = options;
+    let options = openrip_core::ExportOptions { width: o.width, height: o.height, fps: o.fps, codec: openrip_core::codec_named(&o.codec), bitrate: o.bitrate, audio: o.audio };
     AsyncTask::new(ExportTask { json, path, options })
 }
 
 /// The running (or last) export's progress, in frames.
 #[napi]
 pub fn export_progress() -> ExportProgress {
-    ExportProgress { done: EXPORT_DONE.load(Ordering::Relaxed) as f64, total: EXPORT_TOTAL.load(Ordering::Relaxed) as f64 }
+    let p = EXPORT.progress();
+    ExportProgress { done: p.done as f64, total: p.total as f64 }
 }
 
 /// Stop the running export; its promise rejects and the unfinished file is removed.
 #[napi]
 pub fn cancel_export() {
-    EXPORT_CANCEL.store(true, Ordering::Relaxed);
+    EXPORT.cancel();
 }
 
 // CapCut drafts as app projects.
@@ -683,29 +454,15 @@ pub struct DraftTask {
 }
 
 impl Task for DraftTask {
-    type Output = AppProjectFromDraft;
+    type Output = openrip_core::AppProjectFromDraft;
     type JsValue = AppProjectFromDraft;
 
-    fn compute(&mut self) -> Result<AppProjectFromDraft> {
-        let t0 = Instant::now();
-        let imported = openrip_capcut::import_draft_dir(Path::new(&self.dir)).map_err(err)?;
-        let project = imported.project;
-        let t1 = Instant::now();
-        // The engine lays out each text, so the app's box around it fits.
-        let mut engine = PreviewEngine::new(project.clone()).map_err(err)?;
-        let t2 = Instant::now();
-        let doc = openrip_v1::to_app_project(&project, &mut |seg| engine.text_block(&seg.id));
-        if std::env::var_os("OPENRIP_TRACE").is_some() {
-            eprintln!("[capcut] draft {:.0} ms, engine {:.0} ms, convert {:.0} ms", (t1 - t0).as_secs_f64() * 1e3, (t2 - t1).as_secs_f64() * 1e3, t2.elapsed().as_secs_f64() * 1e3);
-        }
-        let r = &imported.report;
-        let mut notes: Vec<String> = r.foreign.iter().map(|(k, n)| format!("{k}: {n} kept for the engine, not drawn yet")).collect();
-        notes.extend(r.warnings.iter().cloned());
-        Ok(AppProjectFromDraft { json: doc.to_string(), name: project.name.clone(), missing_media: r.missing_media.clone(), notes })
+    fn compute(&mut self) -> Result<Self::Output> {
+        openrip_core::capcut_to_app(Path::new(&self.dir)).map_err(err)
     }
 
-    fn resolve(&mut self, _env: Env, out: AppProjectFromDraft) -> Result<AppProjectFromDraft> {
-        Ok(out)
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<AppProjectFromDraft> {
+        Ok(AppProjectFromDraft { json: out.json, name: out.name, missing_media: out.missing_media, notes: out.notes })
     }
 }
 

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/model", "crates/capcut", "crates/v1", "crates/media", "crates/audio", "crates/playback", "crates/render", "crates/node", "crates/export", "crates/dev"]
+members = ["crates/model", "crates/capcut", "crates/v1", "crates/media", "crates/audio", "crates/playback", "crates/render", "crates/core", "crates/node", "crates/export", "crates/dev"]
 
 [workspace.package]
 edition = "2021"
@@ -17,6 +17,7 @@ openrip-audio = { path = "crates/audio" }
 openrip-playback = { path = "crates/playback" }
 openrip-render = { path = "crates/render" }
 openrip-export = { path = "crates/export" }
+openrip-core = { path = "crates/core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

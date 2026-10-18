@@ -1182,6 +1182,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "openrip-core"
+version = "0.1.0"
+dependencies = [
+ "objc2-core-foundation",
+ "objc2-core-video",
+ "objc2-io-surface",
+ "openrip-audio",
+ "openrip-capcut",
+ "openrip-export",
+ "openrip-media",
+ "openrip-model",
+ "openrip-playback",
+ "openrip-render",
+ "openrip-v1",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "openrip-dev"
 version = "0.1.0"
 dependencies = [
@@ -1244,17 +1263,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
- "objc2-core-foundation",
- "objc2-core-video",
- "objc2-io-surface",
- "openrip-audio",
- "openrip-capcut",
- "openrip-export",
- "openrip-model",
- "openrip-playback",
- "openrip-render",
- "openrip-v1",
- "serde_json",
+ "openrip-core",
 ]
 
 [[package]]

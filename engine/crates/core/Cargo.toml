@@ -1,0 +1,25 @@
+[package]
+name = "openrip-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The engine's API as plain Rust, for every client: the Node addon today, Swift/Kotlin or wasm bindings later"
+
+[dependencies]
+openrip-model.workspace = true
+openrip-capcut.workspace = true
+openrip-v1.workspace = true
+openrip-media.workspace = true
+openrip-playback.workspace = true
+openrip-audio.workspace = true
+openrip-render.workspace = true
+openrip-export.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVBase", "objc2-io-surface"] }
+objc2-io-surface = { version = "0.3", default-features = false, features = ["std", "IOSurfaceRef", "objc2-core-foundation"] }
