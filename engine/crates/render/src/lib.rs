@@ -17,6 +17,7 @@
 
 pub mod adjust;
 pub mod blend;
+pub mod exposure;
 pub mod grade;
 mod interop;
 pub mod shape;

@@ -17,10 +17,6 @@ use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, RenderError
 
 /// CapCut's default font, used when a text run names none.
 const DEFAULT_FONT: &str = "/Applications/CapCut.app/Contents/Resources/Font/SystemFont/en.ttf";
-/// The colour bundle that ships with CapCut (the same exposure and fade tables as the one a
-/// draft downloads), for Adjust sliders without a draft's bundle: the app's own clips. Without
-/// CapCut installed, exposure and fade are left out, as for a draft whose bundle is missing.
-const DEFAULT_COLOUR_BUNDLE: &str = "/Applications/CapCut.app/Contents/Resources/DefaultAdjustBundle/merge_all_adjust_color";
 /// Decoders kept open; the least recently used is closed beyond this.
 const MAX_DECODERS: usize = 12;
 /// Decoded-frame cache per preview decoder: room to step back through a 1080p GOP without
@@ -918,8 +914,7 @@ impl PreviewEngine {
             *slot = v;
             bundle = bundle.or(e.resource.as_deref());
         }
-        // The app's own sliders name no bundle: CapCut's own, if it's here (`load_exposure_luts`).
-        let bundle = bundle.or_else(|| (a.exposure != 0.0 || a.fade != 0.0).then_some(DEFAULT_COLOUR_BUNDLE));
+
         // Primary colour wheels (log wheels aren't drawn yet).
         if let Some(w) = seg.attachments.iter().find_map(|id| self.project.materials.color_wheels.iter().find(|w| &w.id == id && !w.log)) {
             let w = &seg.wheels_at(w, local);
@@ -931,7 +926,13 @@ impl PreviewEngine {
         if a.is_identity() {
             return None;
         }
-        Some((a, bundle.and_then(|b| self.exposure_luts.get(b)).and_then(Option::as_ref)))
+        // A draft's sliders read the tables in the colour bundle the draft points at (none if
+        // it's missing); sliders without a bundle (the app's own) use OpenRip's own curves.
+        let luts = match bundle {
+            Some(b) => self.exposure_luts.get(b).and_then(Option::as_ref),
+            None => (a.exposure != 0.0 || a.fade != 0.0).then(openrip_render::exposure::fitted),
+        };
+        Some((a, luts))
     }
 
     /// A text style at a font size of `em` pixels. Sizes are fractions of the font size, on
@@ -996,7 +997,7 @@ impl PreviewEngine {
             .attachments
             .iter()
             .filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && matches!(e.builtin.as_deref(), Some("exposure" | "fade"))))
-            .map(|e| e.resource.clone().unwrap_or_else(|| DEFAULT_COLOUR_BUNDLE.to_string()))
+            .filter_map(|e| e.resource.clone())
             .filter(|b| !self.exposure_luts.contains_key(b))
             .collect();
         for b in bundles {

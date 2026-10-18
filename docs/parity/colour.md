@@ -87,13 +87,36 @@ An edit goes on a copy of the draft's material for that clip, as for the other s
 
 Since 2026-10-18 the app's own videos and photos have the same tools, drawn through the same passes: `color` on the clip (ClipColor in lib/types.ts) holds CapCut's Basic sliders on CapCut's scale, the eight HSL ranges, curves as points, the primary wheels and a LUT, and the importer (`engine/crates/v1/src/color.rs`) turns them into the materials a draft would have:
 
-- **Sliders:** one Adjust effect each, the value divided by CapCut's scale (50, or 100 for sharpen, clarity, vignette and fade) as the draft keeps it. Exposure and fade read their tables from a colour bundle: a draft's own, else the one that ships with CapCut (`Resources/DefaultAdjustBundle/merge_all_adjust_color`, the same three files byte for byte as the downloaded bundle). Without CapCut installed they're left out, as for a draft whose bundle is missing.
+- **Sliders:** one Adjust effect each, the value divided by CapCut's scale (50, or 100 for sharpen, clarity, vignette and fade) as the draft keeps it. Exposure and fade on the app's own clips use OpenRip's own curves (below); a draft's read the tables in the bundle the draft points at, as before.
 - **HSL:** one material per range set (`hsl_color_type` 1–8).
 - **Curves:** the app keeps points; the handles are CapCut's. Read off the drafts' curves: each inner point's handles lie along the line between its neighbours, a sixth of it either way; an end's handle is halfway to its neighbour's near handle; two points alone make a straight line (handles a third of the way). `v1/src/color.rs` reproduces a draft's three-point red curve and two-point luma curve to 1e-9.
 - **Wheels:** CapCut's values and strength, as the draft keeps them. Log wheels aren't drawn yet, for drafts or the app.
 - **LUT:** a `.cube` file or a Hald image, a filter on the clip, drawn first ([compositing.md](compositing.md)).
 
 All but curves are keyframeable (`adjust:<slider>`, `hsl:<range>:<part>`, `wheels:intensity`, `lut:intensity`), as CapCut keyframes them. Checked by the v1 crate's tests (fields to materials, keys, a converted clip) and the harness step `compositing`: exposure +40 lightens the standard clip from 0.507 to 0.684, saturation −100 on every range greys it, an inverting `.cube` inverts it.
+
+### Exposure and fade without CapCut
+
+CapCut's Exposure and Fade mix the picture towards lookup tables in its colour bundle (adjust.md). A draft's clips read those from the bundle the draft points at. The app's own clips can't depend on CapCut or its content, so OpenRip draws them from formulas of its own (`render/src/exposure.rs`) and generates its tables from those; nothing of CapCut's is shipped or read for them, and they work with CapCut not installed.
+
+- **Fade:** one curve for every channel (CapCut's table is per channel): a degree-9 polynomial in the channel's level.
+- **Exposure** (each end of the slider): per output channel, a curve in the input's mean level (degree 11, what a grey gets) plus colour terms, the products of the mean level and two colour differences (r − g, b − g) up to degree 4 that vanish on grey; clamped to 0–1.
+- **Fitted** by least squares to what CapCut's tables do (their 17³ entries, 256 levels of grey, and 20,000 colours from half of 27 frames of real footage), through the clamp the darker table hits (it drives the smallest channel of bright saturated colours to 0), with a soft-L1 loss for what still doesn't fit.
+
+How close the generated tables come to CapCut's, read the way the Adjust pass reads them, in 8-bit code values (|error| of the output; the slider mixes the table in by its size, so the error scales with it):
+
+| | Slider | 33³ colour cube: mean / max | 13 held-out frames: mean / max |
+|---|---|---|---|
+| Exposure, brighter | ±50 (full) | 2.9 / 40 | 1.0 / 31 |
+| | 25 | 1.4 / 20 | 0.6 / 16 |
+| | 10 | 0.6 / 8 | 0.2 / 6 |
+| Exposure, darker | −50 | 2.4 / 46 | 0.5 / 24 |
+| | −25 | 1.2 / 23 | 0.2 / 12 |
+| | −10 | 0.5 / 9 | 0.1 / 5 |
+| Fade | 100 | 0.1 / 1 | 0.05 / 1 |
+| | 50 | 0.03 / 1 | 0.02 / 1 |
+
+The largest errors are at the cube's saturated corners, where CapCut's tables clip; on the grey axis the curves are within 2.3 levels. Checked in `render/src/exposure.rs`'s tests (layout, the grey axis and colours against CapCut's values) and `playback/tests/compositing.rs` (a mid grey taken to CapCut's 190 and 118 at the slider's ends, fade lifting black to 69, with no bundle anywhere; a draft's slider naming a missing bundle still draws nothing, as before).
 
 ### The old sliders
 

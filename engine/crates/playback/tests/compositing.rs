@@ -202,3 +202,44 @@ fn a_lut_on_a_clip_is_drawn() {
     assert!(near(px(&frame(p(1.0), 1.0), 10, 10), [215, 175, 135], 1), "{:?}", px(&frame(p(1.0), 1.0), 10, 10));
     assert!(near(px(&frame(p(0.5), 1.0), 10, 10), [128, 128, 128], 1));
 }
+
+/// Exposure and fade on a clip without a CapCut colour bundle (the app's own) use OpenRip's
+/// curves, so they work with no CapCut on the machine: exposure lightens or darkens a mid grey
+/// as CapCut's slider does (within a few levels), fade lifts black. A draft's slider naming a
+/// bundle that isn't there is left out, as before.
+#[test]
+fn exposure_and_fade_work_without_capcuts_bundle() {
+    let grey = still("cmp-grey6.png", [128, 128, 128]);
+    let black = still("cmp-black.png", [0, 0, 0]);
+    let slider = |name: &str, value: f64, resource: Option<&str>| Effect {
+        id: MaterialId(format!("adj-{name}")),
+        category: EffectCategory::Adjust,
+        name: name.into(),
+        params: [("intensity".to_string(), value)].into_iter().collect(),
+        builtin: Some(name.into()),
+        resource: resource.map(String::from),
+        library: None,
+        text_style: None,
+    };
+    let p = |media: &PathBuf, effects: Vec<Effect>| {
+        let ids: Vec<String> = effects.iter().map(|e| e.id.0.clone()).collect();
+        let att: Vec<&str> = ids.iter().map(String::as_str).collect();
+        project(vec![track("main", vec![clip("a", "m", 0, 1.0, &att)])], Materials { media: vec![photo("m", media)], effects, ..Default::default() })
+    };
+    let plain = px(&frame(p(&grey, vec![]), 1.0), 10, 10);
+    // CapCut's own tables take a mid grey (128) to about 190 at full brightening and about 118
+    // at full darkening; half the slider goes half way.
+    let up = px(&frame(p(&grey, vec![slider("exposure", 1.0, None)]), 1.0), 10, 10);
+    let half = px(&frame(p(&grey, vec![slider("exposure", 0.5, None)]), 1.0), 10, 10);
+    let down = px(&frame(p(&grey, vec![slider("exposure", -1.0, None)]), 1.0), 10, 10);
+    assert!(near(up, [190, 190, 190], 4), "{up:?}");
+    assert!(near(half, [159, 159, 159], 3), "{half:?}");
+    assert!(near(down, [118, 118, 118], 4), "{down:?}");
+    // Fade lifts black towards CapCut's 69.
+    let faded = px(&frame(p(&black, vec![slider("fade", 1.0, None)]), 1.0), 10, 10);
+    assert!(near(faded, [69, 69, 69], 2), "{faded:?}");
+    // A draft's slider whose bundle isn't on this machine draws nothing, as before.
+    let missing = px(&frame(p(&grey, vec![slider("exposure", 1.0, Some("/nowhere/7501974767453474064/bundle"))]), 1.0), 10, 10);
+    assert_eq!(missing, plain);
+}
+
