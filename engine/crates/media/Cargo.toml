@@ -18,11 +18,11 @@ openrip-platform.workspace = true
 
 [features]
 default = ["ffmpeg"]
-# FFmpeg demux and decode, with VideoToolbox on macOS (the built-in backends).
+# FFmpeg demux and decode, with VideoToolbox on Apple platforms (the built-in backends).
 ffmpeg = ["dep:ffmpeg-sys-next", "dep:objc2-core-video", "dep:objc2-io-surface", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-video-toolbox"]
 
 # VideoToolbox, driven with packets FFmpeg demuxes.
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(target_vendor = "apple")'.dependencies]
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "objc2-io-surface"], optional = true }
 objc2-io-surface = { version = "0.3", default-features = false, features = ["std", "IOSurfaceRef", "IOSurfaceTypes", "objc2-core-foundation"], optional = true }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFData", "CFString", "CFNumber", "CFBase"], optional = true }

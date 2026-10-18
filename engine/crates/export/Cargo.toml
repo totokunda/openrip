@@ -17,10 +17,10 @@ thiserror.workspace = true
 
 [features]
 default = ["ffmpeg"]
-# The encoder (VideoToolbox through FFmpeg on macOS), and decoding through FFmpeg.
+# The encoder (VideoToolbox through FFmpeg on Apple platforms), and decoding through FFmpeg.
 ffmpeg = ["dep:ffmpeg-sys-next", "dep:objc2-core-foundation", "dep:objc2-core-video", "openrip-playback/ffmpeg", "openrip-audio/ffmpeg"]
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(target_vendor = "apple")'.dependencies]
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFNumber", "CFString", "CFBase"], optional = true }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferPool", "CVBuffer", "CVImageBuffer", "CVReturn", "CVBase"], optional = true }
 

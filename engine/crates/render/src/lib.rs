@@ -10,7 +10,7 @@
 //! Geometry is in output pixels; mapping the project model (half-canvas positions,
 //! contain-fit scale) to layers is the caller's job (see [`Layer::from_model`]).
 //!
-//! Video frames from the hardware decoder are used in place: on macOS their IOSurface
+//! Video frames from the hardware decoder are used in place: on Apple platforms their IOSurface
 //! planes (NV12 / P010) become GPU textures without a copy and are converted to RGB on the
 //! GPU with the frame's own matrix and range. Frames come as `openrip-frame` types: the
 //! compositor needs decoded pictures, not the decoder.
@@ -77,7 +77,7 @@ impl Lut3d {
 }
 
 pub use openrip_frame::RgbaImage;
-use openrip_frame::{Matrix, VideoFrame};
+use openrip_frame::VideoFrame;
 use wgpu::util::DeviceExt;
 
 pub const DOWNSCALE_SHARPEN: f32 = 0.15;
@@ -293,6 +293,8 @@ pub struct Compositor {
     queue: wgpu::Queue,
     layout: wgpu::BindGroupLayout,
     yuv_layout: wgpu::BindGroupLayout,
+    /// A hardware frame's YUV planes -> RGBA (only the Apple interop imports planes so far).
+    #[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
     yuv: wgpu::RenderPipeline,
     area: wgpu::RenderPipeline,
     sharpen: wgpu::RenderPipeline,
@@ -305,8 +307,10 @@ pub struct Compositor {
     /// Placement that multiplies the canvas (opaque, so cs·cb + cb·(1−αs) is exact).
     place_multiply: wgpu::RenderPipeline,
     place_multiply_bgra: wgpu::RenderPipeline,
-    /// RGBA canvas -> NV12 planes for the encoder.
+    /// RGBA canvas -> NV12 planes for the encoder (VideoToolbox's, so far).
+    #[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
     luma: wgpu::RenderPipeline,
+    #[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
     chroma: wgpu::RenderPipeline,
     /// CapCut's Adjust sliders and its Sharpen (adjust.wgsl).
     adjust: wgpu::RenderPipeline,
@@ -1197,24 +1201,4 @@ fn rgb_of(frame: &VideoFrame) -> RgbaImage {
         Ok(rgb) => RgbaImage { width: rgb.width, height: rgb.height, data: rgb.data.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect() },
         Err(_) => RgbaImage { width: frame.width(), height: frame.height(), data: vec![0; (frame.width() * frame.height() * 4) as usize] },
     }
-}
-
-/// Code-value offsets/ranges and RGB coefficients for the YUV import shader.
-fn yuv_params(matrix: Matrix, full: bool, ten_bit: bool) -> ([f32; 4], [f32; 4], f32) {
-    let (kr, kb) = match matrix {
-        Matrix::Bt601 => (0.299, 0.114),
-        Matrix::Bt709 => (0.2126, 0.0722),
-        Matrix::Bt2020 => (0.2627, 0.0593),
-    };
-    let kg = 1.0 - kr - kb;
-    let coeffs = [2.0 * (1.0 - kr), -2.0 * kb * (1.0 - kb) / kg, -2.0 * kr * (1.0 - kr) / kg, 2.0 * (1.0 - kb)];
-    let ranges = match (ten_bit, full) {
-        (false, false) => [16.0, 219.0, 128.0, 224.0],
-        (false, true) => [0.0, 255.0, 128.0, 255.0],
-        (true, false) => [64.0, 876.0, 512.0, 896.0],
-        (true, true) => [0.0, 1023.0, 512.0, 1023.0],
-    };
-    // P010 keeps 10-bit samples in the top bits of 16: unit sample = 65535 / 64 code values.
-    let k = if ten_bit { 65535.0 / 64.0 } else { 255.0 };
-    (ranges, coeffs, k)
 }

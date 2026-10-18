@@ -22,7 +22,7 @@ thiserror.workspace = true
 
 [features]
 default = ["ffmpeg", "audio-output"]
-# Decoding and encoding through FFmpeg (and VideoToolbox on macOS).
+# Decoding and encoding through FFmpeg (and VideoToolbox on Apple platforms).
 ffmpeg = ["openrip-media/ffmpeg", "openrip-audio/ffmpeg", "openrip-playback/ffmpeg", "openrip-export/ffmpeg"]
 # Audio output through cpal.
 audio-output = ["openrip-playback/cpal"]

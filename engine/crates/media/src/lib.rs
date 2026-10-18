@@ -1,4 +1,4 @@
-//! Demux and decode through FFmpeg, with hardware decode (VideoToolbox on macOS), behind
+//! Demux and decode through FFmpeg, with hardware decode (VideoToolbox on Apple), behind
 //! the decode seams (`backend.rs` for video, `still.rs` for stills).
 //!
 //! FFmpeg is the `ffmpeg` feature (on by default). Without it the crate is the seams, the
@@ -11,10 +11,11 @@
 //! forward from the previous keyframe when it has to, and decoding straight on when the
 //! target is just ahead (scrubbing and playback).
 //!
-//! Hardware frames stay on the GPU: on macOS a decoded frame is a `CVPixelBuffer` backed by
-//! an `IOSurface` (NV12 for 8-bit, P010 for 10-bit), ready for zero-copy hand-off.
-//! Frames are [`VideoFrame`]s of `openrip-frame`, which the compositor takes without
-//! depending on this crate; FFmpeg's and VideoToolbox's buffers are their pixels here.
+//! Hardware frames stay on the GPU: on Apple platforms a decoded frame is a `CVPixelBuffer`
+//! backed by an `IOSurface` (NV12 for 8-bit, P010 for 10-bit), ready for zero-copy
+//! hand-off. Frames are [`VideoFrame`]s of `openrip-frame`, which the compositor takes
+//! without depending on this crate; FFmpeg's and VideoToolbox's buffers are their pixels
+//! here.
 
 mod backend;
 #[cfg(feature = "ffmpeg")]
@@ -32,7 +33,7 @@ mod probe;
 mod still;
 #[cfg(feature = "ffmpeg")]
 mod util;
-#[cfg(all(feature = "ffmpeg", target_os = "macos"))]
+#[cfg(all(feature = "ffmpeg", target_vendor = "apple"))]
 mod vt;
 
 pub use backend::{add_video_backend, open_video, video_backends, DecodeStats, Decoder, DecoderOptions, HardwareMode, VideoBackend, VideoSource};
@@ -51,7 +52,7 @@ pub use still::{add_still_backend, decode_still, load_png, StillBackend};
 /// the first clip the user opens.
 pub fn warm_up() -> openrip_platform::tasks::Task {
     openrip_platform::tasks::spawn("decoder-warm-up", || {
-        #[cfg(all(feature = "ffmpeg", target_os = "macos"))]
+        #[cfg(all(feature = "ffmpeg", target_vendor = "apple"))]
         vt::warm_up();
     })
     .unwrap_or_else(|_| openrip_platform::tasks::Task::done())

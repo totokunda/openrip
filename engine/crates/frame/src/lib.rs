@@ -67,7 +67,7 @@ pub trait FramePixels: Send {
     /// Another reference to the same pixels (no copy).
     fn try_clone(&self) -> Result<Box<dyn FramePixels>, FrameError>;
     /// The `CVPixelBuffer` behind a hardware frame (borrowed; valid while the frame lives).
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     fn pixel_buffer(&self) -> Option<&objc2_core_video::CVPixelBuffer> {
         None
     }
@@ -101,7 +101,7 @@ impl VideoFrame {
         self.pixels.height()
     }
 
-    /// True when the pixels live on the GPU (VideoToolbox on macOS).
+    /// True when the pixels live on the GPU (VideoToolbox on Apple platforms).
     pub fn is_hardware(&self) -> bool {
         self.pixels.is_hardware()
     }
@@ -128,13 +128,13 @@ impl VideoFrame {
     }
 
     /// The `CVPixelBuffer` behind a hardware frame (borrowed; valid while the frame lives).
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     pub fn pixel_buffer(&self) -> Option<&objc2_core_video::CVPixelBuffer> {
         self.pixels.pixel_buffer()
     }
 
     /// The `IOSurface` backing a hardware frame, for zero-copy hand-off to the GPU / Electron.
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     pub fn io_surface(&self) -> Option<objc2_core_foundation::CFRetained<objc2_io_surface::IOSurfaceRef>> {
         objc2_core_video::CVPixelBufferGetIOSurface(Some(self.pixel_buffer()?))
     }

@@ -1,5 +1,5 @@
 //! VideoToolbox's H.264/HEVC encoder through FFmpeg, muxed by FFmpeg (MP4/MOV), with AAC
-//! audio: the export encoder on macOS.
+//! audio: the export encoder on Apple platforms.
 //!
 //! Each frame is composited on the GPU straight into an NV12 (BT.709, limited range)
 //! IOSurface from a CoreVideo pool, which goes to the encoder as a hardware frame: no pixel

@@ -3,9 +3,10 @@
 //!
 //! A worker thread owns the [`PreviewEngine`]. While playing it renders the frames due over
 //! the next few frame times, by the given clock (the audio [`crate::Player`] in the app),
-//! into a pool of surfaces (IOSurfaces on macOS, see `openrip_render::Surface`). The display takes [`PreviewPipeline::frame`] for the clock time
-//! of each refresh: the newest frame due, with older ones dropped. Paused, it renders the
-//! requested time at once (newest request wins).
+//! into a pool of surfaces (IOSurfaces on Apple platforms, see `openrip_render::Surface`).
+//! The display takes [`PreviewPipeline::frame`] for the clock time of each refresh: the
+//! newest frame due, with older ones dropped. Paused, it renders the requested time at once
+//! (newest request wins).
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};

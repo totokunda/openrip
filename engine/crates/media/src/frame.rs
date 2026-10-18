@@ -54,7 +54,7 @@ struct AvPixels(*mut ff::AVFrame);
 unsafe impl Send for AvPixels {}
 
 /// A frame from the native VideoToolbox decoder.
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 struct CvPixels {
     buffer: crate::vt::PixelBuffer,
     colorspace: ff::AVColorSpace,
@@ -67,12 +67,12 @@ pub(crate) fn av_frame(src: *const ff::AVFrame, time: Micros, duration: Micros) 
 }
 
 /// A frame of a pixel buffer from the native VideoToolbox decoder.
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 pub(crate) fn cv_frame(buffer: crate::vt::PixelBuffer, colorspace: ff::AVColorSpace, trc: ff::AVColorTransferCharacteristic, time: Micros, duration: Micros) -> VideoFrame {
     VideoFrame::new(Box::new(CvPixels { buffer, colorspace, trc }), time, duration)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 fn cv_format(pb: &objc2_core_video::CVPixelBuffer) -> (PixelFormat, bool) {
     use objc2_core_video::*;
     #[allow(non_upper_case_globals)]
@@ -155,7 +155,7 @@ impl FramePixels for AvPixels {
         Ok(Box::new(AvPixels::reference(self.0).map_err(frame_error)?))
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     fn pixel_buffer(&self) -> Option<&objc2_core_video::CVPixelBuffer> {
         if !self.is_hardware() {
             return None;
@@ -170,7 +170,7 @@ impl Drop for AvPixels {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 impl FramePixels for CvPixels {
     fn width(&self) -> u32 {
         objc2_core_video::CVPixelBufferGetWidth(&self.buffer.0) as u32
@@ -214,7 +214,7 @@ impl FramePixels for CvPixels {
 }
 
 /// Wrap a locked pixel buffer's planes in a (non-owning) AVFrame and convert it.
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 unsafe fn cv_to_rgb(pb: &objc2_core_video::CVPixelBuffer, colorspace: ff::AVColorSpace) -> Result<RgbImage, MediaError> {
     use objc2_core_video::*;
     let (format, full) = cv_format(pb);

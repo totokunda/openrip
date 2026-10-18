@@ -64,7 +64,7 @@ impl Drop for CodecContext {
 enum Backend {
     /// FFmpeg's decoder: software, or VideoToolbox through FFmpeg's hwaccel.
     Ffmpeg { ctx: CodecContext, flush_sent: bool },
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     Native(crate::vt::VtDecoder),
 }
 
@@ -152,7 +152,7 @@ impl VideoDecoder {
                 return Err(MediaError::NoDecoder(info.codec.clone()));
             }
             let mut device: *mut ff::AVBufferRef = std::ptr::null_mut();
-            if opts.hardware != HardwareMode::Off && cfg!(target_os = "macos") {
+            if opts.hardware != HardwareMode::Off && cfg!(target_vendor = "apple") {
                 let r = ff::av_hwdevice_ctx_create(&mut device, ff::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX, std::ptr::null(), std::ptr::null_mut(), 0);
                 if r < 0 {
                     device = std::ptr::null_mut();
@@ -210,7 +210,7 @@ impl VideoDecoder {
 
     /// The native VideoToolbox decoder when it can take the stream, FFmpeg's otherwise.
     unsafe fn new_backend(&self) -> Result<Backend, MediaError> {
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         if self.hardware && self.native_videotoolbox {
             if let Some(nal::Bitstream { codec, framing: nal::Framing::LengthPrefixed(_), .. }) = self.nal {
                 let par = (*self.input.stream(self.stream)).codecpar;
@@ -255,7 +255,7 @@ impl VideoDecoder {
 
     /// True if frames come from the native VideoToolbox path.
     pub fn native_videotoolbox(&self) -> bool {
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         if let Backend::Native(_) = self.backend {
             return true;
         }
@@ -264,7 +264,7 @@ impl VideoDecoder {
 
     pub fn stats(&self) -> DecodeStats {
         let mut s = self.stats;
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         if let Backend::Native(vt) = &self.backend {
             s.decode_errors += vt.errors();
         }
@@ -401,7 +401,7 @@ impl VideoDecoder {
     /// which costs a few more pictures; nothing that's kept presents before the keyframe a
     /// seek lands on, so it can be taken as soon as it's decoded. `None`: decode as usual.
     fn decode_keyframe(&mut self) -> Result<Option<VideoFrame>, MediaError> {
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         if matches!(self.backend, Backend::Native(_)) {
             let Some(q) = self.next_packet()? else { return Ok(None) };
             let key = unsafe { (*q.pkt).flags & ff::AV_PKT_FLAG_KEY != 0 };
@@ -575,7 +575,7 @@ impl VideoDecoder {
                     ff::avcodec_flush_buffers(ctx.0);
                     *flush_sent = false;
                 }
-                #[cfg(target_os = "macos")]
+                #[cfg(target_vendor = "apple")]
                 Backend::Native(vt) => vt.reset(),
             }
         }
@@ -738,7 +738,7 @@ impl VideoDecoder {
                         }
                     }
                 },
-                #[cfg(target_os = "macos")]
+                #[cfg(target_vendor = "apple")]
                 Backend::Native(vt) => {
                     let done = self.eof && self.queue.is_empty();
                     match vt.next(done) {

@@ -2,7 +2,7 @@
 //! swapped in without reopening anything.
 //!
 //! Frames are rendered into a small pool of surfaces ([`Surface`]: IOSurface-backed buffers
-//! on macOS, pixels read back elsewhere). A surface is reused only after
+//! on Apple platforms, pixels read back elsewhere). A surface is reused only after
 //! [`Session::release`], so a client must release every frame it's handed.
 
 use std::collections::HashMap;
@@ -187,7 +187,7 @@ pub struct FrameHandle {
     pub id: u32,
     /// The IOSurfaceRef pointer (BGRA), for Electron's `sharedTexture`. Elsewhere the pixels
     /// are [`Session::surface`]'s.
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     pub io_surface: u64,
     pub width: u32,
     pub height: u32,
@@ -215,12 +215,12 @@ impl Session {
     pub fn hand_out(&mut self, frame: RenderedFrame) -> Result<FrameHandle> {
         self.next_id = self.next_id.wrapping_add(1);
         let id = self.next_id;
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         let io_surface = frame.surface.io_surface_ptr().ok_or(Error::NoIoSurface)?;
         self.held.insert(id, frame.surface);
         Ok(FrameHandle {
             id,
-            #[cfg(target_os = "macos")]
+            #[cfg(target_vendor = "apple")]
             io_surface,
             width: frame.width,
             height: frame.height,
@@ -252,7 +252,7 @@ pub struct DisplayFrame {
     pub id: u32,
     /// The IOSurfaceRef pointer (BGRA), for Electron's `sharedTexture`. Elsewhere the pixels
     /// are [`Session::surface`]'s.
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     pub io_surface: u64,
     pub width: u32,
     pub height: u32,
@@ -313,7 +313,7 @@ impl Session {
     pub fn frame_for_display(&mut self) -> Option<DisplayFrame> {
         let now = self.player.as_ref().map_or(Micros(i64::MAX), |p| p.position());
         let f = self.pipeline.as_ref()?.frame(now)?;
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         let io_surface = f.surface.io_surface_ptr()?;
         let (w, h) = (f.surface.width(), f.surface.height());
         self.next_id = self.next_id.wrapping_add(1);
@@ -321,7 +321,7 @@ impl Session {
         self.shown.insert(id, f.surface);
         Some(DisplayFrame {
             id,
-            #[cfg(target_os = "macos")]
+            #[cfg(target_vendor = "apple")]
             io_surface,
             width: w,
             height: h,

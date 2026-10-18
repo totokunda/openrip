@@ -25,7 +25,7 @@ ffmpeg = ["openrip-media/ffmpeg", "openrip-audio/ffmpeg"]
 # Audio output through cpal, the built-in one.
 cpal = ["dep:cpal"]
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(target_vendor = "apple")'.dependencies]
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVBase"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }
 

@@ -405,7 +405,7 @@ impl PreviewEngine {
         Ok((frame, report))
     }
 
-    /// Render the frame at `t` into a surface for the platform to present (on macOS an
+    /// Render the frame at `t` into a surface for the platform to present (on Apple an
     /// IOSurface-backed BGRA pixel buffer, see [`Surface`]).
     pub fn render_into(&mut self, t: Micros, target: &mut Surface) -> Result<FrameReport, PreviewError> {
         let (w, h) = (target.width(), target.height());
@@ -427,7 +427,7 @@ impl PreviewEngine {
 
     /// Render the frame at `t` into an IOSurface-backed BGRA pixel buffer (see
     /// [`Compositor::output_surface`]) for the app to present.
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     pub fn render_to_surface(&mut self, t: Micros, target: &objc2_core_video::CVPixelBuffer) -> Result<FrameReport, PreviewError> {
         // Another retain on the buffer, for the surface's time.
         let buffer = unsafe { objc2_core_foundation::CFRetained::retain(std::ptr::NonNull::from(target)) };
@@ -435,7 +435,7 @@ impl PreviewEngine {
     }
 
     /// Render the frame at `t` into an NV12 pixel buffer for the encoder (export).
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     pub fn render_to_nv12(&mut self, t: Micros, target: &objc2_core_video::CVPixelBuffer) -> Result<FrameReport, PreviewError> {
         let (w, h) = (objc2_core_video::CVPixelBufferGetWidth(target) as u32, objc2_core_video::CVPixelBufferGetHeight(target) as u32);
         let (pixels, report) = self.gather(t, w, h);

@@ -16,7 +16,7 @@ swash = "0.2"
 openrip-frame.workspace = true
 openrip-platform.workspace = true
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = "0.6"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFNumber", "CFString", "CFBase"] }
 objc2-metal = { version = "0.3.2", default-features = false, features = ["std", "MTLDevice", "MTLTexture", "MTLPixelFormat", "MTLResource", "MTLTypes", "objc2-io-surface"] }
@@ -28,6 +28,6 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 openrip-media = { workspace = true, features = ["ffmpeg"] }
 openrip-model.workspace = true
 
-[target.'cfg(target_os = "macos")'.dev-dependencies]
+[target.'cfg(target_vendor = "apple")'.dev-dependencies]
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVBase", "CVReturn"] }
 
