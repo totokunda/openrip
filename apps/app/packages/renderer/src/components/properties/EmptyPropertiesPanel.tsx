@@ -6,6 +6,7 @@ import { useClipStore } from "@/lib/clip";
 import { useEnginePreviewStore } from "@/lib/engine-preview";
 import { useShellStore } from "@/lib/shell";
 import { timecode } from "@/components/preview/PlayerBar";
+import { usePreference } from "@/lib/preferences";
 import { revealPathInFolder } from "@app/preload";
 import { refreshProjects } from "@/lib/project-actions";
 
@@ -22,6 +23,7 @@ const EmptyPropertiesPanel: React.FC = () => {
   const clipCount = useClipStore((s) => s.clips.length);
   const mediaCount = useClipStore((s) => Object.keys(s.assets).length);
   const setProjectSettingsOpen = useShellStore((s) => s.setProjectSettingsOpen);
+  const timeCodeStyle = usePreference("timeCode");
   // A project made in this session (new, or from a CapCut draft) learns its file from the list.
   useEffect(() => {
     if (project && !project.filePath) void refreshProjects();
@@ -54,7 +56,7 @@ const EmptyPropertiesPanel: React.FC = () => {
       ["Aspect ratio:", aspect.id === "custom" ? `${aspect.width}:${aspect.height}` : aspect.id],
       ["Resolution:", canvas ?? "–"],
       ["Frame rate:", `${fps.toFixed(2)}fps`],
-      ["Length:", timecode(clipDuration, fps)],
+      ["Length:", timecode(clipDuration, fps, timeCodeStyle)],
       ["Clips:", String(clipCount)],
     ],
   ];

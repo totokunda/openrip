@@ -37,6 +37,7 @@ const en = {
   "settings.unit.s": "s",
   "settings.unit.frames": "frames",
   "settings.targetLoudness": "Target loudness",
+  "settings.targetLoudness.note": "Used by the Audio tab's Normalize loudness, whose switch isn't in the inspector yet.",
   "settings.loudness.default": "Default (-23 LUFS)",
   "settings.loudness.youtube": "YouTube (-14 LUFS)",
   "settings.loudness.tiktok": "TikTok (-12 LUFS)",

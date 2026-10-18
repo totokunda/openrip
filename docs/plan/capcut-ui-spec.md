@@ -609,7 +609,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 |---|---:|---:|---:|
 | 6.1 App menu bar (macOS) | 9 | 3 | 3 |
 | 6.2 Home screen | 4 | 3 | 9 |
-| 6.3 Settings and shortcuts | 17 | 11 | 7 |
+| 6.3 Settings and shortcuts | 16 | 12 | 7 |
 | 6.4 Editor top bar and layout | 2 | 4 | 1 |
 | 6.5 Left panel: Media | 7 | 2 | 13 |
 | 6.6 Left panel: Audio | 0 | 1 | 3 |
@@ -638,7 +638,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.29 Export dialog | 5 | 2 | 9 |
 | 6.30 Other dialogs | 2 | 0 | 4 |
 | 6.31 Classic-algorithm features brought into scope | 0 | 1 | 10 |
-| **Total (348 in-scope features)** | **99** | **76** | **173** |
+| **Total (348 in-scope features)** | **98** | **77** | **173** |
 
 The counts above are as written. A re-audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows (32.0% strict, 47.8% with partly as half); with the text, inspector and audio branches then in progress, 146 / 86 / 105 (43.3% / 56.1%). §6.31's 11 rows were added after it.
 
@@ -706,7 +706,7 @@ Screenshots are in `02-settings/` unless a path says otherwise.
 | Edit › Step forward or back many N frames | `005-edit.png` | has (⇧← / ⇧→) |
 | Edit › Adjust value many N units | `005-edit.png` | has (↑ / ↓ in the inspector's value fields, ⇧ for N) |
 | Edit › Image duration (s or frames) | `005-edit.png`, `009-edit-image-duration-unit.png` | has |
-| Edit › Target loudness: −23, −14, −12 LUFS | `006-edit-target-loudness.png` | has (Normalize loudness's target) |
+| Edit › Target loudness: −23, −14, −12 LUFS | `006-edit-target-loudness.png` | partly (kept and read by Normalize loudness in lib/audio.ts; the Audio tab has no switch for it yet) |
 | Edit › Play audio while scrubbing | `005-edit.png` | missing (the row shows disabled) |
 | Edit › Linkage settings | `010-edit-linkage-settings.png` | missing (linkage moves a video and its detached audio only; the row shows disabled) |
 | Edit › Arrange layers by default | `005-edit.png` | missing (the row shows disabled) |

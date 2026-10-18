@@ -124,6 +124,7 @@ export default async (ctx) => {
   // The menus, for the shots CapCut has of them.
   await settingsTab(win, "draft");
   await win.locator("[data-testid=settings-cache-age]").click();
+  await win.waitForTimeout(400);
   await ctx.shot("set-1-draft-cache-age");
   await win.keyboard.press("Escape");
   await settingsTab(win, "edit");
@@ -134,7 +135,7 @@ export default async (ctx) => {
     ["settings-image-unit", "image-unit"],
   ]) {
     await win.locator(`[data-testid=${testId}]`).click();
-    await win.waitForTimeout(200);
+    await win.waitForTimeout(400);
     if (testId === "settings-frame-rate") {
       const rates = await win.locator("[data-testid=settings-frame-rate-option]").allInnerTexts();
       check("Frame rate offers CapCut's rates", rates.map((r) => r.trim()).join(",") === "24.00 fps,25.00 fps,29.97 fps,30.00 fps,50.00 fps,59.94 fps,60.00 fps", rates.join(","));
@@ -149,6 +150,7 @@ export default async (ctx) => {
   }
   await settingsTab(win, "performance");
   await win.locator("[data-testid=settings-auto-opt]").click();
+  await win.waitForTimeout(400);
   await ctx.shot("set-1-performance-auto-opt");
   await win.keyboard.press("Escape");
 

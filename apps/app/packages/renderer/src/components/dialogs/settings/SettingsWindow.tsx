@@ -138,7 +138,7 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
         <Radio testId="settings-cache-keep" checked={!draft.cacheAutoDelete} onChange={() => set("cacheAutoDelete", false)}>
           {t("settings.cache.keep")}
         </Radio>
-        <div className="flex items-center gap-2 mt-2 whitespace-nowrap">
+        <div className="flex items-center gap-1.5 mt-2 whitespace-nowrap tracking-[-0.1px]">
           <Radio testId="settings-cache-auto" checked={draft.cacheAutoDelete} onChange={() => set("cacheAutoDelete", true)}>
             {t("settings.cache.autoDelete")}
           </Radio>
@@ -200,6 +200,7 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
       </Row>
       <Row id="targetLoudness" label={t("settings.targetLoudness")}>
         <Choice testId="settings-loudness" value={draft.targetLoudness} options={TARGET_LOUDNESS.map((o) => ({ value: o.lufs, label: t(o.key) }))} onChange={(v) => set("targetLoudness", v)} />
+        <NotYet>{t("settings.targetLoudness.note")}</NotYet>
       </Row>
       <Divider />
       <Row id="scrubAudio" label={t("settings.scrubAudio")} disabled>
