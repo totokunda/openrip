@@ -133,6 +133,18 @@ export function onEngineExportProgress(cb: (done: number, total: number) => void
   return () => ipcRenderer.off("engine:export-progress", listener);
 }
 
+/** The playing mix's left and right peaks (0..1) since the last ask, for the player's meter; null without the engine's sound. */
+export function engineOutputLevels(): Promise<{ left: number; right: number } | null> {
+  return ipcRenderer.invoke("engine:levels");
+}
+
+export type EngineStillResult = { ok: true; path: string; width: number; height: number; bytes: number } | { ok: false; error: string };
+
+/** Save the frame at `timeUs` at the project's size as a PNG at `path` (the player's Export still frames). */
+export function engineExportStill(timeUs: number, path: string): Promise<EngineStillResult> {
+  return ipcRenderer.invoke("engine:export-still", timeUs, path);
+}
+
 export function engineClose(): Promise<void> {
   return ipcRenderer.invoke("engine:close");
 }

@@ -53,6 +53,10 @@ export type EngineAddon = {
   frameForDisplay(): DisplayFrame | null;
   positionUs(): number;
   setVolume(volume: number): void;
+  /** The playing mix's peaks (0..1) since the last call, before the volume; null without audio output. */
+  outputLevels(): { left: number; right: number } | null;
+  /** Render the frame at `timeUs` at `width`×`height` and save it as a PNG at `path`. */
+  exportStill(timeUs: number, width: number, height: number, path: string): Promise<{ width: number; height: number; bytes: number }>;
   exportProject(json: string, path: string, options: EngineExportOptions): Promise<{ frames: number; seconds: number; skippedLayers: number }>;
   exportProgress(): { done: number; total: number };
   cancelExport(): void;
@@ -368,7 +372,7 @@ export class EngineModule implements AppModule {
     const settings = getSettingsModule();
     addon?.setHardwareDecoding?.(settings.getPreferences().hardwareDecoding);
     settings.on("preferences-changed", (p: Preferences) => addon?.setHardwareDecoding?.(p.hardwareDecoding));
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families"]) {
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -480,6 +484,28 @@ export class EngineModule implements AppModule {
     });
 
     ipcMain.handle("engine:pause", () => this.#playback.stop());
+
+    // The player's meter: the mix's level since the last ask (zero while paused).
+    ipcMain.handle("engine:levels", () => {
+      try {
+        return addon?.outputLevels() ?? null;
+      } catch {
+        return null;
+      }
+    });
+
+    // The player's Export still frames: the frame at `timeUs` at the project's size, as a PNG.
+    ipcMain.handle("engine:export-still", async (_event, timeUs: number, path: string) => {
+      const engine = addon;
+      if (!engine) return { ok: false, error: "engine not available" };
+      if (openProjectId == null || !openProject) return { ok: false, error: "no project sent to the engine yet" };
+      try {
+        const r = await engine.exportStill(Math.max(0, Math.round(timeUs)), openProject.width, openProject.height, path);
+        return { ok: true, path, ...r };
+      } catch (e) {
+        return { ok: false, error: message(e) };
+      }
+    });
 
     // Export the project (the same snapshot the preview gets) to a file, independent of the
     // preview; progress goes to the asking window as `engine:export-progress` (frames done, total).
