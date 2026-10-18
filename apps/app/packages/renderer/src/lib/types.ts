@@ -302,6 +302,11 @@ export type SpeedProps = {
   speed?: number;
   reverse?: boolean;
   speedCurve?: SpeedCurve | null;
+  /**
+   * CapCut's Change audio pitch: the sound's pitch follows the speed (resampled) instead of
+   * staying as it was. A curve's sound always follows it.
+   */
+  changePitch?: boolean;
 };
 
 /**

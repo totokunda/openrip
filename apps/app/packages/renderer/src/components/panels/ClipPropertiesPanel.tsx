@@ -16,6 +16,7 @@ import LineProperties from '../properties/LineProperties'
 import { useDrawingStore } from '@/lib/drawing';
 import MaskPropertiesPanel from '../properties/mask/MaskPropertiesPanel';
 import AnimationProperties, { KIND_LABEL, animationKinds } from '../properties/AnimationProperties'
+import SpeedProperties from '../properties/SpeedProperties'
 import FilterProperties from '../properties/FilterProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
 import { useInspectorStore } from '@/lib/inspector'
@@ -80,6 +81,15 @@ const ClipPropertiesPanel: React.FC = () => {
       label: 'Animation',
       sections: animationKinds(type!).map((kind) => ({ id: kind, label: KIND_LABEL[kind], own: true, content: <AnimationProperties clipId={clipId} kind={kind} /> })),
     };
+    // A video's or a sound's Speed: Standard and Curve (a sound's has Standard only).
+    const speed = (curve: boolean): InspectorTab => ({
+      id: 'duration',
+      label: 'Speed',
+      sections: [
+        { id: 'standard', label: 'Standard', own: true, content: <SpeedProperties clipId={clipId} mode="standard" /> },
+        ...(curve ? [{ id: 'curve', label: 'Curve', own: true, content: <SpeedProperties clipId={clipId} mode="curve" /> }] : []),
+      ],
+    });
     switch (type) {
       case 'video':
       case 'image':
@@ -93,7 +103,7 @@ const ClipPropertiesPanel: React.FC = () => {
             ],
           },
           ...(hasAudio ? [{ id: 'audio', label: 'Audio', sections: [{ id: 'audio', label: 'Audio', content: <AudioProperties clipId={clipId} /> }] }] : []),
-          duration(type === 'video' ? 'Speed' : 'Duration'),
+          type === 'video' ? speed(true) : duration('Duration'),
           animation,
           { id: 'adjust', label: 'Adjust', sections: [{ id: 'adjust', label: 'Adjust', content: <AdjustProperties clipId={clipId} /> }] },
         ];
@@ -125,7 +135,7 @@ const ClipPropertiesPanel: React.FC = () => {
       case 'audio':
         return [
           { id: 'audio', label: 'Audio', sections: [{ id: 'audio', label: 'Audio', content: <AudioProperties clipId={clipId} /> }] },
-          duration('Speed'),
+          speed(false),
         ];
       case 'filter':
         return [
