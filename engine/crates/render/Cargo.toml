@@ -25,7 +25,7 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 
 [dev-dependencies]
 # Frames to draw in the tests come from the decoder.
-openrip-media.workspace = true
+openrip-media = { workspace = true, features = ["ffmpeg"] }
 openrip-model.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

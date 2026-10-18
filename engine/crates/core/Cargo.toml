@@ -19,3 +19,10 @@ openrip-export.workspace = true
 openrip-platform.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+[features]
+default = ["ffmpeg", "audio-output"]
+# Decoding and encoding through FFmpeg (and VideoToolbox on macOS).
+ffmpeg = ["openrip-media/ffmpeg", "openrip-audio/ffmpeg", "openrip-playback/ffmpeg", "openrip-export/ffmpeg"]
+# Audio output through cpal.
+audio-output = ["openrip-playback/cpal"]

@@ -8,16 +8,27 @@ publish.workspace = true
 description = "Offline render and encode of a project to a video file"
 
 [dependencies]
-ffmpeg-sys-next = { version = "9.0.1", default-features = false, features = ["avcodec", "avformat"] }
+ffmpeg-sys-next = { version = "9.0.1", default-features = false, features = ["avcodec", "avformat"], optional = true }
 openrip-model.workspace = true
 openrip-playback.workspace = true
 openrip-audio.workspace = true
 openrip-render.workspace = true
 thiserror.workspace = true
 
+[features]
+default = ["ffmpeg"]
+# The encoder (VideoToolbox through FFmpeg on macOS), and decoding through FFmpeg.
+ffmpeg = ["dep:ffmpeg-sys-next", "dep:objc2-core-foundation", "dep:objc2-core-video", "openrip-playback/ffmpeg", "openrip-audio/ffmpeg"]
+
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFNumber", "CFString", "CFBase"] }
-objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferPool", "CVBuffer", "CVImageBuffer", "CVReturn", "CVBase"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFNumber", "CFString", "CFBase"], optional = true }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferPool", "CVBuffer", "CVImageBuffer", "CVReturn", "CVBase"], optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
+
+# These decode or play real media: they need the built-in backends.
+
+[[test]]
+name = "export"
+required-features = ["ffmpeg"]

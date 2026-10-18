@@ -15,11 +15,11 @@ path = "src/main.rs"
 openrip-model.workspace = true
 openrip-capcut.workspace = true
 openrip-v1.workspace = true
-openrip-media.workspace = true
-openrip-playback.workspace = true
+openrip-media = { workspace = true, features = ["ffmpeg"] }
+openrip-playback = { workspace = true, features = ["ffmpeg", "cpal"] }
 openrip-render.workspace = true
-openrip-export.workspace = true
-openrip-audio.workspace = true
+openrip-export = { workspace = true, features = ["ffmpeg"] }
+openrip-audio = { workspace = true, features = ["ffmpeg"] }
 png = "0.18"
 serde_json.workspace = true
 # Only to switch FFmpeg to static linking, to check the app's FFmpeg build against drafts.

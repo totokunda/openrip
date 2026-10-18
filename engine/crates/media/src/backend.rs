@@ -6,9 +6,9 @@
 //! [`add_video_backend`] first, then the built-in ones. A backend that can't take a file
 //! says so with [`MediaError::Unsupported`] and the next one tries.
 //!
-//! Built in today:
-//! - FFmpeg demux and decode ([`crate::VideoDecoder`]), with VideoToolbox on Apple
-//!   platforms, natively for H.264/HEVC in MP4/MOV and through FFmpeg's hwaccel otherwise.
+//! Built in today (the `ffmpeg` feature):
+//! - FFmpeg demux and decode (`VideoDecoder`), with VideoToolbox on Apple platforms,
+//!   natively for H.264/HEVC in MP4/MOV and through FFmpeg's hwaccel otherwise.
 //!
 //! Not written yet (each would be a backend added here, demuxing with FFmpeg or the
 //! platform's own demuxer):
@@ -134,7 +134,10 @@ pub fn video_backends() -> Vec<Arc<dyn VideoBackend>> {
 }
 
 fn built_in() -> Vec<Arc<dyn VideoBackend>> {
-    vec![Arc::new(crate::decode::Ffmpeg)]
+    #[cfg(feature = "ffmpeg")]
+    return vec![Arc::new(crate::decode::Ffmpeg)];
+    #[cfg(not(feature = "ffmpeg"))]
+    Vec::new()
 }
 
 /// Open the video stream of the asset at `path` with the first backend that takes it.

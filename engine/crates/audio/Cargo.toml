@@ -8,10 +8,24 @@ publish.workspace = true
 description = "Audio decode (48 kHz stereo float) and the timeline mixer"
 
 [dependencies]
-ffmpeg-sys-next = { version = "9.0.1", default-features = false, features = ["avcodec", "avformat", "avfilter", "swresample"] }
+ffmpeg-sys-next = { version = "9.0.1", default-features = false, features = ["avcodec", "avformat", "avfilter", "swresample"], optional = true }
 openrip-model.workspace = true
 openrip-platform.workspace = true
 realfft = "3"
 serde_json.workspace = true
 thiserror.workspace = true
 
+[features]
+default = ["ffmpeg"]
+# FFmpeg decoding and its pitch-keeping time-stretch (atempo).
+ffmpeg = ["dep:ffmpeg-sys-next"]
+
+# These decode or play real media: they need the built-in backends.
+
+[[test]]
+name = "mixer"
+required-features = ["ffmpeg"]
+
+[[test]]
+name = "peaks"
+required-features = ["ffmpeg"]

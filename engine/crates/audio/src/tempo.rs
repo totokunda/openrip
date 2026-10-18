@@ -15,6 +15,9 @@ fn check(op: &'static str, code: i32) -> Result<i32, AudioError> {
     }
 }
 
+/// Pitch-keeping time-stretch is there (FFmpeg's `atempo`).
+pub(crate) const AVAILABLE: bool = true;
+
 /// Interleaved stereo in, the same sound `speed` times faster (or slower) out, same pitch.
 pub(crate) struct Tempo {
     graph: *mut ff::AVFilterGraph,

@@ -9,17 +9,47 @@
 //! change and before its volume. The mix is limited at full scale, as CapCut's exports are
 //! (docs/parity/voice-effects.md).
 
+#[cfg(feature = "ffmpeg")]
 mod decode;
 pub mod fx;
 mod peaks;
 mod source;
+#[cfg(feature = "ffmpeg")]
 mod tempo;
+
+/// Without FFmpeg there is no pitch-keeping time-stretch yet: sped-up clips are resampled,
+/// their pitch following the speed (todo: a portable WSOLA in place of `atempo`).
+#[cfg(not(feature = "ffmpeg"))]
+mod tempo {
+    use crate::AudioError;
+
+    pub(crate) const AVAILABLE: bool = false;
+
+    pub(crate) struct Tempo;
+
+    impl Tempo {
+        pub(crate) fn new(_rate: u32, _speed: f64) -> Result<Tempo, AudioError> {
+            Err(AudioError::Other("no time-stretch in this build".into()))
+        }
+
+        pub(crate) fn available(&self) -> usize {
+            0
+        }
+
+        pub(crate) fn push(&mut self, _samples: &[f32]) -> Result<(), AudioError> {
+            Ok(())
+        }
+
+        pub(crate) fn take(&mut self, _out: &mut [f32]) {}
+    }
+}
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use openrip_model::{AudioFade, EffectCategory, MediaKind, Micros, Project, Segment, TrackKind};
 
+#[cfg(feature = "ffmpeg")]
 pub use decode::AudioDecoder;
 pub use peaks::{peaks, Peaks};
 pub use source::{add_audio_backend, open_audio, AudioBackend, AudioSource};
@@ -257,7 +287,7 @@ impl Mixer {
         } else if (speed - 1.0).abs() < 1e-9 {
             decoder.read(src_at, &mut self.scratch)?;
             &self.scratch
-        } else if !seg.change_pitch {
+        } else if !seg.change_pitch && tempo::AVAILABLE {
             // Keep the pitch: stream the source through atempo.
             let rate = self.rate;
             let fresh = self.stretches.get(&seg.id).is_none_or(|st| st.next_out != local);

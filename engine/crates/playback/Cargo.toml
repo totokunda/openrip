@@ -13,12 +13,36 @@ openrip-model.workspace = true
 openrip-render.workspace = true
 openrip-audio.workspace = true
 openrip-platform.workspace = true
-cpal = "0.18"
+cpal = { version = "0.18", optional = true }
 png = "0.18"
 serde_json.workspace = true
 thiserror.workspace = true
+
+[features]
+default = ["ffmpeg", "cpal"]
+# Decoding through FFmpeg (and VideoToolbox), the built-in backends.
+ffmpeg = ["openrip-media/ffmpeg", "openrip-audio/ffmpeg"]
+# Audio output through cpal, the built-in one.
+cpal = ["dep:cpal"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVBase"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }
 
+# These decode or play real media: they need the built-in backends.
+
+[[test]]
+name = "preview"
+required-features = ["ffmpeg"]
+
+[[test]]
+name = "server"
+required-features = ["ffmpeg"]
+
+[[test]]
+name = "thumbs"
+required-features = ["ffmpeg"]
+
+[[example]]
+name = "clock"
+required-features = ["cpal"]

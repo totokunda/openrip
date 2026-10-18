@@ -71,10 +71,14 @@ pub fn version() -> String {
 #[derive(Clone, Debug)]
 pub struct EngineInfo {
     pub version: String,
-    /// FFmpeg's library versions.
-    pub ffmpeg: String,
+    /// FFmpeg's library versions; `None` in a build without FFmpeg.
+    pub ffmpeg: Option<String>,
 }
 
 pub fn info() -> EngineInfo {
-    EngineInfo { version: version(), ffmpeg: openrip_media::ffmpeg_versions() }
+    #[cfg(feature = "ffmpeg")]
+    let ffmpeg = Some(openrip_media::ffmpeg_versions());
+    #[cfg(not(feature = "ffmpeg"))]
+    let ffmpeg = None;
+    EngineInfo { version: version(), ffmpeg }
 }

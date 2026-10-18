@@ -2,9 +2,9 @@
 //! addressed by sample, from whichever backend can read it.
 //!
 //! [`open_audio`] asks the backends a client added with [`add_audio_backend`] first, then
-//! the built-in ones. Built in today: FFmpeg ([`crate::AudioDecoder`]). Not written yet:
-//! todo: MediaCodec/`AMediaExtractor` on Android, AVFoundation where FFmpeg isn't built on
-//! iOS, WebCodecs `AudioDecoder` (or `decodeAudioData`) on the web.
+//! the built-in ones. Built in today: FFmpeg (`AudioDecoder`, the `ffmpeg` feature). Not
+//! written yet: todo: MediaCodec/`AMediaExtractor` on Android, AVFoundation where FFmpeg
+//! isn't built on iOS, WebCodecs `AudioDecoder` (or `decodeAudioData`) on the web.
 
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -34,7 +34,10 @@ pub fn add_audio_backend(backend: Arc<dyn AudioBackend>) {
 }
 
 fn built_in() -> Vec<Arc<dyn AudioBackend>> {
-    vec![Arc::new(crate::decode::Ffmpeg)]
+    #[cfg(feature = "ffmpeg")]
+    return vec![Arc::new(crate::decode::Ffmpeg)];
+    #[cfg(not(feature = "ffmpeg"))]
+    Vec::new()
 }
 
 /// The audio of the asset at `path` as interleaved stereo at `rate`, from the first backend

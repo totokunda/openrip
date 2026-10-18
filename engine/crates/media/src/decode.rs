@@ -5,7 +5,7 @@ use ffmpeg_sys_next as ff;
 
 use crate::cache::FrameCache;
 use crate::error::check;
-use crate::info::video_info;
+use crate::probe::video_info;
 use crate::nal;
 use crate::util::{Input, MICROS};
 use crate::backend::{Decoder, VideoBackend, VideoSource};

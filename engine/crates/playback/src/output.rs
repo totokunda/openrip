@@ -1,8 +1,8 @@
 //! The audio output seam: the device the player's mix plays on.
 //!
 //! An [`AudioOutput`] starts the platform's default output and calls back for each buffer
-//! the device wants. Built in: [`Cpal`] (CoreAudio on macOS and iOS, AAudio on Android,
-//! WASAPI and ALSA on desktops). A client with its own audio session (an iOS app sharing
+//! the device wants. Built in: `Cpal` (the `cpal` feature: CoreAudio on macOS and iOS,
+//! AAudio on Android, WASAPI and ALSA on desktops). A client with its own audio session (an iOS app sharing
 //! AVAudioEngine, a web page's AudioWorklet) installs its own with [`set_audio_output`].
 //! With none, the player can't open and the preview runs by the wall clock instead.
 
@@ -47,18 +47,25 @@ pub fn audio_output() -> Option<Arc<dyn AudioOutput>> {
 }
 
 fn built_in() -> Option<Arc<dyn AudioOutput>> {
-    Some(Arc::new(Cpal))
+    #[cfg(feature = "cpal")]
+    return Some(Arc::new(Cpal));
+    #[cfg(not(feature = "cpal"))]
+    None
 }
 
 /// cpal's default output device.
+#[cfg(feature = "cpal")]
 pub struct Cpal;
 
+#[cfg(feature = "cpal")]
 impl AudioOutput for Cpal {
     fn start(&self, fill: Fill) -> Result<(OutputStream, u32), PlayerError> {
         cpal_output::start(fill)
     }
 }
 
+#[cfg(feature = "cpal")]
+#[cfg(feature = "cpal")]
 mod cpal_output {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;

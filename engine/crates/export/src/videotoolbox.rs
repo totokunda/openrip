@@ -11,9 +11,17 @@ use std::path::Path;
 use ffmpeg_sys_next as ff;
 use openrip_playback::{FrameReport, PreviewError};
 
-use crate::{check, Codec, Encoder, ExportError, ExportOptions, Picture, AUDIO_RATE};
+use crate::{Codec, Encoder, ExportError, ExportOptions, Picture, AUDIO_RATE};
 
 const AUDIO_BITRATE: i64 = 192_000;
+
+fn check(op: &'static str, code: i32) -> Result<i32, ExportError> {
+    if code < 0 {
+        Err(ExportError::Ffmpeg { op, code })
+    } else {
+        Ok(code)
+    }
+}
 
 /// Owns the muxer, encoder and the frame/packet scratch objects.
 struct Output {

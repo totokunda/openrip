@@ -9,16 +9,18 @@ repository = "https://github.com/totokunda/openrip"
 publish = false
 
 [workspace.dependencies]
+# The crates with FFmpeg (or cpal) behind a default feature come without it here: each
+# member asks for the features it needs (see docs/plan/portability.md).
 openrip-model = { path = "crates/model" }
 openrip-platform = { path = "crates/platform" }
 openrip-capcut = { path = "crates/capcut" }
 openrip-v1 = { path = "crates/v1" }
 openrip-frame = { path = "crates/frame" }
-openrip-media = { path = "crates/media" }
-openrip-audio = { path = "crates/audio" }
-openrip-playback = { path = "crates/playback" }
+openrip-media = { path = "crates/media", default-features = false }
+openrip-audio = { path = "crates/audio", default-features = false }
+openrip-playback = { path = "crates/playback", default-features = false }
 openrip-render = { path = "crates/render" }
-openrip-export = { path = "crates/export" }
+openrip-export = { path = "crates/export", default-features = false }
 openrip-core = { path = "crates/core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

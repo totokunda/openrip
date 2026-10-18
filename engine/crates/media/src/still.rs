@@ -4,10 +4,10 @@
 //! the still backends: those a client added with [`add_still_backend`], then the built-in
 //! ones, the first to manage wins.
 //!
-//! Built in today: FFmpeg (JPEG, HEIC, WebP, ...: the stream's first picture, decoded in
-//! software). Not written yet: todo: the platform's own image decoders where FFmpeg isn't
-//! built (ImageIO on iOS, `BitmapFactory`/`ImageDecoder` on Android, `createImageBitmap` on
-//! the web).
+//! Built in today (the `ffmpeg` feature): FFmpeg (JPEG, HEIC, WebP, ...: the stream's first
+//! picture, decoded in software). Not written yet: todo: the platform's own image decoders
+//! where FFmpeg isn't built (ImageIO on iOS, `BitmapFactory`/`ImageDecoder` on Android,
+//! `createImageBitmap` on the web).
 
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -30,7 +30,10 @@ pub fn add_still_backend(backend: Arc<dyn StillBackend>) {
 }
 
 fn built_in() -> Vec<Arc<dyn StillBackend>> {
-    vec![Arc::new(crate::decode::Ffmpeg)]
+    #[cfg(feature = "ffmpeg")]
+    return vec![Arc::new(crate::decode::Ffmpeg)];
+    #[cfg(not(feature = "ffmpeg"))]
+    Vec::new()
 }
 
 /// Decode a still image: PNG directly (keeps alpha), anything else through a still backend.

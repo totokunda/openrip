@@ -2,7 +2,7 @@
 //!
 //! The render loop is the same everywhere; what takes the frames is an [`Encoder`], the
 //! encode seam. It hands out the picture each frame is drawn into, so frames can go to a
-//! hardware encoder without a copy. Built in:
+//! hardware encoder without a copy. Built in (the `ffmpeg` feature):
 //! - macOS: VideoToolbox's H.264/HEVC encoder through FFmpeg, fed NV12 (BT.709, limited
 //!   range) IOSurfaces the compositor renders into, muxed by FFmpeg (MP4/MOV)
 //!   (`videotoolbox.rs`). CapCut exports BT.709 limited range too (calibration session 1).
@@ -21,7 +21,7 @@ use openrip_model::{FrameRate, Micros, Project};
 use openrip_playback::{FrameReport, PreviewEngine, PreviewError};
 use openrip_render::RgbaImage;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "ffmpeg", target_os = "macos"))]
 mod videotoolbox;
 
 #[derive(Debug, thiserror::Error)]
@@ -34,14 +34,6 @@ pub enum ExportError {
     Other(String),
     #[error("cancelled")]
     Cancelled,
-}
-
-fn check(op: &'static str, code: i32) -> Result<i32, ExportError> {
-    if code < 0 {
-        Err(ExportError::Ffmpeg { op, code })
-    } else {
-        Ok(code)
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -80,7 +72,7 @@ pub struct ExportStats {
 pub enum Picture<'a> {
     /// An IOSurface-backed NV12 (BT.709, limited range) pixel buffer the encoder takes as
     /// it is.
-    #[cfg(target_os = "macos")]
+    #[cfg(all(feature = "ffmpeg", target_os = "macos"))]
     Nv12(&'a objc2_core_video::CVPixelBuffer),
     /// RGBA pixels read back from the GPU, sized to the export, for encoders that take
     /// pixels from the CPU.
@@ -103,9 +95,9 @@ pub trait Encoder {
 
 /// The encoder this build has for `o`, writing `path`.
 pub fn open_encoder(path: &Path, o: &ExportOptions) -> Result<Box<dyn Encoder>, ExportError> {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(feature = "ffmpeg", target_os = "macos"))]
     return Ok(Box::new(videotoolbox::VtEncoder::open(path, o)?));
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(all(feature = "ffmpeg", target_os = "macos")))]
     {
         let _ = (path, o);
         Err(ExportError::Other("no video encoder in this build (see docs/plan/portability.md)".into()))
@@ -132,7 +124,7 @@ pub fn export(project: Project, path: &Path, o: &ExportOptions, mut progress: im
         let report = out.video(n as i64, &mut |picture| {
             let r0 = Instant::now();
             let report = match picture {
-                #[cfg(target_os = "macos")]
+                #[cfg(all(feature = "ffmpeg", target_os = "macos"))]
                 Picture::Nv12(pb) => engine.render_to_nv12(t, pb),
                 Picture::Rgba(img) => engine.render_image(t, img.width, img.height).map(|(frame, report)| {
                     *img = frame;

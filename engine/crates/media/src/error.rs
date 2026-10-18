@@ -28,12 +28,14 @@ impl From<openrip_frame::FrameError> for MediaError {
     }
 }
 
+#[cfg(feature = "ffmpeg")]
 impl MediaError {
     pub(crate) fn ffmpeg(op: &'static str, code: i32) -> Self {
         MediaError::Ffmpeg { op, code, msg: crate::util::err_str(code) }
     }
 }
 
+#[cfg(feature = "ffmpeg")]
 pub(crate) fn check(op: &'static str, code: i32) -> Result<i32, MediaError> {
     if code < 0 {
         Err(MediaError::ffmpeg(op, code))
