@@ -4,9 +4,9 @@ import { Toaster } from "@/components/ui/sonner";
 import EditorLayout from "./panels/EditorLayout";
 import PanelWindows from "./panels/PanelWindows";
 import { useLayoutConfigStore } from "@/lib/layout-config";
-import { betweenWindows, usePanelWindowsStore } from "@/lib/panel-windows";
+import { betweenWindows, dragOverlayRect, usePanelWindowsStore } from "@/lib/panel-windows";
 import Topbar from "./bars/Topbar";
-import { DndContext, DragEndEvent, DragOverlay } from "@dnd-kit/core";
+import { DndContext, DragEndEvent, DragOverlay, getClientRect } from "@dnd-kit/core";
 import { MediaItem, MediaThumb } from "@/components/media/Item";
 import { TransitionDragTile } from "@/components/menus/TransitionMenu";
 import { cn } from "@/lib/utils";
@@ -40,6 +40,9 @@ const Loading: React.FC<{ title: string; note: string }> = ({ title, note }) => 
     <Toaster />
   </main>
 );
+
+/** The dragged picture measured without the move between windows (lib/panel-windows.ts). */
+const overlayMeasuring = { dragOverlay: { measure: dragOverlayRect(getClientRect) } };
 
 /** `node` rendered into `container` (another window's body), or here without one. */
 const portalInto = (container: HTMLElement | undefined, node: React.ReactNode) => (container ? createPortal(node, container) : node);
@@ -215,6 +218,7 @@ const App: React.FC = () => {
       autoScroll={false}
       // Media dragged from a panel in one window onto the timeline in another.
       modifiers={[betweenWindows]}
+      measuring={overlayMeasuring}
       onDragStart={(event) => {
         const data = event?.active?.data?.current as unknown as
           | MediaItem

@@ -347,8 +347,13 @@ export default async (ctx) => {
     const m0 = await clipCount();
     await assets.mouse.move(item.x + item.width / 2, item.y - 60);
     await assets.mouse.down();
-    await assets.mouse.move(item.x + item.width / 2 + 10, item.y - 50, { steps: 5 });
-    await assets.mouse.move(tx, ty, { steps: 30 });
+    const [sx, sy] = [item.x + item.width / 2 + 10, item.y - 50];
+    await assets.mouse.move(sx, sy, { steps: 5 });
+    // At a hand's pace: moves sent all at once past the window's edge aren't all taken.
+    for (let k = 1; k <= 30; k++) {
+      await assets.mouse.move(sx + ((tx - sx) * k) / 30, sy + ((ty - sy) * k) / 30);
+      await sleep(16);
+    }
     await sleep(300);
     await assets.mouse.up();
     let m1 = m0;

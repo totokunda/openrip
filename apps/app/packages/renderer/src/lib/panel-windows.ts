@@ -131,10 +131,30 @@ export const dropWindow = (): Window => {
 export function betweenWindows<T extends { x: number; y: number }>({ transform, activatorEvent }: { transform: T; activatorEvent: Event | null }): T {
   const from = (activatorEvent?.target as Node | null | undefined)?.ownerDocument?.defaultView;
   const to = dropWindow();
-  if (!from || from === to) return transform;
+  if (!from || from === to) {
+    dragOffset = { x: 0, y: 0 };
+    return transform;
+  }
   const [a, b] = [pageOrigin(from), pageOrigin(to)];
-  return { ...transform, x: transform.x + a.x - b.x, y: transform.y + a.y - b.y };
+  dragOffset = { x: a.x - b.x, y: a.y - b.y };
+  return { ...transform, x: transform.x + dragOffset.x, y: transform.y + dragOffset.y };
 }
+
+/** How far `betweenWindows` moves the drag now. */
+let dragOffset = { x: 0, y: 0 };
+
+type Rect = { top: number; left: number; right: number; bottom: number; width: number; height: number };
+
+/**
+ * The dragged picture's rect as dnd-kit measures it (once, as it appears), less the move
+ * between windows it's drawn with: dnd-kit adds the drag's move to it, which would count that
+ * move twice. `measure` is dnd-kit's own (getClientRect).
+ */
+export const dragOverlayRect = (measure: (el: HTMLElement) => Rect) => (el: HTMLElement): Rect => {
+  const r = measure(el);
+  const { x, y } = dragOffset;
+  return { ...r, top: r.top - y, bottom: r.bottom - y, left: r.left - x, right: r.right - x };
+};
 
 /** Bring a panel's window to the front. */
 export function focusPanelWindow(id: PanelId) {
