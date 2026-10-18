@@ -15,6 +15,7 @@ CAPCUT_DRAFT=… node session.mjs ../.. out/cc out/ud-cc x capcut perf
 - `EXE=<binary>` runs a packaged build.
 - Screenshots are at 2x: CSS coordinates are half their pixels.
 - Steps: `import`, `timeline`, `play`, `perf` (seek, scrub, playback, edit latency), `profstart`/`profstop` (renderer CPU profile), `capcut`, `capfolder` (a draft folder anywhere, `CAPCUT_FOLDER`), `seek`, `selcaption`, `capstyle`, `capanim`, `capbox` (a caption's box after a case and font change), `capadjust` (the draft's own adjustments in the Adjust tab), `capfilter` (a CapCut filter bar's intensity). Helpers for new steps are in `steps/_preview.mjs`.
+- Undo: `undo` (after `import timeline newtext`: each kind of edit undone with ⌘Z and redone with ⇧⌘Z, the engine's frame and the saved project compared; then everything undone and redone by the toolbar), `capundo` (the same on a draft: a caption, a video, the timeline; `DRAFT_ADJUST` for the draft's own adjustments), `undoreopen` (after `reopen`: nothing left to undo). Helpers in `steps/_undo.mjs`.
 - Clicking the ruler seeks; draft-specific coordinates come from env vars (see each step). Clicking the ruler also drops the selection, and a click on the playhead's line grabs the playhead, not the clip under it.
 - Steps print `PASS`/`FAIL` lines where they check something (`checks` in `steps/_anim.mjs`, with the Animation tab's helpers, the project as saved and where a clip's bar is).
 
