@@ -16,7 +16,23 @@ import {
   setEffectParam,
 } from "../src/lib/audio-effects.ts";
 import { CHANNEL_FILLS, LOUDNESS_TARGET, loudnessGain, loudnessOff, loudnessStale, normalizeLoudness, placeVoiceover, playedRange, setChannelFill } from "../src/lib/audio.ts";
-import { addBeat, addBeatAtPlayhead, beatFrames, beatSnapPoints, beatsOfFile, clearBeats, forgetBeats, frameOfMediaTime, mediaTimeAt, removeBeat, setAutoBeats, shownBeats } from "../src/lib/beats.ts";
+import {
+  addBeat,
+  addBeatAtPlayhead,
+  beatFrames,
+  beatSnapPoints,
+  beatsOfFile,
+  clearBeats,
+  forgetBeats,
+  frameOfMediaTime,
+  knownBeatsOfFile,
+  manualBeatAt,
+  mediaTimeAt,
+  removeBeat,
+  setAutoBeats,
+  shownBeats,
+  toggleBeatAtPlayhead,
+} from "../src/lib/beats.ts";
 import { snapPoints } from "../src/lib/timeline-edit.ts";
 import type { AnyClipProps, AudioClipProps, VideoClipProps } from "../src/lib/types.ts";
 
@@ -199,7 +215,28 @@ test("a file's beats are asked once, and asked again after a failure", async () 
     return { bpm: 100, beats: [] };
   };
   assert.equal(await beatsOfFile("/s.mp3", find), null);
+  assert.equal(knownBeatsOfFile("/s.mp3"), undefined, "a failure isn't kept");
   assert.equal((await beatsOfFile("/s.mp3", find))!.bpm, 100);
   await beatsOfFile("/s.mp3", find);
   assert.equal(asked, 2);
+  // Once back, snapping can read them without waiting.
+  assert.equal(knownBeatsOfFile("/s.mp3")!.bpm, 100);
+  forgetBeats();
+  assert.equal(knownBeatsOfFile("/s.mp3"), undefined);
+});
+
+test("Mark beat at the playhead toggles a hand-marked beat there, through the clip's speed", () => {
+  const fps = 30;
+  // Twice as fast from 1 s of media: timeline frame 60 plays media 1 + 2 × 1 s = 3 s.
+  const fast = audio({ startFrame: 30, endFrame: 330, trimStart: 15, speed: 2 });
+  const on = { ...fast, ...toggleBeatAtPlayhead(fast, 60, fps) } as AudioClipProps;
+  assert.deepEqual(on.beats!.manual, [3]);
+  close(manualBeatAt(on, 60, fps)!, 3, 1e-9, "the beat at the playhead");
+  assert.equal(manualBeatAt(on, 61, fps), undefined, "a frame away");
+  const off = { ...on, ...toggleBeatAtPlayhead(on, 60, fps) } as AudioClipProps;
+  assert.deepEqual(off.beats!.manual, []);
+  assert.deepEqual(on.beats!.manual, [3], "the clip it was given is left as it was");
+  // Automatic beats aren't hand-marked: the toggle adds one beside them.
+  const auto = audio({ beats: { auto: true, everyBeat: true, detected: [{ time: 1, downbeat: true }] } });
+  assert.deepEqual((toggleBeatAtPlayhead(auto, 60, fps) as Partial<AudioClipProps>).beats!.manual, [1]);
 });

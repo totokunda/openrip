@@ -43,7 +43,16 @@ const MenuRow: React.FC<{
       <button
         disabled={item.disabled}
         data-testid={`menu-${item.id}`}
-        onClick={() => (sub ? setOpen(item.id) : onSelect(item.action, item.value))}
+        onClick={() => {
+          if (sub) return setOpen(item.id);
+          // An item with its own action (the audio tools') does it, and the menu closes.
+          if (item.run) {
+            item.run();
+            useContextMenuStore.getState().closeMenu();
+            return;
+          }
+          onSelect(item.action, item.value);
+        }}
         className={cn(
           "w-full h-8 px-2.5 text-left text-[13px] flex items-center rounded-[4px] justify-between hover:bg-brand-hover text-brand-light",
           open && "bg-brand-hover",

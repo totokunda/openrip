@@ -19,6 +19,8 @@ export type FindBeats = (path: string) => Promise<BeatGrid | null>;
 const SAME = 0.001;
 
 const found = new Map<string, Promise<BeatGrid | null>>();
+// The answers that have come back, for code that can't wait for one (snapping during a drag).
+const known = new Map<string, BeatGrid | null>();
 
 /**
  * The engine's beats for the file at `path`, asked once per file and session (the engine keeps
@@ -27,17 +29,29 @@ const found = new Map<string, Promise<BeatGrid | null>>();
 export const beatsOfFile = (path: string, find: FindBeats): Promise<BeatGrid | null> => {
   let p = found.get(path);
   if (!p) {
-    p = find(path).catch(() => {
-      found.delete(path);
-      return null;
-    });
+    p = find(path).then(
+      (grid) => {
+        known.set(path, grid);
+        return grid;
+      },
+      () => {
+        found.delete(path);
+        return null;
+      },
+    );
     found.set(path, p);
   }
   return p;
 };
 
+/** The file's beats if `beatsOfFile` has had them back; undefined while asked or never asked. */
+export const knownBeatsOfFile = (path: string): BeatGrid | null | undefined => known.get(path);
+
 /** Forget the files' beats asked so far (tests). */
-export const forgetBeats = () => found.clear();
+export const forgetBeats = () => {
+  found.clear();
+  known.clear();
+};
 
 /** Clips that can carry beat markers: those with sound. */
 export const canHaveBeats = (clip: AnyClipProps) => clip.type === "audio" || clip.type === "video";
@@ -131,6 +145,25 @@ export const addBeatAtPlayhead = (clip: AnyClipProps, frame: number, fps: number
   const start = clip.startFrame ?? 0;
   if (frame < start || frame > start + lengthOf(clip)) return {};
   return addBeat(clip, mediaTimeAt(clip, frame, fps, mediaSeconds));
+};
+
+/**
+ * The hand-marked beat at timeline frame `frame` (within half a frame of it), as media seconds;
+ * undefined when there's none there.
+ */
+export const manualBeatAt = (clip: AnyClipProps, frame: number, fps: number, mediaSeconds?: number): number | undefined =>
+  (beatsOf(clip).manual ?? []).find((t) => {
+    const f = frameOfMediaTime(clip, t, fps, mediaSeconds);
+    return f != null && Math.abs(f - frame) <= 0.5;
+  });
+
+/**
+ * Mark beat, as the toolbar's button does it: a beat at the playhead, or, if one marked by hand
+ * is already there, without it (as a keyframe diamond toggles its key).
+ */
+export const toggleBeatAtPlayhead = (clip: AnyClipProps, frame: number, fps: number, mediaSeconds?: number): Partial<AnyClipProps> => {
+  const at = manualBeatAt(clip, frame, fps, mediaSeconds);
+  return at === undefined ? addBeatAtPlayhead(clip, frame, fps, mediaSeconds) : removeBeat(clip, at, SAME);
 };
 
 /**

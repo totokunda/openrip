@@ -25,7 +25,9 @@ export type ContextMenuAction =
   | "keyframeEase"
   | "keyframeGraph"
   /** A row that only opens its submenu. */
-  | "none";
+  | "none"
+  /** The item's own `run` does it. */
+  | "custom";
 
 export type ContextTarget =
   | { type: "clip"; clipIds: string[]; primaryClipId: string; isVideo: boolean }
@@ -50,6 +52,8 @@ export interface ContextMenuItem {
   value?: string;
   /** A submenu, opened beside the row as it's hovered (CapCut's ›). */
   children?: ContextMenuItem[];
+  /** Done when picked, in place of the menu's handling of `action` (then "custom"). */
+  run?: () => void;
 }
 
 export interface ContextMenuGroup {
