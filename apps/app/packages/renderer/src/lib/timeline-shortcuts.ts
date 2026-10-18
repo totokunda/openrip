@@ -1,11 +1,12 @@
 // CapCut's timeline shortcuts: playback and stepping, split, delete left and right, markers,
-// the magnet and snapping toggles, selection and timeline zoom. The keyboard handler in
+// the magnet and snapping toggles, selection, timeline zoom and the keyframe graph. The keyboard handler in
 // Controls.tsx passes keys here first; the list the Shortcuts menu shows is lib/shortcuts.ts.
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
 import { MIN_DURATION } from "./settings";
 import type { ZoomLevel } from "./types";
 import { isClipLocked } from "./timeline-edit";
+import { useKeyframeGraphStore } from "./timeline-keyframes";
 
 /**
  * Zoom the timeline to `level` (1 shows the whole project, 10 a few frames), keeping the
@@ -105,6 +106,11 @@ export function handleTimelineKey(e: KeyboardEvent): boolean {
   // Timeline zoom in and out (⌘= / ⌘−).
   if (mod && (e.key === "=" || e.key === "+" || e.key === "-")) {
     zoomTimelineTo(controls.zoomLevel + (e.key === "-" ? -1 : 1));
+    return done();
+  }
+  // The selected clip's keyframe graph (⌥K; by its key, ⌥ changes the letter).
+  if (e.altKey && !mod && e.code === "KeyK") {
+    useKeyframeGraphStore.getState().toggle();
     return done();
   }
   if (mod || (e.altKey && !["ArrowLeft", "ArrowRight"].includes(e.key))) return false;

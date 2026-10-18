@@ -1,5 +1,5 @@
 import { FiMinusCircle, FiPlusCircle } from "react-icons/fi";
-import { LuMic, LuSnowflake } from "react-icons/lu";
+import { LuMic } from "react-icons/lu";
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -25,6 +25,7 @@ import {
   MagnetToggle,
   SnappingToggle,
   ToolbarDivider,
+  TransformToolsMenu,
   ZoomToFitButton,
 } from "@/components/timeline/TimelineTools";
 
@@ -515,7 +516,7 @@ const Controls = () => {
           <Tool title="Delete" id="delete"><TrashButton /></Tool>
           <Tool id="marker"><AddMarkerButton /></Tool>
           <Tool title="Crop" id="crop"><CropButton /></Tool>
-          <NotYet title="Freeze frame" id="freeze" icon={LuSnowflake} />
+          <TransformToolsMenu />
           <Tool title="Detach audio" id="detach"><SeparateButton /></Tool>
         </div>
         <div className="flex items-center gap-x-2">

@@ -50,6 +50,9 @@ import {
 import { useWebGLFilters } from "@/components/preview/webgl-filters";
 import { useWebGLMask } from "@/components/preview/mask/useWebGLMask";
 import MaskKeyframes from "./MaskKeyframes";
+import ClipKeyframes from "./ClipKeyframes";
+import MotionMarks from "./MotionMarks";
+import { freezeTarget } from "@/lib/timeline-motion";
 import { useViewportStore } from "@/lib/viewport";
 import { useContextMenuStore, ContextMenuItem } from "@/lib/context-menu";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -1218,7 +1221,24 @@ const TimelineClip: React.FC<
         });
       }
 
+      // CapCut's Edit › on a video: Freeze (at the playhead, when it's on the clip) and Reverse.
+      const editTools: ContextMenuItem[] = [];
+      if (clip?.type === "video" && !(clip as VideoClipProps).freeze && targetIds.length === 1) {
+        const canFreeze = !!freezeTarget(clipsState.clips, clipsState.timelines, controls.focusFrame, [clip.clipId]);
+        editTools.push({
+          id: "edit",
+          label: "Edit",
+          action: "none",
+          children: [
+            { id: "freeze", label: "Freeze", action: "freeze", disabled: !canFreeze, checked: false },
+            // A toggle: ticked while the clip plays backward.
+            { id: "reverse", label: "Reverse", action: "reverse", checked: !!(clip as VideoClipProps).reverse },
+          ],
+        });
+      }
+
       const clipActions: ContextMenuItem[] = [
+        ...editTools,
         {
           id: "split",
           label: "Split at Playhead",
@@ -2013,6 +2033,7 @@ const TimelineClip: React.FC<
               />
             </Group>
           )}
+          {!assetMode && <MotionMarks clip={currentClip} width={clipWidth} height={timelineHeight} selected={isSelected} />}
         </Group>
       </Group>
 
@@ -2027,6 +2048,10 @@ const TimelineClip: React.FC<
           currentStartFrame={currentStartFrame}
           currentEndFrame={currentEndFrame}
         />
+      )}
+      {/* The selected clip's keyframes (not while it's dragged or trimmed). */}
+      {isSelected && !assetMode && !isDragging && !resizeSide && !showMaskKeyframes && currentClip?.keyframes && (
+        <ClipKeyframes clip={currentClip} x={clipPosition.x} y={clipPosition.y} width={clipWidth} height={timelineHeight} />
       )}
       <Rect
         ref={rectRefRight}

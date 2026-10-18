@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { useContextMenuStore } from "@/lib/context-menu";
+import { useContextMenuStore, type ContextMenuItem } from "@/lib/context-menu";
+import { LuCheck, LuChevronRight } from "react-icons/lu";
+import { freezeAtPlayhead, toggleReverse } from "@/lib/timeline-motion";
+import { easeKeysAt, removeKeysAt, useKeyframeGraphStore } from "@/lib/timeline-keyframes";
+import type { KeyframePreset } from "@/lib/types";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { cn } from "@/lib/utils";
@@ -18,6 +22,49 @@ import ClipExportModal, {
 const Key: React.FC<{ text: string }> = ({ text }) => (
   <span className="text-[12px] text-[#949494] tracking-wide">{text}</span>
 );
+
+/**
+ * A menu row: its label (after an accent tick column when the menu has choices), its shortcut,
+ * or a › with a submenu that opens beside it while it's hovered, its first row level with it
+ * (CapCut's).
+ */
+const MenuRow: React.FC<{
+  item: ContextMenuItem;
+  ticked: boolean;
+  onSelect: (action: string, value?: string) => void;
+  open: boolean;
+  setOpen: (id: string | null) => void;
+}> = ({ item, ticked, onSelect, open, setOpen }) => {
+  const sub = item.children?.length ? item.children : null;
+  const subTicked = !!sub?.some((c) => c.checked !== undefined);
+  return (
+    <div className="relative" onMouseEnter={() => setOpen(sub && !item.disabled ? item.id : null)}>
+      <button
+        disabled={item.disabled}
+        data-testid={`menu-${item.id}`}
+        onClick={() => (sub ? setOpen(item.id) : onSelect(item.action, item.value))}
+        className={cn(
+          "w-full h-8 px-2.5 text-left text-[13px] flex items-center rounded-[4px] justify-between hover:bg-brand-hover text-brand-light",
+          open && "bg-brand-hover",
+          item.disabled && "text-[#525252] cursor-default! hover:bg-transparent",
+        )}
+      >
+        <span className="flex items-center gap-2">
+          {ticked && <LuCheck className={cn("w-3.5 h-3.5 text-brand-accent", !item.checked && "invisible")} />}
+          {item.label}
+        </span>
+        {sub ? <LuChevronRight className="w-3.5 h-3.5 text-[#cacaca]" /> : item.shortcut && <Key text={item.shortcut} />}
+      </button>
+      {sub && open && (
+        <div className="absolute left-full -top-1 ml-1 min-w-[160px] p-1 rounded-[8px] border-[0.5px] border-black bg-brand-header shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)]">
+          {sub.map((c) => (
+            <MenuRow key={c.id} item={c} ticked={subTicked} onSelect={onSelect} open={false} setOpen={() => {}} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const GlobalContextMenu: React.FC = () => {
   const { open, position, items, groups, closeMenu, setPosition, target } =
@@ -56,6 +103,9 @@ const GlobalContextMenu: React.FC = () => {
   };
 
   const shouldShowMenu = open && !exportModalOpen;
+  // The row whose submenu is open.
+  const [openSub, setOpenSub] = useState<string | null>(null);
+  useEffect(() => setOpenSub(null), [open, groups]);
 
   useEffect(() => {
     if (!shouldShowMenu) return;
@@ -351,7 +401,16 @@ const GlobalContextMenu: React.FC = () => {
     ],
   );
 
-  const onSelect = (action: string) => {
+  const onSelect = (action: string, value?: string) => {
+    if (action === "none") return;
+    if (target?.type === "keyframe") {
+      const clip = clipsStore.getClipById(target.clipId);
+      if (clip && action === "deleteKeyframe") clipsStore.updateClip(target.clipId, { keyframes: removeKeysAt(clip.keyframes, target.frame) });
+      else if (clip && action === "keyframeEase" && value) clipsStore.updateClip(target.clipId, { keyframes: easeKeysAt(clip.keyframes, target.frame, value as KeyframePreset) });
+      else if (action === "keyframeGraph") useKeyframeGraphStore.getState().toggle();
+      closeMenu();
+      return;
+    }
     if (target?.type === "textSelection") {
       if (action === "copy") {
         try {
@@ -420,6 +479,10 @@ const GlobalContextMenu: React.FC = () => {
         clipsStore.linkClips(ids);
       } else if (action === "unlink") {
         clipsStore.unlinkClips(ids);
+      } else if (action === "freeze") {
+        freezeAtPlayhead(target.primaryClipId);
+      } else if (action === "reverse") {
+        toggleReverse(target.primaryClipId);
       }
     } else if (target?.type === "marker") {
       if (action === "editMarker") useMarkerEditorStore.getState().open(target.markerId);
@@ -439,6 +502,7 @@ const GlobalContextMenu: React.FC = () => {
     closeMenu();
   };
 
+  const ticked = groups?.some((g) => g.items.some((i) => i.checked !== undefined)) ?? false;
   const content =
     groups && groups.length > 0 ? (
       <div className="p-1">
@@ -452,19 +516,7 @@ const GlobalContextMenu: React.FC = () => {
                   </div>
                 )}
                 {group.items.map((item) => (
-                  <button
-                    key={item.id}
-                    disabled={item.disabled}
-                    onClick={() => onSelect(item.action)}
-                    className={cn(
-                      "w-full h-8 px-2.5 text-left text-[13px] flex items-center rounded-[4px] justify-between hover:bg-brand-hover text-brand-light",
-                      item.disabled &&
-                        "text-[#525252] cursor-default! hover:bg-transparent",
-                    )}
-                  >
-                    <span>{item.label}</span>
-                    {item.shortcut && <Key text={item.shortcut} />}
-                  </button>
+                  <MenuRow key={item.id} item={item} ticked={ticked} onSelect={onSelect} open={openSub === item.id} setOpen={setOpenSub} />
                 ))}
                 {gi < groups.length - 1 && (
                   <div className="my-1 h-px bg-brand-hover mx-1" />

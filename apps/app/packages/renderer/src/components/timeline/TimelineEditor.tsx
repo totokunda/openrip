@@ -41,6 +41,7 @@ import { useViewportStore } from "@/lib/viewport";
 import { insertionFrame, mainTrackOf, mainTrackPreview } from "@/lib/timeline-edit";
 import { MarkerEditor, MarkerFlags } from "./Markers";
 import { RULER_HEIGHT, TIME_ZERO_X } from "@/lib/timeline-geometry";
+import KeyframeGraph from "./KeyframeGraph";
 
 interface TimelineEditorProps {}
 
@@ -1494,6 +1495,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
           </>
         )}
         <MarkerEditor anchor={containerRef} stageWidth={dimensions.stageWidth} startPadding={TIME_ZERO_X} />
+        {hasClips && <KeyframeGraph stageWidth={dimensions.stageWidth} scrollY={clampedScroll} />}
         <div style={{ display: hasClips ? undefined : "none" }}>
           <ScrubControl
             stageHeight={dimensions.stageHeight - 30}

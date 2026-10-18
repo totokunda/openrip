@@ -17,14 +17,23 @@ export type ContextMenuAction =
   | "deleteAllMarkers"
   | "lockTrack"
   | "unlockTrack"
-  | "deleteTrack";
+  | "deleteTrack"
+  | "freeze"
+  | "reverse"
+  | "deleteKeyframe"
+  | "keyframeEase"
+  | "keyframeGraph"
+  /** A row that only opens its submenu. */
+  | "none";
 
 export type ContextTarget =
   | { type: "clip"; clipIds: string[]; primaryClipId: string; isVideo: boolean }
   | { type: "timeline"; timelineId: string }
   | { type: "track"; timelineId: string }
   | { type: "marker"; markerId: string }
-  | { type: "textSelection" };
+  | { type: "textSelection" }
+  /** The keys at a clip-local frame of a clip (its diamond on the timeline). */
+  | { type: "keyframe"; clipId: string; frame: number };
 
 export interface ContextMenuItem {
   id: string;
@@ -32,6 +41,12 @@ export interface ContextMenuItem {
   action: ContextMenuAction;
   shortcut?: string;
   disabled?: boolean;
+  /** The current choice: an accent tick before the label. */
+  checked?: boolean;
+  /** What the action is given (an ease preset's name). */
+  value?: string;
+  /** A submenu, opened beside the row as it's hovered (CapCut's ›). */
+  children?: ContextMenuItem[];
 }
 
 export interface ContextMenuGroup {

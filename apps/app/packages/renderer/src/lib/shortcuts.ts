@@ -47,6 +47,7 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
       { action: "Zoom In Timeline", keys: ["⌘", "="] },
       { action: "Zoom Out Timeline", keys: ["⌘", "−"] },
       { action: "Zoom Timeline to Fit", keys: ["⇧", "Z"] },
+      { action: "Keyframe Graph", keys: ["⌥", "K"] },
     ],
   },
   {
