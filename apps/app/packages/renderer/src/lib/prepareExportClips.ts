@@ -645,8 +645,12 @@ export function prepareExportClipsForValue(
       //   3) attach a normalized snapshot relative to the *target* canvas.
       // ensure newClip.originalTransform x, y at 0,0
       // update the scale 
-      newClip.originalTransform.scaleX = newClip.transform?.scaleX ?? 1;
-      newClip.originalTransform.scaleY = newClip.transform?.scaleY ?? 1;
+      // On a copy: the clip's own transform is the store's (and the undo history's).
+      newClip.originalTransform = {
+        ...newClip.originalTransform,
+        scaleX: newClip.transform?.scaleX ?? 1,
+        scaleY: newClip.transform?.scaleY ?? 1,
+      };
       
       const resolvedTransform = resolveTransformFromClip(
         newClip.originalTransform,

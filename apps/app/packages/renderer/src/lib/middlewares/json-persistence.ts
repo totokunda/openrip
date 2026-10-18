@@ -29,6 +29,7 @@ import { useViewportStore } from "../viewport";
 import { exportSequence, type ExportClip } from "@app/export-renderer";
 import { prepareExportClipsForValue } from "../prepareExportClips";
 import { sortClipsForStacking } from "../clipOrdering";
+import { pauseHistory, resetHistory } from "../history";
 type JsonProjectSlice = {
   projects: Array<{
     id: number;
@@ -1043,6 +1044,8 @@ export const withJsonProjectPersistence =
       }
       // Cancel any pending autosave debounce from the previous project.
       cancelPendingJsonProjectSave();
+      // Undo stays within a project: its history starts again once this one is in the stores.
+      pauseHistory();
 
       try {
         // While we are hydrating from JSON, mark projects as not yet fully loaded
@@ -1211,6 +1214,7 @@ export const withJsonProjectPersistence =
 
             // Mark the new blank project as the one our in-memory stores correspond to.
             currentHydratedProjectId = normalizedId;
+            resetHistory();
 
             // Best-effort: update project metadata timestamps in the projects list so UI stays consistent.
             if (activeProject && typeof (projectState as any).updateProject === "function") {
@@ -1225,6 +1229,7 @@ export const withJsonProjectPersistence =
           return;
         }
         await hydrateStoresFromProjectJson(projectId, doc);
+        if (myGen === jsonProjectLoadGeneration) resetHistory();
         // we need to set the active project id to the project id
         get().setActiveProjectId(projectId as string | number);
       } catch (err) {

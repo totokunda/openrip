@@ -22,12 +22,17 @@ import { queryClient } from "@/lib/react-query/queryClient";
 import { useContextMenuStore } from "@/lib/context-menu";
 import { useUpdateToasts } from "@/hooks/use-update-toasts";
 import { initEnginePreview } from "@/lib/engine-preview";
+import { initHistory } from "@/lib/history";
 
 const App: React.FC = () => {
   useUpdateToasts();
   // The Rust engine preview setting, and keeping the engine's copy of the project current.
   useEffect(() => {
     initEnginePreview();
+  }, []);
+  // Undo and redo: telling one edit from the next by the user's presses.
+  useEffect(() => {
+    initHistory();
   }, []);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const layout = useLayoutConfigStore((s) => s.layout);

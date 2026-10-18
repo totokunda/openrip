@@ -10,6 +10,8 @@ import {
   PlayPauseButton,
   SeparateButton,
   CropButton,
+  UndoButton,
+  RedoButton,
 } from "./Buttons";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
@@ -18,6 +20,7 @@ import { MIN_DURATION } from "@/lib/settings";
 import { useDrawingStore } from "@/lib/drawing";
 import { useMaskStore } from "@/lib/mask";
 import { useViewportStore } from "@/lib/viewport";
+import { undo, redo } from "@/lib/history";
 
 const TimelineZoom = () => {
   const {
@@ -285,6 +288,15 @@ const Controls = () => {
       const selectedLineId = drawingStore.selectedLineId;
       const selectedMaskId = controls.selectedMaskId;
 
+      // Undo (Cmd/Ctrl + Z) and redo (Cmd/Ctrl + Shift + Z, Cmd/Ctrl + Y). A text field
+      // keeps these for its own typing (returned above).
+      if (isMod && (e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
+        e.preventDefault();
+        if (e.key.toLowerCase() === "y" || e.shiftKey) redo();
+        else undo();
+        return;
+      }
+
       // Delete selected clips, lines, or masks
       if (e.key === "Delete" || e.key === "Backspace") {
         // Delete selected mask if it exists
@@ -537,6 +549,8 @@ const Controls = () => {
     <div className="relative  flex items-center ">
       <div className="flex items-center w-full bg-brand-background/30 justify-between border-b border-brand-light/5 px-5 py-1">
         <div className="flex items-center gap-x-2">
+          <UndoButton />
+          <RedoButton />
           <SplitButton />
           <TrashButton />
           <SeparateButton />

@@ -18,6 +18,7 @@ import {
   Transformer,
 } from "react-konva";
 import { useViewportStore } from "@/lib/viewport";
+import { isRestoredAspect } from "@/lib/history";
 import { sortClipsForStacking } from "@/lib/clipOrdering";
 import { getLocalFrame, useClipStore } from "@/lib/clip";
 import { KonvaEventObject } from "konva/lib/Node";
@@ -623,7 +624,10 @@ const Preview: React.FC<PreviewProps> = () => {
     }
     if (prev.w === rectWidth && prev.h === rectHeight) return; // no change
 
-    recenterAllClips(rectWidth, rectHeight);
+    // Not when an undo or redo put the canvas back: its clips come back where they were.
+    if (!isRestoredAspect(useViewportStore.getState().aspectRatio)) {
+      recenterAllClips(rectWidth, rectHeight);
+    }
 
     prevRectRef.current = { w: rectWidth, h: rectHeight };
   }, [rectWidth, rectHeight, isFullscreen, isAspectEditing, recenterAllClips]);

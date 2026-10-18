@@ -189,7 +189,7 @@ const collectUsedAssetIds = (clips: AnyClipProps[]): Set<string> => {
 };
 
 // Given current clips, drop any assets that are no longer referenced by clips
-const pruneAssetsForClips = (
+export const pruneAssetsForClips = (
   assets: Record<string, Asset>,
   clips: AnyClipProps[],
 ): Record<string, Asset> => {
@@ -534,7 +534,8 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
     return newAsset;
   },
   removeAsset: (assetId) => set((state) => ({ assets: _.omit(state.assets, assetId) })),
-  updateAsset: (assetId, assetToUpdate) => set((state) => ({ assets: _.set(state.assets, assetId, { ...state.assets[assetId], ...assetToUpdate }) })),
+  // A new record, not the old one changed: the undo history keeps the old one.
+  updateAsset: (assetId, assetToUpdate) => set((state) => ({ assets: { ...state.assets, [assetId]: { ...state.assets[assetId], ...assetToUpdate } } })),
   getAssetById: (assetId) => get().assets[assetId],
   getAssetByPath: (path) => Object.values(get().assets).find((a) => a.path === path),
   isTimelineMuted: (timelineId) =>
@@ -735,7 +736,8 @@ export const useClipStore = create<ClipStore>(((set, get) => ({
           if (remapMasks) {
             mask = remapMaskWithClipTransformProportional(mask, mask.transform as ClipTransform, next);
           } else {
-            mask.transform = { ...next };
+            // A copy: the undo history keeps the clip's old masks.
+            mask = { ...mask, transform: { ...next } };
           }
           return mask;
         });

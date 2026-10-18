@@ -14,11 +14,12 @@ import { useClipStore } from "@/lib/clip";
 import { useCallback, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { MAX_DURATION } from "@/lib/settings";
-import { LuSquareSplitVertical, LuCrop } from "react-icons/lu";
+import { LuSquareSplitVertical, LuCrop, LuUndo2, LuRedo2 } from "react-icons/lu";
 import { getMediaInfoCached } from "@/lib/media/utils";
 import { PiSplitHorizontal } from "react-icons/pi";
 import { MediaDialog } from "@/components/dialogs/MediaDialog";
 import { useState } from "react";
+import { undo, redo, useHistoryStore } from "@/lib/history";
 
 const BackButton = () => {
   const { setFocusFrame, focusFrame } = useControlsStore();
@@ -443,7 +444,42 @@ const CropButton = () => {
   );
 };
 
+// Undo and redo, at the head of the toolbar as in CapCut (also Cmd+Z and Cmd+Shift+Z).
+const UndoButton = () => {
+  const disabled = !useHistoryStore((s) => s.canUndo);
+  return (
+    <div
+      title="Undo"
+      className={cn(
+        "flex shrink-0 transform-gpu items-center cursor-pointer gap-x-2 py-4 justify-center opacity-60 hover:opacity-100 transition-opacity duration-300",
+        disabled && "opacity-30 cursor-not-allowed hover:opacity-30",
+      )}
+      onClick={() => !disabled && undo()}
+    >
+      <LuUndo2 className=" text-brand-light h-4 w-4" />
+    </div>
+  );
+};
+
+const RedoButton = () => {
+  const disabled = !useHistoryStore((s) => s.canRedo);
+  return (
+    <div
+      title="Redo"
+      className={cn(
+        "flex shrink-0 transform-gpu items-center cursor-pointer gap-x-2 py-4 justify-center opacity-60 hover:opacity-100 transition-opacity duration-300",
+        disabled && "opacity-30 cursor-not-allowed hover:opacity-30",
+      )}
+      onClick={() => !disabled && redo()}
+    >
+      <LuRedo2 className=" text-brand-light h-4 w-4" />
+    </div>
+  );
+};
+
 export {
+  UndoButton,
+  RedoButton,
   BackButton,
   RewindBackward,
   RewindForward,

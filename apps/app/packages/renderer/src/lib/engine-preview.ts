@@ -25,6 +25,7 @@ import { useControlsStore, setPlaybackDriver } from "./control";
 import { useViewportStore } from "./viewport";
 import { useProjectsStore } from "./projects";
 import { getActiveProjectJsonSnapshot } from "./middlewares/json-persistence";
+import { withoutHistory } from "./history";
 import { BASE_LONG_SIDE } from "./settings";
 
 type EnginePreviewState = {
@@ -123,9 +124,14 @@ async function syncNow() {
 /**
  * A CapCut text the engine laid out anew (a new font, case or words): its box takes the new
  * block's size about the same middle, so its handles fit the text. The importer places
- * CapCut text by its box's middle, so this doesn't move it.
+ * CapCut text by its box's middle, so this doesn't move it. It follows the edit that changed
+ * the text rather than being an edit itself: undo takes it back with that edit.
  */
 function followTextBlocks(project: EngineProjectInfo) {
+  withoutHistory(() => fitTextBlocks(project));
+}
+
+function fitTextBlocks(project: EngineProjectInfo) {
   const toWorld = BASE_LONG_SIDE / Math.max(1, project.height);
   const { getClipById, setClipTransform } = useClipStore.getState();
   for (const block of project.textBlocks ?? []) {

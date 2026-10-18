@@ -200,11 +200,6 @@ const TextPreview: React.FC<
   const backgroundOpacity = clip?.backgroundOpacity ?? 100;
   const backgroundCornerRadius = clip?.backgroundCornerRadius ?? 0;
 
-  // Don't render if clip is not found
-  if (!clip) {
-    return null;
-  }
-
   // If the playhead leaves this clip, exit editing mode to avoid stray keyboard/mouse handlers.
   useEffect(() => {
     if (!isInFrame && isEditing) {
@@ -2532,6 +2527,14 @@ const TextPreview: React.FC<
   );
 };
 
+// A clip can leave the store (a delete, an undo of its add) a render before the preview
+// drawing it goes: nothing is drawn then, without running the preview's hooks, whose number
+// must stay the same from one render to the next.
+const TextPreviewIfPresent: React.FC<React.ComponentProps<typeof TextPreview>> = (props) => {
+  const present = useClipStore((s) => !!s.getClipById(props.clipId));
+  return present ? <TextPreview {...props} /> : null;
+};
+
 // Memoised: its parent re-renders on every frame of playback, and its own store
 // subscriptions already re-render it when what it shows changes.
-export default React.memo(TextPreview);
+export default React.memo(TextPreviewIfPresent);

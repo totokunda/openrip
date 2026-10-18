@@ -676,6 +676,8 @@ const TopBar: React.FC<TopBarProps> = () => {
           <div className="divide-y divide-brand-light/10 ">
             <div className="p-3">
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                <ShortcutRow action="Undo" keys={["⌘", "Z"]} />
+                <ShortcutRow action="Redo" keys={["⌘", "⇧", "Z"]} />
                 <ShortcutRow action="Zoom to Fit" keys={["⌘", "0"]} />
                 <ShortcutRow action="Zoom to 50%" keys={["⌘", "5"]} />
                 <ShortcutRow action="Zoom to 100%" keys={["⌘", "1"]} />

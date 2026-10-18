@@ -7,7 +7,7 @@ import { diff, drag, grab, rulerMap, seek, settled, tab } from "./_preview.mjs";
 import { checks, choose, duration, savedClips, selected, setDuration } from "./_anim.mjs";
 import { ROW } from "./animtext.mjs";
 
-export const SPLIT = (process.env.SPLIT_AT || "39,703").split(",").map(Number);
+export const SPLIT = (process.env.SPLIT_AT || "87,703").split(",").map(Number);
 
 export default async (ctx) => {
   const { win, shot, udDir } = ctx;
