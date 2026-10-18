@@ -85,7 +85,9 @@ export default async (ctx) => {
   await edit("reverse");
   await seek(win, ctx.map, 7);
   await edit("freeze");
+  // The split, the still and the shift save as one edit a moment later than the menu closes.
   v = await videos();
+  for (let i = 0; i < 4 && v.length !== 5; i++) v = await videos();
   check("Edit › Freeze at the playhead", v.length === 5 && v.filter((c) => c.freeze).length === 2, v.map((c) => frames(c).join("-")).join(" "));
 
   // Mirror.
