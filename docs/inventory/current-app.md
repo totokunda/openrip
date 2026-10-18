@@ -1226,7 +1226,9 @@ Every edit the store makes then follows the timeline's rules (`withTimelineRules
 
 A selected mask opens Video ▸ Mask; a selected line opens Line.
 
-**Timeline toolbar** (renderer/src/components/controls/Controls.tsx): 32 px with a hairline under it, 28 px buttons on a 36 px pitch: Undo, Redo, then Split, Delete, Freeze (not yet), Detach audio and Crop on the left; Record a voiceover (not yet), zoom to fit and the zoom slider on the right. Slots are marked where the timeline's own tools go (add, select/split mode, delete left and right, marker; linked audio, magnet, snapping). The transport moved under the player.
+**Timeline toolbar** (renderer/src/components/controls/Controls.tsx): 32 px with a hairline under it, 28 px buttons on a 36 px pitch, in CapCut's order: Undo, Redo, Split (right after Redo), Delete left, Delete right, Delete, Add marker, Crop, Freeze (not yet) and Detach audio on the left; Record a voiceover (not yet), Main track magnet, Auto snapping and Linkage (toggles: on, the glyph in the accent on a dark 24×23 chip), a divider, Zoom to fit and the zoom slider on the right. The timeline's buttons and toggles are standalone components in renderer/src/components/timeline/TimelineTools.tsx, each tooltip naming its shortcut. The transport moved under the player.
+
+**Ruler, playhead and clip colours** (renderer/src/components/timeline/TimelineEditor.tsx, Scrubber.tsx, clips/thumbnails/): CapCut's 18 px ruler (10.5 px major ticks #727272 with their MM:SS label beside them in #6c6c6c, 5.5 px minor ticks #404040). Time 0 sits 50 px into the timeline (`TIME_ZERO_X`, renderer/src/lib/timeline-geometry.ts), leaving CapCut's Cover column; every track uses it, whatever padding a project saved. The main track's Cover tile is drawn there, dimmed and letting clicks through (no cover editor yet). The playhead is a hollow white 10×14 shield over a 1 px line. Clips take CapCut's colours: video #1e4c51 under its thumbnails, audio #182f55 (#1d4950 with a teal waveform when it comes from a video), text #924e3c, a draft's filter, effect, sticker and adjustment bars #464186, #6e4c7f, #cc9641 and #a58744 (the app's shapes and drawings keep theirs); text and filter labels sit on a chip of the clip's colour with 9% white, in #e0e0e0.
 
 **Tools:** chosen in the player's header (FloatingBar, renderer/src/components/preview/clips/FloatingBar.tsx).
 - `ViewTool`: pointer, hand, mask, draw, shape, text
@@ -1236,8 +1238,6 @@ A selected mask opens Video ▸ Mask; a selected line opens Line.
 - preview zoom: 0.1–4 (viewport.ts:48-49), with Fit, 50, 100 and 200 %
 
 **Transport:** under the player: go to start, ±5 s (`fps·5` frames), and play/pause, which restarts from 0 when at the end (Buttons.tsx:23-101; control.ts:302-316). Time is shown as `HH:MM:SS:FF`. `ExtendTimelineButton` and `ReduceTimelineButton` exist but are never rendered.
-
-**Timeline toolbar** (Controls.tsx): Undo, Redo, Split, Delete left, Delete right, Delete, Add marker, Crop, Detach audio on the left, in CapCut's order; Main track magnet, Auto snapping and Linkage (toggles: on, the glyph in the accent on a dark 24×23 chip), a divider, Zoom to fit and the zoom slider on the right. The timeline's buttons and toggles are standalone components in renderer/src/components/timeline/TimelineTools.tsx, each tooltip naming its shortcut.
 
 **Keyboard shortcuts.** The `document` keydown handler is in Controls.tsx; it passes keys to the timeline's handler (`handleTimelineKey`, renderer/src/lib/timeline-shortcuts.ts) first. It is ignored while focus is in an input, textarea or contentEditable. "Mod" means ⌘ or Ctrl. The Shortcuts menu lists them from renderer/src/lib/shortcuts.ts.
 
