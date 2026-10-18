@@ -1450,7 +1450,9 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
             size_unit: SizeUnit::CanvasHeight,
             // v1's colorOpacity has no effect in its renderer, so it isn't applied here.
             fill: hex(clip, "color", Rgba::BLACK),
+            gradient: None,
             stroke,
+            more_strokes: Vec::new(),
             bold: f(clip, "fontWeight", 400.0) >= 700.0,
             italic: s(clip, "fontStyle") == "italic",
             underline: s(clip, "textDecoration") == "underline",
@@ -1470,6 +1472,7 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
             kerning: true,
             background,
             shadow,
+            glow: None,
             max_width: None,
             curve: 0.0,
             // Konva draws v1 text inside its box (wrapping at the box's width), aligned by

@@ -472,6 +472,7 @@ fn text_style(bundle: &Path) -> Option<TextEffect> {
             })
             .collect(),
         sharp_edges: false,
+        glow: None,
     })
 }
 
@@ -955,7 +956,9 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
                 size: f(st, "size", f(m, "font_size", 15.0)) as f32,
                 size_unit: SizeUnit::CapCut,
                 fill: st.get("fill").and_then(solid).unwrap_or(Rgba::WHITE),
+                gradient: None,
                 stroke,
+                more_strokes: Vec::new(),
                 bold: b(st, "bold", false),
                 italic: b(st, "italic", false),
                 underline: b(st, "underline", false),
@@ -1012,6 +1015,7 @@ fn import_text(id: MaterialId, m: &Value) -> Text {
             kerning: false,
             background,
             shadow,
+            glow: None,
             // A box with a fixed width wraps at a width proportional to `fixed_width`, scaled
             // with the clip and independent of the font size; an auto-sized box (`fixed_width`
             // -1) doesn't wrap (calibration session 5; docs/parity/text-wrap.md).

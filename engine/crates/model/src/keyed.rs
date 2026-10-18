@@ -1,6 +1,6 @@
 //! Keyframed material parameters: a segment's own keyframes for the values of the materials
 //! it uses (its Adjust sliders, a filter's strength, the colour wheels' strength, an HSL
-//! range, its text's colours and sizes, a mask's place and size). The transform, opacity and
+//! range, its text's colours, sizes and glow, a mask's place and size). The transform, opacity and
 //! volume are keyframed on the segment itself ([`crate::Animated`]).
 //!
 //! Keys are in the segment's local time, like the segment's own, and replace the material's
@@ -58,6 +58,16 @@ pub enum Param {
     BackgroundHeight,
     /// Curved text's arc (degrees).
     TextCurve,
+    /// The text's glow: colour, opacity, strength and range (0…1), and where it spreads from
+    /// (CapCut's `dirX` and `dirY`).
+    GlowRed,
+    GlowGreen,
+    GlowBlue,
+    GlowAlpha,
+    GlowStrength,
+    GlowRange,
+    GlowDirX,
+    GlowDirY,
     /// The text's font size: its first run's (in its unit), the others scaled alike.
     TextSize,
     /// A mask's centre (half-sizes from the picture's middle, +y up), size (fractions of the
@@ -176,6 +186,18 @@ impl Segment {
         if let Some(curve) = k(Param::TextCurve) {
             text.layout.curve = curve;
         }
+        let glow = [Param::GlowRed, Param::GlowGreen, Param::GlowBlue, Param::GlowAlpha, Param::GlowStrength, Param::GlowRange, Param::GlowDirX, Param::GlowDirY];
+        if glow.into_iter().any(|p| k(p).is_some()) {
+            let g = text.layout.glow.get_or_insert(TextGlow { color: None, strength: 0.3, range: 0.2, direction: [0.5, 0.5], style: None });
+            // A keyed colour on a glow in the text's colours starts from white.
+            if [Param::GlowRed, Param::GlowGreen, Param::GlowBlue, Param::GlowAlpha].into_iter().any(|p| k(p).is_some()) {
+                let c = g.color.get_or_insert(crate::animated::Rgba::WHITE);
+                (c.r, c.g, c.b, c.a) = (k(Param::GlowRed).unwrap_or(c.r), k(Param::GlowGreen).unwrap_or(c.g), k(Param::GlowBlue).unwrap_or(c.b), k(Param::GlowAlpha).unwrap_or(c.a));
+            }
+            g.strength = k(Param::GlowStrength).unwrap_or(g.strength);
+            g.range = k(Param::GlowRange).unwrap_or(g.range);
+            g.direction = [k(Param::GlowDirX).unwrap_or(g.direction[0]), k(Param::GlowDirY).unwrap_or(g.direction[1])];
+        }
         text
     }
 
@@ -269,8 +291,8 @@ mod tests {
         let text = Text {
             id: MaterialId("t".into()),
             text: "hi".into(),
-            runs: vec![TextRun { range: (0, 2), font: FontRef::default(), size: 15.0, size_unit: SizeUnit::CapCut, fill: Rgba::WHITE, stroke: None, bold: false, italic: false, underline: false }],
-            layout: TextLayout { alignment: 1, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: false, background: None, shadow: None, max_width: None, curve: 0.0, frame: None },
+            runs: vec![TextRun { range: (0, 2), font: FontRef::default(), size: 15.0, size_unit: SizeUnit::CapCut, fill: Rgba::WHITE, gradient: None, stroke: None, more_strokes: Vec::new(), bold: false, italic: false, underline: false }],
+            layout: TextLayout { alignment: 1, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: false, background: None, shadow: None, glow: None, max_width: None, curve: 0.0, frame: None },
             words: Vec::new(),
         };
         let at = s.text_at(&text, Micros(250_000));

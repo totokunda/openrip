@@ -607,7 +607,7 @@ mod tests {
         p.materials.texts.push(Text {
             id: MaterialId("t".into()),
             text: "Hello there".into(),
-            runs: vec![TextRun { range: (0, 11), font: FontRef { name: "Arial".into(), path: "/fonts/a.ttf".into() }, size: 15.0, size_unit: SizeUnit::CapCut, fill: Rgba::WHITE, stroke: Some(Stroke { color: Rgba::BLACK, width: 0.08 }), bold: false, italic: false, underline: false }],
+            runs: vec![TextRun { range: (0, 11), font: FontRef { name: "Arial".into(), path: "/fonts/a.ttf".into() }, size: 15.0, size_unit: SizeUnit::CapCut, fill: Rgba::WHITE, gradient: None, stroke: Some(Stroke { color: Rgba::BLACK, width: 0.08 }), more_strokes: Vec::new(), bold: false, italic: false, underline: false }],
             layout: TextLayout {
                 alignment: 1,
                 letter_spacing: 0.0,
@@ -616,6 +616,7 @@ mod tests {
                 kerning: false,
                 background: Some(TextBackground { color: Rgba { r: 1.0, g: 0.0, b: 0.0, a: 0.5 }, corner_radius: 0.4, width: 0.14, height: 0.14, style: 2 }),
                 shadow: Some(TextShadow { color: Rgba::BLACK, distance: 0.1, angle_deg: -45.0, smoothing: 0.05 }),
+                glow: None,
                 max_width: None,
                 curve: 0.0,
                 frame: None,

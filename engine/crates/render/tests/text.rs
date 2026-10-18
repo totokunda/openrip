@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use openrip_render::text::{layout, Align, Effect, Font, Paint, TextStyle, TexturePaint};
+use openrip_render::text::{layout, Align, Effect, Font, Glow, Gradient, Paint, Span, TextStyle, TexturePaint};
 use openrip_render::RgbaImage;
 
 fn font() -> Option<Font> {
@@ -11,7 +11,7 @@ fn font() -> Option<Font> {
 }
 
 fn style(font: &Font, max_width: Option<f32>) -> TextStyle<'_> {
-    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: false, stroke: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None }
+    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: false, stroke: None, more_strokes: &[], gradient: None, glow: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None }
 }
 
 #[test]
@@ -188,4 +188,87 @@ fn kerning_is_optional() {
     let plain = layout("AV", &style(&f, None)).width;
     let kerned = layout("AV", &TextStyle { kerning: true, ..style(&f, None) }).width;
     assert!(kerned < plain - 1.0, "{kerned} vs {plain}");
+}
+
+/// The middle row of a rendered image, straight RGBA.
+fn middle_row(r: &openrip_render::text::RenderedText) -> Vec<[u8; 4]> {
+    let y = r.center[1] as usize;
+    (0..r.image.width as usize).map(|x| pixel(&r.image, x, y)).collect()
+}
+
+#[test]
+fn a_gradient_runs_across_its_box() {
+    let Some(f) = font() else { return };
+    let red_to_blue = |span| Gradient { colors: vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]], stops: vec![0.0, 1.0], radians: 0.0, span };
+    let across = red_to_blue(Span::Text);
+    let s = TextStyle { gradient: Some(&across), size: 80.0, ..style(&f, None) };
+    let row = middle_row(&layout("IIII", &s).rasterize(&s, [0.0, 0.0]));
+    let inked: Vec<&[u8; 4]> = row.iter().filter(|p| p[3] > 250).collect();
+    let (first, last) = (inked[0], inked[inked.len() - 1]);
+    assert!(first[0] > 200 && first[2] < 60 && last[2] > 200 && last[0] < 60, "{first:?} … {last:?}");
+    // Each character's own: every "I" goes from red to blue.
+    let each = red_to_blue(Span::Character);
+    let s = TextStyle { gradient: Some(&each), ..s };
+    let row = middle_row(&layout("IIII", &s).rasterize(&s, [0.0, 0.0]));
+    let starts: Vec<[u8; 4]> = (1..row.len()).filter(|&x| row[x][3] > 250 && row[x - 1][3] <= 250).map(|x| row[x]).collect();
+    assert_eq!(starts.len(), 4);
+    assert!(starts.iter().all(|p| p[0] > p[2]), "{starts:?}");
+    // Turned 90°: bottom to top.
+    let up = Gradient { radians: std::f32::consts::FRAC_PI_2, ..red_to_blue(Span::Text) };
+    assert!(up.at(5.0, 9.0, [0.0, 0.0, 10.0, 10.0])[0] > 0.8 && up.at(5.0, 1.0, [0.0, 0.0, 10.0, 10.0])[2] > 0.8);
+}
+
+#[test]
+fn more_outlines_reach_further_under_the_first() {
+    let Some(f) = font() else { return };
+    let more = [([0, 0, 255, 255], 9.0)];
+    let s = TextStyle { stroke: Some(([0, 0, 0, 255], 3.0)), more_strokes: &more, size: 80.0, ..style(&f, None) };
+    let r = layout("I", &s).rasterize(&s, [0.0, 0.0]);
+    let row = middle_row(&r);
+    let first = |c: &dyn Fn(&[u8; 4]) -> bool| row.iter().position(|p| c(p)).unwrap();
+    let (blue, black, white) = (first(&|p| p[2] > 200 && p[3] > 250), first(&|p| p[3] > 250 && p[0] < 30 && p[2] < 30), first(&|p| p[0] > 230 && p[3] > 250));
+    assert!(blue < black && black < white, "blue {blue}, black {black}, white {white}");
+    assert!((black - blue) as f32 > 4.0 && (white - black) as f32 > 1.0);
+    // Without it the image is no wider than the first outline needs.
+    let plain = TextStyle { more_strokes: &[], ..s.clone() };
+    assert!(layout("I", &plain).rasterize(&plain, [0.0, 0.0]).image.width <= r.image.width);
+}
+
+#[test]
+fn a_glow_lights_around_the_text_from_its_middle() {
+    let Some(f) = font() else { return };
+    let plain = TextStyle { size: 60.0, ..style(&f, None) };
+    let glow = Glow { color: Some([1.0, 0.8, 0.0, 1.0]), strength: 0.3, range: 0.2, direction: [0.5, 0.5], soften: 2.0 };
+    let lit = TextStyle { glow: Some(glow), ..plain.clone() };
+    let (a, b) = (layout("HI HI", &plain).rasterize(&plain, [0.0, 0.0]), layout("HI HI", &lit).rasterize(&lit, [0.0, 0.0]));
+    assert!(b.image.width > a.image.width, "room for the light");
+    // Left of the text: yellow light, fading outward.
+    let row = middle_row(&b);
+    let ink = row.iter().position(|p| p[0] > 200 && p[1] > 200 && p[2] > 200 && p[3] > 250).unwrap();
+    let (near, far) = (row[ink - 4], row[ink.saturating_sub(40)]);
+    assert!(near[3] > 40 && near[0] > near[2] + 60, "near {near:?}");
+    assert!(far[3] < near[3], "far {far:?} near {near:?}");
+    // Without a glow, nothing is drawn left of the text but its anti-aliased edge.
+    let plain_row = middle_row(&a);
+    let plain_ink = plain_row.iter().position(|p| p[3] > 250).unwrap();
+    assert!(plain_row[..plain_ink.saturating_sub(2)].iter().all(|p| p[3] == 0));
+    // The text itself is 2% darker under a glow.
+    let white = row.iter().filter(|p| p[3] == 255).map(|p| p[0]).max().unwrap();
+    assert!((248..=251).contains(&white), "{white}");
+    // Spread from the right edge, the light goes left more than right.
+    let left_lit = TextStyle { glow: Some(Glow { direction: [0.0, 0.5], ..glow }), ..plain.clone() };
+    let row = middle_row(&layout("HI HI", &left_lit).rasterize(&left_lit, [0.0, 0.0]));
+    let (l, r) = (row.iter().position(|p| p[3] > 250).unwrap(), row.iter().rposition(|p| p[3] > 250).unwrap());
+    let light = |range: std::ops::Range<usize>| range.map(|x| row[x][3] as u32).sum::<u32>();
+    assert!(light(l.saturating_sub(30)..l) > light(r + 1..(r + 31).min(row.len())), "left of the text should glow more");
+}
+
+#[test]
+fn spacing_widens_lines_and_spreads_them() {
+    let Some(f) = font() else { return };
+    let base = layout("HHHH\nHH", &style(&f, None));
+    let spaced = layout("HHHH\nHH", &TextStyle { letter_spacing: 0.25, line_spacing: 0.5, ..style(&f, None) });
+    // Three gaps on the longest line, a quarter of the 40 px size each; half a size between lines.
+    assert!((spaced.width - base.width - 3.0 * 10.0).abs() < 0.01, "{} {}", spaced.width, base.width);
+    assert!((spaced.height - base.height - 20.0).abs() < 0.01);
 }

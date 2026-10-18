@@ -93,6 +93,13 @@ pub struct TextStyle<'a> {
     pub kerning: bool,
     /// Outline drawn under the fill: colour and how far it reaches outside the glyphs (px).
     pub stroke: Option<([u8; 4], f32)>,
+    /// More outlines under `stroke`, each reaching its own width outside the glyphs, the last
+    /// at the back.
+    pub more_strokes: &'a [([u8; 4], f32)],
+    /// Paints the fill in place of `color` (its alpha still applies). Not used with `effect`.
+    pub gradient: Option<&'a Gradient>,
+    /// A glow under the text and its outlines and shadow, over the background.
+    pub glow: Option<Glow>,
     /// Box behind the text: colour, padding around the block of line boxes (px, x and y),
     /// corner radius (px).
     pub background: Option<([u8; 4], [f32; 2], f32)>,
@@ -144,6 +151,8 @@ pub enum Paint {
     /// Straight-alpha colour with the layer's opacity folded in.
     Solid([f32; 4]),
     Texture(TexturePaint),
+    /// Colours with the layer's opacity folded in.
+    Gradient(Gradient),
 }
 
 /// An image mapped onto each character as CapCut's text-style shader maps it: split into
@@ -162,11 +171,114 @@ pub struct TexturePaint {
     pub alpha: f32,
 }
 
+/// Colours along a line, as CapCut's gradient fill paints a text: the line runs through the
+/// middle of a box (a character's, a line's or the block's: `span`) in the direction
+/// `radians`, measured in the box's own proportions, from 0 on one side to 1 on the other;
+/// colour i sits at `stops[i]` of the way, the ends held beyond the first and last stops.
+#[derive(Clone, Debug)]
+pub struct Gradient {
+    /// Straight-alpha colours, one per stop.
+    pub colors: Vec<[f32; 4]>,
+    pub stops: Vec<f32>,
+    /// Counter-clockwise from +x, +y up.
+    pub radians: f32,
+    pub span: Span,
+}
+
+/// The box a gradient stretches across.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Span {
+    /// Each glyph's own box.
+    Character,
+    /// Each line's width and the block's height.
+    Line,
+    /// The block of lines.
+    Text,
+}
+
+impl Gradient {
+    /// Straight colour at `(x, y)` (+y down) in the box `rect` (x, y, w, h).
+    pub fn at(&self, x: f32, y: f32, rect: [f32; 4]) -> [f32; 4] {
+        let (nx, ny) = ((x - rect[0]) / rect[2].max(1e-3) - 0.5, 0.5 - (y - rect[1]) / rect[3].max(1e-3));
+        let (sin, cos) = self.radians.sin_cos();
+        let u = nx * cos + ny * sin + 0.5;
+        let n = self.colors.len().min(self.stops.len());
+        if n == 0 {
+            return self.colors.first().copied().unwrap_or([1.0; 4]);
+        }
+        if u <= self.stops[0] {
+            return self.colors[0];
+        }
+        for i in 1..n {
+            let (s0, s1) = (self.stops[i - 1], self.stops[i]);
+            if u <= s1 {
+                let t = if s1 > s0 { (u - s0) / (s1 - s0) } else { 1.0 };
+                let (a, b) = (self.colors[i - 1], self.colors[i]);
+                return std::array::from_fn(|k| a[k] + (b[k] - a[k]) * t);
+            }
+        }
+        self.colors[n - 1]
+    }
+
+    /// The box this gradient stretches across for a glyph: its own box `glyph`, its line
+    /// (`line`: left edge and width in the block) or the block at `(left, top)`.
+    fn frame(&self, glyph: [f32; 4], line: Option<[f32; 4]>, left: f32, top: f32, block: [f32; 2]) -> [f32; 4] {
+        match (self.span, line) {
+            (Span::Character, _) => glyph,
+            (Span::Line, Some(l)) => [left + l[0], top, l[1], block[1]],
+            _ => [left, top, block[0], block[1]],
+        }
+    }
+}
+
+/// A glow under the text, as CapCut draws its Text ▸ Glow (docs/parity/text-styles.md): the
+/// text's light carried outward along lines from a point in the block, fading by a tenth per
+/// step, brightened by the strength and spread by the range; the text and that light are then
+/// softened together, and the text, a little less saturated, drawn on top.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Glow {
+    /// Straight-alpha colour of the light, or `None` for the text's own colours.
+    pub color: Option<[f32; 4]>,
+    /// CapCut's strength and range, 0…1.
+    pub strength: f32,
+    pub range: f32,
+    /// Where the light spreads from, as CapCut's `dirX` and `dirY` (0.5 the block's middle,
+    /// lower values right and down).
+    pub direction: [f32; 2],
+    /// Standard deviation of the softening (px).
+    pub soften: f32,
+}
+
+/// Steps along each line of light, and how much each step keeps of the one before.
+const GLOW_STEPS: usize = 64;
+const GLOW_DECAY: f32 = 0.9;
+/// How far a step reaches, as a fraction of the distance to the glow's middle per unit of the
+/// spread (the range to the power 0.2).
+const GLOW_STEP: f32 = 1.6 / GLOW_STEPS as f32;
+
+impl Glow {
+    /// The spread: CapCut eases the range with a fifth root.
+    fn spread(&self) -> f32 {
+        self.range.clamp(0.01, 1.0).powf(0.2)
+    }
+
+    /// How far beyond the block the light reaches, per side, as a fraction of the block's
+    /// half-size: where a step's weight falls under 5% (28 steps), capped at twice.
+    fn reach(&self) -> f32 {
+        let along = 28.0 * GLOW_STEP * self.spread();
+        (1.0 / (1.0 - along).max(1.0 / 3.0) - 1.0).min(2.0)
+    }
+}
+
 impl Paint {
     /// Premultiplied colour at `(x, y)` inside a character's box `rect` (x, y, w, h).
     fn at(&self, x: f32, y: f32, rect: [f32; 4], index: usize) -> [f32; 4] {
         match self {
             Paint::Solid(c) => [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]],
+            Paint::Gradient(g) => {
+                let c = g.at(x, y, rect);
+                [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]]
+            }
             Paint::Texture(t) => {
                 let img = &t.image;
                 let (rw, rh) = (rect[2].max(1e-3), rect[3].max(1e-3));
@@ -425,8 +537,10 @@ impl TextLayout {
             return self.prepare_effect(style, effect, origin).composite(char_alpha);
         }
         let stroke = style.stroke.map_or(0.0, |s| s.1);
+        // The outermost outline.
+        let outer = style.more_strokes.iter().map(|s| s.1).fold(stroke, f32::max);
         let bg_pad = style.background.map_or([0.0, 0.0], |b| b.1);
-        let shadow_reach = style.shadow.map_or(0.0, |(_, o, blur)| stroke + o[0].abs().max(o[1].abs()) + 2.0 * blur);
+        let shadow_reach = style.shadow.map_or(0.0, |(_, o, blur)| outer + o[0].abs().max(o[1].abs()) + 2.0 * blur);
         let metrics = style.font.as_ref().metrics(&[]).scale(self.size);
         // A curved line moves its ends by the arc's sagitta and turns its glyphs.
         let bend = if style.curve != 0.0 {
@@ -435,13 +549,16 @@ impl TextLayout {
         } else {
             0.0
         };
-        let pad = ((self.size * 0.5).max(stroke).max(bg_pad[0]).max(bg_pad[1]).max(shadow_reach) + bend).ceil() as i32 + 2;
-        let (w, h) = ((self.width.ceil() as i32 + 2 * pad + 1) as u32, (self.height.ceil() as i32 + 2 * pad + 1) as u32);
-        let (left, top) = (pad as f32 + origin[0], pad as f32 + origin[1]);
+        let pad = ((self.size * 0.5).max(outer).max(bg_pad[0]).max(bg_pad[1]).max(shadow_reach) + bend).ceil() as i32 + 2;
+        let [pad_x, pad_y] = glow_pad(style.glow.as_ref(), pad, self.width, self.height);
+        let (w, h) = ((self.width.ceil() as i32 + 2 * pad_x + 1) as u32, (self.height.ceil() as i32 + 2 * pad_y + 1) as u32);
+        let (left, top) = (pad_x as f32 + origin[0], pad_y as f32 + origin[1]);
         let mut fill = vec![0f32; (w * h) as usize];
-        // With a colour per character: premultiplied colour, each glyph over those before it.
-        let mut tinted = style.char_colors.map(|_| vec![[0f32; 4]; (w * h) as usize]);
+        // With a colour per character or a gradient: premultiplied colour, each glyph over those
+        // before it.
+        let mut tinted = (style.char_colors.is_some() || style.gradient.is_some()).then(|| vec![[0f32; 4]; (w * h) as usize]);
         let mut outline = style.stroke.map(|_| vec![0f32; (w * h) as usize]);
+        let mut more: Vec<Vec<f32>> = style.more_strokes.iter().map(|_| vec![0f32; (w * h) as usize]).collect();
         let mut ctx = ScaleContext::new();
         let mut scaler = ctx.builder(style.font.as_ref()).size(self.size).hint(false).build();
         let draw = |cov: &mut [f32], img: &swash::scale::image::Image, x: f32, y: f32, alpha: f32| {
@@ -488,11 +605,19 @@ impl TextLayout {
             let offset = Vector::new(x - x.floor(), -(y - y.floor()));
             // Turned along the curve (clockwise on screen is clockwise in the y-up glyph space).
             let shear = if rot != 0.0 { Some(shear.unwrap_or(Transform::IDENTITY).then(&Transform::rotation(Angle::from_radians(-rot)))) } else { shear };
-            if let Some(cov) = outline.as_mut() {
-                // Centred on the outline, so twice as wide as its reach outside the glyph.
-                let mut pen = Stroke::new(2.0 * stroke);
+            // Centred on the outline, so twice as wide as its reach outside the glyph.
+            let outlined = |scaler: &mut swash::scale::Scaler, width: f32| {
+                let mut pen = Stroke::new(2.0 * width);
                 pen.join(Join::Round).cap(Cap::Round);
-                if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).embolden(style.bold).transform(shear).style(pen).offset(offset).render(&mut scaler, g.glyph) {
+                Render::new(&[GlyphSource::Outline]).format(Format::Alpha).embolden(style.bold).transform(shear).style(pen).offset(offset).render(scaler, g.glyph)
+            };
+            if let Some(cov) = outline.as_mut() {
+                if let Some(img) = outlined(&mut scaler, stroke) {
+                    draw(cov, &img, x, y, alpha);
+                }
+            }
+            for (cov, &(_, width)) in more.iter_mut().zip(style.more_strokes) {
+                if let Some(img) = outlined(&mut scaler, width) {
                     draw(cov, &img, x, y, alpha);
                 }
             }
@@ -502,6 +627,11 @@ impl TextLayout {
                     Some(tinted) => {
                         let color = style.char_colors.and_then(|c| c.get(g.char_index)).copied().unwrap_or(style.color);
                         let (gx, gy) = (x.floor() as i32 + img.placement.left, y.floor() as i32 - img.placement.top);
+                        // A gradient's box for this glyph.
+                        let frame = style.gradient.map(|gr| {
+                            let glyph = [gx as f32, gy as f32, img.placement.width as f32, img.placement.height as f32];
+                            gr.frame(glyph, self.lines.get(g.line).copied(), left, top, [self.width, self.height])
+                        });
                         for row in 0..img.placement.height as i32 {
                             for col in 0..img.placement.width as i32 {
                                 let (px, py) = (gx + col, gy + row);
@@ -509,8 +639,16 @@ impl TextLayout {
                                     continue;
                                 }
                                 let a = img.data[(row * img.placement.width as i32 + col) as usize] as f32 / 255.0 * alpha;
+                                let c = match (style.gradient, frame) {
+                                    (Some(gr), Some(frame)) => {
+                                        let c = gr.at(px as f32 + 0.5, py as f32 + 0.5, frame);
+                                        let a = a * c[3] * style.color[3] as f32 / 255.0;
+                                        [c[0] * a, c[1] * a, c[2] * a, a]
+                                    }
+                                    _ => premul(color, a),
+                                };
                                 let t = &mut tinted[(py * w as i32 + px) as usize];
-                                *t = over(premul(color, a), *t);
+                                *t = over(c, *t);
                             }
                         }
                     }
@@ -522,7 +660,7 @@ impl TextLayout {
         let shadow = style.shadow.map(|(color, [ox, oy], blur)| {
             let solid = |i: usize| {
                 let f = tinted.as_ref().map_or(fill[i], |t| t[i][3]);
-                outline.as_ref().map_or(f, |o| f.max(o[i]))
+                more.iter().fold(outline.as_ref().map_or(f, |o| f.max(o[i])), |a, m| a.max(m[i]))
             };
             let mut sh: Vec<[f32; 4]> = (0..(w * h) as usize)
                 .map(|i| {
@@ -540,19 +678,36 @@ impl TextLayout {
             }
             sh
         });
-        // Composite background, shadow, stroke, then fill (premultiplied), back to straight alpha.
-        let mut px = vec![[0f32; 4]; (w * h) as usize];
-        for (i, px) in px.iter_mut().enumerate() {
-            if let Some((c, cov)) = &background {
-                *px = premul(*c, cov[i]);
-            }
+        // Shadow, the outlines (the outermost at the back), then the fill.
+        let ink = |i: usize, mut px: [f32; 4]| {
             if let Some(sh) = &shadow {
-                *px = over(sh[i], *px);
+                px = over(sh[i], px);
+            }
+            for (cov, (c, _)) in more.iter().zip(style.more_strokes).rev() {
+                px = over(premul(*c, cov[i]), px);
             }
             if let (Some((c, _)), Some(cov)) = (style.stroke, &outline) {
-                *px = over(premul(c, cov[i]), *px);
+                px = over(premul(c, cov[i]), px);
             }
-            *px = over(tinted.as_ref().map_or_else(|| premul(style.color, fill[i]), |t| t[i]), *px);
+            over(tinted.as_ref().map_or_else(|| premul(style.color, fill[i]), |t| t[i]), px)
+        };
+        // Composite the background and the text over it (premultiplied), back to straight alpha.
+        // A glow goes under the text, over the background.
+        let mut px = vec![[0f32; 4]; (w * h) as usize];
+        if let Some(glow) = &style.glow {
+            let mut lit: Vec<[f32; 4]> = (0..px.len()).map(|i| ink(i, [0.0; 4])).collect();
+            glow_under(&mut lit, w as usize, h as usize, [left, top, self.width, self.height], glow);
+            for (i, px) in px.iter_mut().enumerate() {
+                let under = background.as_ref().map_or([0.0; 4], |(c, cov)| premul(*c, cov[i]));
+                *px = over(lit[i], under);
+            }
+        } else {
+            for (i, px) in px.iter_mut().enumerate() {
+                if let Some((c, cov)) = &background {
+                    *px = premul(*c, cov[i]);
+                }
+                *px = ink(i, *px);
+            }
         }
         finish(px, w, h, [(left + self.width / 2.0) as f64, (top + self.height / 2.0) as f64])
     }
@@ -612,8 +767,9 @@ impl TextLayout {
         let shadow_reach = effect.shadows.iter().map(|sh| sh.offset[0].abs().max(sh.offset[1].abs()) + reach(&sh.strokes).max(2.0 * sh.blur)).fold(0.0, f32::max);
         let bg_pad = style.background.map_or([0.0, 0.0], |b| b.1);
         let pad = ((self.size * 0.5).max(reach(&effect.strokes)).max(shadow_reach).max(bg_pad[0]).max(bg_pad[1]).ceil() as i32) + 2;
-        let (w, h) = ((self.width.ceil() as i32 + 2 * pad + 1) as u32, (self.height.ceil() as i32 + 2 * pad + 1) as u32);
-        let (left, top) = (pad as f32 + origin[0], pad as f32 + origin[1]);
+        let [pad_x, pad_y] = glow_pad(style.glow.as_ref(), pad, self.width, self.height);
+        let (w, h) = ((self.width.ceil() as i32 + 2 * pad_x + 1) as u32, (self.height.ceil() as i32 + 2 * pad_y + 1) as u32);
+        let (left, top) = (pad_x as f32 + origin[0], pad_y as f32 + origin[1]);
         let mut ctx = ScaleContext::new();
         let mut scaler = ctx.builder(style.font.as_ref()).size(self.size).hint(false).build();
         let shear = (style.italic != 0.0).then(|| Transform::skew(Angle::from_degrees(style.italic), Angle::ZERO));
@@ -647,7 +803,11 @@ impl TextLayout {
                 let (fx, fy) = (x.floor() as i32 + fp.left, y.floor() as i32 - fp.top);
                 let side = PAINT_BOX * self.size;
                 let (cx, cy) = (fx as f32 + fp.width as f32 / 2.0, fy as f32 + fp.height as f32 / 2.0);
-                let rect = [cx - side / 2.0, cy - side / 2.0, side, side];
+                // A gradient stretches across its own box: the glyph's, its line's or the block's.
+                let rect = match paint {
+                    Paint::Gradient(gr) => gr.frame([fx as f32, fy as f32, fp.width as f32, fp.height as f32], self.lines.get(g.line).copied(), left, top, [self.width, self.height]),
+                    _ => [cx - side / 2.0, cy - side / 2.0, side, side],
+                };
                 // The shape: everything within `grow` of the glyph, then the edge fade.
                 // Measured by distance rather than by stroking the outline, which leaves
                 // holes in round letters' middles.
@@ -686,7 +846,7 @@ impl TextLayout {
         if let Some(paint) = &effect.fill {
             layers.push(layer(paint, 0.0, [0.0, 0.0], 0.0));
         }
-        PreparedText { w, h, left, top, width: self.width, height: self.height, base, layers }
+        PreparedText { w, h, left, top, width: self.width, height: self.height, base, layers, glow: style.glow }
     }
 }
 
@@ -703,6 +863,7 @@ pub struct PreparedText {
     base: Vec<[f32; 4]>,
     /// Back to front; each layer's pieces in text order.
     layers: Vec<Vec<Patch>>,
+    glow: Option<Glow>,
 }
 
 /// One character's premultiplied pixels in one layer.
@@ -720,7 +881,8 @@ impl PreparedText {
     /// or with none, opaque).
     pub fn composite(&self, char_alpha: Option<&[f32]>) -> RenderedText {
         let (w, h) = (self.w as i32, self.h as i32);
-        let mut px = self.base.clone();
+        // With a glow the layers go on their own, to light them, then over the background.
+        let mut px = if self.glow.is_some() { vec![[0f32; 4]; self.base.len()] } else { self.base.clone() };
         for patch in self.layers.iter().flatten() {
             let a = char_alpha.and_then(|a| a.get(patch.char_index)).copied().unwrap_or(1.0).clamp(0.0, 1.0);
             if a == 0.0 {
@@ -740,6 +902,12 @@ impl PreparedText {
                     let t = &mut px[(y * w + x) as usize];
                     *t = over(c.map(|v| v * a), *t);
                 }
+            }
+        }
+        if let Some(glow) = &self.glow {
+            glow_under(&mut px, self.w as usize, self.h as usize, [self.left, self.top, self.width, self.height], glow);
+            for (p, b) in px.iter_mut().zip(&self.base) {
+                *p = over(*p, *b);
             }
         }
         finish(px, self.w, self.h, [(self.left + self.width / 2.0) as f64, (self.top + self.height / 2.0) as f64])
@@ -907,6 +1075,140 @@ fn box_blur(px: &mut [[f32; 4]], w: usize, h: usize, radius: f32) {
             px.copy_from_slice(&tmp);
         }
     }
+}
+
+/// The margins (x, y) an image needs around a block of `width` × `height` px: `pad` on each
+/// side, more along each axis for a glow's light.
+fn glow_pad(glow: Option<&Glow>, pad: i32, width: f32, height: f32) -> [i32; 2] {
+    match glow {
+        Some(g) => {
+            let soften = (3.0 * g.soften).ceil() as i32;
+            let reach = g.reach();
+            [pad.max((reach * width / 2.0).ceil() as i32 + soften + 2), pad.max((reach * height / 2.0).ceil() as i32 + soften + 2)]
+        }
+        None => [pad, pad],
+    }
+}
+
+/// Each step's weight on a line of light (CapCut's: a tenth of 0.58767).
+const GLOW_WEIGHT: f32 = 0.058767;
+
+/// Put a glow ([`Glow`]) under premultiplied text pixels `ink` (`w` × `h`), the block of lines
+/// at `block` (left, top, width, height).
+///
+/// Each pixel takes the text's light along the line to the glow's middle, in [`GLOW_STEPS`]
+/// steps of [`GLOW_STEP`] × the spread × its distance from the middle, each weighing
+/// [`GLOW_DECAY`] of the one before, the first a random fraction of a step out (which dithers
+/// the steps). The sum, lifted by a power of the strength, goes under the text (at 70% of the
+/// text's alpha), the two are softened together, and the text goes on top, a quarter less
+/// saturated and 2% darker: CapCut's order and constants (docs/parity/text-styles.md). The
+/// light is worked out at half the resolution, being soft.
+fn glow_under(ink: &mut [[f32; 4]], w: usize, h: usize, block: [f32; 4], g: &Glow) {
+    let spread = g.spread();
+    let light = g.strength.clamp(0.01, 1.0).powf(0.2) * 1.5;
+    for p in ink.iter_mut() {
+        *p = dimmed(*p);
+    }
+    // The text at half resolution.
+    let (hw, hh) = (w.div_ceil(2), h.div_ceil(2));
+    let half: Vec<[f32; 4]> = (0..hw * hh)
+        .map(|i| {
+            let (x, y) = (i % hw * 2, i / hw * 2);
+            let mut sum = [0f32; 4];
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                if x + dx < w && y + dy < h {
+                    let p = ink[(y + dy) * w + x + dx];
+                    sum = std::array::from_fn(|k| sum[k] + p[k] / 4.0);
+                }
+            }
+            sum
+        })
+        .collect();
+    // Bilinear, at full-resolution coordinates; nothing outside.
+    let sample = |x: f32, y: f32| -> [f32; 4] {
+        let (x, y) = (x / 2.0 - 0.5, y / 2.0 - 0.5);
+        let (x0, y0) = (x.floor(), y.floor());
+        let (fx, fy) = (x - x0, y - y0);
+        let at = |xi: f32, yi: f32| if xi < 0.0 || yi < 0.0 || xi >= hw as f32 || yi >= hh as f32 { [0.0; 4] } else { half[yi as usize * hw + xi as usize] };
+        let (a, b, c, d) = (at(x0, y0), at(x0 + 1.0, y0), at(x0, y0 + 1.0), at(x0 + 1.0, y0 + 1.0));
+        std::array::from_fn(|k| (a[k] * (1.0 - fx) + b[k] * fx) * (1.0 - fy) + (c[k] * (1.0 - fx) + d[k] * fx) * fy)
+    };
+    let middle = [block[0] + (1.0 - g.direction[0]) * block[2], block[1] + (1.0 - g.direction[1]) * block[3]];
+    let weights: Vec<f32> = (0..GLOW_STEPS).map(|i| GLOW_WEIGHT * GLOW_DECAY.powi(i as i32)).collect();
+    let total: f32 = weights.iter().sum();
+    // The light's faint far reaches (CapCut's spread over the whole picture, a few levels at
+    // most there) fade out over the outer half of the room left for it, instead of stopping at
+    // the image's edge: by the distance from the block's middle in half-sizes.
+    let (reach, centre, half_size) = (g.reach(), [block[0] + block[2] / 2.0, block[1] + block[3] / 2.0], [block[2].max(1.0) / 2.0, block[3].max(1.0) / 2.0]);
+    let fade = |x: f32, y: f32| {
+        let r = ((x - centre[0]).abs() / half_size[0]).max((y - centre[1]).abs() / half_size[1]);
+        let t = ((r - 1.0 - reach / 2.0) / (reach / 2.0).max(1e-3)).clamp(0.0, 1.0);
+        1.0 - t * t * (3.0 - 2.0 * t)
+    };
+    let rays: Vec<[f32; 4]> = (0..hw * hh)
+        .map(|i| {
+            let (hx, hy) = (i % hw, i / hw);
+            let (x, y) = (hx as f32 * 2.0 + 1.0, hy as f32 * 2.0 + 1.0);
+            let kept = fade(x, y);
+            if kept <= 0.0 {
+                return [0.0; 4];
+            }
+            let step = [(x - middle[0]) * GLOW_STEP * spread, (y - middle[1]) * GLOW_STEP * spread];
+            let start = jitter(hx, hy);
+            let mut sum = [0f32; 4];
+            for (k, wk) in weights.iter().enumerate() {
+                let t = k as f32 + 1.0 - start;
+                let s = sample(x - step[0] * t, y - step[1] * t);
+                sum = std::array::from_fn(|c| sum[c] + s[c] * wk);
+            }
+            // A colour of its own replaces the text's, by the light's alpha.
+            if let Some(c) = g.color {
+                sum = [c[0] * sum[3] * c[3], c[1] * sum[3] * c[3], c[2] * sum[3] * c[3], sum[3]];
+            }
+            sum.map(|v| (light * v.max(0.0).powf(1.0 / (0.01 + light))).clamp(0.0, 1.0) / total * spread * kept)
+        })
+        .collect();
+    // The text (at 70% of its alpha) with the light under it, softened.
+    let mut field: Vec<[f32; 4]> = (0..w * h)
+        .map(|i| {
+            let (hx, hy) = (((i % w) as f32 + 0.5) / 2.0 - 0.5, ((i / w) as f32 + 0.5) / 2.0 - 0.5);
+            let (x0, y0) = (hx.floor().max(0.0), hy.floor().max(0.0));
+            let (fx, fy) = ((hx - x0).clamp(0.0, 1.0), (hy - y0).clamp(0.0, 1.0));
+            let at = |xi: usize, yi: usize| rays[yi.min(hh - 1) * hw + xi.min(hw - 1)];
+            let (x0, y0) = (x0 as usize, y0 as usize);
+            let (a, b, c, d) = (at(x0, y0), at(x0 + 1, y0), at(x0, y0 + 1), at(x0 + 1, y0 + 1));
+            let ray: [f32; 4] = std::array::from_fn(|k| (a[k] * (1.0 - fx) + b[k] * fx) * (1.0 - fy) + (c[k] * (1.0 - fx) + d[k] * fx) * fy);
+            let p = ink[i];
+            let under = [p[0], p[1], p[2], p[3] * 0.7];
+            std::array::from_fn(|k| (under[k] + ray[k] * (1.0 - under[3])).min(1.0))
+        })
+        .collect();
+    if g.soften >= 0.5 {
+        // Three box passes of half-width r have a variance of r(r + 1).
+        let r = ((g.soften * g.soften + 0.25).sqrt() - 0.5).max(1.0);
+        box_blur(&mut field, w, h, r * 3f32.sqrt());
+    }
+    for (p, f) in ink.iter_mut().zip(field) {
+        *p = over(*p, f);
+    }
+}
+
+/// A premultiplied colour a quarter less saturated and 2% darker (in HSV), as CapCut draws text
+/// that glows.
+fn dimmed(p: [f32; 4]) -> [f32; 4] {
+    let max = p[0].max(p[1]).max(p[2]);
+    // Lowering the saturation draws each channel toward the brightest by the same fraction.
+    let shade = |c: f32| (max - (max - c) * 0.75) * 0.98;
+    [shade(p[0]), shade(p[1]), shade(p[2]), p[3]]
+}
+
+/// A random fraction for a pixel, the same every time.
+fn jitter(x: usize, y: usize) -> f32 {
+    let mut v = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77).rotate_left(13);
+    v ^= v >> 15;
+    v = v.wrapping_mul(0x2C1B_3C6D);
+    v ^= v >> 12;
+    (v >> 8) as f32 / (1u32 << 24) as f32
 }
 
 #[cfg(test)]

@@ -120,6 +120,24 @@ pub enum PreviewError {
     Worker(std::io::Error),
 }
 
+/// The glow's softening (standard deviation, px) on a canvas 1080 px across its short side:
+/// CapCut's 9-tap blur at 1.25 px a tap, there.
+const GLOW_SOFTEN: f32 = 4.6;
+
+/// A model gradient as the text renderer takes it.
+fn render_gradient(g: &openrip_model::Gradient) -> text::Gradient {
+    text::Gradient {
+        colors: g.colors.iter().map(|c| [c.r, c.g, c.b, c.a]).collect(),
+        stops: g.stops.clone(),
+        radians: g.angle_deg.to_radians(),
+        span: match g.span {
+            openrip_model::GradientSpan::Character => text::Span::Character,
+            openrip_model::GradientSpan::Line => text::Span::Line,
+            openrip_model::GradientSpan::Text => text::Span::Text,
+        },
+    }
+}
+
 /// What a frame needed that couldn't be drawn.
 #[derive(Clone, Debug, Default)]
 pub struct FrameReport {
@@ -945,6 +963,11 @@ impl PreviewEngine {
         let mut paint = |p: &openrip_model::Paint| -> Option<text::Paint> {
             Some(match &p.kind {
                 PaintKind::Solid(c) => text::Paint::Solid([c.r, c.g, c.b, c.a * p.alpha]),
+                PaintKind::Gradient(g) => {
+                    let mut g = render_gradient(g);
+                    g.colors.iter_mut().for_each(|c| c[3] *= p.alpha);
+                    text::Paint::Gradient(g)
+                }
                 PaintKind::TextColor { hue, saturation, brightness } => {
                     let [r, g, b] = shift_hsb([text_color.r, text_color.g, text_color.b], *hue, *saturation, *brightness);
                     text::Paint::Solid([r, g, b, text_color.a * p.alpha])
@@ -1071,6 +1094,17 @@ impl PreviewEngine {
             // A library text style attached to the clip replaces the run's colour and stroke.
             let styled = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id).and_then(|e| Some((e.id.clone(), e.text_style.clone()?))));
             let effect = styled.as_ref().map(|(_, fx)| self.text_effect(fx, em, run.fill));
+            // More outlines, a gradient fill and a glow (the text's own, else its style's). The
+            // glow softens by CapCut's 9-tap blur at 1.25 px a tap on a 1080-px canvas.
+            let more_strokes: Vec<([u8; 4], f32)> = run.more_strokes.iter().filter(|s| s.width > 0.0).map(|s| (rgba(s.color), s.width * em)).collect();
+            let gradient = run.gradient.as_ref().map(render_gradient);
+            let glow = text.layout.glow.as_ref().or(styled.as_ref().and_then(|(_, fx)| fx.glow.as_ref())).filter(|g| g.strength > 0.0).map(|g| text::Glow {
+                color: g.color.map(|c| [c.r, c.g, c.b, c.a]),
+                strength: g.strength,
+                range: g.range,
+                direction: g.direction,
+                soften: GLOW_SOFTEN * w.min(h) as f32 / 1080.0,
+            });
             let style = TextStyle {
                 font: &self.fonts[&path],
                 size: em,
@@ -1089,6 +1123,9 @@ impl PreviewEngine {
                 // width/height in em, with corners of 0.55 em × the clip's scale per unit of
                 // radius.
                 stroke: run.stroke.filter(|s| s.width > 0.0).map(|s| ([to_u8(s.color.r), to_u8(s.color.g), to_u8(s.color.b), to_u8(s.color.a)], s.width * em)),
+                more_strokes: &more_strokes,
+                gradient: gradient.as_ref(),
+                glow,
                 background: text.layout.background.map(|b| {
                     let pad = [b.width * em, b.height * em];
                     let radius = if b.style == 2 { b.corner_radius * 0.55 * em * scale.x.abs() as f32 } else { 0.0 };
@@ -1154,7 +1191,10 @@ impl PreviewEngine {
                 text.layout.letter_spacing.to_bits(),
                 (text.layout.line_spacing.to_bits(), text.layout.line_height.map(f32::to_bits), text.layout.kerning),
                 (style.max_width.map(f32::to_bits), origin[0].to_bits(), origin[1].to_bits(), style.bold.to_bits(), style.italic.to_bits(), style.curve.to_bits()),
-                styled.as_ref().map(|(id, _)| id),
+                (
+                    styled.as_ref().map(|(id, _)| id),
+                    (!more_strokes.is_empty() || run.gradient.is_some() || glow.is_some()).then(|| format!("{more_strokes:?} {:?} {glow:?}", run.gradient)),
+                ),
             ));
             let key = key_of((shape_key, char_alpha.as_ref().map(|a| a.iter().map(|v| (v * 255.0).round() as u8).collect::<Vec<_>>())));
             let tick = self.tick;

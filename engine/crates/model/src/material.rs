@@ -245,8 +245,17 @@ pub struct TextRun {
     #[serde(default)]
     pub size_unit: SizeUnit,
     pub fill: Rgba,
+    /// A gradient that paints the fill in place of `fill`'s colour (CapCut's gradient fill;
+    /// `fill` keeps its opacity).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gradient: Option<Gradient>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stroke: Option<Stroke>,
+    /// More outlines outside `stroke`, each reaching its own width outside the glyphs and
+    /// drawn under the ones before it (CapCut's rich text keeps a list of strokes; its Text
+    /// panel edits the first).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub more_strokes: Vec<Stroke>,
     #[serde(default)]
     pub bold: bool,
     #[serde(default)]
@@ -291,6 +300,81 @@ pub struct Stroke {
     pub width: f32,
 }
 
+/// Colours along a line across the text, as CapCut's gradient fill paints them: colour i sits
+/// at `stops[i]` of the way along the line (0 at its start), clamped before the first and after
+/// the last. The line runs through the middle of each character, line or the whole block
+/// (`span`), in the direction `angle_deg`, and reaches across it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Gradient {
+    /// Straight-alpha colours, at least one.
+    pub colors: Vec<Rgba>,
+    /// Ascending, 0…1, one per colour.
+    pub stops: Vec<f32>,
+    /// Degrees counter-clockwise from +x (+y up): 0 runs left to right, 90 bottom to top.
+    #[serde(default)]
+    pub angle_deg: f32,
+    #[serde(default)]
+    pub span: GradientSpan,
+}
+
+/// What a gradient stretches across (CapCut's gradient `mode`).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GradientSpan {
+    /// Each character's own box (CapCut's "character").
+    #[default]
+    Character,
+    /// Each line, across the block's height.
+    Line,
+    /// The whole block of lines.
+    Text,
+}
+
+impl Gradient {
+    /// The colour a fraction `u` of the way along the line.
+    pub fn at(&self, u: f32) -> Rgba {
+        let n = self.colors.len().min(self.stops.len().max(1));
+        let Some(first) = self.colors.first().copied() else { return Rgba::WHITE };
+        if n < 2 || u <= self.stops[0] {
+            return first;
+        }
+        for i in 1..n {
+            let (s0, s1) = (self.stops[i - 1], self.stops[i]);
+            if u <= s1 {
+                let t = if s1 > s0 { (u - s0) / (s1 - s0) } else { 1.0 };
+                let (a, b) = (self.colors[i - 1], self.colors[i]);
+                return Rgba { r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t, a: a.a + (b.a - a.a) * t };
+            }
+        }
+        self.colors[n - 1]
+    }
+}
+
+/// A glow around the text (CapCut's Text ▸ Glow): the text's light spread outward from a
+/// point in its block and softened, under the text.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TextGlow {
+    /// The glow's colour (its alpha scales it), or `None` for the text's own colours (CapCut's
+    /// glow before a colour is picked).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<Rgba>,
+    /// CapCut's strength and range, 0…1 (its Intensity and Range sliders over 100).
+    pub strength: f32,
+    pub range: f32,
+    /// Where the light spreads from, as CapCut's `dirX` and `dirY`: 0.5 is the middle of the
+    /// block; lower values move it right and down.
+    #[serde(default = "half_pair")]
+    pub direction: [f32; 2],
+    /// CapCut's glow style (the bundle its Glow section's tile picks), kept with the draft's
+    /// glow. The engine draws every style with its own glow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<LibraryRef>,
+}
+
+fn half_pair() -> [f32; 2] {
+    [0.5, 0.5]
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextLayout {
     /// 0 = left, 1 = centre, 2 = right (CapCut's convention).
@@ -311,6 +395,8 @@ pub struct TextLayout {
     pub background: Option<TextBackground>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TextShadow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glow: Option<TextGlow>,
     /// Lines longer than this break between words (anywhere in CJK text): a fraction of the
     /// canvas width at the clip's scale 1 (it scales with the clip, not with the font size).
     /// `None` never wraps.
@@ -865,6 +951,9 @@ pub struct TextEffect {
     /// fading out a little beyond each shape, as it draws its text-style meshes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sharp_edges: bool,
+    /// A glow under the layers (OpenRip's own styles; the text's own glow wins).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glow: Option<TextGlow>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -900,6 +989,7 @@ pub struct Paint {
 pub enum PaintKind {
     Solid(Rgba),
     Texture(TexturePaint),
+    Gradient(Gradient),
     /// The text's own colour shifted in HSB: hue in degrees, saturation and brightness as
     /// offsets on 0..1 (CapCut's SDF text effects colour their layers this way).
     TextColor { hue: f32, saturation: f32, brightness: f32 },
@@ -1205,5 +1295,21 @@ mod tests {
         assert!((eval_curve(&lifted, 1.0) - 0.9).abs() < 1e-9);
         let mid = eval_curve(&lifted, 0.5);
         assert!(mid > 0.4 && mid < 0.6, "{mid}");
+    }
+
+    #[test]
+    fn a_gradient_mixes_between_its_stops_and_holds_its_ends() {
+        let red = Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 };
+        let blue = Rgba { r: 0.0, g: 0.0, b: 1.0, a: 0.5 };
+        let g = Gradient { colors: vec![red, Rgba::WHITE, blue], stops: vec![0.2, 0.5, 0.8], angle_deg: 0.0, span: GradientSpan::Text };
+        assert_eq!(g.at(0.0), red);
+        assert_eq!(g.at(0.2), red);
+        let near = |a: Rgba, b: [f32; 4]| [a.r, a.g, a.b, a.a].iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5);
+        assert!(near(g.at(0.35), [1.0, 0.5, 0.5, 1.0]), "{:?}", g.at(0.35));
+        assert!(near(g.at(0.65), [0.5, 0.5, 1.0, 0.75]), "{:?}", g.at(0.65));
+        assert_eq!(g.at(1.0), blue);
+        // One colour paints everywhere; equal stops jump.
+        assert_eq!(Gradient { colors: vec![blue], stops: vec![0.0], ..g.clone() }.at(0.7), blue);
+        assert_eq!(Gradient { colors: vec![red, blue], stops: vec![0.5, 0.5], ..g }.at(0.5), red);
     }
 }
