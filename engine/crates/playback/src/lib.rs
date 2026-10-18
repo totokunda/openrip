@@ -13,10 +13,12 @@
 //!   The UI widens the tolerance with drag speed and sends one accurate request when the
 //!   drag ends.
 
+mod analysis;
 pub mod animation;
 pub mod caption;
 pub mod colour;
 mod gif;
+pub mod input;
 pub mod mask;
 pub mod output;
 pub mod pipeline;
@@ -30,6 +32,8 @@ pub mod thumbs;
 pub mod transition;
 mod waveform;
 
+pub use analysis::beats;
+pub use input::{audio_input, set_audio_input, AudioInput, InputStream, Level, Recorder, Recording};
 pub use pipeline::{Clock, PipelineStats, PreviewPipeline, RenderedFrame, Surface};
 pub use output::{audio_output, set_audio_output, AudioOutput, OutputStream};
 pub use player::{Player, PlayerError};

@@ -26,3 +26,9 @@ default = ["ffmpeg", "audio-output"]
 ffmpeg = ["openrip-media/ffmpeg", "openrip-audio/ffmpeg", "openrip-playback/ffmpeg", "openrip-export/ffmpeg"]
 # Audio output through cpal.
 audio-output = ["openrip-playback/cpal"]
+
+# Records from the stand-in microphone and decodes what it wrote: needs the built-in decoder.
+
+[[test]]
+name = "audio"
+required-features = ["ffmpeg"]

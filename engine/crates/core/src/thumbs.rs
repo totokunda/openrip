@@ -1,4 +1,4 @@
-//! Timeline thumbnails and waveforms, independent of any open project.
+//! Timeline thumbnails, waveforms and beats, independent of any open project.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -12,6 +12,9 @@ use crate::Result;
 /// A file's waveform: per bucket of `1 / per_second` s, of the mono mix, the largest absolute
 /// sample and the RMS (0..1).
 pub use openrip_audio::Peaks as Waveform;
+
+/// A file's beats: its tempo, and each beat in media time with whether it starts a bar.
+pub use openrip_audio::beats::BeatGrid as Beats;
 
 /// Thumbnails and waveforms, with the folder that keeps them across runs. One thumbnailer
 /// per pass, so a long exact pass doesn't hold up a quick one. Usable from any thread.
@@ -78,5 +81,13 @@ impl Thumbnails {
     pub fn waveform(&self, path: &Path, per_second: u32) -> Result<Option<Waveform>> {
         let dir = self.cache_dir.lock().unwrap().clone();
         Ok(openrip_playback::waveform(path, per_second, dir.as_deref())?)
+    }
+
+    /// The beats in `path`'s audio (all of it, for the timeline's automatic beat markers);
+    /// `None` if it has no audio. Kept in the cache folder, so each song is listened to once.
+    /// Blocks: call it off the UI thread.
+    pub fn beats(&self, path: &Path) -> Result<Option<Beats>> {
+        let dir = self.cache_dir.lock().unwrap().clone();
+        Ok(openrip_playback::beats(path, dir.as_deref())?)
     }
 }

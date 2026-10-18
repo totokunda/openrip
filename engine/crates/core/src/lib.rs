@@ -9,10 +9,13 @@
 //!   project (the app's own format) as a [`Project`].
 //! - [`Session`]: one open project for preview: render frames into surfaces the platform
 //!   shows, play with the audio clock, swap in edits.
-//! - [`Thumbnails`]: timeline thumbnails and waveforms, cached on disk.
+//! - [`Thumbnails`]: timeline thumbnails, waveforms and beats, cached on disk.
+//! - [`measure_loudness`] and [`Recorder`]: a clip's loudness for loudness normalisation, and
+//!   voiceover recording from the microphone (behind the audio input seam).
 //! - [`export_project`]: render and encode a project, with progress and cancel.
 //! - [`capcut_to_app`]: a CapCut draft converted to the app's project document.
 
+mod audio;
 mod capcut;
 mod export;
 mod project;
@@ -23,12 +26,13 @@ use openrip_audio::AudioError;
 use openrip_export::ExportError;
 use openrip_playback::PreviewError;
 
+pub use audio::{measure_loudness, set_audio_input, Level, Loudness, Recorder, Recording, ToneInput};
 pub use capcut::{capcut_to_app, AppProjectFromDraft};
 pub use export::{codec_named, export_project, Codec, ExportControl, ExportOptions, ExportProgress, ExportResult};
 pub use openrip_model::{Micros, Project};
 pub use project::{load_project, parse_project_json, ProjectInfo, Source, TextBlock};
 pub use session::{DisplayFrame, FrameHandle, FrameJob, Image, RenderedFrame, Renderer, Session, Surface};
-pub use thumbs::{Thumbnail, Thumbnails, Waveform};
+pub use thumbs::{Beats, Thumbnail, Thumbnails, Waveform};
 
 /// Everything the API can fail with. The messages are what a client shows (the app's
 /// promises reject with them), so they stay stable.
@@ -58,6 +62,8 @@ pub enum Error {
     Export(#[from] ExportError),
     #[error(transparent)]
     Audio(#[from] AudioError),
+    #[error(transparent)]
+    Player(#[from] openrip_playback::PlayerError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

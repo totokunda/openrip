@@ -27,6 +27,11 @@ pub enum PlayerError {
     NoDevice,
     #[error("audio output: {0}")]
     Output(String),
+    /// No microphone (or no input in this build), for a voiceover.
+    #[error("no microphone")]
+    NoInput,
+    #[error("recording: {0}")]
+    Input(String),
 }
 
 struct State {

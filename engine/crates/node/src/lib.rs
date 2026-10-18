@@ -16,7 +16,7 @@
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use napi::bindgen_prelude::{AsyncTask, Buffer, Float32Array};
+use napi::bindgen_prelude::{AsyncTask, Buffer, Float32Array, Float64Array, Uint8Array};
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
 use openrip_core::{ExportControl, Micros, Session, Thumbnails};
@@ -471,4 +471,145 @@ impl Task for DraftTask {
 #[napi]
 pub fn capcut_to_app(dir: String) -> AsyncTask<DraftTask> {
     AsyncTask::new(DraftTask { dir })
+}
+
+// ---- the Audio tab: beats, loudness, voiceover -------------------------------
+
+#[napi(object)]
+pub struct BeatGrid {
+    /// Beats per minute.
+    pub bpm: f64,
+    /// Each beat's time in the file's media, in seconds.
+    pub times: Float64Array,
+    /// 1 where the beat starts a bar (in fours), else 0.
+    pub downbeats: Uint8Array,
+}
+
+pub struct BeatsTask {
+    path: String,
+}
+
+impl Task for BeatsTask {
+    type Output = Option<openrip_core::Beats>;
+    type JsValue = Option<BeatGrid>;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        thumbnails_service().beats(Path::new(&self.path)).map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<Option<BeatGrid>> {
+        Ok(out.map(|g| BeatGrid {
+            bpm: g.bpm as f64,
+            times: Float64Array::new(g.beats.iter().map(|b| b.at.as_secs_f64()).collect()),
+            downbeats: Uint8Array::new(g.beats.iter().map(|b| b.downbeat as u8).collect()),
+        }))
+    }
+}
+
+/// The beats in the audio of the file at `path` (all of it), on a worker thread, for the
+/// timeline's automatic beat markers; `null` if it has no audio. Kept in the thumbnail cache
+/// folder, so each file is listened to once.
+#[napi]
+pub fn beats(path: String) -> AsyncTask<BeatsTask> {
+    AsyncTask::new(BeatsTask { path })
+}
+
+#[napi(object)]
+pub struct Loudness {
+    /// EBU R128 integrated loudness, LUFS; `null` for silence.
+    pub integrated: Option<f64>,
+    /// The largest sample, dBFS.
+    pub peak: f64,
+}
+
+pub struct LoudnessTask {
+    path: String,
+    start: Micros,
+    duration: Option<Micros>,
+}
+
+impl Task for LoudnessTask {
+    type Output = Option<openrip_core::Loudness>;
+    type JsValue = Option<Loudness>;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        openrip_core::measure_loudness(Path::new(&self.path), self.start, self.duration).map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<Option<Loudness>> {
+        Ok(out.map(|l| Loudness { integrated: l.integrated.map(|v| v as f64), peak: l.peak as f64 }))
+    }
+}
+
+/// The loudness of the file at `path` over `durationUs` from `startUs` of its media (all of it
+/// for `null`), as CapCut measures it for "Normalize loudness", on a worker thread; `null` if
+/// it has no audio.
+#[napi]
+pub fn loudness(path: String, start_us: i64, duration_us: Option<i64>) -> AsyncTask<LoudnessTask> {
+    AsyncTask::new(LoudnessTask { path, start: Micros(start_us), duration: duration_us.map(Micros) })
+}
+
+fn recorder() -> &'static Mutex<Option<openrip_core::Recorder>> {
+    static R: OnceLock<Mutex<Option<openrip_core::Recorder>>> = OnceLock::new();
+    R.get_or_init(|| Mutex::new(None))
+}
+
+#[napi(object)]
+pub struct RecordingStarted {
+    pub rate: u32,
+    pub channels: u32,
+}
+
+/// Start recording a voiceover from the default microphone into a new WAV file at `path`
+/// (one at a time: a recording already running is stopped first and kept). On macOS the
+/// system asks for the microphone the first time; the main process asks first.
+#[napi]
+pub fn start_recording(path: String) -> Result<RecordingStarted> {
+    let mut slot = recorder().lock().unwrap();
+    if let Some(running) = slot.take() {
+        let _ = running.stop();
+    }
+    let r = openrip_core::Recorder::start(Path::new(&path)).map_err(err)?;
+    let started = RecordingStarted { rate: r.rate(), channels: r.channels() as u32 };
+    *slot = Some(r);
+    Ok(started)
+}
+
+#[napi(object)]
+pub struct RecordingLevel {
+    /// The largest sample and the RMS since the last call, 0..1.
+    pub peak: f64,
+    pub rms: f64,
+}
+
+/// The recording's level since the last call, for a meter; `null` when not recording.
+#[napi]
+pub fn recording_level() -> Option<RecordingLevel> {
+    recorder().lock().unwrap().as_ref().map(|r| {
+        let l = r.level();
+        RecordingLevel { peak: l.peak as f64, rms: l.rms as f64 }
+    })
+}
+
+#[napi(object)]
+pub struct Recording {
+    pub path: String,
+    pub duration_us: i64,
+    pub rate: u32,
+    pub channels: u32,
+}
+
+/// Stop recording and finish the file; `null` when not recording.
+#[napi]
+pub fn stop_recording() -> Result<Option<Recording>> {
+    let Some(r) = recorder().lock().unwrap().take() else { return Ok(None) };
+    let done = r.stop().map_err(err)?;
+    Ok(Some(Recording { path: done.path.to_string_lossy().into_owned(), duration_us: done.duration_us(), rate: done.rate, channels: done.channels as u32 }))
+}
+
+/// For automated tests: record from a stand-in microphone that hears a steady tone
+/// (`openrip_core::ToneInput`) instead of the real one, so nothing real is recorded.
+#[napi]
+pub fn use_tone_input() {
+    openrip_core::set_audio_input(std::sync::Arc::new(openrip_core::ToneInput));
 }
