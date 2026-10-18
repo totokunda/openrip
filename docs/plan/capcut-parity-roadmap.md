@@ -18,7 +18,8 @@ Agreed 2026-10-16. What the engine draws next is chosen from two sources: what r
 | Audio clips, fades, loudness | 7–35 drafts | ✅ |
 | Speed changes, keyframes (opacity, position) | 14 and 12 uses | ✅ with CapCut's curves, bit for bit, and every keyframe type the engine draws ([keyframes.md](../parity/keyframes.md)) |
 | Stabilisation | 12, 2 drafts | ❌ |
-| Transitions | 8, 2 drafts | ✅ Blink, White Flash, White Fade ([transitions.md](../parity/transitions.md)) |
+| Transitions | 8, 2 drafts | ✅ Blink, White Flash, White Fade ([transitions.md](../parity/transitions.md)); built-ins any project can use: Mix, Black Fade, Pull in, Pull out, Blur, Slide, Push, Wipe, Circle, Spin |
+| Video and photo In / Out / Combo animations | 0 | ✅ a basic built-in set (fade, zoom, slide, rotate, spin, bounce, shake; swing, pulse), CapCut's Fade Out from its bundle ([clip-animations.md](../parity/clip-animations.md)) |
 | Voice effects | 8, 5 drafts | ✅ Deep, Low, Voice Crisper, Demonized; Deep 2 without its reverb ([voice-effects.md](../parity/voice-effects.md)) |
 | Masks | 2 drafts | ✅ Rectangle, matching both covers ([masks.md](../parity/masks.md)); circle, linear, mirror and heart from their bundles, the star if its bundle is the heart's kind (no local use to check against); ❌ pen |
 | Stickers | 11, 4 drafts (1 shown; the rest on hidden tracks) | ✅ PNG and GIF stickers from CapCut's cache (2026-10-17, [stickers.md](../parity/stickers.md)); their size is provisional, unchecked against CapCut |

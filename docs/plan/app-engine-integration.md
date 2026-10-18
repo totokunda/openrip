@@ -136,6 +136,27 @@ Done (2026-10-18): the data model and the engine. The keyframe diamonds, the ins
   - the harness steps `keyframes` and `keyframescheck`: keys set through the store change the engine's frames over time; CapCut's rule; a split; save and reopen;
   - opening a keyed draft in the app shows its texts' opacity keys in `keyframes`.
 
+## Transitions and animations
+
+Done (2026-10-18): the data model, the built-in lists and the engine. The Transitions panel, the transition handle on the timeline and the Animation tab's In / Out / Combo (Loop for text) grids are UI still to build on them ([transitions.md](../parity/transitions.md), [clip-animations.md](../parity/clip-animations.md)).
+
+- **On a clip** (`lib/types.ts`):
+  - video and image: `transitionOut`, `animationIn`, `animationOut`, `animationCombo`;
+  - text: `animationIn`, `animationOut`, `animationLoop`.
+  - An animation is `{ type, duration, name?, params? }`: `type` a built-in's id, or "" for a CapCut one the engine doesn't draw (kept as the draft had it until replaced; `name` is CapCut's). A transition is the same plus `resource` (Blink's image sequence). `params.direction` ("left", "right", "up", "down") goes with Slide, Push and Wipe, left when left out.
+  - Durations are seconds. An In runs from the clip's start and an Out up to its end. The engine shortens an Out so it doesn't overlap the In, and ends an In or a Loop with the clip. A Combo always spans the whole clip, whatever its `duration`. A Loop repeats once per its duration. A transition runs across the cut, half on each side, at most the clip's length, and only where the next clip on the track starts as this one ends.
+- **Built-in lists** (`lib/animations.ts`):
+  - `TRANSITIONS` and `animationsFor(clipType, kind)` give each built-in's CapCut name, `type`, a category like CapCut's panels (Classic, Basic, Slide, Mask, Movement; Typing for text), `params` (with options and default), default duration and `capcut`: "bundle" when its behaviour comes from CapCut's own script, "named" when it's our curve for CapCut's name. Transitions also say whether they show both clips at once (`overlap`) and whether they need CapCut's bundle (`needsResource`, Blink).
+  - Transitions: Mix, Black Fade, White Flash, White Fade, Pull in, Pull out, Blur, Blink, Slide, Push, Wipe, Circle, Spin.
+  - Video and photo In: Fade In, Zoom In, Zoom Out, Slide, Rotate, Spin, Bounce, Shake. Out: Fade Out and the same moves. Combo: Swing, Shake, Pulse, Spin.
+  - Text In: Type 1, Type 2, Typewriter, Fade In, Zoom In, Zoom Out, Slide. Out: Fade Out, Zoom In, Zoom Out, Slide. Loop: Pulse, Swing, Shake, Float, Blink.
+  - Helpers, pure: `transitionOf(type, {duration, params, resource})` and `animationOf(clip, kind, type, {duration, params, fps})` make the field with defaults (a Combo spanning the clip). `maxAnimationDuration(clip, kind, fps)` and `maxTransitionDuration(clip, next, fps)` give the slider bounds the engine keeps to. `ANIMATION_FIELD` maps a kind to its field. Set the results with `updateClip`; undo and the autosave need nothing more.
+- **The store:** a split keeps the In on the left half, the Out and the transition on the right, and the Combo or Loop on both.
+- **To the engine** (`engine/crates/v1`): the fields become the segment's animations and transition. A direction joins the engine's name ("slide_left"); the overlapping transitions are marked so. CapCut clips show their own as these fields, and a field the app changes replaces the draft's of that kind; the rest stay CapCut's, and an unedited clip comes back exactly.
+- **CapCut import:** by resource id where known (White Flash, White Fade, Blink, Pull in, Black Fade, the video Fade Out), else by English name (Mix, Black Fade, Pull in, Pull out, Fade In, Fade Out); others are listed in the import report's `unmapped_library`.
+- **Checked:** `tests/animations.test.ts` (`node --test tests/*.test.ts` in packages/renderer) checks the lists against the engine's. Then the v1 crate's tests (fields both ways, the fitting rules, splits), the engine's tests (math and frames), and the harness step `transitions`.
+- **For the panels:** the existing Animation tab still offers only the first three transitions and the typing intros. The panels should take their lists from `lib/animations.ts`, and show a draft's undrawn one by `name` as the tab does now.
+
 ## Speed on large projects
 
 Done (2026-10-17), measured in the app on the largest local drafts (222, 211 and 120 clips; one has 101 photos and 113 captions). The draft with 222 clips:

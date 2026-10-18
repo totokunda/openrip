@@ -27,7 +27,7 @@ The importer only reads CapCut's files; it never writes to CapCut's data folder.
 
 | CapCut table | Uses | Next step |
 |---|---|---|
-| `material_animations` | 2,731 | Clip/text In/Out/Combo animations. These are CapCut library presets; map the common ones (fade, zoom, slide, …) to built-in animations, placeholder the rest. |
+| `material_animations` | 2,731 | Clip/text In/Out/Combo animations. These are CapCut library presets: the typing intros, caption styles and Fade In / Fade Out map to built-ins ([text-animations.md](text-animations.md), [clip-animations.md](clip-animations.md)); the rest keep their library reference and are listed in the report's `unmapped_library`. |
 | `sound_channel_mappings` | 1,026 | Channel routing (mono/stereo); likely trivial. |
 | `placeholder_infos` | 1,026 | Per-media placeholder metadata; probably ignorable. |
 | `vocal_separations` | 1,026 | AI feature; unsupported by design (usually inactive entries). |
