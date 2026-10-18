@@ -608,6 +608,19 @@ fn mask_picture(bundle: &Path) -> Option<String> {
     assets::list(&feature.join("effects")).ok()?.iter().any(|e| decodes(e)).then(|| picture.to_string_lossy().into_owned())
 }
 
+/// The beats in one of CapCut's beats files (`Cache/music/<hash>.beat`, downloaded with a
+/// library song): JSON with parallel `time` (ms) and `value` (the beat's place in its bar,
+/// 1 starting it) arrays. Empty when the file isn't on this machine.
+pub fn beats_file(path: &Path) -> Vec<Beat> {
+    let Some(doc) = assets::read(path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else { return Vec::new() };
+    let values = arr(&doc, "value");
+    arr(&doc, "time")
+        .iter()
+        .enumerate()
+        .filter_map(|(k, t)| Some(Beat { at: Micros((t.as_f64()? * 1000.0).round() as i64), downbeat: values.get(k).and_then(Value::as_i64) == Some(1) }))
+        .collect()
+}
+
 fn library_ref(m: &Value) -> LibraryRef {
     let resource = [s(m, "resource_id"), s(m, "effect_id"), s(m, "third_resource_id")]
         .into_iter()
@@ -715,6 +728,33 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         id,
                         fade_in: Micros(i(m, "fade_in_duration")),
                         fade_out: Micros(i(m, "fade_out_duration")),
+                    });
+                    true
+                }
+                // "Fill channel": `audio_channel_mapping` 1 copies the left channel over the
+                // right, 2 the right over the left (TEAudioChannelMapping in CapCut's engine),
+                // and only while its switch (`is_config_open`) is on.
+                "sound_channel_mappings" => {
+                    let fill = match (b(m, "is_config_open", false), i(m, "audio_channel_mapping")) {
+                        (true, 1) => ChannelFill::Left,
+                        (true, 2) => ChannelFill::Right,
+                        _ => ChannelFill::None,
+                    };
+                    out.channels.push(ChannelMap { id, fill });
+                    true
+                }
+                // Beat markers: those added by hand (`user_beats`, µs of the media), and the
+                // automatic ones from the beats file CapCut downloaded with the music, shown
+                // when "Auto beat" is on: `gear` 1 ("Beat 2") every beat, otherwise ("Beat 1")
+                // the bar starts.
+                "beats" => {
+                    let file = m.pointer("/ai_beats/beats_path").and_then(Value::as_str).unwrap_or_default();
+                    out.beats.push(Beats {
+                        id,
+                        manual: arr(m, "user_beats").iter().filter_map(Value::as_i64).map(Micros).collect(),
+                        auto: b(m, "enable_ai_beats", false),
+                        every_beat: i(m, "gear") == 1,
+                        detected: if file.is_empty() { Vec::new() } else { beats_file(Path::new(file)) },
                     });
                     true
                 }
@@ -959,6 +999,13 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                 out.foreign.push(Foreign { id: MaterialId(s(m, "id")), app: APP.into(), kind: table.clone(), raw: m.clone() });
             }
         }
+    }
+    // A video whose sound was extracted (an audio material of type `video_original_sound`
+    // names it by `video_id`) is silent: its extracted clip plays the sound instead, as
+    // CapCut's "Audio is separated" state does.
+    let extracted: Vec<String> = tables.get("audios").and_then(Value::as_array).into_iter().flatten().filter(|a| s(a, "type") == "video_original_sound").map(|a| s(a, "video_id")).filter(|v| !v.is_empty()).collect();
+    for m in out.media.iter_mut().filter(|m| m.kind == MediaKind::Video && extracted.contains(&m.id.0)) {
+        m.has_audio = false;
     }
     // A freeze frame names the video it was taken from by material too: that material's path
     // is the one in use (it may have been relinked since).
@@ -1626,6 +1673,39 @@ mod tests {
         let Imported { project, .. } = import_draft_json(&d, "hint").unwrap();
         let e = project.materials.effects.iter().find(|e| e.id.0 == "AE").unwrap();
         assert_eq!((e.category, e.resource.as_deref(), e.params.get("change_voice_param_pitch").copied()), (EffectCategory::Audio, Some("/cache/deep"), Some(0.834)));
+    }
+
+    #[test]
+    fn imports_channel_fills_and_beats() {
+        let mut d = sample_draft();
+        let dir = std::env::temp_dir().join(format!("openrip-beats-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("song.beat");
+        std::fs::write(&file, r#"{"time":[140,590,1030,1480,1940],"value":[1,2,3,4,1],"energy":[1,2,3,4,5]}"#).unwrap();
+        d["materials"]["sound_channel_mappings"] = json!([
+            {"id": "CM0", "type": "none", "audio_channel_mapping": 0, "is_config_open": false},
+            {"id": "CM1", "type": "", "audio_channel_mapping": 1, "is_config_open": true},
+            {"id": "CM2", "type": "", "audio_channel_mapping": 2, "is_config_open": true},
+            // Its switch off: no fill, whatever the menu says.
+            {"id": "CM3", "type": "", "audio_channel_mapping": 1, "is_config_open": false}
+        ]);
+        d["materials"]["beats"] = json!([
+            {"id": "B1", "type": "beats", "enable_ai_beats": true, "gear": 404, "mode": 404, "user_beats": [2_000_000, 500_000], "user_delete_ai_beats": null,
+                "ai_beats": {"beats_path": file.to_string_lossy(), "melody_percents": [0.6]}},
+            {"id": "B2", "type": "beats", "enable_ai_beats": false, "gear": 1, "user_beats": [], "ai_beats": {"beats_path": "/nope.beat"}}
+        ]);
+        let Imported { project, .. } = import_draft_json(&d, "hint").unwrap();
+        let fill = |id: &str| project.materials.channels.iter().find(|c| c.id.0 == id).unwrap().fill;
+        assert_eq!([fill("CM0"), fill("CM1"), fill("CM2"), fill("CM3")], [ChannelFill::None, ChannelFill::Left, ChannelFill::Right, ChannelFill::None]);
+        let b1 = project.materials.beats.iter().find(|b| b.id.0 == "B1").unwrap();
+        assert!(b1.auto && !b1.every_beat);
+        assert_eq!(b1.detected.len(), 5);
+        assert_eq!((b1.detected[1].at, b1.detected[4].downbeat, b1.detected[1].downbeat), (Micros(590_000), true, false));
+        // Beat 1 shows the hand-marked beats and the bar starts, in order.
+        assert_eq!(b1.shown(&[]), vec![Micros(140_000), Micros(500_000), Micros(1_940_000), Micros(2_000_000)]);
+        let b2 = project.materials.beats.iter().find(|b| b.id.0 == "B2").unwrap();
+        assert!(!b2.auto && b2.every_beat && b2.detected.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
