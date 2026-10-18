@@ -551,6 +551,30 @@ fn sdf_text_style(bundle: &Path) -> Option<TextEffect> {
     Some(effect)
 }
 
+/// A sticker from its bundle (`artistEffect/<id>/<hash>/`): the GIF its `config.json` names
+/// (`"format": "gif"`), else the image its `infoSticker.lua` loads (`singleImage.png`), with
+/// one frame's size from `heycanInfo.json`. `None` when the bundle isn't on this machine.
+fn sticker_file(bundle: &Path) -> Option<(String, bool, u32, u32)> {
+    let read = |name: &str| std::fs::read(bundle.join(name)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+    let link = read("config.json").and_then(|c| c.pointer("/effect/Link/0").cloned()).unwrap_or(Value::Null);
+    let animated = s(&link, "format") == "gif";
+    let file = if animated {
+        Some(s(&link, "path")).filter(|p| !p.is_empty()).unwrap_or_else(|| "final.gif".into())
+    } else {
+        // The script's `source = "…"`.
+        std::fs::read_to_string(bundle.join("infoSticker.lua"))
+            .ok()
+            .and_then(|lua| lua.split("source").nth(1).and_then(|rest| rest.split('"').nth(1)).map(str::to_string))
+            .unwrap_or_else(|| "singleImage.png".into())
+    };
+    let path = bundle.join(&file);
+    if !path.is_file() {
+        return None;
+    }
+    let info = read("heycanInfo.json").unwrap_or(Value::Null);
+    Some((path.to_string_lossy().into_owned(), animated, i(&info, "singleWidth").max(0) as u32, i(&info, "singleHeight").max(0) as u32))
+}
+
 fn library_ref(m: &Value) -> LibraryRef {
     let resource = [s(m, "resource_id"), s(m, "effect_id"), s(m, "third_resource_id")]
         .into_iter()
@@ -736,6 +760,16 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                     });
                     true
                 }
+                // Library stickers: the image or GIF in the bundle the material points at.
+                "stickers" => {
+                    let (path, animated, width, height) = sticker_file(Path::new(&s(m, "path"))).unwrap_or_default();
+                    if path.is_empty() {
+                        report.warnings.push(format!("sticker {:?} not found in CapCut's cache", s(m, "name")));
+                    }
+                    bump(&mut report.library_items, "stickers".to_string());
+                    out.stickers.push(Sticker { id, path, animated, width, height, library: Some(library_ref(m)) });
+                    true
+                }
                 "hsl" => {
                     let custom = s(m, "custom_color");
                     out.hsl.push(HslAdjust {
@@ -794,7 +828,7 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
             } else {
                 let label = if AI_TABLES.contains(&table.as_str()) { format!("{table} (AI, unsupported)") } else { table.clone() };
                 bump(&mut report.foreign, label);
-                if matches!(table.as_str(), "stickers" | "text_templates") {
+                if table == "text_templates" {
                     bump(&mut report.library_items, table.clone());
                 }
                 out.foreign.push(Foreign { id: MaterialId(s(m, "id")), app: APP.into(), kind: table.clone(), raw: m.clone() });
@@ -1072,8 +1106,11 @@ mod tests {
         assert_eq!(text.layout.shadow.unwrap().color.a, 0.5);
         assert_eq!(project.tracks[1].segments[0].source, None);
 
-        // Unsupported tables are kept and reported; AI tables are labelled.
-        assert_eq!(report.foreign.get("stickers"), Some(&1));
+        // Unsupported tables are kept and reported; AI tables are labelled. A sticker whose
+        // bundle isn't here is kept without a file.
+        assert_eq!(report.foreign.get("stickers"), None);
+        assert_eq!((project.materials.stickers[0].path.as_str(), report.library_items.get("stickers")), ("", Some(&1)));
+        assert!(report.warnings.iter().any(|w| w.contains("sticker")));
         assert_eq!(report.foreign.get("vocal_separations (AI, unsupported)"), Some(&1));
         assert_eq!(report.missing_media, vec!["/nope/a.mp4".to_string()]);
 
@@ -1083,6 +1120,28 @@ mod tests {
         assert_eq!(report.library_items.get("effects:text_effect"), Some(&1));
         assert_eq!(report.library_items.get("effects:brightness"), None);
         assert!(report.problems.is_empty(), "{:?}", report.problems);
+    }
+
+    /// A sticker bundle names its picture: a PNG through its script, or a GIF in its config.
+    #[test]
+    fn stickers_take_their_picture_from_the_bundle() {
+        let root = std::env::temp_dir().join(format!("openrip-sticker-{}", std::process::id()));
+        let (png, gif) = (root.join("png"), root.join("gif"));
+        for dir in [&png, &gif] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(png.join("config.json"), r#"{"effect": {"Link": [{"type": "InfoSticker"}]}}"#).unwrap();
+        std::fs::write(png.join("infoSticker.lua"), "InfoSticker = { materials = { { id = 0, source = \"singleImage.png\" } } }").unwrap();
+        std::fs::write(png.join("singleImage.png"), b"png").unwrap();
+        std::fs::write(png.join("heycanInfo.json"), r#"{"type":"png","singleWidth":465,"singleHeight":466,"frameCount":1}"#).unwrap();
+        std::fs::write(gif.join("config.json"), r#"{"effect": {"Link": [{"type": "InfoSticker", "format": "gif", "path": "final.gif"}]}}"#).unwrap();
+        std::fs::write(gif.join("final.gif"), b"gif").unwrap();
+        let (path, animated, w, h) = sticker_file(&png).unwrap();
+        assert!(path.ends_with("singleImage.png") && !animated && (w, h) == (465, 466), "{path}");
+        let (path, animated, ..) = sticker_file(&gif).unwrap();
+        assert!(path.ends_with("final.gif") && animated, "{path}");
+        assert!(sticker_file(&root.join("missing")).is_none());
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

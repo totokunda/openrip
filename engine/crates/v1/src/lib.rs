@@ -509,6 +509,12 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
             materials.effects.retain(|m| m.id != e.id);
             materials.effects.push(e);
         }
+        // A sticker bar's: its opacity (keyframes scaled with it).
+        if materials.stickers.iter().any(|s| s.id == seg.material) {
+            let (was, now) = (seg.opacity.value.max(1e-6), (f(clip, "intensity", 100.0).clamp(0.0, 100.0) / 100.0) as f32);
+            seg.opacity.value = now;
+            seg.opacity.keys.iter_mut().for_each(|k| k.value = (k.value * now / was).clamp(0.0, 1.0));
+        }
     }
     if ty == "text" && (["text", "fontSize", "color"].into_iter().any(changed) || app::TEXT_STYLE_KEYS.into_iter().any(differs)) {
         edit_text(&mut seg, clip, &base, materials);

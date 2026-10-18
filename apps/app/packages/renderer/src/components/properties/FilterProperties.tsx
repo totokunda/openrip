@@ -37,9 +37,11 @@ const FilterProperties: React.FC<FilterPropertiesProps> = ({ clipId }) => {
     updateClip(clipId, { intensity: clamped });
   };
 
-  // A CapCut draft's bar: the engine draws its filters at this strength; its effects,
-  // stickers and adjustment layers are kept for CapCut's export, without settings.
+  // A CapCut draft's bar: the engine draws its filters at this strength and its stickers at
+  // this opacity; its effects and adjustment layers are kept for CapCut's export, without
+  // settings.
   const fromDraft = clip?.draftKind !== undefined;
+  const sticker = clip?.draftKind === "sticker";
   const title = fromDraft ? (DRAFT_KINDS[clip?.draftKind ?? ""] ?? "CapCut") : "Filter";
 
   return (
@@ -56,7 +58,7 @@ const FilterProperties: React.FC<FilterPropertiesProps> = ({ clipId }) => {
         </p>
       ) : (
         <PropertiesSlider
-          label="Intensity"
+          label={sticker ? "Opacity" : "Intensity"}
           value={Math.round(intensity)}
           onChange={setIntensity}
           min={0}

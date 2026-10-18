@@ -133,6 +133,8 @@ enum Pixels {
     /// A rasterised shape's layers (image, cache key, multiplies) and the canvas point their
     /// centres go to.
     Shape(Vec<(std::sync::Arc<RgbaImage>, u64, bool)>, [f64; 2]),
+    /// A sticker's picture (the GIF's current frame) and its cache key.
+    Sticker(std::sync::Arc<RgbaImage>, u64),
 }
 
 /// The media file a segment plays.
@@ -283,6 +285,8 @@ pub struct PreviewEngine {
     font_files: HashMap<String, String>,
     /// Text-style textures (premultiplied) by path; `None` if unreadable.
     textures: HashMap<String, Option<std::sync::Arc<RgbaImage>>>,
+    /// Decoded stickers.
+    stickers: crate::sticker::Stickers,
     prefetch: Prefetcher,
     tick: u64,
 }
@@ -308,6 +312,7 @@ impl PreviewEngine {
             exposure_luts: HashMap::new(),
             filters: HashMap::new(),
             textures: HashMap::new(),
+            stickers: Default::default(),
             font_files: HashMap::new(),
             prepared: HashMap::new(),
             prefetch: Prefetcher::new(),
@@ -916,6 +921,11 @@ impl PreviewEngine {
             }
             return Ok(Some(Pixels::Filter(self.filters[&bundle].clone(), strength)));
         }
+        // A library sticker: its image, or its GIF's frame now.
+        if let Some(sticker) = self.project.materials.stickers.iter().find(|m| m.id == seg.material) {
+            let (img, key) = self.stickers.frame(sticker, seg.local_time(t), self.tick).map_err(|why| (sticker.path.clone(), why))?;
+            return Ok(Some(Pixels::Sticker(img, key)));
+        }
         let Some(media) = self.project.materials.media.iter().find(|m| m.id == seg.material).cloned() else { return Ok(None) };
         if media.kind == MediaKind::Audio {
             return Ok(None);
@@ -1191,6 +1201,24 @@ impl PreviewEngine {
                                 app_filters: None,
                             })
                             .collect();
+                    }
+                    // Centred on its position at its own size (crate::sticker), scaled and
+                    // turned with the clip.
+                    Pixels::Sticker(img, key) => {
+                        let [sw, sh] = crate::sticker::size_on_canvas(img.width, img.height, w);
+                        Layer {
+                            source: Source::Cached(*key, img),
+                            center: [w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0],
+                            size: [sw * scale[0].abs(), sh * scale[1].abs()],
+                            rotation: rot,
+                            flip_h: scale[0] < 0.0,
+                            flip_v: scale[1] < 0.0,
+                            opacity: 1.0,
+                            adjust: None,
+                            mattes: Vec::new(),
+                            multiply: false,
+                            app_filters: None,
+                        }
                     }
                     Pixels::Text(img, key, at) => Layer {
                         source: Source::Cached(*key, img),

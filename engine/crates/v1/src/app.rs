@@ -455,17 +455,21 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
             clip.insert("type".into(), json!("filter"));
             let name = match project.materials.get(&seg.material) {
                 Some(MaterialRef::Effect(e)) if !e.name.is_empty() => e.name.clone(),
+                Some(MaterialRef::Sticker(s)) => s.library.as_ref().map(|l| l.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Sticker".into()),
                 Some(MaterialRef::Foreign(f)) => f.raw.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(String::from).unwrap_or_else(|| f.kind.clone()),
                 _ => kind_name(track.kind).to_string(),
             };
             clip.insert("name".into(), json!(name));
             clip.insert("category".into(), json!("CapCut"));
             // What it is, and whether the engine draws it: filters with their bundle, at their
-            // strength; effects, stickers and adjustment layers not yet.
+            // strength, and stickers with their picture, at their opacity (the bar's
+            // intensity); effects and adjustment layers not yet.
             let filter = project.materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter);
+            let sticker = project.materials.stickers.iter().find(|s| s.id == seg.material);
             clip.insert("draftKind".into(), json!(kind_name(track.kind)));
-            clip.insert("drawn".into(), json!(filter.is_some_and(|e| e.resource.is_some()) && track.kind == TrackKind::Filter));
-            clip.insert("intensity".into(), num(filter.and_then(|e| e.params.get("intensity").copied()).unwrap_or(1.0) * 100.0));
+            clip.insert("drawn".into(), json!((filter.is_some_and(|e| e.resource.is_some()) && track.kind == TrackKind::Filter) || sticker.is_some_and(|s| !s.path.is_empty())));
+            let intensity = if sticker.is_some() { seg.opacity.value as f64 } else { filter.and_then(|e| e.params.get("intensity").copied()).unwrap_or(1.0) };
+            clip.insert("intensity".into(), num(intensity * 100.0));
         }
     }
 
@@ -922,6 +926,27 @@ mod tests {
         let e = back.materials.effects.iter().find(|e| e.id == f.material).unwrap();
         assert_eq!((e.params["intensity"], e.resource.as_deref(), e.category), (0.8, Some("/bundle/sunset"), EffectCategory::Filter));
         assert_eq!(back.materials.effects.iter().find(|e| e.id.0 == "lut").unwrap().params["intensity"], 0.3);
+    }
+
+    /// A sticker bar is drawn when its picture is here, and its intensity is the sticker's
+    /// opacity: set in the app, it sets the segment's opacity.
+    #[test]
+    fn a_sticker_bars_intensity_is_its_opacity() {
+        let mut p = project();
+        let lib = Some(LibraryRef { app: "capcut".into(), resource_id: "7".into(), name: "Countdown".into(), category: String::new() });
+        p.materials.stickers.push(Sticker { id: MaterialId("st".into()), path: "/cache/final.gif".into(), animated: true, width: 280, height: 280, library: lib.clone() });
+        p.materials.stickers.push(Sticker { id: MaterialId("gone".into()), path: String::new(), animated: false, width: 0, height: 0, library: lib });
+        let bar = |id: &str, material: &str| Segment { id: id.into(), material: MaterialId(material.into()), source: None, attachments: Vec::new(), render_index: 15000, opacity: Animated::constant(0.8), ..segment(&p, "v").clone() };
+        let segments = vec![bar("s", "st"), Segment { target: TimeRange::new(Micros(4_500_000), Micros(1_000_000)), ..bar("g", "gone") }];
+        p.tracks.push(Track { id: "ts".into(), kind: TrackKind::Sticker, name: String::new(), segments, muted: false, hidden: false, locked: false });
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let s = clip_mut(&mut doc, "s");
+        assert_eq!((s["name"].as_str(), s["drawn"].as_bool(), s["intensity"].as_f64(), s["draftKind"].as_str()), (Some("Countdown"), Some(true), Some(80.0), Some("sticker")));
+        s["intensity"] = json!(40);
+        assert_eq!(clip_mut(&mut doc, "g")["drawn"].as_bool(), Some(false));
+        let back = import_v1_json(&doc).unwrap().project;
+        assert_eq!((segment(&back, "s").opacity.value, segment(&back, "s").material.0.as_str()), (0.4, "st"));
+        assert_eq!(segment(&back, "g").opacity.value, 0.8);
     }
 
     /// The app resizes a caption's box about its middle when the engine lays the text out

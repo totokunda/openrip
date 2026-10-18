@@ -21,7 +21,8 @@ Agreed 2026-10-16. What the engine draws next is chosen from two sources: what r
 | Transitions | 8, 2 drafts | ✅ Blink, White Flash, White Fade ([transitions.md](../parity/transitions.md)) |
 | Voice effects | 8, 5 drafts | ✅ Deep, Low, Voice Crisper, Demonized; Deep 2 without its reverb ([voice-effects.md](../parity/voice-effects.md)) |
 | Masks | 2 drafts | ✅ Rectangle, matching both covers ([masks.md](../parity/masks.md)); other shapes not drawn yet |
-| Stickers, video effects | 1–4 each | ❌ |
+| Stickers | 11, 4 drafts (1 shown; the rest on hidden tracks) | ✅ PNG and GIF stickers from CapCut's cache (2026-10-17, [stickers.md](../parity/stickers.md)); their size is provisional, unchecked against CapCut |
+| Video effects | 1 | ❌ its bundle isn't in CapCut's cache |
 | AI features (matting, smart crop, AI denoise) | 1–29 | No models in OpenRip; background removal draws from the masks CapCut saved in the draft ([cutouts.md](../parity/cutouts.md)) |
 
 ## Library content

@@ -50,6 +50,8 @@ pub struct Materials {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub loudness: Vec<Loudness>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stickers: Vec<Sticker>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreign: Vec<Foreign>,
 }
 
@@ -70,6 +72,7 @@ pub enum MaterialRef<'a> {
     ColorWheels(&'a ColorWheels),
     Animations(&'a Animations),
     Loudness(&'a Loudness),
+    Sticker(&'a Sticker),
     Foreign(&'a Foreign),
 }
 
@@ -91,6 +94,7 @@ impl MaterialRef<'_> {
             MaterialRef::ColorWheels(m) => AnyMaterial::ColorWheels(m.clone()),
             MaterialRef::Animations(m) => AnyMaterial::Animations(m.clone()),
             MaterialRef::Loudness(m) => AnyMaterial::Loudness(m.clone()),
+            MaterialRef::Sticker(m) => AnyMaterial::Sticker(m.clone()),
             MaterialRef::Foreign(m) => AnyMaterial::Foreign(m.clone()),
         }
     }
@@ -119,6 +123,7 @@ impl Materials {
         find!(color_wheels, ColorWheels);
         find!(animations, Animations);
         find!(loudness, Loudness);
+        find!(stickers, Sticker);
         find!(foreign, Foreign);
         None
     }
@@ -142,6 +147,7 @@ impl Materials {
             + self.color_wheels.len()
             + self.animations.len()
             + self.loudness.len()
+            + self.stickers.len()
             + self.foreign.len()
     }
 
@@ -841,6 +847,26 @@ pub struct ColorWheels {
     pub intensity: f64,
 }
 
+/// A sticker from the source app's library (CapCut's info stickers): an image, or an animated
+/// GIF that loops, drawn centred on the segment's position at a size of its own (not fitted
+/// to the canvas like a photo).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Sticker {
+    pub id: MaterialId,
+    /// The image or GIF in the source app's downloaded bundle; empty when the bundle isn't on
+    /// this machine (the sticker is then left out).
+    pub path: String,
+    #[serde(default)]
+    pub animated: bool,
+    /// One frame's size in pixels, as the bundle describes it (0 if it doesn't).
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<LibraryRef>,
+}
+
 /// A material OpenRip doesn't interpret yet, kept verbatim.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Foreign {
@@ -870,6 +896,7 @@ pub enum AnyMaterial {
     ColorWheels(ColorWheels),
     Animations(Animations),
     Loudness(Loudness),
+    Sticker(Sticker),
     Foreign(Foreign),
 }
 
@@ -890,6 +917,7 @@ impl AnyMaterial {
             AnyMaterial::ColorWheels(m) => &m.id,
             AnyMaterial::Animations(m) => &m.id,
             AnyMaterial::Loudness(m) => &m.id,
+            AnyMaterial::Sticker(m) => &m.id,
             AnyMaterial::Foreign(m) => &m.id,
         }
     }
@@ -917,6 +945,7 @@ impl Materials {
             AnyMaterial::ColorWheels(m) => put(&mut self.color_wheels, m, index),
             AnyMaterial::Animations(m) => put(&mut self.animations, m, index),
             AnyMaterial::Loudness(m) => put(&mut self.loudness, m, index),
+            AnyMaterial::Sticker(m) => put(&mut self.stickers, m, index),
             AnyMaterial::Foreign(m) => put(&mut self.foreign, m, index),
         }
     }
@@ -944,6 +973,7 @@ impl Materials {
         take!(color_wheels, ColorWheels);
         take!(animations, Animations);
         take!(loudness, Loudness);
+        take!(stickers, Sticker);
         take!(foreign, Foreign);
         None
     }

@@ -18,6 +18,7 @@ pub mod animation;
 #[cfg(target_os = "macos")]
 pub mod caption;
 pub mod colour;
+mod gif;
 pub mod mask;
 #[cfg(target_os = "macos")]
 pub mod transition;
@@ -26,6 +27,7 @@ mod player;
 pub mod preview;
 mod scrub;
 mod server;
+pub mod sticker;
 pub mod thumbs;
 mod waveform;
 
