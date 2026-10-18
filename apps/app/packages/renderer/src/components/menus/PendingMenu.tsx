@@ -1,6 +1,6 @@
 import React from "react";
 import type { IconType } from "react-icons";
-import { LuCaptions, LuFilm, LuLayoutTemplate, LuMusic, LuSlidersHorizontal, LuSparkles, LuSticker } from "react-icons/lu";
+import { LuFilm, LuLayoutTemplate, LuMusic, LuSlidersHorizontal, LuSparkles, LuSticker } from "react-icons/lu";
 import { useSidebarStore } from "@/lib/sidebar";
 import { useInspectorStore } from "@/lib/inspector";
 import { useControlsStore } from "@/lib/control";
@@ -10,7 +10,7 @@ import { useClipStore } from "@/lib/clip";
  * The left panel's tabs that have nothing to offer yet: what's coming, and what to use
  * meanwhile. Nothing here is a placeholder posing as content.
  */
-export type Pending = "audio" | "stickers" | "effects" | "captions" | "adjustment" | "templates" | "library";
+export type Pending = "audio" | "stickers" | "effects" | "adjustment" | "templates" | "library";
 
 const COPY: Record<Pending, { icon: IconType; title: string; body: string }> = {
   audio: {
@@ -27,11 +27,6 @@ const COPY: Record<Pending, { icon: IconType; title: string; body: string }> = {
     icon: LuSparkles,
     title: "Video effects are coming",
     body: "Effects you can drop on a clip will live here. For colour, blur, sharpness and grain on one clip, use its Adjust tab.",
-  },
-  captions: {
-    icon: LuCaptions,
-    title: "Captions are coming",
-    body: "Captions from subtitle (SRT) files will be added here. Captions in an opened CapCut project already show, and can be edited in the inspector.",
   },
   adjustment: {
     icon: LuSlidersHorizontal,

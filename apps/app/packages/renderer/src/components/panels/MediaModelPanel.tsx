@@ -28,6 +28,8 @@ import TextMenu from "../menus/TextMenu";
 import TransitionMenu from "../menus/TransitionMenu";
 import CanvasToolsMenu from "../menus/CanvasToolsMenu";
 import PendingMenu, { type Pending } from "../menus/PendingMenu";
+import CaptionsMenu from "../menus/CaptionsMenu";
+import { PRESET_CATEGORIES } from "../menus/TextMenu";
 
 interface MediaModelPanelProps {
   id?: string;
@@ -65,8 +67,11 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
     { id: "music", label: "Music" },
     { id: "sounds", label: "Sound effects" },
   ],
+  // CapCut's Text column: Add text, its presets by category, Local captions (the file import).
   text: [
-    { id: "styles", label: "Add text" },
+    { id: "add", label: "Add text" },
+    ...PRESET_CATEGORIES.map((c) => ({ id: `presets:${c}`, label: c, under: "Presets" })),
+    { id: "captions", label: "Local captions" },
     { id: "animations", label: "Animations" },
   ],
   stickers: [
@@ -75,7 +80,10 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
     { id: "shapes", label: "Shapes" },
   ],
   effects: [{ id: "effects", label: "Video effects" }],
-  captions: [{ id: "captions", label: "Captions" }],
+  captions: [
+    { id: "add", label: "Add captions" },
+    { id: "templates", label: "Templates" },
+  ],
   adjustment: [{ id: "adjustment", label: "Adjustment" }],
   templates: [{ id: "templates", label: "Templates" }],
 };
@@ -188,7 +196,9 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
       case "filters":
         return <FilterMenu />;
       case "text":
-        return <TextMenu part={sub === "animations" ? "animations" : "styles"} />;
+        return <TextMenu part={sub} />;
+      case "captions":
+        return <CaptionsMenu part={sub} />;
       case "transitions":
         return <TransitionMenu category={sub || undefined} />;
       case "stickers":
