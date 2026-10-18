@@ -74,7 +74,9 @@ export interface ClipTransform {
  * - the Adjust sliders ("brightness", …, on their scale); "intensity", a filter bar's
  *   strength or a sticker bar's opacity (0–100);
  * - a text's "color" (#rrggbb), "fontSize", "stroke", "strokeWidth", "strokeOpacity",
- *   "shadowColor", "shadowOpacity", "shadowBlur", "backgroundColor", "backgroundOpacity";
+ *   "shadowColor", "shadowOpacity", "shadowBlur", "backgroundColor", "backgroundOpacity",
+ *   "glowColor" (#rrggbb), "glowIntensity", "glowRange" (0–100, as CapCut keyframes its glow;
+ *   it doesn't keyframe spacing);
  * - "draft:<id>": one of a converted clip's own adjustments (`draftAdjustments`) on CapCut's
  *   scale, or "draft:<id>:hue" (":saturation", ":lightness") for an HSL range;
  * - the colour tools (`color`): "adjust:<slider>" on CapCut's scale, "hsl:<range>:hue"
@@ -107,6 +109,9 @@ export type KeyframeProperty =
   | "shadowBlur"
   | "backgroundColor"
   | "backgroundOpacity"
+  | "glowColor"
+  | "glowIntensity"
+  | "glowRange"
   | `draft:${string}`
   | `adjust:${AdjustSlider}`
   | `hsl:${HslRange}:${HslPart}`
@@ -476,6 +481,49 @@ export type StarClipProps = ShapeClipProps & {
   points?: number;
 };
 
+/**
+ * A gradient fill (CapCut's): colours ("#rrggbb" or "#rrggbbaa") at `stops` along a line
+ * through the middle of each character, line or the whole text (`span`, "character" by
+ * default), in the direction `angle` (degrees counter-clockwise from +x, +y up: 0 runs left to
+ * right, 90 bottom to top). Stops are 0–1, ascending; without them the colours spread evenly.
+ */
+export type TextGradient = {
+  colors: string[];
+  stops?: number[];
+  angle: number;
+  span?: "character" | "line" | "text";
+};
+
+/** A further outline outside a text's stroke: its width in px (as `strokeWidth`), opacity 0–100. */
+export type TextOutline = { color: string; width: number; opacity?: number };
+
+/**
+ * What a layer of a text style is painted with: a colour, a gradient, or the clip's own text
+ * colour (`textColor`), at an opacity (0–100, 100 when left out).
+ */
+export type TextStylePaint =
+  | { color: string; opacity?: number }
+  | { gradient: TextGradient; opacity?: number }
+  | { textColor: true; opacity?: number };
+
+/**
+ * The Effects tab's text style on a text clip (lib/text-styles.ts lists OpenRip's own): layers
+ * drawn by the engine, shadows at the back, then the outlines (the first on top), then the
+ * fill, in place of the clip's colour and stroke. Sizes are fractions of the font size: an
+ * outline's `width` (how far it reaches outside the glyphs), a shadow's `distance` and `blur`
+ * (`angle` in degrees counter-clockwise from +x, +y up). A glow under it all (`intensity` and
+ * `range` 0–100; the clip's own glow wins). `id` is a built-in's, or "" for a CapCut library
+ * style on a converted clip (drawn from CapCut's bundle, `name` its name; kept until replaced).
+ */
+export type TextEffectStyle = {
+  id: string;
+  name?: string;
+  fill?: TextStylePaint;
+  strokes?: { width: number; paint: TextStylePaint }[];
+  shadows?: { paint: TextStylePaint; distance: number; angle: number; blur: number }[];
+  glow?: { color?: string | null; intensity: number; range: number };
+};
+
 export type TextClipProps = ClipProps & {
   type: "text";
   /** How the text is put over what's under it (CapCut's Blend › Mode). */
@@ -509,6 +557,29 @@ export type TextClipProps = ClipProps & {
   backgroundColor?: string;
   backgroundOpacity?: number;
   backgroundCornerRadius?: number;
+  /**
+   * CapCut's Character and Line fields: steps of 1/20 of the font size between characters and
+   * between lines (−10…100; 0 is CapCut's default). Not keyframeable (CapCut doesn't key them).
+   */
+  letterSpacing?: number;
+  lineSpacing?: number;
+  /** A gradient that paints the text in place of `color` (whose opacity still applies). */
+  fillGradient?: TextGradient | null;
+  /** More outlines outside the stroke, each drawn under the ones before it. */
+  moreStrokes?: TextOutline[];
+  /**
+   * CapCut's Glow: its colour ("" or none for the text's own colours), Intensity and Range
+   * (0–100; CapCut starts at 30 and 20) and offsets (−100…100, the light moved right and down;
+   * 0 spreads it from the middle of the text).
+   */
+  glowEnabled?: boolean;
+  glowColor?: string | null;
+  glowIntensity?: number;
+  glowRange?: number;
+  glowOffsetX?: number;
+  glowOffsetY?: number;
+  /** The Effects tab's style (lib/text-styles.ts), or none. */
+  textEffect?: TextEffectStyle | null;
   // Animation
   animationIn?: ClipAnimationIn | null;
   animationOut?: ClipAnimation | null;

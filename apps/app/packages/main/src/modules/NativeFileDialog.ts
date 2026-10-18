@@ -14,6 +14,7 @@ export class NativeFileDialog implements AppModule {
     // Register once; remove any previous to avoid duplication during dev HMR
     try {
       ipcMain.removeHandler("dialog:pick-media");
+      ipcMain.removeHandler("dialog:pick-save-path");
     } catch {}
 
     ipcMain.handle(
@@ -32,6 +33,20 @@ export class NativeFileDialog implements AppModule {
         });
         if (res.canceled) return [] as string[];
         return res.filePaths as string[];
+      },
+    );
+
+    // Where to save a file (a caption export): the chosen path, or null if cancelled.
+    ipcMain.handle(
+      "dialog:pick-save-path",
+      async (_evt, opts: OpenDialogOptions) => {
+        const res = await dialog.showSaveDialog({
+          filters: opts?.filters,
+          title: opts?.title,
+          defaultPath: opts?.defaultPath,
+          properties: ["createDirectory", "showOverwriteConfirmation"],
+        });
+        return res.canceled || !res.filePath ? null : res.filePath;
       },
     );
   }

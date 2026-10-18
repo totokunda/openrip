@@ -143,6 +143,21 @@ async function pickMediaPaths(options: {
   }
 }
 
+/** Ask where to save a file (the native save dialog); null if cancelled. Write it with
+ * `writeFileBuffer`. */
+async function pickSavePath(options: {
+  filters?: { name: string; extensions: string[] }[];
+  title?: string;
+  defaultPath?: string;
+}): Promise<string | null> {
+  try {
+    const path = await ipcRenderer.invoke("dialog:pick-save-path", options ?? {});
+    return typeof path === "string" && path ? path : null;
+  } catch {
+    return null;
+  }
+}
+
 async function listConvertedMedia(
   folderUuid?: string,
 ): Promise<ConvertedMediaItem[]> {
@@ -611,6 +626,7 @@ export {
   renameMediaPair,
   deleteMediaPair,
   pickMediaPaths,
+  pickSavePath,
   listConvertedMedia,
   importMediaPaths,
   ensureUniqueConvertedName,

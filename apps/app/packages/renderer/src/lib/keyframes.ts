@@ -27,7 +27,7 @@ import { CHROMA_PROPERTIES, setChroma } from "./compositing.ts";
 const SAME_FRAME = 1e-6;
 
 /** The text properties whose values are colours (#rrggbb). */
-const COLOUR_PROPERTIES = new Set<string>(["color", "stroke", "shadowColor", "backgroundColor"]);
+const COLOUR_PROPERTIES = new Set<string>(["color", "stroke", "shadowColor", "backgroundColor", "glowColor"]);
 
 /** The app's Adjust sliders that can be keyframed (fields on video and image clips). */
 export const ADJUST_PROPERTIES = ["brightness", "contrast", "hue", "saturation", "sharpness", "noise", "blur", "vignette"] as const;
@@ -44,6 +44,9 @@ export const TEXT_PROPERTIES = [
   "shadowBlur",
   "backgroundColor",
   "backgroundOpacity",
+  "glowColor",
+  "glowIntensity",
+  "glowRange",
 ] as const;
 
 /** Which properties a clip of this type can keyframe (besides its `draft:` adjustments). */
@@ -516,6 +519,14 @@ export const propertyValue = (clip: AnyClipProps, property: KeyframeProperty): K
       return c.volume ?? 0;
     case "intensity":
       return c.intensity ?? 100;
+    // A glow in the text's own colours keys from the text's colour; CapCut's glow starts at
+    // 30 and 20.
+    case "glowColor":
+      return c.glowColor || c.color || "#ffffff";
+    case "glowIntensity":
+      return c.glowIntensity ?? 30;
+    case "glowRange":
+      return c.glowRange ?? 20;
   }
   if (property.startsWith("draft:")) {
     const [id, part] = draftParts(property);
