@@ -49,6 +49,7 @@ const ReferencePicker: React.FC<{
         className="flex-1 min-w-0 h-[22px] px-2 rounded-[4px] bg-brand flex flex-row items-center gap-1.5 text-left text-[12px] text-brand-lighter disabled:opacity-50 outline-none focus-visible:ring-1 focus-visible:ring-[#515151]"
       >
         <span className={cn("flex-1 truncate", !chosen && "text-[#8a8a8a]")}>{chosen ? nameOf(chosen) : options.length ? "Select a reference clip" : "No other clip on the timeline"}</span>
+        {chosen && <span className="shrink-0 text-[11px] tabular-nums text-[#8a8a8a]">{timecode(chosen.startFrame ?? 0, fps)}</span>}
         <LuChevronDown className="w-3 h-3 shrink-0 text-brand-light" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className={cn(menu, "w-[240px] max-h-[280px] overflow-y-auto")}>
