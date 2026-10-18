@@ -252,3 +252,27 @@ Landscape: the 540×540 sticker (0–1 s) and the GIF (1–2 s) at scale 1, cent
    osascript -e 'quit app "CapCut"'; while pgrep -x CapCut >/dev/null; do sleep 1; done; python3 /Users/tosinkuye/openrip/bench/calibration/make_draft.py --template "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/1015" --register --replace openrip-calibration-6 openrip-calibration-6-landscape && open -a CapCut
    ```
 2. In CapCut, export into `bench/calibration/out/` at **1080p, 30 fps, H.264, bitrate Higher**: `openrip-calibration-6` named `openrip-calibration-6`, and `openrip-calibration-6-landscape` named `openrip-calibration-6-landscape`.
+
+## Session 7: text spacing, outlines, gradients and glows
+
+`openrip-calibration-7` (9:16, 11 s on black) checks what no local draft uses ([text-styles.md](text-styles.md)): the units of CapCut's letter and line spacing, a second stroke, gradient fills and their direction, and its glow. All text is CapCut's default font at size 15, centred.
+
+| Time | Content |
+|---|---|
+| 0–2 s | "Spacing" at Character 5 (`letter_spacing` 0.25), then 20 (1.0) |
+| 2–4 s | two lines at Line 0 (`line_spacing` 0.02), then 10 (0.52) |
+| 4–5 s | "Outlines" with a black stroke of 0.06 and a yellow one of 0.15 |
+| 5–7 s | "Gradient" filled red to blue, each character, at 0° then 90° |
+| 7–10 s | "Glow": CapCut's first glow style at its defaults (strength 0.3, range 0.2); green at strength 0.6 and range 0.4; spread from right of the middle (`dirX` 0.2) |
+| 10–11 s | "Plain", for the text's own look |
+
+The glow's rich-text keys (`bloom` with `enable`, `id`, `path`, `colorCustomized`, `color`, `strength`, `range`, `dirX`, `dirY`) are read from CapCut's engine, not from a draft. If CapCut shows no glow on 7–10 s, tick Glow on those three clips (and set the second's colour, intensity and range, the third's X-offset) before exporting: the saved draft then has the real keys too.
+
+### Steps
+
+1. Install the draft (quits CapCut, writes it, reopens it):
+   ```
+   osascript -e 'quit app "CapCut"'; while pgrep -x CapCut >/dev/null; do sleep 1; done; python3 /Users/tosinkuye/openrip/bench/calibration/make_draft.py --template "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/1015" --register --replace openrip-calibration-7 && open -a CapCut
+   ```
+2. In CapCut, export `openrip-calibration-7` into `bench/calibration/out/` at **1080p, 30 fps, H.264, bitrate Higher**, named `openrip-calibration-7`.
+3. `openrip-dev export-parity "$HOME/Movies/CapCut/User Data/Projects/com.lveditor.draft/openrip-calibration-7" bench/calibration/out/openrip-calibration-7.mp4 --every 0.5`.

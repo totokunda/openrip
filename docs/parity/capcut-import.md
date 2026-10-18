@@ -21,7 +21,7 @@ The importer only reads CapCut's files; it never writes to CapCut's data folder.
 | Import time | 3.4 ms average, 13.4 ms max per draft |
 | Media files missing on this machine | 740 of 1,026 (→ relink is a P0 feature) |
 
-**Mapped to OpenRip types:** videos, photos, audios, texts (rich runs, stroke, shadow, background), speeds, canvas fills, audio fades, transitions, Adjust sliders (brightness, contrast, saturation, sharpen, highlights, shadows, temperature, tint, vignette, blacks, whites, exposure, fade, clarity), **HSL (8 named ranges plus custom colour, −100…100), tone curves (bezier anchors per luma/R/G/B channel), primary and log colour wheels (lift/gamma/gain/offset)**, filters/effects, and keyframes: the transform, opacity, volume, the Adjust sliders, filter strength, colour wheels, HSL, a text's style and a mask's geometry, with CapCut's curves ([keyframes.md](keyframes.md)).
+**Mapped to OpenRip types:** videos, photos, audios, texts (rich runs, strokes, shadow, background, spacing, gradient fills and glow: [text-styles.md](text-styles.md)), speeds, canvas fills, audio fades, transitions, Adjust sliders (brightness, contrast, saturation, sharpen, highlights, shadows, temperature, tint, vignette, blacks, whites, exposure, fade, clarity), **HSL (8 named ranges plus custom colour, −100…100), tone curves (bezier anchors per luma/R/G/B channel), primary and log colour wheels (lift/gamma/gain/offset)**, filters/effects, and keyframes: the transform, opacity, volume, the Adjust sliders, filter strength, colour wheels, HSL, a text's style and glow, and a mask's geometry, with CapCut's curves ([keyframes.md](keyframes.md)).
 
 **Kept verbatim, not interpreted yet** (ordered by how much real projects use them):
 

@@ -10,6 +10,7 @@ Agreed 2026-10-16. What the engine draws next is chosen from two sources: what r
 | Caption text clips (`subtitle`) | 1,840 clips, 27 drafts | ✅ stroke (1,755), background, wrap, bold/italic |
 | Word-by-word captions (`caption` animations) and subtitle templates (`text_templates`) | 43 + 43, 6 drafts | ✅ the word-colour and "pop" styles (38 of 43, [captions.md](../parity/captions.md)); ❌ multi-line (5) |
 | Library text styles (`text_effect`) | 185, 16 drafts | ✅ both kinds ([capcut-bundles.md](../parity/capcut-bundles.md)) |
+| Text spacing, glow, gradient fills, several strokes | spacing on 50 captions in 1 draft; the rest 0 | ✅ drawn with CapCut's maths, unchecked against its output (2026-10-18, [text-styles.md](../parity/text-styles.md)); OpenRip's own Effects styles and presets for new text; ❌ bubbles (library image bundles) |
 | Curved text (`text_curve`) | 3 enabled (125 carry it switched off), 1 draft | ✅ fitted to its export, provisional ([curved-text.md](../parity/curved-text.md)) |
 | Text shapes (`text_shape`) | 122, 5 drafts | Nothing to draw: they name a "Bubble" with no bundle, and CapCut's covers and export show plain text |
 | Text intros | 47, 22 drafts | ✅ Type 1, Type 2, Typewriter (40); ❌ 7 others (single uses under 2.6 s; Preview Type's 2 run under 0.4 s) |
