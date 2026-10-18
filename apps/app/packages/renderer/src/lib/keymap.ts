@@ -275,6 +275,12 @@ export const shortcutHint = (id: string): string => {
   return c ? keyLabels(c).join("") : "";
 };
 
+/** A tooltip naming an action's key as it is now: "Delete left (Q)", or the name alone. */
+export const useShortcutTitle = (name: string, id: string): string => {
+  const c = useKeymapStore((s) => s.bindings[id]?.[0]);
+  return c ? `${name} (${keyLabels(c).join("")})` : name;
+};
+
 // ---- Showing keys ----
 
 const MAC_MODS: Record<string, string> = { Mod: "⌘", Ctrl: "⌃", Alt: "⌥", Shift: "⇧" };

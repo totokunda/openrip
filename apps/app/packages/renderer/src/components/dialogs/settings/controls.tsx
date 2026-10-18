@@ -14,8 +14,8 @@ export const Row: React.FC<{ id: string; label: React.ReactNode; children: React
   disabled,
   className,
 }) => (
-  <div data-testid={`settings-row-${id}`} data-disabled={disabled ? "true" : undefined} className={cn("grid grid-cols-[164px_1fr] gap-x-6 mb-6 last:mb-0", className)}>
-    <div className={cn("min-h-[22px] flex items-start pt-[3px] text-[12px] leading-4 text-left", disabled ? "text-[#7a7a7a]" : "text-brand-light")}>{label}</div>
+  <div data-testid={`settings-row-${id}`} data-disabled={disabled ? "true" : undefined} className={cn("grid grid-cols-[164px_268px] mb-6 last:mb-0", className)}>
+    <div className={cn("min-h-[22px] flex items-start pt-[3px] text-[12px] leading-4 text-left whitespace-nowrap tracking-[-0.1px]", disabled ? "text-[#7a7a7a]" : "text-brand-light")}>{label}</div>
     <div className="min-w-0 flex flex-col items-start gap-1.5 text-left">{children}</div>
   </div>
 );
@@ -158,7 +158,7 @@ export function Choice<T extends string | number>({
   value,
   options,
   onChange,
-  width = 355,
+  width = 268,
   testId,
   disabled,
 }: {

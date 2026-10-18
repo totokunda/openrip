@@ -138,11 +138,11 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
         <Radio testId="settings-cache-keep" checked={!draft.cacheAutoDelete} onChange={() => set("cacheAutoDelete", false)}>
           {t("settings.cache.keep")}
         </Radio>
-        <div className="flex items-center gap-2 mt-2">
+        <div className="flex items-center gap-2 mt-2 whitespace-nowrap">
           <Radio testId="settings-cache-auto" checked={draft.cacheAutoDelete} onChange={() => set("cacheAutoDelete", true)}>
             {t("settings.cache.autoDelete")}
           </Radio>
-          <Choice testId="settings-cache-age" width={70} value={draft.cacheMaxAgeDays} options={CACHE_AGES.map((d) => ({ value: d, label: String(d) }))} onChange={(v) => setDraft((d) => ({ ...d, cacheMaxAgeDays: v, cacheAutoDelete: true }))} />
+          <Choice testId="settings-cache-age" width={56} value={draft.cacheMaxAgeDays} options={CACHE_AGES.map((d) => ({ value: d, label: String(d) }))} onChange={(v) => setDraft((d) => ({ ...d, cacheMaxAgeDays: v, cacheAutoDelete: true }))} />
           <span className="text-[12px] font-medium text-brand-lighter">{t("settings.cache.daysAgo")}</span>
         </div>
       </Row>
@@ -254,7 +254,7 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
         <div className="flex items-center gap-2">
           <Choice
             testId="settings-auto-opt"
-            width={338}
+            width={246}
             value={draft.autoOptimization}
             options={[
               { value: "none", label: t("settings.autoOpt.none") },
@@ -401,7 +401,7 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
               ))}
             </div>
           </div>
-          <div data-testid={`settings-panel-${tab}`} className="mx-[15px] mt-[14px] h-[602px] max-h-[calc(100vh-180px)] overflow-y-auto custom-scrollbar">
+          <div data-testid={`settings-panel-${tab}`} className="mx-[15px] mt-[14px] max-h-[min(602px,calc(100vh-180px))] overflow-y-auto overflow-x-hidden custom-scrollbar rounded-[6px]">
             {tab === "draft" ? draftTab : tab === "edit" ? editTab : tab === "performance" ? performanceTab : generalTab}
           </div>
           <div className="shrink-0 flex gap-2 px-[15px] pt-[14px] pb-[15px]">

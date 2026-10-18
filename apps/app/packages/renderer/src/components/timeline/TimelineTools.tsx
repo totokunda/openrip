@@ -12,6 +12,7 @@ import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { addMarkerAtPlayhead, deleteToPlayhead, zoomTimelineTo } from "@/lib/timeline-shortcuts";
 import { mainTrackOf } from "@/lib/timeline-edit";
+import { useShortcutTitle } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
 
 const buttonClass = (disabled: boolean) =>
@@ -38,7 +39,7 @@ const useCanTrim = () => {
 export const DeleteLeftButton = () => {
   const disabled = !useCanTrim();
   return (
-    <div title="Delete left (Q)" className={buttonClass(disabled)} onClick={() => !disabled && deleteToPlayhead("left")}>
+    <div title={useShortcutTitle("Delete left", "deleteLeft")} className={buttonClass(disabled)} onClick={() => !disabled && deleteToPlayhead("left")}>
       <TbArrowBarToLeft className="text-brand-light h-4 w-4" />
     </div>
   );
@@ -47,7 +48,7 @@ export const DeleteLeftButton = () => {
 export const DeleteRightButton = () => {
   const disabled = !useCanTrim();
   return (
-    <div title="Delete right (W)" className={buttonClass(disabled)} onClick={() => !disabled && deleteToPlayhead("right")}>
+    <div title={useShortcutTitle("Delete right", "deleteRight")} className={buttonClass(disabled)} onClick={() => !disabled && deleteToPlayhead("right")}>
       <TbArrowBarToRight className="text-brand-light h-4 w-4" />
     </div>
   );
@@ -56,7 +57,7 @@ export const DeleteRightButton = () => {
 export const AddMarkerButton = () => {
   const disabled = useClipStore((s) => s.clips.length === 0);
   return (
-    <div title="Add marker (M)" className={buttonClass(disabled)} onClick={() => !disabled && addMarkerAtPlayhead()}>
+    <div title={useShortcutTitle("Add marker", "addMarker")} className={buttonClass(disabled)} onClick={() => !disabled && addMarkerAtPlayhead()}>
       <LuShield className="text-brand-light h-4 w-4" />
     </div>
   );
@@ -91,7 +92,7 @@ export const MagnetToggle = () => {
   // CapCut won't change it while the main track is locked.
   const mainLocked = useClipStore((s) => !!mainTrackOf(s.timelines)?.locked);
   return (
-    <Toggle title="Main track magnet (P)" on={magnet} disabled={mainLocked} onClick={() => setMagnet(!magnet)}>
+    <Toggle title={useShortcutTitle("Main track magnet", "magnet")} on={magnet} disabled={mainLocked} onClick={() => setMagnet(!magnet)}>
       <LuMagnet className="h-3.5 w-3.5" />
     </Toggle>
   );
@@ -101,7 +102,7 @@ export const SnappingToggle = () => {
   const snapping = useControlsStore((s) => s.snapping);
   const setSnapping = useControlsStore((s) => s.setSnapping);
   return (
-    <Toggle title="Auto snapping (N)" on={snapping} onClick={() => setSnapping(!snapping)}>
+    <Toggle title={useShortcutTitle("Auto snapping", "snapping")} on={snapping} onClick={() => setSnapping(!snapping)}>
       <TbSeparatorVertical className="h-4 w-4" />
     </Toggle>
   );
@@ -111,7 +112,7 @@ export const LinkageToggle = () => {
   const linkage = useControlsStore((s) => s.linkage);
   const setLinkage = useControlsStore((s) => s.setLinkage);
   return (
-    <Toggle title="Linkage (`)" on={linkage} onClick={() => setLinkage(!linkage)}>
+    <Toggle title={useShortcutTitle("Linkage", "linkage")} on={linkage} onClick={() => setLinkage(!linkage)}>
       <LuLink className="h-3.5 w-3.5" />
     </Toggle>
   );
@@ -121,7 +122,7 @@ export const ZoomToFitButton = () => {
   const disabled = useClipStore((s) => s.clips.length === 0);
   return (
     <div
-      title="Zoom timeline to fit (⇧Z)"
+      title={useShortcutTitle("Zoom timeline to fit", "zoomToFit")}
       className={cn("flex shrink-0 items-center justify-center h-6 w-6 rounded-[5px] text-brand-light/60 hover:text-brand-light hover:bg-brand-light/10 cursor-pointer", disabled && "opacity-30 cursor-not-allowed")}
       onClick={() => !disabled && zoomTimelineTo(useControlsStore.getState().minZoomLevel)}
     >
