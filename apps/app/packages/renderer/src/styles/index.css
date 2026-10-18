@@ -6,7 +6,12 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  --font-poppins: "Poppins", sans-serif;
+  /* The UI's type is the system's (SF Pro on macOS, Segoe UI on Windows), as CapCut's is.
+     Fonts picked for text clips are loaded separately (main.tsx) and stay as they are. */
+  --font-ui: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* The class most of the UI was given when it used Poppins: it now gives the UI's type. */
+  --font-poppins: var(--font-ui);
+  --font-sans: var(--font-ui);
   --font-inter: "Inter", sans-serif;
   --color-brand-background: #151517;
   --color-brand-background-dark: #0b0b0d;
@@ -25,6 +30,8 @@
 
 body {
   background: #000000;
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
   /* disable scrollbar */
   overflow: hidden;
 }

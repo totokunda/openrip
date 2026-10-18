@@ -1762,7 +1762,7 @@ const TimelineClip: React.FC<
                     y={assetMode ? 12 : 16}
                     text={"Group"}
                     fontSize={assetMode ? 9.5 : 10.5}
-                    fontFamily="Poppins"
+                    fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
                     fontStyle="500"
                     fill="white"
                     align="left"
@@ -1812,7 +1812,7 @@ const TimelineClip: React.FC<
                             y={startY - 1}
                             text={`${it.count}`}
                             fontSize={assetMode ? 9.5 : 11}
-                            fontFamily="Poppins"
+                            fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
                             fill="rgba(255,255,255,0.82)"
                           />
                         </Group>
@@ -1921,7 +1921,7 @@ const TimelineClip: React.FC<
                     ((currentClip as ShapeClipProps)?.shapeType?.slice(1) ?? "")
                   }
                   fontSize={9.5}
-                  fontFamily="Poppins"
+                  fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
                   fontStyle="500"
                   fill="white"
                   align="left"
@@ -1950,7 +1950,7 @@ const TimelineClip: React.FC<
                 }
                 fontSize={10}
                 fontFamily={
-                  (currentClip as TextClipProps)?.fontFamily ?? "Poppins"
+                  (currentClip as TextClipProps)?.fontFamily ?? "-apple-system, BlinkMacSystemFont, sans-serif"
                 }
                 fontStyle="500"
                 fill="#151517"
@@ -1977,7 +1977,7 @@ const TimelineClip: React.FC<
                 y={timelineHeight / 2}
                 text={(currentClip as FilterClipProps)?.name ?? ""}
                 fontSize={9.5}
-                fontFamily={"Poppins"}
+                fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
                 fontStyle="500"
                 fill="#ffffff"
                 align="left"
@@ -2003,7 +2003,7 @@ const TimelineClip: React.FC<
                 y={timelineHeight / 2}
                 text="Drawing"
                 fontSize={9.5}
-                fontFamily="Poppins"
+                fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
                 fontStyle="500"
                 fill="white"
                 align="left"

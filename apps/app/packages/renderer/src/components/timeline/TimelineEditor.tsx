@@ -225,7 +225,7 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
                   text={formatTickLabel(tick.x, tick.format)}
                   fontSize={8.5}
                   fill="rgba(255, 255, 255, 0.4)"
-                  fontFamily="Poppins, system-ui, sans-serif"
+                  fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
                   listening={false}
                 />
               )}
