@@ -60,6 +60,11 @@ class Txt:
     bold: bool = False  # CapCut's B button (bold_width 0.008)
     italic: bool = False  # CapCut's I button (italic_degree 10)
     curve: float = 0.0  # CapCut's curved text angle (text_curve), 0 = straight
+    letter_spacing: float = 0.0  # CapCut's letter_spacing (its Character field / 20)
+    line_spacing: float = 0.02  # CapCut's line_spacing (0.02 at its Line 0, + Line / 20)
+    strokes: tuple = ()  # (width, (r, g, b)) per stroke, first on top; replaces `stroke`
+    gradient: dict = None  # the fill's rich-text gradient: {"color": [[r, g, b], …], "percent", "angle", "mode"}
+    glow: dict = None  # the style's `bloom` over the defaults below (CapCut's first glow style)
 
 
 @dataclass
@@ -80,6 +85,14 @@ _CURVE = "OpenRip bends this line"
 STICKERS = {"png_a": "7314575603322146056", "png_b": "7388438985074330887", "png_c": "7227150928544140550", "gif": "7505300385456819517"}
 _RECT = dict(width=0.5, height=0.3)
 _WRAP = "one two three four five six seven eight nine ten eleven twelve thirteen"
+# CapCut's first glow style (Text ▸ Glow, its defaults: intensity 30, range 20, offsets 0) and
+# where its bundle sits in CapCut's cache. The rich-text `bloom` keys are read from CapCut's
+# engine (AMGRichTextParser), unconfirmed by a draft: if CapCut shows no glow on the glow clips,
+# tick Glow on them by hand before exporting, and the saved draft gives the real keys.
+_GLOW_ID = "7194814374001775105"
+_GLOW_PATH = str(Path.home() / "Library/Containers/com.lemon.lvoverseas/Data/Movies/CapCut/User Data/Cache/effect" / _GLOW_ID / "13fd5bb6c22236bb299c266428395180")
+_GLOW = {"enable": True, "id": _GLOW_ID, "path": _GLOW_PATH, "colorCustomized": False, "color": [1.0, 1.0, 1.0, 1.0], "strength": 0.3, "range": 0.2, "dirX": 0.5, "dirY": 0.5}
+_TWO = "one two three\nfour five six"
 
 
 # Session 4: one Adjust slider per clip on the chart, to measure CapCut's colour formulas.
@@ -135,6 +148,19 @@ SESSIONS = {
         [Sticker("png_a", 8, 1), Sticker("png_b", 9, 1), Sticker("png_c", 10, 1), Sticker("png_b", 11, 1, 0.5, 200, 300), Sticker("gif", 12, 3)],
         [Txt(15, 1, 15, text=_CURVE, curve=60), Txt(16, 1, 15, text=_CURVE, curve=120), Txt(17, 1, 15, text=_CURVE, curve=180),
          Txt(18, 1, 15, text=_CURVE, curve=-90), Txt(19, 1, 15, text=_CURVE, curve=360)],
+    ]),
+    # Text spacing (CapCut's Character 5 and 20; Line 0 and 10), two strokes, gradient fills at
+    # 0° and 90° (each character red to blue), and glows: the default, a custom colour at
+    # strength 0.6 and range 0.4, and one spread from right of the middle (dirX 0.2).
+    "openrip-calibration-7": dict(canvas=(1080, 1920, "9:16"), tracks=[
+        [Img("black.png", 0, 11)],
+        [Txt(0, 1, 15, text="Spacing", letter_spacing=0.25), Txt(1, 1, 15, text="Spacing", letter_spacing=1.0),
+         Txt(2, 1, 15, text=_TWO), Txt(3, 1, 15, text=_TWO, line_spacing=0.52),
+         Txt(4, 1, 15, text="Outlines", strokes=((0.06, (0, 0, 0)), (0.15, (1, 0.85, 0)))),
+         Txt(5, 1, 15, text="Gradient", gradient={"color": [[1, 0, 0], [0, 0, 1]], "alpha": [1, 1], "percent": [0, 1], "angle": 0, "mode": "character", "style": "linear"}),
+         Txt(6, 1, 15, text="Gradient", gradient={"color": [[1, 0, 0], [0, 0, 1]], "alpha": [1, 1], "percent": [0, 1], "angle": 90, "mode": "character", "style": "linear"}),
+         Txt(7, 1, 15, text="Glow", glow={}), Txt(8, 1, 15, text="Glow", glow={"colorCustomized": True, "color": [0, 1, 0, 1], "strength": 0.6, "range": 0.4}),
+         Txt(9, 1, 15, text="Glow", glow={"dirX": 0.2}), Txt(10, 1, 15, text="Plain")],
     ]),
     # Landscape: does a sticker's size follow the canvas width or height?
     "openrip-calibration-6-landscape": dict(canvas=(1920, 1080, "16:9"), tracks=[
@@ -352,8 +378,15 @@ def build(name, spec, template: Path, root: Path, media_dir: Path, replace=False
                         style["italic"] = True
                     if c.stroke:
                         style["strokes"] = [{"content": {"render_type": "solid", "solid": {"color": [0, 0, 0]}}, "width": c.stroke, "mode": 0}]
+                    if c.strokes:
+                        style["strokes"] = [{"alpha": 1.0, "content": {"render_type": "solid", "solid": {"alpha": 1.0, "color": list(rgb)}}, "width": w, "mode": 0} for w, rgb in c.strokes]
+                    if c.gradient:
+                        style["fill"] = {"alpha": 1.0, "content": {"render_type": "gradient", "gradient": c.gradient, "solid": {"alpha": 1.0, "color": [1.0, 1.0, 1.0]}}}
+                    if c.glow is not None:
+                        style["bloom"] = _GLOW | c.glow
                 text.update(content=json.dumps(content, separators=(",", ":")), font_size=c.size, text_size=round(c.size * 2), fixed_width=c.fixed_width,
-                            bold_width=0.008 if c.bold else 0.0, italic_degree=10 if c.italic else 0)
+                            bold_width=0.008 if c.bold else 0.0, italic_degree=10 if c.italic else 0,
+                            letter_spacing=c.letter_spacing, line_spacing=c.line_spacing)
                 if c.curve:
                     text["text_curve"] = {"enable": True, "angle": c.curve}
                 if c.background:
