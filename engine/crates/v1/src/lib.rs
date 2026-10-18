@@ -1397,34 +1397,91 @@ fn hex_alpha(clip: &Value, key: &str, default: &str, opacity_key: &str) -> Rgba 
     c
 }
 
-/// A shape clip as Konva draws it (`ShapePreview.tsx`): in a box of the clip's width and
-/// height, scaled by its scaleX/scaleY, filled then stroked.
+/// A shape clip as the app's preview draws it (`ShapePreview.tsx`): in a box of the clip's
+/// width and height, scaled by its scaleX/scaleY, filled then stroked, over its shadow.
+/// - CapCut's shapes from the Stickers tab: a triangle, parallelogram and trapezoid filling
+///   the box (`triangle`, `parallelogram`, `trapezoid`), a line and an arrow (an open `path`
+///   of two points, the arrow with an arrow at its end), and the pen's `path`: points in
+///   fractions of the box with Bézier handles as offsets (`inX`, `inY`, `outX`, `outY`),
+///   closed or open (`pathClosed`).
+/// - `fillEnabled` and `strokeEnabled` turn the fill and stroke on (by default the fill for
+///   closed shapes and the stroke when it has a width); `strokeStyle` dashes it; `capStart` and
+///   `capEnd` mark an open outline's ends (`arrow`, `round`).
+/// - `shadowEnabled` with `shadowColor`, `shadowOpacity` (%), `shadowDistance` (world units)
+///   and `shadowAngle` (degrees clockwise from +x on screen): a copy under the shape.
+/// - Older shapes (`rectangle`, `ellipse`, a regular `polygon`, `star`, a `line` with no path
+///   along the box's top) draw as before.
 fn convert_shape(id: &MaterialId, clip: &Value) -> Shape {
     let t = clip.get("transform").cloned().unwrap_or(Value::Null);
     let (w, h) = (f(&t, "width", 100.0) as f32, f(&t, "height", 100.0) as f32);
+    let scale = [f(&t, "scaleX", 1.0) as f32, f(&t, "scaleY", 1.0) as f32];
     let corner = f(&t, "cornerRadius", 0.0) as f32;
     let shape_type = s(clip, "shapeType");
+    // The pen's points (and a line's or an arrow's), in the box's units.
+    let nodes: Option<Vec<[f32; 6]>> = clip.get("path").and_then(Value::as_array).map(|pts| {
+        pts.iter()
+            .map(|p| [f(p, "x", 0.0) as f32 * w, f(p, "y", 0.0) as f32 * h, f(p, "inX", 0.0) as f32 * w, f(p, "inY", 0.0) as f32 * h, f(p, "outX", 0.0) as f32 * w, f(p, "outY", 0.0) as f32 * h])
+            .collect()
+    });
+    let closed = b(clip, "pathClosed");
     let geometry = match shape_type.as_str() {
         "ellipse" => Geometry::Ellipse,
         "polygon" => Geometry::Polygon { sides: f(clip, "sides", 3.0).max(3.0) as u32, radius: (w / 3f32.sqrt()).min(h / 1.5), corner_radius: corner },
         "star" => Geometry::Star { points: f(clip, "points", 5.0).max(2.0) as u32, inner: w.min(h) / 4.0, outer: w.min(h) / 2.0 },
-        "line" => Geometry::Line { points: vec![[0.0, 0.0], [w, 0.0]], tension: 0.0, closed: false },
+        "triangle" => Geometry::Vertices { points: vec![[w / 2.0, 0.0], [w, h], [0.0, h]], corner_radius: corner },
+        "parallelogram" => Geometry::Vertices { points: vec![[w / 3.0, 0.0], [w, 0.0], [w * 2.0 / 3.0, h], [0.0, h]], corner_radius: corner },
+        "trapezoid" => Geometry::Vertices { points: vec![[w / 4.0, 0.0], [w * 3.0 / 4.0, 0.0], [w, h], [0.0, h]], corner_radius: corner },
+        "path" => Geometry::Path { nodes: nodes.clone().unwrap_or_default(), closed },
+        "line" | "arrow" => match &nodes {
+            Some(nodes) => Geometry::Path { nodes: nodes.clone(), closed: false },
+            // The app's first lines ran along the top of their box.
+            None if shape_type == "line" => Geometry::Line { points: vec![[0.0, 0.0], [w, 0.0]], tension: 0.0, closed: false },
+            None => Geometry::Line { points: vec![[0.0, h / 2.0], [w, h / 2.0]], tension: 0.0, closed: false },
+        },
         _ => Geometry::Rectangle { corner_radius: corner },
     };
+    let open = matches!(shape_type.as_str(), "line" | "arrow") || (shape_type == "path" && !closed);
+    let fill_on = clip.get("fillEnabled").and_then(Value::as_bool).unwrap_or(!open && shape_type != "path");
     let stroke_width = f(clip, "strokeWidth", 2.0) as f32;
+    let stroke_on = clip.get("strokeEnabled").and_then(Value::as_bool).unwrap_or(stroke_width > 0.0) && stroke_width > 0.0;
+    let marker = |key: &str, default: StrokeMarker| match clip.get(key).and_then(Value::as_str) {
+        Some("arrow") => StrokeMarker::Arrow,
+        Some("round") => StrokeMarker::Dot,
+        Some(_) => StrokeMarker::None,
+        None => default,
+    };
+    let stroke = stroke_on.then(|| ShapeStroke {
+        color: hex_alpha(clip, "stroke", "#1e40af", "strokeOpacity"),
+        width: stroke_width,
+        ends: StrokeEnds::Butt,
+        dash: match s(clip, "strokeStyle").as_str() {
+            "dashed" => StrokeDash::Dashed,
+            "dotted" => StrokeDash::Dotted,
+            _ => StrokeDash::Solid,
+        },
+        start: if open { marker("capStart", StrokeMarker::None) } else { StrokeMarker::None },
+        end: if open { marker("capEnd", if shape_type == "arrow" { StrokeMarker::Arrow } else { StrokeMarker::None }) } else { StrokeMarker::None },
+    });
+    // The shadow's offset is in world units, whatever the shape's scale.
+    let shadow = b(clip, "shadowEnabled").then(|| {
+        let (dist, angle) = (f(clip, "shadowDistance", 0.0), f(clip, "shadowAngle", 45.0).to_radians());
+        let off = |v: f64, s: f32| (v / f64::from(if s.abs() > 1e-6 { s.abs() } else { 1.0 })) as f32;
+        ShapeShadow { color: hex_alpha(clip, "shadowColor", "#000000", "shadowOpacity"), offset: [off(dist * angle.cos(), scale[0]), off(dist * angle.sin(), scale[1])] }
+    });
     Shape {
         id: id.clone(),
         size: [w, h],
-        scale: [f(&t, "scaleX", 1.0) as f32, f(&t, "scaleY", 1.0) as f32],
+        scale,
         unit: (1.0 / WORLD_H) as f32,
         paths: vec![ShapePath {
-            // A line has no inside.
-            fill: (shape_type != "line").then(|| hex_alpha(clip, "fill", "#3b82f6", "fillOpacity")),
-            stroke: (stroke_width > 0.0).then(|| ShapeStroke { color: hex_alpha(clip, "stroke", "#1e40af", "strokeOpacity"), width: stroke_width, ends: StrokeEnds::Butt }),
+            // An open outline (a line, an arrow, an open pen path) has no inside.
+            fill: (fill_on && !open).then(|| hex_alpha(clip, "fill", "#3b82f6", "fillOpacity")),
+            stroke,
             opacity: 1.0,
             blend: PathBlend::Normal,
             geometry,
         }],
+        shadow,
     }
 }
 
@@ -1464,13 +1521,13 @@ fn convert_drawing(id: &MaterialId, clip: &Value, world: &World) -> Shape {
             Some(ShapePath {
                 geometry: Geometry::Line { points, tension, closed: false },
                 fill: None,
-                stroke: Some(ShapeStroke { color, width: (f(line, "strokeWidth", 4.0) * (sx.abs() * sy.abs()).sqrt()) as f32, ends }),
+                stroke: Some(ShapeStroke { color, width: (f(line, "strokeWidth", 4.0) * (sx.abs() * sy.abs()).sqrt()) as f32, ends, dash: StrokeDash::Solid, start: StrokeMarker::None, end: StrokeMarker::None }),
                 opacity: if tool == "eraser" { 1.0 } else { (f(line, "opacity", 100.0) / 100.0) as f32 },
                 blend: PathBlend::Normal,
             })
         })
         .collect();
-    Shape { id: id.clone(), size: [world.w as f32, world.h as f32], scale: [1.0, 1.0], unit: (1.0 / WORLD_H) as f32, paths }
+    Shape { id: id.clone(), size: [world.w as f32, world.h as f32], scale: [1.0, 1.0], unit: (1.0 / WORLD_H) as f32, paths, shadow: None }
 }
 
 /// `text` in the case the app's `textTransform` shows it in.
@@ -1693,6 +1750,68 @@ mod tests {
         assert_eq!(line.geometry, Geometry::Line { points: vec![[5.0, 7.0], [5.0, 27.0]], tension: 0.0, closed: false });
         let stroke = line.stroke.unwrap();
         assert_eq!((stroke.width, stroke.ends, line.blend, line.opacity), (20.0, StrokeEnds::Square, PathBlend::Normal, 0.5));
+    }
+
+    #[test]
+    fn capcuts_shapes_and_the_pen_become_outlines() {
+        let mut d = doc();
+        let tl = d["timeline"].as_object_mut().unwrap();
+        tl["tracks"].as_array_mut().unwrap().insert(0, json!({"type": "shape", "timelineId": "T-shape"}));
+        let clips = tl["clips"].as_array_mut().unwrap();
+        let shape = |id: &str, extra: Value| {
+            let mut c = json!({"clipId": id, "type": "shape", "timelineId": "T-shape", "startTick": "0", "endTick": "1000000", "trimStartTick": "0", "trimEndTick": "0",
+                "fill": "#949494", "stroke": "#cccccc", "strokeWidth": 4,
+                "transform": {"x": 100, "y": 100, "width": 90, "height": 60, "scaleX": 1, "scaleY": 1, "rotation": 0, "opacity": 100, "cornerRadius": 5}});
+            c.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            c
+        };
+        clips.push(shape("par", json!({"shapeType": "parallelogram", "fillEnabled": true, "strokeEnabled": false})));
+        clips.push(shape("trap", json!({"shapeType": "trapezoid", "fillEnabled": true, "strokeEnabled": true, "strokeStyle": "dashed",
+            "shadowEnabled": true, "shadowColor": "#000000", "shadowOpacity": 50, "shadowDistance": 10, "shadowAngle": 90})));
+        clips.push(shape("tri", json!({"shapeType": "triangle", "fillEnabled": false, "strokeEnabled": true})));
+        clips.push(shape("arrow", json!({"shapeType": "arrow", "fillEnabled": false, "strokeEnabled": true, "path": [{"x": 0, "y": 0.5}, {"x": 1, "y": 0.5}]})));
+        clips.push(shape("pen", json!({"shapeType": "path", "fillEnabled": true, "strokeEnabled": true, "pathClosed": true, "capEnd": "arrow",
+            "path": [{"x": 0, "y": 1}, {"x": 0.5, "y": 0, "inX": -0.25, "inY": 0, "outX": 0.25, "outY": 0}, {"x": 1, "y": 1}]})));
+        clips.push(shape("open", json!({"shapeType": "path", "fillEnabled": true, "strokeEnabled": true, "pathClosed": false, "capStart": "round", "strokeStyle": "dotted",
+            "path": [{"x": 0, "y": 0}, {"x": 1, "y": 1}]})));
+        let Imported { project, report } = import_v1_json(&d).unwrap();
+        assert!(report.kept_foreign.is_empty(), "{:?}", report.kept_foreign);
+        let get = |id: &str| project.materials.shapes.iter().find(|m| m.id.0 == format!("{id}-shape")).unwrap().clone();
+
+        // The parallelogram leans right by a third of its box; filled, no stroke, its corners rounded.
+        let par = get("par");
+        assert_eq!(par.paths[0].geometry, Geometry::Vertices { points: vec![[30.0, 0.0], [90.0, 0.0], [60.0, 60.0], [0.0, 60.0]], corner_radius: 5.0 });
+        assert!(par.paths[0].fill.is_some() && par.paths[0].stroke.is_none() && par.shadow.is_none());
+        // The trapezoid's top is half its bottom; a dashed stroke; a half-black shadow 10 down.
+        let trap = get("trap");
+        assert_eq!(trap.paths[0].geometry, Geometry::Vertices { points: vec![[22.5, 0.0], [67.5, 0.0], [90.0, 60.0], [0.0, 60.0]], corner_radius: 5.0 });
+        assert_eq!(trap.paths[0].stroke.unwrap().dash, StrokeDash::Dashed);
+        let sh = trap.shadow.unwrap();
+        assert!((sh.color.a - 0.5).abs() < 1e-6 && sh.offset[0].abs() < 1e-4 && (sh.offset[1] - 10.0).abs() < 1e-4, "{sh:?}");
+        // The triangle's apex is the top's middle; its fill off.
+        let tri = get("tri");
+        assert_eq!(tri.paths[0].geometry, Geometry::Vertices { points: vec![[45.0, 0.0], [90.0, 60.0], [0.0, 60.0]], corner_radius: 5.0 });
+        assert!(tri.paths[0].fill.is_none() && tri.paths[0].stroke.is_some());
+        // The arrow: an open path across the box's middle, an arrow at its end and no inside.
+        let arrow = get("arrow");
+        assert_eq!(arrow.paths[0].geometry, Geometry::Path { nodes: vec![[0.0, 30.0, 0.0, 0.0, 0.0, 0.0], [90.0, 30.0, 0.0, 0.0, 0.0, 0.0]], closed: false });
+        let st = arrow.paths[0].stroke.unwrap();
+        assert_eq!((st.start, st.end, st.width), (StrokeMarker::None, StrokeMarker::Arrow, 4.0));
+        assert!(arrow.paths[0].fill.is_none());
+        // The pen: its points and handles in the box's units, closed and filled; a closed
+        // outline has no ends to mark.
+        let pen = get("pen");
+        assert_eq!(
+            pen.paths[0].geometry,
+            Geometry::Path { nodes: vec![[0.0, 60.0, 0.0, 0.0, 0.0, 0.0], [45.0, 0.0, -22.5, 0.0, 22.5, 0.0], [90.0, 60.0, 0.0, 0.0, 0.0, 0.0]], closed: true }
+        );
+        assert!(pen.paths[0].fill.is_some());
+        assert_eq!(pen.paths[0].stroke.unwrap().end, StrokeMarker::None);
+        // An open pen path isn't filled, and keeps its caps and dots.
+        let open = get("open");
+        let st = open.paths[0].stroke.unwrap();
+        assert!(open.paths[0].fill.is_none());
+        assert_eq!((st.start, st.dash), (StrokeMarker::Dot, StrokeDash::Dotted));
     }
 
     #[test]

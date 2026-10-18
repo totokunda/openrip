@@ -215,70 +215,75 @@ fn media_path(p: &Project, segment: &str) -> Option<String> {
     })
 }
 
-/// A shape's paths as the rasteriser's outlines, in its box of `size` units.
+/// A shape's paths as the rasteriser's outlines, in its box of `size` units: each path, then
+/// the marks on its open ends (arrows, dots) filled in its stroke's colour.
 fn render_paths(paths: &[openrip_model::ShapePath], size: [f32; 2]) -> Vec<openrip_render::shape::ShapePath> {
-    use openrip_model::{Geometry, PathBlend, StrokeEnds};
-    use openrip_render::shape::{self as sh, Blend, Ends};
+    use openrip_model::{Geometry, PathBlend, StrokeDash, StrokeEnds, StrokeMarker};
+    use openrip_render::shape::{self as sh, Blend, Dash, Ends, Marker};
     let rgba = |c: openrip_model::Rgba| [c.r, c.g, c.b, c.a].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    let marker = |m: StrokeMarker| match m {
+        StrokeMarker::None => Marker::None,
+        StrokeMarker::Arrow => Marker::Arrow,
+        StrokeMarker::Dot => Marker::Dot,
+    };
     let [w, h] = size;
-    paths
-        .iter()
-        .map(|p| sh::ShapePath {
-            commands: match &p.geometry {
-                Geometry::Rectangle { corner_radius } => sh::rectangle(w, h, *corner_radius),
-                Geometry::Ellipse => sh::ellipse(w, h),
-                Geometry::Polygon { sides, radius, corner_radius } => sh::polygon(w, h, *sides, *radius, *corner_radius),
-                Geometry::Star { points, inner, outer } => sh::star(w, h, *points, *inner, *outer),
-                Geometry::Line { points, tension, closed } => sh::line(points, *tension, *closed),
-            },
+    let mut out = Vec::new();
+    for p in paths {
+        let commands = match &p.geometry {
+            Geometry::Rectangle { corner_radius } => sh::rectangle(w, h, *corner_radius),
+            Geometry::Ellipse => sh::ellipse(w, h),
+            Geometry::Polygon { sides, radius, corner_radius } => sh::polygon(w, h, *sides, *radius, *corner_radius),
+            Geometry::Star { points, inner, outer } => sh::star(w, h, *points, *inner, *outer),
+            Geometry::Line { points, tension, closed } => sh::line(points, *tension, *closed),
+            Geometry::Vertices { points, corner_radius } => sh::vertices(points, *corner_radius),
+            Geometry::Path { nodes, closed } => sh::path(nodes, *closed),
+        };
+        let blend = match p.blend {
+            PathBlend::Normal => Blend::Normal,
+            PathBlend::Multiply => Blend::Multiply,
+            PathBlend::Erase => Blend::Erase,
+        };
+        let (commands, marks) = match &p.stroke {
+            Some(s) => sh::with_markers(commands, s.width, marker(s.start), marker(s.end)),
+            None => (commands, Vec::new()),
+        };
+        out.push(sh::ShapePath {
+            commands,
             fill: p.fill.map(rgba),
             stroke: p.stroke.map(|s| {
-                let ends = match s.ends {
-                    StrokeEnds::Butt => Ends::Butt,
-                    StrokeEnds::Round => Ends::Round,
-                    StrokeEnds::Square => Ends::Square,
+                // Dots are round dashes.
+                let ends = match (s.dash, s.ends) {
+                    (StrokeDash::Dotted, _) | (_, StrokeEnds::Round) => Ends::Round,
+                    (_, StrokeEnds::Butt) => Ends::Butt,
+                    (_, StrokeEnds::Square) => Ends::Square,
                 };
                 (rgba(s.color), s.width, ends)
             }),
+            dash: p.stroke.map_or(Vec::new(), |s| {
+                let style = match s.dash {
+                    StrokeDash::Solid => Dash::Solid,
+                    StrokeDash::Dashed => Dash::Dashed,
+                    StrokeDash::Dotted => Dash::Dotted,
+                };
+                sh::dashes(style, s.width)
+            }),
             opacity: p.opacity,
-            blend: match p.blend {
-                PathBlend::Normal => Blend::Normal,
-                PathBlend::Multiply => Blend::Multiply,
-                PathBlend::Erase => Blend::Erase,
-            },
-        })
-        .collect()
+            blend,
+        });
+        if let Some(s) = &p.stroke {
+            out.extend(marks.into_iter().map(|commands| sh::ShapePath { commands, fill: Some(rgba(s.color)), stroke: None, dash: Vec::new(), opacity: p.opacity, blend }));
+        }
+    }
+    out
 }
 
 /// Everything that changes a shape's pixels.
 fn shape_key(shape: &openrip_model::Shape, px: f32, scale: [f32; 2], origin: [f32; 2]) -> u64 {
-    use openrip_model::Geometry;
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    let mut f = |v: f32| v.to_bits().hash(&mut h);
-    [px, scale[0], scale[1], origin[0], origin[1], shape.size[0], shape.size[1]].into_iter().for_each(&mut f);
-    for p in &shape.paths {
-        for c in p.fill.iter().chain(p.stroke.as_ref().map(|s| &s.color)) {
-            [c.r, c.g, c.b, c.a].into_iter().for_each(&mut f);
-        }
-        if let Some(s) = &p.stroke {
-            f(s.width);
-            f(s.ends as u8 as f32);
-        }
-        f(p.opacity);
-        f(p.blend as u8 as f32);
-        f(p.fill.is_some() as u8 as f32);
-        match &p.geometry {
-            Geometry::Rectangle { corner_radius } => [1.0, *corner_radius].into_iter().for_each(&mut f),
-            Geometry::Ellipse => f(2.0),
-            Geometry::Polygon { sides, radius, corner_radius } => [3.0, *sides as f32, *radius, *corner_radius].into_iter().for_each(&mut f),
-            Geometry::Star { points, inner, outer } => [4.0, *points as f32, *inner, *outer].into_iter().for_each(&mut f),
-            Geometry::Line { points, tension, closed } => {
-                [5.0, *tension, *closed as u8 as f32, points.len() as f32].into_iter().for_each(&mut f);
-                points.iter().flatten().copied().for_each(&mut f);
-            }
-        }
-    }
+    [px, scale[0], scale[1], origin[0], origin[1]].map(f32::to_bits).hash(&mut h);
+    // The shape as stored: its box, paths and shadow (its id doesn't change its pixels).
+    serde_json::to_vec(&(&shape.size, &shape.scale, &shape.unit, &shape.paths, &shape.shadow)).unwrap_or_default().hash(&mut h);
     let mut out = std::collections::hash_map::DefaultHasher::new();
     ("shape", h.finish()).hash(&mut out);
     out.finish()
@@ -1323,7 +1328,9 @@ impl PreviewEngine {
                     (layers.clone(), *center)
                 }
                 None => {
-                    let r = openrip_render::shape::rasterize(shape.size, scale, px, &render_paths(&shape.paths, shape.size), origin);
+                    let rgba = |c: openrip_model::Rgba| [c.r, c.g, c.b, c.a].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                    let shadow = shape.shadow.map(|s| (rgba(s.color), s.offset));
+                    let r = openrip_render::shape::rasterize(shape.size, scale, px, &render_paths(&shape.paths, shape.size), origin, shadow);
                     let layers: Vec<_> = r.layers.into_iter().enumerate().map(|(i, (img, multiply))| (std::sync::Arc::new(img), key_of((key, i)), multiply)).collect();
                     self.shapes.insert(key, (layers.clone(), r.center, tick));
                     (layers, r.center)

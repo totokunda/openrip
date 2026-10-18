@@ -633,10 +633,21 @@ pub struct Shape {
     pub unit: f32,
     /// Drawn in order, each over the ones before.
     pub paths: Vec<ShapePath>,
+    /// A copy of the paths under them, offset and in one colour (CapCut's shape Shadow).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<ShapeShadow>,
 }
 
 fn unit_scale() -> [f32; 2] {
     [1.0, 1.0]
+}
+
+/// A shape's shadow: everything its paths cover (fill and stroke), in `color`, moved by
+/// `offset` in the shape's units (before `scale`; +y down).
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShapeShadow {
+    pub color: Rgba,
+    pub offset: [f32; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -663,6 +674,41 @@ pub struct ShapeStroke {
     pub width: f32,
     #[serde(default)]
     pub ends: StrokeEnds,
+    /// Solid, dashed or dotted (CapCut's stroke Style).
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub dash: StrokeDash,
+    /// What an open outline's first and last points carry (CapCut's Cap: Start and End).
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub start: StrokeMarker,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub end: StrokeMarker,
+}
+
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+
+/// A stroke's pattern. Dashes are 4 widths long with 2-width gaps; dots are round, a dot
+/// every 2 widths.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrokeDash {
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+}
+
+/// A mark at an end of an open outline. An arrow is a filled triangle 3 widths long and 3
+/// widths across with its tip on the end (the outline stops at its base); a dot is a filled
+/// circle 2.5 widths across on the end.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrokeMarker {
+    #[default]
+    None,
+    Arrow,
+    Dot,
 }
 
 /// A stroke's caps and joins.
@@ -705,6 +751,13 @@ pub enum Geometry {
     /// A polyline through points in the box's units (origin at its top-left), curved through
     /// them by `tension` (0 is straight segments; Konva's cardinal spline).
     Line { points: Vec<[f32; 2]>, tension: f32, closed: bool },
+    /// A polygon through `points` in the box's units (origin at its top-left), each corner
+    /// rounded by up to `corner_radius` (at most half the shorter edge beside it).
+    Vertices { points: Vec<[f32; 2]>, corner_radius: f32 },
+    /// A pen path through `nodes` in the box's units: each its point and its Bézier handles
+    /// as offsets from it, `[x, y, in_dx, in_dy, out_dx, out_dy]` (zero handles make a
+    /// corner), closed back to the first or left open.
+    Path { nodes: Vec<[f32; 6]>, closed: bool },
 }
 
 /// A clip's speed (CapCut's `speeds` table): constant, or a curve that remaps its time
