@@ -156,6 +156,44 @@ export function engineExportStill(timeUs: number, path: string): Promise<EngineS
   return ipcRenderer.invoke("engine:export-still", timeUs, path);
 }
 
+export type EngineTrackRequest = {
+  path: string;
+  /** Source times (µs): the frame the region was drawn on, and the range to track over. */
+  atUs: number;
+  fromUs: number;
+  toUs: number;
+  /** The region on the video's upright picture: centre and size in fractions of it, degrees clockwise. */
+  centerX: number;
+  centerY: number;
+  width: number;
+  height: number;
+  rotation: number;
+  direction: "forward" | "backward" | "both";
+};
+
+export type EngineTrackSample = { timeUs: number; centerX: number; centerY: number; width: number; height: number; rotation: number; scale: number; confidence: number };
+
+export type EngineTrackResult =
+  | { ok: true; samples: EngineTrackSample[]; lostForwardUs?: number | null; lostBackwardUs?: number | null }
+  | { ok: false; cancelled?: boolean; error?: string };
+
+/** Follow a region of a video through its frames with the engine (motion tracking). */
+export function engineTrack(request: EngineTrackRequest): Promise<EngineTrackResult> {
+  return ipcRenderer.invoke("engine:track", request);
+}
+
+/** Stop the running track (its promise resolves with `cancelled`). */
+export function engineTrackCancel(): Promise<void> {
+  return ipcRenderer.invoke("engine:track-cancel");
+}
+
+/** Called with frames done and total while a track runs. Returns an unsubscribe. */
+export function onEngineTrackProgress(cb: (done: number, total: number) => void): () => void {
+  const listener = (_e: unknown, done: number, total: number) => cb(done, total);
+  ipcRenderer.on("engine:track-progress", listener);
+  return () => ipcRenderer.off("engine:track-progress", listener);
+}
+
 export function engineClose(): Promise<void> {
   return ipcRenderer.invoke("engine:close");
 }

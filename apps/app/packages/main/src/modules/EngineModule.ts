@@ -79,6 +79,30 @@ export type EngineAddon = {
   useToneInput(): void;
   registerFonts(faces: { family: string; weight: number; italic: boolean; path: string; unicodeRange?: string }[]): void;
   fontFamilies(): FontFamily[];
+  /** Motion tracking: a region of a video followed through its frames (engine/crates/core/src/track.rs). */
+  trackRegion(request: EngineTrackRequest): Promise<EngineTrackResult>;
+  trackProgress(): { done: number; total: number };
+  cancelTrack(): void;
+};
+
+/** What to track: the video, the source times (µs), the region on its upright picture (fractions, degrees). */
+export type EngineTrackRequest = {
+  path: string;
+  atUs: number;
+  fromUs: number;
+  toUs: number;
+  centerX: number;
+  centerY: number;
+  width: number;
+  height: number;
+  rotation: number;
+  direction: string;
+};
+
+export type EngineTrackResult = {
+  samples: { timeUs: number; centerX: number; centerY: number; width: number; height: number; rotation: number; scale: number; confidence: number }[];
+  lostForwardUs?: number | null;
+  lostBackwardUs?: number | null;
 };
 
 /** A family the engine draws text in: the app's bundled fonts, then the installed ones. */
@@ -548,6 +572,36 @@ export class EngineModule implements AppModule {
     });
 
     ipcMain.handle("engine:export-cancel", () => addon?.cancelExport());
+
+    // Motion tracking over a video's own frames; progress goes to the asking window as
+    // `engine:track-progress` (frames done, total).
+    for (const channel of ["engine:track", "engine:track-cancel"]) {
+      try {
+        ipcMain.removeHandler(channel);
+      } catch {}
+    }
+    ipcMain.handle("engine:track", async (event, request: EngineTrackRequest) => {
+      const engine = addon;
+      if (!engine) return { ok: false, error: "engine not available" };
+      const path = request.path.startsWith("file://") ? fileURLToPath(request.path) : request.path;
+      const sender = event.sender;
+      const timer = setInterval(() => {
+        if (!sender.isDestroyed()) {
+          const p = engine.trackProgress();
+          sender.send("engine:track-progress", p.done, p.total);
+        }
+      }, 100);
+      try {
+        const r = await engine.trackRegion({ ...request, path });
+        return { ok: true, ...r };
+      } catch (e) {
+        const why = message(e);
+        return why === "cancelled" ? { ok: false, cancelled: true } : { ok: false, error: why };
+      } finally {
+        clearInterval(timer);
+      }
+    });
+    ipcMain.handle("engine:track-cancel", () => addon?.cancelTrack());
 
     ipcMain.handle("engine:close", () => {
       this.#playback.stop();

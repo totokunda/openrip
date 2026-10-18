@@ -38,6 +38,10 @@ export {
 } from "./engine.js";
 export type { EngineInfo, EngineProjectInfo, EngineRenderResult, EngineExportOptions, EngineExportResult, EngineThumbnail, EngineBeats, EngineWaveform, EngineFontFace, EngineFontFamily, EngineStillResult } from "./engine.js";
 
+// Motion tracking with the engine (the Tracking tab and Track mask)
+export { engineTrack, engineTrackCancel, onEngineTrackProgress } from "./engine.js";
+export type { EngineTrackRequest, EngineTrackResult, EngineTrackSample } from "./engine.js";
+
 // Voiceover recording (the main process's VoiceoverModule)
 export { voiceoverStatus, voiceoverStart, voiceoverStop, voiceoverCancel, voiceoverList, onVoiceoverLevel } from "./voiceover.js";
 export type { VoiceoverStatus, VoiceoverStart, VoiceoverStop, VoiceoverLevel, VoiceoverTake } from "./voiceover.js";
