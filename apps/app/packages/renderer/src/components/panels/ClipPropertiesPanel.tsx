@@ -2,6 +2,7 @@ import { useClipStore } from '@/lib/clip'
 import { useControlsStore } from '@/lib/control'
 import AudioProperties from '../properties/AudioProperties'
 import VoiceChangerProperties from '../properties/VoiceChangerProperties'
+import { soundSeparated } from '@/lib/audio-tools'
 import React, { useMemo, useEffect } from 'react'
 import { getMediaInfoCached } from '@/lib/media/utils'
 import DurationProperties from '../properties/DurationProperties'
@@ -63,7 +64,7 @@ const ClipPropertiesPanel: React.FC = () => {
 
   // A video's Audio tab: its own sound, or CapCut's "Audio is separated" when that went to an
   // audio clip.
-  const separated = useClipStore((s) => type === 'video' && !!s.assets[(clip as VideoClipProps)?.assetId]?.path.endsWith('#video'));
+  const separated = useClipStore(() => soundSeparated(clip));
   const hasAudio = useMemo(() => {
     if (type === 'audio') return true;
     if (type === 'video') return separated || getMediaInfoCached((clip as VideoClipProps)?.assetId)?.audio !== null;
