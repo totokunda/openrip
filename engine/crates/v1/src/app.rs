@@ -399,6 +399,13 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                 );
                 if ty == "video" {
                     clip.insert("freeze".into(), Value::Null);
+                    // Speed › Smooth slow-mo and Video › Basic › Optical flow.
+                    let mode = m.complement_frame.as_ref().map(|c| match c.mode {
+                        ComplementMode::OpticalFlow => "optical_flow",
+                        ComplementMode::FrameBlending => "frame_blending",
+                    });
+                    clip.insert("smoothSlowMo".into(), mode.map_or(Value::Null, |mode| json!({ "mode": mode })));
+                    clip.insert("opticalFlow".into(), m.smart_complement_frame.as_ref().map_or(Value::Null, |c| json!({ "fps": c.fps })));
                 }
                 clip.insert("volume".into(), json!(20.0 * (seg.volume.value.max(1e-4) as f64).log10()));
                 // Trims in timeline frames before the speed, as the app keeps them (a reversed
@@ -561,7 +568,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
     // What the engine needs to draw it as it was, and the app's fields as written, so an
     // import can tell what the app changed.
     let base_keys = [
-        "startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "reverse", "changePitch", "speedCurve", "freeze", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color",
+        "startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "reverse", "changePitch", "speedCurve", "freeze", "smoothSlowMo", "opticalFlow", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color",
         "animationIn", "animationOut", "animationCombo", "animationLoop", "captionStyle", "transitionOut", "keyframes", "textEffect",
     ];
     let base: Map<String, Value> = base_keys
@@ -1382,6 +1389,48 @@ mod tests {
         assert_eq!((still.kind, still.path.as_str(), still.has_audio), (MediaKind::Photo, "", false));
         assert_eq!(still.freeze, Some(Freeze { video: "/tmp/clip.mov".into(), at: Micros(1_500_000) }));
         assert_eq!((v.source, v.speed), (Some(TimeRange::new(Micros::ZERO, v.target.duration)), 1.0));
+    }
+
+    #[test]
+    fn smooth_slow_mo_and_optical_flow_go_both_ways() {
+        // The app's own clip: off by default (it plays the asset), then each set.
+        let p = project();
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clip = clip_mut(&mut doc, "v");
+        clip.as_object_mut().unwrap().remove("engine");
+        let back = import_v1_json(&doc).unwrap().project;
+        assert_eq!(segment(&back, "v").material, MaterialId("m".into()));
+        let clip = clip_mut(&mut doc, "v");
+        clip["smoothSlowMo"] = json!({"mode": "frame_blending"});
+        clip["opticalFlow"] = json!({"fps": 60});
+        let back = import_v1_json(&doc).unwrap().project;
+        let v = segment(&back, "v");
+        let media = back.materials.media.iter().find(|m| m.id == v.material).unwrap();
+        assert_eq!(media.complement_frame, Some(ComplementFrame { mode: ComplementMode::FrameBlending }));
+        assert_eq!(media.smart_complement_frame, Some(SmartComplementFrame { fps: 60, sub_type: 0 }));
+        assert_eq!(media.path, "/tmp/clip.mov");
+        // The asset itself is untouched (other clips of it play it as it is).
+        assert!(back.materials.media.iter().find(|m| m.id.0 == "m").unwrap().complement_frame.is_none());
+
+        // A draft's clip with Smooth slow-mo: shown, kept through the round trip, and turned
+        // off or changed in the app.
+        let mut p = project();
+        p.materials.media[0].complement_frame = Some(ComplementFrame { mode: ComplementMode::OpticalFlow });
+        let doc = to_app_project(&p, &mut |_| None);
+        let shown = doc["timeline"]["clips"].as_array().unwrap().iter().find(|c| c["clipId"] == "v").unwrap().clone();
+        assert_eq!((&shown["smoothSlowMo"], &shown["opticalFlow"]), (&json!({"mode": "optical_flow"}), &Value::Null));
+        let back = import_v1_json(&doc).unwrap().project;
+        let flagged = |p: &Project| {
+            let v = segment(p, "v");
+            p.materials.media.iter().find(|m| m.id == v.material).unwrap().complement_frame.clone()
+        };
+        assert_eq!(flagged(&back), Some(ComplementFrame { mode: ComplementMode::OpticalFlow }));
+        let mut off = doc.clone();
+        clip_mut(&mut off, "v")["smoothSlowMo"] = Value::Null;
+        assert_eq!(flagged(&import_v1_json(&off).unwrap().project), None);
+        let mut blend = doc.clone();
+        clip_mut(&mut blend, "v")["smoothSlowMo"] = json!({"mode": "frame_blending"});
+        assert_eq!(flagged(&import_v1_json(&blend).unwrap().project), Some(ComplementFrame { mode: ComplementMode::FrameBlending }));
     }
 
     #[test]
