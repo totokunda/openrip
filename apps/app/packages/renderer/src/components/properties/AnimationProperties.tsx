@@ -24,7 +24,7 @@ import PropertiesSlider from "./PropertiesSlider";
  * kept as CapCut had them until replaced.
  */
 
-const IN_ANIMATIONS = [
+export const IN_ANIMATIONS = [
   { value: "type_1", label: "Type 1" },
   { value: "type_2", label: "Type 2" },
   { value: "typewriter", label: "Typewriter" },
@@ -36,7 +36,7 @@ const CAPTION_STYLES = [
   { value: "caption_one_word", label: "One word at a time" },
 ];
 
-const TRANSITIONS = [
+export const TRANSITIONS = [
   { value: "white_flash", label: "White Flash" },
   { value: "white_fade", label: "White Fade" },
   { value: "blink", label: "Blink" },
@@ -48,6 +48,65 @@ const KEEP = "keep";
 
 /** A duration as typed or slid, within the slider's bounds and to hundredths of a second. */
 const within = (d: number, max: number) => Math.round(Math.max(0.1, Math.min(d, max)) * 100) / 100;
+
+type AnyClip = ReturnType<typeof useClipStore.getState>["clips"][number];
+
+const clipSeconds = (clip: AnyClip, fps: number) => Math.max(0.1, (clip.endFrame - clip.startFrame) / fps);
+
+// A transition needs a clip starting where this one ends on its track, as the engine draws
+// it; the shorter of the two bounds its duration. In frames, 0 when there's none.
+export const nextClipFrames = (clips: AnyClip[], clip: AnyClip | undefined) => {
+  const next = clip && clips.find((c) => c.clipId !== clip.clipId && c.timelineId === clip.timelineId && c.startFrame === clip.endFrame);
+  return next ? next.endFrame - next.startFrame : 0;
+};
+
+// Blink draws CapCut's downloaded image sequence: offered when the project has one, on a
+// clip or among a draft clip's materials (where it stays when the app replaces it).
+export const projectBlink = (clips: AnyClip[]) => {
+  for (const c of clips) {
+    const t = (c as VideoClipProps).transitionOut;
+    if (t?.type === "blink" && t.resource) return t.resource;
+    const m = ((c as any).engine?.materials ?? []).find((m: any) => m?.type === "transition" && m.builtin === "blink" && m.resource);
+    if (m) return m.resource as string;
+  }
+  return null;
+};
+
+/** The longest In animation a text can have: its length, 5 s at most. */
+const inMaxFor = (clip: AnyClip, fps: number) => Math.max(0.1, Math.min(5, clipSeconds(clip, fps)));
+
+/** Give a text the In animation `v` ("none" removes it), keeping its duration where it can. */
+export function applyInAnimation(clipId: string, v: string) {
+  const { getClipById, updateClip } = useClipStore.getState();
+  const clip = getClipById(clipId) as TextClipProps | undefined;
+  if (!clip || clip.type !== "text" || v === KEEP) return;
+  if (v === NONE) return updateClip(clipId, { animationIn: null });
+  const fps = useControlsStore.getState().fps || 30;
+  const anim = clip.animationIn ?? null;
+  const duration = within(anim?.duration ?? 0.5, inMaxFor(clip, fps));
+  const next: ClipAnimationIn = { type: v, duration, name: IN_ANIMATIONS.find((a) => a.value === v)?.label };
+  updateClip(clipId, { animationIn: next });
+}
+
+/** Give a video or photo the transition `v` into the next clip ("none" removes it). */
+export function applyTransition(clipId: string, v: string) {
+  const { getClipById, updateClip, clips } = useClipStore.getState();
+  const clip = getClipById(clipId) as VideoClipProps | ImageClipProps | undefined;
+  if (!clip || (clip.type !== "video" && clip.type !== "image") || v === KEEP) return;
+  if (v === NONE) return updateClip(clipId, { transitionOut: null });
+  const fps = useControlsStore.getState().fps || 30;
+  const seconds = clipSeconds(clip, fps);
+  const nextFrames = nextClipFrames(clips, clip);
+  const trMax = Math.max(0.1, Math.min(2, seconds, nextFrames ? nextFrames / fps : seconds));
+  const tr = clip.transitionOut ?? null;
+  const next: ClipTransition = {
+    type: v,
+    duration: within(tr?.duration ?? 0.5, trMax),
+    name: TRANSITIONS.find((t) => t.value === v)?.label,
+    resource: v === "blink" ? (tr?.type === "blink" ? tr.resource : projectBlink(clips)) : null,
+  };
+  updateClip(clipId, { transitionOut: next });
+}
 
 interface Option {
   value: string;
@@ -102,23 +161,8 @@ const AnimationProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
     | undefined;
   const updateClip = useClipStore((s) => s.updateClip);
   const fps = useControlsStore((s) => s.fps) || 30;
-  // A transition needs a clip starting where this one ends on its track, as the engine draws
-  // it; the shorter of the two bounds its duration. In frames, 0 when there's none.
-  const nextFrames = useClipStore((s) => {
-    const next = clip && s.clips.find((c) => c.clipId !== clip.clipId && c.timelineId === clip.timelineId && c.startFrame === clip.endFrame);
-    return next ? next.endFrame - next.startFrame : 0;
-  });
-  // Blink draws CapCut's downloaded image sequence: offered when the project has one, on a
-  // clip or among a draft clip's materials (where it stays when the app replaces it).
-  const blinkResource = useClipStore((s) => {
-    for (const c of s.clips) {
-      const t = (c as VideoClipProps).transitionOut;
-      if (t?.type === "blink" && t.resource) return t.resource;
-      const m = ((c as any).engine?.materials ?? []).find((m: any) => m?.type === "transition" && m.builtin === "blink" && m.resource);
-      if (m) return m.resource as string;
-    }
-    return null;
-  });
+  const nextFrames = useClipStore((s) => nextClipFrames(s.clips, clip));
+  const blinkResource = useClipStore((s) => projectBlink(s.clips));
   if (!clip) return null;
   const seconds = Math.max(0.1, (clip.endFrame - clip.startFrame) / fps);
 
@@ -128,14 +172,8 @@ const AnimationProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
     const options: Option[] = [{ value: NONE, label: "None" }, ...IN_ANIMATIONS];
     if (value === KEEP) options.push({ value: KEEP, label: `${anim?.name || "CapCut's"} (CapCut)` });
     // The engine ends an animation longer than its clip (trimmed shorter) with the clip.
-    const inMax = Math.max(0.1, Math.min(5, seconds));
-    const setIn = (v: string) => {
-      if (v === KEEP) return;
-      if (v === NONE) return updateClip(clipId, { animationIn: null });
-      const duration = within(anim?.duration ?? 0.5, inMax);
-      const next: ClipAnimationIn = { type: v, duration, name: IN_ANIMATIONS.find((a) => a.value === v)?.label };
-      updateClip(clipId, { animationIn: next });
-    };
+    const inMax = inMaxFor(clip, fps);
+    const setIn = (v: string) => applyInAnimation(clipId, v);
     // A draft's style the engine doesn't draw comes as "" (a select can't have that value).
     const style = clip.captionStyle ?? NONE;
     const caption = CAPTION_STYLES.some((c) => c.value === style) ? style : KEEP;
@@ -181,17 +219,7 @@ const AnimationProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
     const options: Option[] = [{ value: NONE, label: "None" }, ...TRANSITIONS.filter((t) => t.value !== "blink" || blinkResource || tr?.type === "blink")];
     if (value === KEEP) options.push({ value: KEEP, label: `${tr?.name || "CapCut's"} (CapCut)` });
     const trMax = Math.max(0.1, Math.min(2, seconds, nextFrames ? nextFrames / fps : seconds));
-    const setTransition = (v: string) => {
-      if (v === KEEP) return;
-      if (v === NONE) return updateClip(clipId, { transitionOut: null });
-      const next: ClipTransition = {
-        type: v,
-        duration: within(tr?.duration ?? 0.5, trMax),
-        name: TRANSITIONS.find((t) => t.value === v)?.label,
-        resource: v === "blink" ? (tr?.type === "blink" ? tr.resource : blinkResource) : null,
-      };
-      updateClip(clipId, { transitionOut: next });
-    };
+    const setTransition = (v: string) => applyTransition(clipId, v);
     return (
       <Section
         title="Transition to the next clip"

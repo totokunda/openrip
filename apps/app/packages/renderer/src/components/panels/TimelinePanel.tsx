@@ -3,15 +3,31 @@ import { ResizablePanel } from "../ui/resizable";
 import Controls from "../controls/Controls";
 import TimelineEditor from "../timeline/TimelineEditor";
 
-const TimelinePanel: React.FC = () => {
+interface TimelinePanelProps {
+  id?: string;
+  order?: number;
+  defaultSize?: number;
+  minSize?: number;
+}
+
+/** The timeline across the bottom: its toolbar (edit tools left, switches and zoom right) over the tracks. */
+const TimelinePanel: React.FC<TimelinePanelProps> = ({
+  id = "timeline",
+  order,
+  defaultSize = 42,
+  minSize = 25,
+}) => {
   return (
     <ResizablePanel
-      defaultSize={30}
-      minSize={30}
-      className="bg-brand flex flex-col  rounded-lg shadow w-full border-brand-light/10 flex-shrink-0"
+      id={id}
+      order={order}
+      defaultSize={defaultSize}
+      minSize={minSize}
+      data-testid="timeline"
+      className="bg-brand flex flex-col rounded-md w-full overflow-hidden"
     >
       <Controls />
-      <div className="flex flex-col gap-y-2.5 justify-center h-full overflow-auto">
+      <div className="flex flex-col justify-center flex-1 min-h-0 overflow-auto">
         <TimelineEditor />
       </div>
     </ResizablePanel>

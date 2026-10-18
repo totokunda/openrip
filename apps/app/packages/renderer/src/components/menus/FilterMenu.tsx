@@ -411,7 +411,7 @@ const FilterMenu = () => {
           display: none;
         }
       `}</style>
-      <div className="flex flex-row h-full w-full border-t border-brand-light/5 mt-2 bg-brand-background">
+      <div className="flex flex-row h-full w-full bg-brand-background">
         <CategorySidebar
           categories={categories}
           activeCategory={activeCategory}

@@ -35,6 +35,8 @@ import { formatErrMessage, looksLikeSslCertError } from "@/lib/formatErrMessage"
 interface SettingsModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Leave out the gear button: the caller opens the dialog itself (the top bar). */
+  hideTrigger?: boolean;
 }
 
 const fieldLabelClass =
@@ -86,6 +88,7 @@ function InlineUpdateError({
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   open,
   onOpenChange,
+  hideTrigger,
 }) => {
   const controlsFps = useControlsStore((s) => s.fps);
   const setGlobalFpsWithRescale = useControlsStore((s) => s.setFpsWithRescale);
@@ -453,12 +456,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </Button>
         </div>
       </DialogContent>
-      <button
-        onClick={() => onOpenChange(true)}
-        className="text-brand-light/90 dark w-8 h-8 flex items-center justify-center rounded-[6px] hover:text-brand-light border border-brand-light/10 bg-brand hover:bg-brand-light/10 transition-all duration-300 cursor-pointer"
-      >
-        <LuSettings className="w-4 h-4" />
-      </button>
+      {!hideTrigger && (
+        <button
+          onClick={() => onOpenChange(true)}
+          title="Settings"
+          className="text-brand-light/90 dark w-8 h-8 flex items-center justify-center rounded-[6px] hover:text-brand-light border border-brand-light/10 bg-brand hover:bg-brand-light/10 transition-all duration-300 cursor-pointer"
+        >
+          <LuSettings className="w-4 h-4" />
+        </button>
+      )}
     </Dialog>
   )
 }

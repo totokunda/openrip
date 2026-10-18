@@ -3,15 +3,16 @@ import {
   LuChevronDown,
   LuChevronUp,
   LuCheck,
-  LuFolder,
+  LuChevronLeft,
   LuFolderPlus,
   LuFolderInput,
   LuHouse,
-  LuSearch,
-  LuTrash2,
+  LuMenu,
+  LuSettings,
+  LuUpload,
 } from "react-icons/lu";
-import { useProjectsStore, type ProjectSettings } from "@/lib/projects";
-import { clearProjectCover, createProject, deleteProject } from "@app/preload";
+import { useProjectsStore } from "@/lib/projects";
+import { clearProjectCover } from "@app/preload";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,21 +21,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { useLayoutConfigStore } from "@/lib/layout-config";
+import { useLayoutConfigStore, type AppLayoutId } from "@/lib/layout-config";
 import { useViewportStore } from "@/lib/viewport";
-import { PiResize } from "react-icons/pi";
 import { LayoutIcon } from "./LayoutIcon";
-import { TbPackageExport } from "react-icons/tb";
 import ExportModal, { ExportSettings } from "@/components/dialogs/ExportModal";
 import { ProgressBar } from "@/components/common/ProgressBar";
 import {
@@ -50,13 +39,11 @@ import { sortClipsForStacking } from "@/lib/clipOrdering";
 import { cancelEngineExport, engineExportProject, engineExports, parseBitrate } from "@/lib/engine-preview";
 import { toast } from "sonner";
 import { revealPathInFolder, writeFileBuffer } from "@app/preload";
-import { DEFAULT_FPS } from "@/lib/settings";
 import { cn } from "@/lib/utils";
+import { SHORTCUT_SECTIONS } from "@/lib/shortcuts";
 import { SettingsModal } from "../dialogs/SettingsModal";
 import { CapCutImportDialog } from "../dialogs/CapCutImportDialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { SHORTCUT_SECTIONS } from "@/lib/shortcuts";
-import { goHome, openProject } from "@/lib/project-actions";
+import { createAndOpenProject, goHome, openProject } from "@/lib/project-actions";
 
 interface TopBarProps {
 
@@ -94,10 +81,6 @@ const TopBar: React.FC<TopBarProps> = () => {
   const setLayout = useLayoutConfigStore((s) => s.setLayout);
   const [layoutOpen, setLayoutOpen] = useState(false);
   const aspectRatio = useViewportStore((s) => s.aspectRatio);
-  const setAspectRatio = useViewportStore((s) => s.setAspectRatio);
-  const [sizeOpen, setSizeOpen] = useState(false);
-  const setIsAspectEditing = useViewportStore((s) => s.setAspectEditing);
-  const isAspectEditing = useViewportStore((s) => s.isAspectEditing);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -105,85 +88,22 @@ const TopBar: React.FC<TopBarProps> = () => {
   const projects = useProjectsStore((s) => s.projects);
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);
   const addProject = useProjectsStore((s) => s.addProject);
-  const removeProject = useProjectsStore((s) => s.removeProject);
   const getAssetById = useClipStore((s) => s.getAssetById);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const updateProject = useProjectsStore((s) => s.updateProject);
-  const setActiveProjectId = useProjectsStore((s) => s.setActiveProjectId);
 
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
-  const [projectSearch, setProjectSearch] = useState("");
-  const [deleteProjectOpen, setDeleteProjectOpen] = useState(false);
-  const [projectToDelete, setProjectToDelete] = useState<ProjectSettings | null>(
-    null,
-  );
-  const [isDeletingProject, setIsDeletingProject] = useState(false);
 
   const [cancelExportFn, setCancelExportFn] = useState<(() => void) | null>(
     null,
   );
-  const layoutLabel =
-    layout === "default"
-      ? "Default"
-      : layout === "media"
-        ? "Media"
-        : "Properties";
   const clips = useClipStore((s) => s.clips);
   const timelines = useClipStore((s) => s.timelines);
   const getClipsForGroup = useClipStore((s) => s.getClipsForGroup);
   const getClipsByType = useClipStore((s) => s.getClipsByType);
   const getClipPositionScore = useClipStore((s) => s.getClipPositionScore);
   const fps = useControlsStore((s) => s.fps);
-  const controlsFps = fps;
-
-  const getNextDefaultProjectName = () => {
-    const usedNumbers = projects
-      .map((p) => {
-        const match = /^Project\s+(\d+)$/i.exec(p.name || "");
-        return match ? Number(match[1]) : null;
-      })
-      .filter((n): n is number => n !== null);
-
-    let candidate = 1;
-    while (usedNumbers.includes(candidate)) {
-      candidate += 1;
-    }
-    return `Project ${candidate}`;
-  };
-
-  const handleCreateProject = async () => {
-    const name = getNextDefaultProjectName();
-    const newFps = controlsFps || DEFAULT_FPS;
-    try {
-      const res = await createProject({
-        name,
-        fps: newFps,
-      });
-
-      if (!res?.success || !res?.data) {
-        // eslint-disable-next-line no-console
-        console.error("Failed to create project", res?.error);
-        return;
-      }
-
-      const created = res.data as ProjectSettings;
-
-      // Ensure the newly created project appears immediately in the list
-      // (JSON persistence may refresh later, but we shouldn't wait for it).
-      const alreadyInList = projects.some((p) => p.id === created.id);
-      if (!alreadyInList) {
-        addProject(created);
-      }
-
-      // Navigate to the newly created project.
-      setActiveProjectId(created.id);
-      setProjectSearch("");
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to create project", e);
-    }
-  };
 
   const handleCommitProjectName = async () => {
     if (!activeProject) return;
@@ -198,38 +118,6 @@ const TopBar: React.FC<TopBarProps> = () => {
       console.error("Failed to update project name", e);
     }
   };
-
-  const handleConfirmDeleteProject = async () => {
-    if (!projectToDelete) return;
-
-    setIsDeletingProject(true);
-    try {
-      const res = await deleteProject(projectToDelete.id);
-      if (!res?.success) {
-        toast("Failed to delete project", {
-          description: res?.error || "Unknown error",
-        });
-        return;
-      }
-
-      removeProject(projectToDelete.id);
-      toast("Project deleted", {
-        description: projectToDelete.name,
-      });
-
-      setDeleteProjectOpen(false);
-      setProjectToDelete(null);
-      setProjectSearch("");
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to delete project", e);
-      toast("Failed to delete project");
-    } finally {
-      setIsDeletingProject(false);
-    }
-  };
-
-
 
   const handleExport = async (settings: ExportSettings) => {
     const ext =
@@ -409,12 +297,6 @@ const TopBar: React.FC<TopBarProps> = () => {
     }
   };
 
-  const filteredProjects = projects.filter((project) => {
-    const query = projectSearch.trim().toLowerCase();
-    if (!query) return true;
-    return (project.name ?? "").toLowerCase().includes(query);
-  });
-
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [capcutOpen, setCapcutOpen] = useState(false);
 
@@ -478,19 +360,24 @@ const TopBar: React.FC<TopBarProps> = () => {
     return clips.some((clip) => hasExportableMedia(clip));
   }, [clips, timelines, getClipsForGroup]);
 
+  const button =
+    "h-7 flex items-center gap-x-1.5 px-2 rounded-[5px] text-[11px] text-brand-light/80 hover:text-brand-light hover:bg-brand-light/10 transition-colors cursor-pointer";
+  const LAYOUTS: { id: AppLayoutId; label: string }[] = [
+    { id: "default", label: "Default" },
+    { id: "media", label: "Media" },
+    { id: "properties", label: "Inspector" },
+  ];
+
   return (
-    <div className="w-full relative h-8 mt-2 px-6 pl-4 flex items-center justify-between space-x-2">
-      {/* Project name editor */}
-      <div className="flex flex-row items-center gap-1.5 min-w-0">
-        {/* Projects dropdown (top-left) */}
-        <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+    <div data-testid="topbar" className="w-full relative h-10 shrink-0 px-2 flex items-center justify-between font-poppins">
+      <div className="flex flex-row items-center gap-1 min-w-0 z-10">
+        <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} hideTrigger />
         <CapCutImportDialog
           open={capcutOpen}
           onOpenChange={setCapcutOpen}
           onImported={(created) => {
             if (!projects.some((p) => p.id === created.id)) addProject(created);
             openProject(created.id);
-            setProjectSearch("");
           }}
         />
         <button
@@ -499,410 +386,188 @@ const TopBar: React.FC<TopBarProps> = () => {
           title={isExporting ? "Wait for the export to finish" : "Back to your projects"}
           disabled={isExporting}
           onClick={() => void goHome()}
-          className="text-brand-light/90 dark h-[34px] flex items-center gap-x-2 px-3 font-medium border border-brand-light/10 hover:text-brand-light bg-brand hover:bg-brand-light/10 rounded-[6px] transition-all duration-300 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className={cn(button, "pr-2.5 disabled:opacity-40 disabled:cursor-not-allowed")}
         >
-          <LuHouse className="w-4 h-4" />
-          <span className="text-[11px]">Home</span>
+          <LuChevronLeft className="w-4 h-4 -mr-1" />
+          <LuHouse className="w-3.5 h-3.5" />
+          <span>Home</span>
         </button>
         <DropdownMenu>
-          <DropdownMenuTrigger className="text-brand-light/90 dark max-w-[220px] h-[34px] flex items-center space-x-2 px-3 font-medium border border-brand-light/10 hover:text-brand-light bg-brand hover:bg-brand-light/10 rounded-[6px] py-[7px] transition-all duration-300 cursor-pointer">
-            <LuFolder className="w-4 h-4 shrink-0" />
-            <span className="text-[11px] truncate">
-              Projects
-            </span>
-            <div className="ml-1">
-              <LuChevronDown className="w-3.5 h-3.5" />
-            </div>
+          <DropdownMenuTrigger data-testid="app-menu" className={button}>
+            <LuMenu className="w-3.5 h-3.5" />
+            <span>Menu</span>
+            <LuChevronDown className="w-3 h-3 opacity-70" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
-            className="dark w-60 font-poppins bg-brand-background/90 backdrop-blur-md border border-brand-light/10 rounded-[8px] p-0 gap-0"
+            className="dark w-56 font-poppins bg-brand-background/95 backdrop-blur-md border border-brand-light/10 rounded-[8px]"
           >
-            
-            <div className=" relative">
-              <LuSearch className="w-3.5 h-3.5 text-brand-light/60 absolute left-2 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={projectSearch}
-                onChange={(e) => setProjectSearch(e.target.value)}
-                placeholder="Search by name..."
-                className="w-full h-8 rounded-[5px] pl-7  px-2 text-[11px] text-brand-light/90 placeholder:text-brand-light/40 focus:outline-none focus:border-brand-light/30 "
-              />
-            </div>
-            <DropdownMenuSeparator className="my-0" />
-            
-            <ScrollArea className="h-64">
-              <div className="px-1 py-1 flex flex-col">
-                {filteredProjects.length === 0 && (
-                  <DropdownMenuItem
-                    disabled
-                    className="dark text-[11px] text-brand-light/60 px-2"
-                  >
-                    {projects.length === 0
-                      ? "No projects yet"
-                      : "No matching projects"}
-                  </DropdownMenuItem>
-                )}
-                {filteredProjects.map((project, index) => (
-                  <React.Fragment key={project.id}>
-                    <DropdownMenuItem
-                      className={cn(
-                        "dark text-[11px] font-medium flex items-center gap-x-2 cursor-pointer",
-                        index === 0 && "mt-1",
-                      )}
-                      onClick={() => {
-                        setActiveProjectId(project.id);
-                      }}
-                    >
-                      <LuFolder className="w-3.5 h-3.5 text-brand-light/70" />
-                      <span className="truncate">{project.name}</span>
-                      <div className="ml-auto flex items-center gap-1">
-                        {activeProjectId === project.id && (
-                          <LuCheck className="w-4 h-4 text-brand-light" />
-                        )}
-                        {project.id !== activeProjectId && (
-                          <button
-                            type="button"
-                            title={`Delete ${project.name}`}
-                            className="inline-flex items-center justify-center w-6 h-6 rounded-[4px] hover:bg-red-500/15 text-brand-light/60 hover:text-red-400 transition-colors"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setProjectToDelete(project);
-                              setDeleteProjectOpen(true);
-                            }}
-                          >
-                            <LuTrash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </DropdownMenuItem>
-                    {index !== filteredProjects.length - 1 && (
-                      <DropdownMenuSeparator />
-                    )}
-                  </React.Fragment>
-                ))}
-              </div>
-            </ScrollArea>
-
-            <DropdownMenuSeparator />
             <DropdownMenuItem
-              className="dark text-[11px] font-medium flex items-center gap-x-2 cursor-pointer mb-1 mx-1"
+              className="dark text-[11px] font-medium flex items-center gap-x-2 cursor-pointer"
+              disabled={isExporting}
               onClick={() => {
-                void handleCreateProject();
+                void createAndOpenProject().catch((e) => toast.error((e as Error).message));
               }}
             >
               <LuFolderPlus className="w-3.5 h-3.5 text-brand-light/80" />
-              <span>New Project</span>
+              <span>New project</span>
             </DropdownMenuItem>
             <DropdownMenuItem
-              className="dark text-[11px] font-medium flex items-center gap-x-2 cursor-pointer mb-1 mx-1"
+              className="dark text-[11px] font-medium flex items-center gap-x-2 cursor-pointer"
+              disabled={isExporting}
               onClick={() => setCapcutOpen(true)}
             >
               <LuFolderInput className="w-3.5 h-3.5 text-brand-light/80" />
-              <span>Open CapCut Project…</span>
+              <span>Open a CapCut project…</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="dark text-[11px] font-medium flex items-center gap-x-2 cursor-pointer"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <span className="w-3.5" />
+              <span>Settings…</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-
-        {/* Project name input */}
-        {activeProject && (
-        <input
-          type="text"
-          value={
-            activeProject
-              ? isEditingProjectName
-                ? projectNameDraft
-                : activeProject.name
-              : ""
-          }
-          onFocus={() => {
-            if (!activeProject) return;
-            setIsEditingProjectName(true);
-            setProjectNameDraft(activeProject.name ?? "");
-          }}
-          onChange={(e) => {
-            if (!activeProject) return;
-            setProjectNameDraft(e.target.value);
-          }}
-          onBlur={async () => {
-            if (!activeProject) return;
-            await handleCommitProjectName();
-            setIsEditingProjectName(false);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              (e.currentTarget as HTMLInputElement).blur();
-            }
-          }}
-          disabled={!activeProject}
-          placeholder="Project 1"
-          className="max-w-xs w-[220px] h-[34px] focus:border transition-all border border-transparent font-medium duration-150 focus:bg-brand-light/10 hover:bg-brand-background/80  focus:border-brand-light/10 focus:outline-none rounded-[6px] px-3 flex items-center justify-between text-[12px] text-brand-light/90 placeholder:text-brand-light/40 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
-        />
-        )}
       </div>
-      <div className="flex items-center justify-end gap-2">
-      {/* Exit Custom button when in aspect editing mode */}
-        {isAspectEditing && (
-        <button
-          onClick={() => setIsAspectEditing(false)}
-          className="text-brand-light/90 dark h-[34px] px-4 flex items-center gap-x-2 font-medium border border-red-500/30 hover:border-red-500/50 bg-red-500/10 hover:bg-red-500/20 rounded-[6px] transition-all duration-300 cursor-pointer"
-        >
-          <span className="text-[11px]">Exit Aspect Editing</span>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
-        )}
-      <DropdownMenu open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
-        <DropdownMenuTrigger className="text-brand-light/90 dark w-32 h-[34px] relative flex items-center space-x-2 px-2 font-medium border border-brand-light/10 hover:text-brand-light bg-brand hover:bg-brand-light/10 rounded-[6px] py-[7px] transition-all duration-300 cursor-pointer">
-          <span className="text-[11px] inline-flex items-center space-x-1 w-full">
-            <span className="text-brand-light/50 font-light">⌘</span>{" "}
-            <span>Shortcuts</span>
-          </span>
-          {shortcutsOpen ? (
-            <LuChevronUp className="w-3.5 h-3.5" />
-          ) : (
-            <LuChevronDown className="w-3.5 h-3.5" />
-          )}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          className="dark w-[400px] font-poppins p-0 overflow-hidden bg-brand-background/90 backdrop-blur-md border border-brand-light/10 rounded-[8px] z-[100]"
-        >
-          <div className="border-b border-brand-light/10 px-3 py-2">
-            <span className="text-[11px] uppercase tracking-wide text-brand-light/70">
-              Keyboard Shortcuts
-            </span>
-          </div>
-          {/* Tall enough for the timeline's shortcuts: it scrolls. */}
-          <div className="divide-y divide-brand-light/10 max-h-[70vh] overflow-y-auto">
-            {SHORTCUT_SECTIONS.map((section, i) => (
-              <div className="p-3" key={section.title ?? i}>
-                {section.title && (
-                  <DropdownMenuLabel className="dark text-[11px] font-semibold text-brand-light p-0 mb-2">
-                    {section.title}
-                  </DropdownMenuLabel>
-                )}
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                  {section.rows.map((row) => (
-                    <ShortcutRow key={row.action} action={row.action} keys={row.keys} />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu open={sizeOpen} onOpenChange={setSizeOpen}>
-        <DropdownMenuTrigger className="text-brand-light/90 dark w-24 h-[34px] flex items-center space-x-1  px-2 relative font-medium border border-brand-light/10 hover:text-brand-light bg-brand hover:bg-brand-light/10 rounded-[6px] py-[7px] transition-all duration-300 cursor-pointer">
-          <PiResize className="w-4 h-4" /> <span className="text-xs">Size</span>
-          <div className="absolute right-2">
-            {sizeOpen ? (
-              <LuChevronUp className="w-3.5 h-3.5" />
-            ) : (
-              <LuChevronDown className="w-3.5 h-3.5" />
-            )}
-          </div>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          className="dark w-48 flex flex-col bg-brand-background/90 backdrop-blur-md border border-brand-light/10 rounded-[8px] font-poppins"
-        >
-          {[
-            { id: "16:9", name: "Wide", w: 16, h: 9 },
-            { id: "9:16", name: "Vertical", w: 9, h: 16 },
-            { id: "1:1", name: "Square", w: 1, h: 1 },
-            { id: "4:3", name: "Classic", w: 4, h: 3 },
-            { id: "4:5", name: "Social", w: 4, h: 5 },
-            { id: "21:9", name: "Cinema", w: 21, h: 9 },
-            { id: "2:3", name: "Portrait", w: 2, h: 3 },
-          ].map((opt, index) => (
-            <>
-              <DropdownMenuItem
-                key={opt.id}
-                textValue={opt.name}
-                className="dark text-[12px] font-medium flex flex-row items-center cursor-pointer gap-x-3 w-full bg-transparent"
-                onClick={() => {
-                  setAspectRatio({ width: opt.w, height: opt.h, id: opt.id });
-                  setIsAspectEditing(false);
-                  setSizeOpen(false);
-                }}
-              >
-                <div
-                  className="w-[24px] border-[1.5px] border-brand-light rounded-xs"
-                  style={{ height: `${(24 * (opt.h / opt.w)).toFixed(1)}px` }}
-                />
-                <div className="flex flex-col items-start gap-y-0.5">
-                  <span>{opt.name}</span>
-                  <span className="text-brand-light/50 text-xs font-light">
-                    {opt.id}
-                  </span>
-                </div>
-                {aspectRatio.id === opt.id && (
-                  <LuCheck className="w-4 h-4 ml-auto text-brand-light" />
-                )}
-              </DropdownMenuItem>
-              {index !== 6 && <DropdownMenuSeparator />}
-            </>
-          ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            key={"custom"}
-            textValue={"Custom"}
-            className="dark text-[12px] font-medium flex flex-row items-center cursor-pointer gap-x-3 w-full bg-transparent"
-            onClick={(e) => {
-              // Only prevent default if clicking on the edit button
-              if ((e.target as HTMLElement).closest("button")) {
+
+      {/* The project's name, in the middle; click to rename. */}
+      {activeProject && (
+        <div className="absolute inset-x-0 flex justify-center pointer-events-none">
+          <input
+            type="text"
+            data-testid="project-name"
+            value={isEditingProjectName ? projectNameDraft : activeProject.name}
+            onFocus={() => {
+              setIsEditingProjectName(true);
+              setProjectNameDraft(activeProject.name ?? "");
+            }}
+            onChange={(e) => setProjectNameDraft(e.target.value)}
+            onBlur={async () => {
+              await handleCommitProjectName();
+              setIsEditingProjectName(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
                 e.preventDefault();
-                e.stopPropagation();
-                return;
+                (e.currentTarget as HTMLInputElement).blur();
               }
-              // If not custom already, set to custom mode
-              if (aspectRatio.id !== "custom") {
-                setAspectRatio({
-                  width: aspectRatio.width,
-                  height: aspectRatio.height,
-                  id: "custom",
-                });
-                setIsAspectEditing(true);
-              }
-              setSizeOpen(false);
             }}
-          >
-            <div className="w-[24px] h-[24px] border-[1.5px] border-dashed border-brand-light rounded-xs" />
-            <div className="flex flex-col items-start gap-y-0.5 flex-1">
-              <span>Custom</span>
-              <span className="text-brand-light/50 text-xs font-light">
-                {aspectRatio.id === "custom"
-                  ? `${aspectRatio.width}:${aspectRatio.height}`
-                  : "Set W:H"}
-              </span>
-            </div>
-            {aspectRatio.id === "custom" && (
-              <button
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsAspectEditing(!isAspectEditing);
-                  setSizeOpen(false);
-                }}
-                className="px-3 py-1 text-[10px] bg-brand-light/10 hover:bg-brand-light/20 rounded-[4px] transition-colors"
-              >
-                {isAspectEditing ? "Done" : "Edit"}
-              </button>
-            )}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu open={layoutOpen} onOpenChange={setLayoutOpen}>
-        <DropdownMenuTrigger className="text-brand-light/90 dark w-32 h-[34px] relative flex items-center space-x-2 px-2 font-medium border border-brand-light/10 hover:text-brand-light bg-brand hover:bg-brand/90 rounded-[6px] py-[7px] transition-all duration-300 cursor-pointer">
-          <LayoutIcon type={layout as any} />
-          <span className="text-[11px]">{layoutLabel}</span>
-          <div className="absolute right-2">
-            {layoutOpen ? (
-              <LuChevronUp className="w-4 h-4" />
-            ) : (
-              <LuChevronDown className="w-4 h-4" />
-            )}
-          </div>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          className="dark w-48 font-poppins bg-brand-background/90 backdrop-blur-md border border-brand-light/10 rounded-[8px]"
-        >
-          <DropdownMenuItem
-            className="dark text-[11px] font-medium flex items-center gap-x-2"
-            onClick={() => {
-              setLayout("default");
-              setLayoutOpen(false);
-            }}
-          >
-            <LayoutIcon type="default" />
-            <span>Default</span>
-            {layout === "default" && (
-              <LuCheck className="w-4 h-4 ml-auto text-brand-light" />
-            )}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="dark text-[11px] font-medium flex items-center gap-x-2"
-            onClick={() => {
-              setLayout("media");
-              setLayoutOpen(false);
-            }}
-          >
-            <LayoutIcon type="media" />
-            <span>Media</span>
-            {layout === "media" && (
-              <LuCheck className="w-4 h-4 ml-auto text-brand-light" />
-            )}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="dark text-[11px] font-medium flex items-center gap-x-2"
-            onClick={() => {
-              setLayout("properties");
-              setLayoutOpen(false);
-            }}
-          >
-            <LayoutIcon type="properties" />
-            <span>Properties</span>
-            {layout === "properties" && (
-              <LuCheck className="w-4 h-4 ml-auto text-brand-light" />
-            )}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            placeholder="Project 1"
+            title="Rename the project"
+            className="pointer-events-auto w-[260px] h-7 text-center rounded-[5px] px-3 text-[12px] font-medium text-brand-light/90 placeholder:text-brand-light/40 border border-transparent hover:bg-brand-light/[0.05] focus:bg-brand-light/[0.08] focus:border-brand-light/10 transition-colors"
+          />
+        </div>
+      )}
 
-      <div className="flex items-center gap-2">
-        {!isExporting ? (
-          <button
-            disabled={!canExport} 
-            type="button"
-            className="text-brand-light space-x-1.5 flex items-center justify-center px-5 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-brand disabled:border-brand font-medium h-[34px] hover:text-brand-light bg-brand-accent border border-brand-accent-two-shade hover:bg-brand-accent-two-shade rounded-[6px] py-1.5 transition-all duration-300 cursor-pointer"
-            onClick={() => setExportOpen(true)}
+      <div className="flex items-center justify-end gap-1 z-10">
+        <DropdownMenu open={layoutOpen} onOpenChange={setLayoutOpen}>
+          <DropdownMenuTrigger title="Layout" data-testid="layout-menu" className={button}>
+            <LayoutIcon type={layout as any} className="scale-[0.7]" />
+            <span>{LAYOUTS.find((l) => l.id === layout)?.label}</span>
+            {layoutOpen ? <LuChevronUp className="w-3 h-3" /> : <LuChevronDown className="w-3 h-3 opacity-70" />}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="dark w-48 font-poppins bg-brand-background/95 backdrop-blur-md border border-brand-light/10 rounded-[8px]"
           >
-            <TbPackageExport size={16} />
-            <span className="text-[11px]">Export</span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="hidden md:flex items-center gap-2 min-w-[180px] h-[34px] px-3 pr-5 rounded-[6px] border border-brand-light/10 bg-brand-background/80 hover:bg-brand-background cursor-pointer transition-colors"
-            onClick={() => setExportOpen(true)}
+            {LAYOUTS.map((l, i) => (
+              <React.Fragment key={l.id}>
+                {i > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuItem
+                  className="dark text-[11px] font-medium flex items-center gap-x-2"
+                  onClick={() => {
+                    setLayout(l.id);
+                    setLayoutOpen(false);
+                  }}
+                >
+                  <LayoutIcon type={l.id} />
+                  <span>{l.label}</span>
+                  {layout === l.id && <LuCheck className="w-4 h-4 ml-auto text-brand-light" />}
+                </DropdownMenuItem>
+              </React.Fragment>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+          <DropdownMenuTrigger title="Keyboard shortcuts" className={button}>
+            <span className="text-brand-light/60">⌘</span>
+            <span>Shortcuts</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="dark w-[400px] font-poppins p-0 overflow-hidden bg-brand-background/95 backdrop-blur-md border border-brand-light/10 rounded-[8px] z-[100]"
           >
-            <TbPackageExport size={14} className="text-brand-light/80" />
-            <span className="text-[10px] text-brand-light/70 whitespace-nowrap">
-              Exporting
-            </span>
-            <div className="flex-1 w-24">
-              <ProgressBar
-                percent={Math.round(
-                  Math.max(0, Math.min(1, exportProgress ?? 0)) * 100,
-                )}
-                className="h-1.5 border-brand-light/20 bg-brand-background-dark/80"
-                barClassName="bg-brand-accent"
-              />
+            <div className="border-b border-brand-light/10 px-3 py-2">
+              <span className="text-[11px] text-brand-light/70">Keyboard shortcuts</span>
             </div>
-            <span className="text-[10px] text-brand-light/60 w-4 text-right">
-              {Math.round(Math.max(0, Math.min(1, exportProgress ?? 0)) * 100)}%
-            </span>
-          </button>
-        )}
-      </div>
+            {/* Tall enough for the timeline's shortcuts: it scrolls. */}
+            <div className="divide-y divide-brand-light/10 max-h-[70vh] overflow-y-auto">
+              {SHORTCUT_SECTIONS.map((section, i) => (
+                <div className="p-3" key={section.title ?? i}>
+                  {section.title && (
+                    <DropdownMenuLabel className="dark text-[11px] font-semibold text-brand-light p-0 mb-2">
+                      {section.title}
+                    </DropdownMenuLabel>
+                  )}
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    {section.rows.map((row) => (
+                      <ShortcutRow key={row.action} action={row.action} keys={row.keys} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <button
+          type="button"
+          title="Settings"
+          data-testid="open-settings"
+          onClick={() => setSettingsOpen(true)}
+          className={cn(button, "w-7 justify-center px-0")}
+        >
+          <LuSettings className="w-3.5 h-3.5" />
+        </button>
+
+        <div className="flex items-center ml-1">
+          {!isExporting ? (
+            <button
+              disabled={!canExport}
+              type="button"
+              data-testid="export"
+              className="h-7 px-4 flex items-center justify-center gap-x-1.5 rounded-[5px] text-[11.5px] font-medium text-brand-lighter bg-brand-accent hover:bg-brand-accent-two-shade disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-brand-accent transition-colors cursor-pointer"
+              onClick={() => setExportOpen(true)}
+            >
+              <LuUpload className="w-3.5 h-3.5" />
+              <span>Export</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="flex items-center gap-2 min-w-[180px] h-7 px-3 rounded-[5px] border border-brand-light/10 bg-brand-background/80 hover:bg-brand-background cursor-pointer transition-colors"
+              onClick={() => setExportOpen(true)}
+            >
+              <LuUpload className="w-3.5 h-3.5 text-brand-light/80" />
+              <span className="text-[10px] text-brand-light/70 whitespace-nowrap">
+                Exporting
+              </span>
+              <div className="flex-1 w-24">
+                <ProgressBar
+                  percent={Math.round(
+                    Math.max(0, Math.min(1, exportProgress ?? 0)) * 100,
+                  )}
+                  className="h-1.5 border-brand-light/20 bg-brand-background-dark/80"
+                  barClassName="bg-brand-accent"
+                />
+              </div>
+              <span className="text-[10px] text-brand-light/60 w-6 text-right tabular-nums">
+                {Math.round(Math.max(0, Math.min(1, exportProgress ?? 0)) * 100)}%
+              </span>
+            </button>
+          )}
+        </div>
       </div>
 
       <ExportModal
@@ -917,52 +582,6 @@ const TopBar: React.FC<TopBarProps> = () => {
           }
         }}
       />
-
-      <AlertDialog
-        open={deleteProjectOpen}
-        onOpenChange={(open) => {
-          setDeleteProjectOpen(open);
-          if (!open) {
-            setProjectToDelete(null);
-            setIsDeletingProject(false);
-          }
-        }}
-        
-      >
-        <AlertDialogContent className="dark bg-brand-background/95 font-poppins backdrop-blur-md border border-brand-light/10">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-brand-light">
-              Delete project?
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-brand-light/70">
-              This will permanently delete{" "}
-              <span className="text-brand-light font-medium">
-                {projectToDelete?.name ?? "this project"}
-              </span>{" "}
-              and its saved JSON.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              disabled={isDeletingProject}
-              className="dark border-brand-light/15 text-brand-light hover:bg-brand-light/10 text-[12px] font-medium px-5"
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!projectToDelete || isDeletingProject}
-              onClick={(e) => {
-                // Prevent radix from closing early while we await deletion.
-                e.preventDefault();
-                void handleConfirmDeleteProject();
-              }}
-              className="bg-red-500/80 hover:bg-red-500/70 text-brand-light text-[12px] font-medium px-5"
-            >
-              {isDeletingProject ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };

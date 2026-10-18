@@ -49,9 +49,10 @@ const TextButton = ({
   return (
     <div
       onClick={onClick}
-      className={`rounded-md h-8 w-8 p-1.5 transition-all duration-300 cursor-pointer ${active ? "text-brand-light bg-brand-accent-two-shade" : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"}`}
+      title="Text (T)"
+      className={`rounded-[5px] h-7 w-7 p-1.5 transition-all duration-300 cursor-pointer ${active ? "text-brand-light bg-brand-accent-two-shade" : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"}`}
     >
-      <LuType className="w-5 h-5" />
+      <LuType className="w-4 h-4" />
     </div>
   );
 };
@@ -123,12 +124,12 @@ const FloatingBar: React.FC<FloatingBarProps> = () => {
   const sliderMin = useMemo(() => Math.round(minScale * 100), [minScale]);
   const sliderMax = useMemo(() => Math.round(maxScale * 100), [maxScale]);
   return (
-    <div className="w-64 absolute top-7 left-1/2 -translate-x-1/2 rounded-lg px-6 z-50 ">
-      <div className="w-full h-full flex items-center justify-between">
-        <div className="flex flex-row-reverse justify-center items-center gap-x-1.5 absolute top-0 left-1/2 -translate-x-1/2 p-2 bg-brand border border-brand-light/5 rounded-lg shadow-lg">
+    <div data-testid="player-tools" className="flex items-center justify-center">
+      <div className="flex items-center">
+        <div className="flex flex-row-reverse justify-center items-center gap-x-1">
           <div className="flex items-center gap-x-1">
             <DropdownMenu open={zoomOpen} onOpenChange={setZoomOpen}>
-              <DropdownMenuTrigger className="text-brand-light/90 dark w-18  flex items-center font-medium justify-between px-2 text-xs border border-brand-light/10 hover:text-brand-light bg-brand hover:bg-brand-light/10 rounded-md py-[7px] transition-all duration-300 cursor-pointer">
+              <DropdownMenuTrigger title="Zoom" data-testid="player-zoom" className="text-brand-light/80 dark w-[66px] h-7 flex items-center font-medium justify-between px-2 text-[11px] tabular-nums hover:text-brand-light hover:bg-brand-light/10 rounded-[5px] transition-colors cursor-pointer ml-1">
                 {zoomLevel}%
                 {zoomOpen ? (
                   <LuChevronUp className="w-3.5 h-3.5" />
@@ -219,17 +220,18 @@ const FloatingBar: React.FC<FloatingBarProps> = () => {
           <div className="flex items-center gap-x-1">
             <div
               onClick={() => setTool("draw")}
-              className={`rounded-md h-8 w-8 p-1.5 transition-all duration-300 cursor-pointer ${tool === "draw" ? "text-brand-light bg-brand-accent-two-shade" : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"}`}
+              title="Draw (D)"
+              className={`rounded-[5px] h-7 w-7 p-1.5 transition-all duration-300 cursor-pointer ${tool === "draw" ? "text-brand-light bg-brand-accent-two-shade" : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"}`}
             >
-              {drawingTool === "brush" && <LuPenTool className="w-5 h-5" />}
+              {drawingTool === "brush" && <LuPenTool className="w-4 h-4" />}
               {drawingTool === "highlighter" && (
-                <LuHighlighter className="w-5 h-5" />
+                <LuHighlighter className="w-4 h-4" />
               )}
-              {drawingTool === "eraser" && <LuEraser className="w-5 h-5" />}
+              {drawingTool === "eraser" && <LuEraser className="w-4 h-4" />}
             </div>
             <Popover open={drawOpen} onOpenChange={setDrawOpen}>
               <PopoverTrigger
-                className={`rounded h-8 px-0.5 -ml-0.5 transition-all duration-300 cursor-pointer ${
+                className={`rounded h-7 px-0.5 -ml-0.5 transition-all duration-300 cursor-pointer ${
                   drawOpen
                     ? "text-brand-light bg-brand-light/10"
                     : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"
@@ -399,26 +401,26 @@ const FloatingBar: React.FC<FloatingBarProps> = () => {
             <div
               title="Mask"
               onClick={() => setTool("mask")}
-              className={`rounded-md h-8 w-8 p-1.5 transition-all duration-300 cursor-pointer ${tool === "mask" ? "text-brand-light bg-brand-accent-two-shade" : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"}`}
+              className={`rounded-[5px] h-7 w-7 p-1.5 transition-all duration-300 cursor-pointer ${tool === "mask" ? "text-brand-light bg-brand-accent-two-shade" : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"}`}
             >
-              {maskTool === "lasso" && <LuLasso className="w-5 h-5" />}
+              {maskTool === "lasso" && <LuLasso className="w-4 h-4" />}
               {maskTool === "shape" && maskShape === "rectangle" && (
-                <LuSquare className="w-5 h-5" />
+                <LuSquare className="w-4 h-4" />
               )}
               {maskTool === "shape" && maskShape === "ellipse" && (
-                <LuCircle className="w-5 h-5" />
+                <LuCircle className="w-4 h-4" />
               )}
               {maskTool === "shape" && maskShape === "polygon" && (
-                <LuTriangle className="w-5 h-5" />
+                <LuTriangle className="w-4 h-4" />
               )}
               {maskTool === "shape" && maskShape === "star" && (
-                <LuStar className="w-5 h-5" />
+                <LuStar className="w-4 h-4" />
               )}
-              {maskTool === "draw" && <LuBrush className="w-5 h-5" />}
+              {maskTool === "draw" && <LuBrush className="w-4 h-4" />}
             </div>
             <Popover open={maskOpen} onOpenChange={setMaskOpen}>
               <PopoverTrigger
-                className={`rounded h-8 px-0.5 -ml-0.5 transition-all duration-300 cursor-pointer ${
+                className={`rounded h-7 px-0.5 -ml-0.5 transition-all duration-300 cursor-pointer ${
                   maskOpen
                     ? "text-brand-light bg-brand-light/10"
                     : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"
@@ -563,21 +565,22 @@ const FloatingBar: React.FC<FloatingBarProps> = () => {
             </Popover>
             <div
               onClick={() => setTool("shape")}
-              className={`rounded-md h-8 w-8 p-1.5 transition-all duration-300 cursor-pointer ${
+              title="Shape (S)"
+              className={`rounded-[5px] h-7 w-7 p-1.5 transition-all duration-300 cursor-pointer ${
                 tool === "shape"
                   ? "text-brand-light bg-brand-accent-two-shade"
                   : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"
               }`}
             >
-              {shape === "rectangle" && <LuSquare className="w-5 h-5" />}
-              {shape === "ellipse" && <LuCircle className="w-5 h-5" />}
-              {shape === "polygon" && <LuTriangle className="w-5 h-5" />}
-              {shape === "line" && <LuMinus className="w-5 h-5" />}
-              {shape === "star" && <LuStar className="w-5 h-5" />}
+              {shape === "rectangle" && <LuSquare className="w-4 h-4" />}
+              {shape === "ellipse" && <LuCircle className="w-4 h-4" />}
+              {shape === "polygon" && <LuTriangle className="w-4 h-4" />}
+              {shape === "line" && <LuMinus className="w-4 h-4" />}
+              {shape === "star" && <LuStar className="w-4 h-4" />}
             </div>
             <DropdownMenu open={shapeOpen} onOpenChange={setShapeOpen}>
               <DropdownMenuTrigger
-                className={`rounded h-8 px-0.5 -ml-0.5 transition-all duration-300 cursor-pointer ${
+                className={`rounded h-7 px-0.5 -ml-0.5 transition-all duration-300 cursor-pointer ${
                   shapeOpen
                     ? "text-brand-light bg-brand-light/10"
                     : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"
@@ -658,21 +661,22 @@ const FloatingBar: React.FC<FloatingBarProps> = () => {
             </DropdownMenu>
             <div
               onClick={() => setTool(tool === "hand" ? "hand" : "pointer")}
-              className={`rounded-md h-8 w-8 p-1.5 transition-all duration-300 cursor-pointer ${
+              title="Select (V) or hand (H)"
+              className={`rounded-[5px] h-7 w-7 p-1.5 transition-all duration-300 cursor-pointer ${
                 tool === "pointer" || tool === "hand"
                   ? "text-brand-light bg-brand-accent-two-shade"
                   : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"
               }`}
             >
               {tool === "hand" ? (
-                <LuHand className="w-5 h-5" />
+                <LuHand className="w-4 h-4" />
               ) : (
-                <LuMousePointer2 className="w-5 h-5" />
+                <LuMousePointer2 className="w-4 h-4" />
               )}
             </div>
             <DropdownMenu open={toolOpen} onOpenChange={setToolOpen}>
               <DropdownMenuTrigger
-                className={`rounded py-2 px-0.5 -ml-0.5 h-8 transition-all duration-300 cursor-pointer ${
+                className={`rounded px-0.5 -ml-0.5 h-7 transition-all duration-300 cursor-pointer ${
                   toolOpen
                     ? "text-brand-light bg-brand-light/10"
                     : "text-brand-light/90 hover:text-brand-light hover:bg-brand-light/10"

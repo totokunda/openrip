@@ -46,7 +46,6 @@ import {
   ClipTransform,
 } from "@/lib/types";
 import { v4 as uuidv4 } from "uuid";
-import { SlSizeFullscreen } from "react-icons/sl";
 import FullscreenPreview from "./FullscreenPreview";
 import {
   APPLICATOR_CLIP_TYPES,
@@ -2866,13 +2865,7 @@ const Preview: React.FC<PreviewProps> = () => {
               </Layer>
             )}
           </Stage>
-          {/* Fullscreen button */}
-          <button
-            onClick={() => setIsFullscreen(true)}
-            className="absolute bottom-4 right-4 p-2 bg-brand cursor-pointer hover:bg-brand-background-dark hover:text-blue-400 text-white rounded-md transition-colors"
-          >
-            <SlSizeFullscreen className="h-3 w-3" />
-          </button>
+          {/* Full screen is under the player (PlayerBar). */}
         </div>
       )}
       {

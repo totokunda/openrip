@@ -701,12 +701,16 @@ export interface Point {
   y: number;
 }
 
+/** The left panel's tabs, in CapCut's order. */
 export type SidebarSection =
   | "media"
-  | "filters"
-  | "templates"
+  | "audio"
+  | "text"
+  | "stickers"
+  | "effects"
   | "transitions"
-  | "effects";
+  | "filters"
+  | "adjustment";
 
 export interface Filter {
   id: string;

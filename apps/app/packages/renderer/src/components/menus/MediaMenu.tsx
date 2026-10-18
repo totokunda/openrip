@@ -194,7 +194,6 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   const listContainerRef = useRef<HTMLDivElement | null>(null);
   const uploadBarRef = useRef<HTMLDivElement | null>(null);
   const [menuWidth, setMenuWidth] = useState<number>(0);
-  const [panelHeight, setPanelHeight] = useState<number>(0);
   const [deleteAlertOpen, setDeleteAlertOpen] = useState(false);
   const [renamingItem, setRenamingItem] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState<string>("");
@@ -284,21 +283,6 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
     const el = uploadBarRef.current;
     if (!el) return;
     const update = () => setMenuWidth(el.clientWidth);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    window.addEventListener("resize", update);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, []);
-
-  // Track panel height and update on resize to size the ScrollArea dynamically (panelHeight - 172px)
-  useEffect(() => {
-    const el = panelRef.current;
-    if (!el) return;
-    const update = () => setPanelHeight(el.clientHeight);
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
@@ -759,28 +743,27 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   }, [items, selectedTypes, sortKey, sortOrder, durationCache]);
 
   return (
-    <div ref={panelRef} className="h-full w-full  duration-200 ease-out ">
-      <div className="flex flex-col gap-y-3 px-5 pb-5 pt-3">
+    <div ref={panelRef} className="h-full w-full flex flex-col">
+      <div className="shrink-0 flex flex-row items-center gap-1.5 px-3 pt-3 pb-2">
         <DropdownMenu>
           <div
             ref={uploadBarRef}
-            className="bg-brand-accent-shade shadow flex flex-row  items-center   text-brand-lighter w-full text-[12.5px] font-medium rounded transition-all duration-200 cursor-pointer"
+            className="flex-1 min-w-0 h-8 bg-brand-accent-shade flex flex-row items-center text-brand-lighter text-[12px] font-medium rounded-[6px] transition-colors cursor-pointer"
           >
             <span
+              data-testid="media-import"
               onClick={() => handleUpload(false)}
-              className="px-4 py-2 flex flex-row gap-x-2.5 rounded-l items-center justify-center hover:bg-brand-accent-two-shade border-r border-brand-light/30 w-full"
+              className="h-full px-3 flex flex-row gap-x-2 rounded-l-[6px] items-center justify-center hover:bg-brand-accent-two-shade border-r border-brand-light/25 w-full"
             >
               {isUploading ? (
-                <LuLoader className="w-[18px] h-[18px] animate-spin" />
+                <LuLoader className="w-4 h-4 animate-spin" />
               ) : (
-                <LuCloudUpload className="w-[18px] h-[18px] cursor-pointer stroke-2" />
+                <LuCloudUpload className="w-4 h-4 stroke-2" />
               )}
-              <span className="flex flex-row gap-x-2.5 items-center justify-center text-xs">
-                {isUploading ? "Uploading…" : "Upload Media"}
-              </span>
+              <span>{isUploading ? "Importing…" : "Import"}</span>
             </span>
-            <DropdownMenuTrigger className="px-1 py-2 flex flex-row gap-x-2.5 items-center justify-center w-10 hover:bg-brand-accent-two-shade rounded-r-md">
-              <LuChevronDown className="w-4 h-4 cursor-pointer stroke-2" />
+            <DropdownMenuTrigger aria-label="More ways to import" className="h-full px-1 flex items-center justify-center w-8 hover:bg-brand-accent-two-shade rounded-r-[6px]">
+              <LuChevronDown className="w-4 h-4 stroke-2" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -792,175 +775,139 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
                 onClick={() => handleUpload(false)}
                 className="w-full cursor-pointer py-2"
               >
-                <TbFileUpload className="w-[18px] h-[18px] cursor-pointer stroke-2" />
-                <span className="flex flex-row gap-x-2.5 items-center justify-center text-[12px] font-medium">
-                  Upload File
-                </span>
+                <TbFileUpload className="w-4 h-4 stroke-2" />
+                <span className="text-[11.5px] font-medium">Import files</span>
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => handleUpload(true)}
                 className="w-full cursor-pointer py-2"
               >
-                <TbFolderUp className="w-[18px] h-[18px] cursor-pointer stroke-2" />
-                <span className="flex flex-row gap-x-2.5 items-center justify-center text-[12px] font-medium">
-                  Upload Directory
-                </span>
+                <TbFolderUp className="w-4 h-4 stroke-2" />
+                <span className="text-[11.5px] font-medium">Import a folder</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </div>
         </DropdownMenu>
-      </div>
-      <div className="border-t border-brand-light/5"></div>
-      {/* Filter & Sort Toolbar */}
-      <div className="px-5 py-2">
-        <div className="flex flex-row items-center gap-x-1.5">
-          {/* compute selected state for styling */}
-          {/* eslint-disable-next-line */}
-          {/* toolbar */}
-          <DropdownMenu open={filterOpen} onOpenChange={setFilterOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                className={cn(
-                  "px-2.5 py-1.5 rounded-[6px] text-brand-light/90 text-[11px] font-medium flex bg-brand flex-row items-center gap-x-2 transition-colors",
-                  "hover:bg-brand-light/10",
-                  (filterOpen || selectedTypes.size > 0) && "bg-brand-light/10",
-                )}
-                title="Filter"
-              >
-                <BsFilter className="w-[16px] h-[16px]" />
-                <span>Filter</span>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="dark w-44 flex flex-col text-brand-light bg-brand-background font-poppins text-[12px]"
+        <DropdownMenu open={filterOpen} onOpenChange={setFilterOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              className={cn(
+                "h-8 w-8 shrink-0 rounded-[6px] text-brand-light/80 flex items-center justify-center bg-brand transition-colors hover:bg-brand-light/10 hover:text-brand-light",
+                (filterOpen || selectedTypes.size > 0) && "bg-brand-light/10 text-brand-light",
+              )}
+              title="Filter"
+              aria-label="Filter"
             >
-              <DropdownMenuCheckboxItem
-                className="text-[11px] font-medium"
-                checked={selectedTypes.size === 0}
-                onCheckedChange={(checked) => {
-                  if (checked) setSelectedTypes(new Set());
-                }}
-              >
-                All
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                className="text-[11px] font-medium"
-                checked={selectedTypes.has("video")}
-                onCheckedChange={(checked) => {
-                  setSelectedTypes((prev) => {
-                    const next = new Set(prev);
-                    if (checked) next.add("video");
-                    else next.delete("video");
-                    return next;
-                  });
-                }}
-              >
-                Videos
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                className="text-[11px] font-medium"
-                checked={selectedTypes.has("image")}
-                onCheckedChange={(checked) => {
-                  setSelectedTypes((prev) => {
-                    const next = new Set(prev);
-                    if (checked) next.add("image");
-                    else next.delete("image");
-                    return next;
-                  });
-                }}
-              >
-                Images
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                className="text-[11px] font-medium"
-                checked={selectedTypes.has("audio")}
-                onCheckedChange={(checked) => {
-                  setSelectedTypes((prev) => {
-                    const next = new Set(prev);
-                    if (checked) next.add("audio");
-                    else next.delete("audio");
-                    return next;
-                  });
-                }}
-              >
-                Audio
-              </DropdownMenuCheckboxItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu open={sortOpen} onOpenChange={setSortOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                className={cn(
-                  "px-2.5 py-1.5 rounded-[6px] text-brand-light/90 text-[11px] font-medium flex bg-brand flex-row items-center gap-x-2 transition-colors",
-                  "hover:bg-brand-light/10",
-                  sortOpen && "bg-brand-light/10",
-                )}
-                title="Sort"
-              >
-                <LuArrowUpDown className="w-[16px] h-[16px]" />
-                <span>Sort</span>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="dark w-48 flex flex-col text-brand-light bg-brand-background font-poppins"
+              <BsFilter className="w-4 h-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="dark w-44 flex flex-col text-brand-light bg-brand-background font-poppins text-[12px]"
+          >
+            <DropdownMenuCheckboxItem
+              className="text-[11px] font-medium"
+              checked={selectedTypes.size === 0}
+              onCheckedChange={(checked) => {
+                if (checked) setSelectedTypes(new Set());
+              }}
             >
-              {/* Sort key (mutually exclusive via checkboxes) */}
+              All
+            </DropdownMenuCheckboxItem>
+            {([
+              ["video", "Videos"],
+              ["image", "Images"],
+              ["audio", "Audio"],
+            ] as const).map(([type, label]) => (
               <DropdownMenuCheckboxItem
+                key={type}
                 className="text-[11px] font-medium"
-                checked={sortKey === "name"}
+                checked={selectedTypes.has(type)}
                 onCheckedChange={(checked) => {
-                  if (checked) setSortKey("name");
+                  setSelectedTypes((prev) => {
+                    const next = new Set(prev);
+                    if (checked) next.add(type);
+                    else next.delete(type);
+                    return next;
+                  });
                 }}
               >
-                Name
+                {label}
               </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                className="text-[11px] font-medium"
-                checked={sortKey === "duration"}
-                onCheckedChange={(checked) => {
-                  if (checked) setSortKey("duration");
-                }}
-              >
-                Duration
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                className="text-[11px] font-medium"
-                checked={sortKey === "date"}
-                onCheckedChange={(checked) => {
-                  if (checked) setSortKey("date");
-                }}
-              >
-                Date Added
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuSeparator />
-              {/* Sort order (mutually exclusive via checkboxes) */}
-              <DropdownMenuCheckboxItem
-                className="text-[11px] font-medium"
-                checked={sortOrder === "asc"}
-                onCheckedChange={(checked) => {
-                  if (checked) setSortOrder("asc");
-                }}
-              >
-                Ascending
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                className="text-[11px] font-medium"
-                checked={sortOrder === "desc"}
-                onCheckedChange={(checked) => {
-                  if (checked) setSortOrder("desc");
-                }}
-              >
-                Descending
-              </DropdownMenuCheckboxItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu open={sortOpen} onOpenChange={setSortOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              className={cn(
+                "h-8 w-8 shrink-0 rounded-[6px] text-brand-light/80 flex items-center justify-center bg-brand transition-colors hover:bg-brand-light/10 hover:text-brand-light",
+                sortOpen && "bg-brand-light/10 text-brand-light",
+              )}
+              title="Sort"
+              aria-label="Sort"
+            >
+              <LuArrowUpDown className="w-4 h-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="dark w-48 flex flex-col text-brand-light bg-brand-background font-poppins"
+          >
+            {/* Sort key (mutually exclusive via checkboxes) */}
+            <DropdownMenuCheckboxItem
+              className="text-[11px] font-medium"
+              checked={sortKey === "name"}
+              onCheckedChange={(checked) => {
+                if (checked) setSortKey("name");
+              }}
+            >
+              Name
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              className="text-[11px] font-medium"
+              checked={sortKey === "duration"}
+              onCheckedChange={(checked) => {
+                if (checked) setSortKey("duration");
+              }}
+            >
+              Duration
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              className="text-[11px] font-medium"
+              checked={sortKey === "date"}
+              onCheckedChange={(checked) => {
+                if (checked) setSortKey("date");
+              }}
+            >
+              Date Added
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            {/* Sort order (mutually exclusive via checkboxes) */}
+            <DropdownMenuCheckboxItem
+              className="text-[11px] font-medium"
+              checked={sortOrder === "asc"}
+              onCheckedChange={(checked) => {
+                if (checked) setSortOrder("asc");
+              }}
+            >
+              Ascending
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              className="text-[11px] font-medium"
+              checked={sortOrder === "desc"}
+              onCheckedChange={(checked) => {
+                if (checked) setSortOrder("desc");
+              }}
+            >
+              Descending
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <div
         ref={listContainerRef}
-        className="overflow-y-auto relative"
+        className="flex-1 min-h-0 relative"
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -978,31 +925,25 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
           </div>
         )}
         {!isMediaListLoading && items.length === 0 && (
-          <div
-            style={{ height: Math.max(0, panelHeight - 172) }}
-            className="flex flex-col items-center justify-center w-full text-sm gap-y-2 text-brand-lighter/60"
-          >
-            <LuFolder className="w-7 h-7 text-brand-light" />
+          <div className="h-full flex flex-col items-center justify-center w-full gap-y-2 pb-8 text-brand-lighter/60">
+            <LuFolder className="w-6 h-6 text-brand-light/50" />
             <div className="flex flex-col items-center justify-center gap-y-1">
-              <span className="text-brand-lighter text-base font-medium">
+              <span className="text-brand-lighter/90 text-[12px] font-medium">
                 No media yet
               </span>
-              <span className="text-brand-lighter/50 text-xs">
-                Upload files to get started.
+              <span className="text-brand-lighter/50 text-[11px]">
+                Import files, or drop them here.
               </span>
             </div>
           </div>
         )}
         {/* Keep showing the grid even while background reloads happen. */}
         {items.length > 0 && (
-          <ScrollArea
-            style={{ height: Math.max(0, panelHeight - 172) }}
-            className="px-5 py-4 pt-1 dark"
-          >
+          <ScrollArea className="h-full px-3 pb-3 pt-1 dark">
             <div
               className="grid gap-2 w-full"
               style={{
-                gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fill, minmax(112px, 1fr))",
               }}
             >
               {displayItems.map((item) => (
