@@ -1336,6 +1336,7 @@ dependencies = [
  "openrip-frame",
  "openrip-media",
  "openrip-model",
+ "openrip-motion",
  "openrip-platform",
  "pollster",
  "swash",

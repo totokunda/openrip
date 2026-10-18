@@ -17,6 +17,7 @@ swash = "0.2"
 wuff = { version = "0.2", default-features = false, features = ["brotli"] }
 openrip-frame.workspace = true
 openrip-platform.workspace = true
+openrip-motion.workspace = true
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = "0.6"
@@ -35,6 +36,7 @@ wgpu = { version = "30", features = ["fragile-send-sync-non-atomic-wasm"] }
 # Frames to draw in the tests come from the decoder.
 openrip-media = { workspace = true, features = ["ffmpeg"] }
 openrip-model.workspace = true
+openrip-motion.workspace = true
 
 [target.'cfg(target_vendor = "apple")'.dev-dependencies]
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVBase", "CVReturn"] }

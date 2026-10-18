@@ -40,11 +40,13 @@ pub struct FlowOptions {
     /// Neighbours this many pixels away offer their vectors before each level's refinement
     /// (0: none).
     pub select_radius: usize,
+    /// The coarsest level tries every whole-pixel motion up to this far.
+    pub search_radius: usize,
 }
 
 impl Default for FlowOptions {
     fn default() -> Self {
-        FlowOptions { levels: 6, iterations: 5, sigma: 2.0, lambda: 1e-8, relative: 0.02, robust: 0.05, select_radius: 2 }
+        FlowOptions { levels: 6, iterations: 5, sigma: 2.0, lambda: 1e-8, relative: 0.02, robust: 0.05, select_radius: 2, search_radius: 4 }
     }
 }
 
@@ -143,7 +145,9 @@ pub fn dense_flow(a: &Gray, b: &Gray, o: &FlowOptions) -> Flow {
         let (w, h) = (la.image.width, la.image.height);
         let f = match flow.take() {
             Some(coarse) => coarse.upsampled(w, h),
-            None => Flow::zero(w, h),
+            // The coarsest level starts from an exhaustive search, so motions too big for the
+            // pyramid's Gauss–Newton steps (a small object moving fast) are still found.
+            None => search(&la.image, lb, o.search_radius as isize),
         };
         // Each pixel takes the neighbour's vector that matches best (so a motion boundary
         // the coarser level blurred snaps back to its place), then Gauss–Newton refines it.
@@ -232,6 +236,40 @@ pub const MAX_STEP: f32 = 1.0;
 /// Offsets (in units of the radius) of the candidates [`select`] tries, and of the taps of its
 /// matching cost (pixels): the pixel itself and its eight neighbours.
 pub const NEIGHBOURS: [[isize; 2]; 9] = [[0, 0], [-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+
+/// Mean absolute difference per tap that one pixel of motion costs in [`search`], so flat
+/// areas, where every motion matches, keep none.
+pub const SEARCH_PENALTY: f32 = 0.002;
+
+/// Per pixel, the whole-pixel motion up to `radius` under which its 5×5 patch of `a` best
+/// matches `b`.
+pub fn search(a: &Gray, b: &Gray, radius: isize) -> Flow {
+    let (w, h) = (a.width as isize, a.height as isize);
+    let mut out = Flow::zero(a.width, a.height);
+    for y in 0..h {
+        for x in 0..w {
+            let mut best = (f32::MAX, 0isize, 0isize);
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let mut cost = 0.0f32;
+                    for qy in -2..=2 {
+                        for qx in -2..=2 {
+                            cost += (b.at(x + qx + dx, y + qy + dy) - a.at(x + qx, y + qy)).abs();
+                        }
+                    }
+                    let cost = cost / 25.0 + SEARCH_PENALTY * ((dx * dx + dy * dy) as f32).sqrt();
+                    if cost < best.0 {
+                        best = (cost, dx, dy);
+                    }
+                }
+            }
+            let i = (y * w + x) as usize;
+            out.u[i] = best.1 as f32;
+            out.v[i] = best.2 as f32;
+        }
+    }
+    out
+}
 
 /// Each pixel's vector replaced by the one among its own and its neighbours' (`radius` pixels
 /// away) under which a small patch around it matches best.
@@ -348,6 +386,25 @@ mod tests {
         assert!((inside[0] - 9.0).abs() < 0.3 && (inside[1] - 4.0).abs() < 0.3, "{inside:?}");
         let outside = at(200, 150);
         assert!(outside[0].abs() < 0.2 && outside[1].abs() < 0.2, "{outside:?}");
+    }
+
+    #[test]
+    fn a_small_object_moving_fast_is_found() {
+        // The scene at 2.5× the size: 45 px a frame over a two-frame gap, the square 175 px.
+        let big = |k: f64| {
+            let mut rng = Rng(21);
+            let background = texture(&mut rng, 240, 180, 2.5);
+            let object = texture(&mut rng, 80, 80, 2.0);
+            render_square(&background, &object, 600, 450, [225.0 + 22.5 * k, 200.0 + 10.0 * k], 175.0, (2.0 * k).to_radians())
+        };
+        let (a, mid, b) = (big(0.0), big(1.0), big(2.0));
+        let o = FlowOptions::default();
+        let (ab, ba) = (dense_flow(&a, &b, &o), dense_flow(&b, &a, &o));
+        let c = [ab.u[200 * 600 + 225], ab.v[200 * 600 + 225]];
+        let (pf, pb) = (psnr(&interpolate(&a, &b, &ab, &ba, 0.5).data, &mid.data), psnr(&blend(&a, &b, 0.5).data, &mid.data));
+        eprintln!("600x450 held-out middle frame: flow {pf:.2} dB, blend {pb:.2} dB; centre {c:?}");
+        assert!((c[0] - 45.0).abs() < 1.0 && (c[1] - 20.0).abs() < 1.0, "{c:?}");
+        assert!(pf > pb + 5.0, "flow {pf:.2} dB, blend {pb:.2} dB");
     }
 
     #[test]

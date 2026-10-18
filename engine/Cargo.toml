@@ -29,3 +29,8 @@ thiserror = "2"
 
 [profile.release]
 lto = "thin"
+
+# The motion maths (tracking, optical flow) is per-pixel work: optimised even in debug builds
+# and tests, which would otherwise take a minute over a few small pictures.
+[profile.dev.package.openrip-motion]
+opt-level = 3

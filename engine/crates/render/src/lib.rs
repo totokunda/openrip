@@ -18,6 +18,7 @@
 pub mod adjust;
 pub mod blend;
 pub mod exposure;
+mod flow;
 pub mod fonts;
 pub mod grade;
 mod interop;
@@ -28,6 +29,7 @@ mod upload;
 pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
 pub use blend::BlendMode;
 pub use grade::{CurvePoint, Curves, Hsl};
+pub use flow::{work_factor, FlowField, Tween, TweenMode, WORK_SIDE};
 pub use interop::Surface;
 pub use upload::Uploader;
 
@@ -191,6 +193,8 @@ pub enum Source<'a> {
     /// transition): the incoming clip's group the last one finished and the outgoing one's
     /// before it, each only if the mix draws it.
     Mix(Mix),
+    /// A frame made in between two frames of a video (Smooth slow-mo, Optical flow).
+    Tween(&'a Tween<'a>),
 }
 
 impl Source<'_> {
@@ -198,6 +202,7 @@ impl Source<'_> {
         match self {
             Source::Image(i) | Source::Cached(_, i) => (i.width, i.height),
             Source::Video(f) => (f.width(), f.height()),
+            Source::Tween(t) => t.from.size(),
             Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) => (1, 1),
         }
     }
@@ -507,6 +512,10 @@ pub struct Compositor {
     pool: std::sync::Mutex<Vec<(wgpu::Texture, u64)>>,
     /// The last readback buffer, reused when the next readback is the same size.
     readback: std::sync::Mutex<Option<wgpu::Buffer>>,
+    /// The optical flow passes, made the first time a frame needs them.
+    flow_fx: std::sync::OnceLock<flow::FlowFx>,
+    /// Flow between pairs of frames, by the pair's key, with the frame last used in.
+    flows: std::sync::Mutex<Vec<(u64, flow::FlowPair, u64)>>,
 }
 
 /// Textures the GPU still needs for a recorded frame: `keep` must merely live until the work
@@ -750,6 +759,8 @@ impl Compositor {
             written: Default::default(),
             pool: Default::default(),
             readback: Default::default(),
+            flow_fx: Default::default(),
+            flows: Default::default(),
         })
     }
 
@@ -1213,6 +1224,30 @@ impl Compositor {
         out
     }
 
+    /// A video frame on the GPU as premultiplied RGBA: its planes imported in place where the
+    /// platform allows (they go in `keep`), else converted on the CPU and uploaded.
+    fn video_texture(&self, enc: &mut wgpu::CommandEncoder, frame: &VideoFrame, keep: &mut Vec<wgpu::Texture>, scratch: &mut Vec<wgpu::Texture>) -> wgpu::Texture {
+        match self.import_video(enc, frame) {
+            Some((rgba, planes)) => {
+                keep.extend(planes);
+                rgba
+            }
+            None => self.upload(enc, &rgb_of(frame), None, scratch),
+        }
+    }
+
+    /// A picture source (an image or a video frame) on the GPU as premultiplied RGBA. A keyed
+    /// image's texture stays in the compositor's keeping: don't recycle it.
+    fn picture_texture(&self, enc: &mut wgpu::CommandEncoder, src: Source, keep: &mut Vec<wgpu::Texture>, scratch: &mut Vec<wgpu::Texture>) -> wgpu::Texture {
+        match src {
+            Source::Video(frame) => self.video_texture(enc, frame, keep, scratch),
+            Source::Image(img) => self.upload(enc, img, None, scratch),
+            Source::Cached(key, img) => self.upload(enc, img, Some(key), scratch),
+            Source::Tween(t) => self.picture_texture(enc, t.from, keep, scratch),
+            _ => self.texture(1, 1, CANVAS, wgpu::TextureUsages::empty()),
+        }
+    }
+
     /// Whether a frame can go to the GPU without a copy (diagnostics).
     pub fn can_import(&self, frame: &VideoFrame) -> bool {
         let mut enc = self.device.create_command_encoder(&Default::default());
@@ -1290,13 +1325,20 @@ impl Compositor {
                         Source::Image(img) => self.upload(enc, img, None, &mut scratch),
                         Source::Cached(key, img) => self.upload(enc, img, Some(key), &mut scratch),
                         Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) => unreachable!("canvas passes are drawn above"),
-                        Source::Video(frame) => match self.import_video(enc, frame) {
-                            Some((rgba, planes)) => {
-                                keep.extend(planes);
-                                rgba
+                        Source::Video(frame) => self.video_texture(enc, frame, &mut keep, &mut scratch),
+                        Source::Tween(tween) => {
+                            let a = self.picture_texture(enc, tween.from, &mut keep, &mut scratch);
+                            let b = self.picture_texture(enc, tween.to, &mut keep, &mut scratch);
+                            let out = self.tween_textures(enc, &a, &b, tween, &mut scratch);
+                            for (src, tex) in [(tween.from, a), (tween.to, b)] {
+                                if matches!(src, Source::Cached(..)) {
+                                    keep.push(tex);
+                                } else {
+                                    scratch.push(tex);
+                                }
                             }
-                            None => self.upload(enc, &rgb_of(frame), None, &mut scratch),
-                        },
+                            out
+                        }
                     };
                     // The texture's own size (an oversize image is uploaded smaller).
                     let (sw, sh) = (src.width(), src.height());
