@@ -163,7 +163,9 @@ try {
         canvas.dispatchEvent(new CustomEvent(ENGINE_FRAME_EVENT, { detail: meta }));
       }
     } finally {
-      importedSharedTexture.release();
+      // When the window is slow, main can have let the texture go already (its send gave
+      // up); the late release then finds nothing to release, which is harmless.
+      Promise.resolve(importedSharedTexture.release()).catch(() => {});
     }
   });
 } catch (e) {
