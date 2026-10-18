@@ -409,10 +409,72 @@ export type ClipLook = {
   flip?: ClipFlip;
 };
 
+/**
+ * The engine's voice effect kinds (lib/audio-effects.ts lists their parameters and the presets
+ * built on them; engine/crates/audio/src/voice.rs plays them).
+ */
+export type AudioEffectKind =
+  | "pitch"
+  | "robot"
+  | "echo"
+  | "reverb"
+  | "chorus"
+  | "tremolo"
+  | "distortion"
+  | "bitcrush"
+  | "lowpass"
+  | "highpass"
+  | "eq"
+  | "telephone"
+  | "megaphone"
+  | "gain";
+
+/**
+ * One voice effect on a clip: a kind with its parameters by name (missing ones take the kind's
+ * defaults; every kind has `strength`, 0–100) and the preset's name it came from. A clip converted
+ * from a CapCut draft lists its own voice filter as `{type: "draft", id, name}`: CapCut's bundle,
+ * kept as it is (take the entry out to remove it).
+ */
+export type AudioEffect = { type: AudioEffectKind | "draft"; params?: Record<string, number>; name?: string; id?: string };
+
+/**
+ * CapCut's "Normalize loudness": the clip turned to `target` LUFS (CapCut's −23) from the
+ * loudness `measured` over its range (LUFS) and its peak (dBFS), which lib/audio.ts measures
+ * with the engine; without a measurement nothing changes. `range` is the media range measured
+ * ([start, duration] s), so a trim can tell the measurement is stale.
+ */
+export type ClipLoudness = { enabled: boolean; target: number; measured?: number | null; peak?: number | null; range?: [number, number] };
+
+/**
+ * CapCut's "Fill channel": "left" plays the left channel on both sides ("Fill right with left"),
+ * "right" the right one; "mono" (OpenRip's own) both mixed.
+ */
+export type ChannelFill = "none" | "left" | "right" | "mono";
+
+/** A beat a source app found (a CapCut draft's), in seconds of the clip's media. */
+export type DetectedBeat = { time: number; downbeat: boolean };
+
+/**
+ * A clip's beat markers (lib/beats.ts), in seconds of its media so they stay on the music
+ * through a trim or a move: those marked by hand, and whether the automatic ones show (every
+ * beat, or only bar starts, CapCut's Beat 2 and Beat 1). `detected` holds a CapCut draft's own
+ * automatic beats; without them the engine's are shown.
+ */
+export type ClipBeats = { manual?: number[]; auto?: boolean; everyBeat?: boolean; detected?: DetectedBeat[] };
+
+/** The Audio tab's fields on a video or audio clip (all optional; missing is off). */
+export type ClipAudio = {
+  audioEffects?: AudioEffect[];
+  loudness?: ClipLoudness | null;
+  channel?: ChannelFill;
+  beats?: ClipBeats | null;
+};
+
 export type VideoClipProps = ClipProps &
   MediaAdjustments &
   SpeedProps &
-  ClipLook & {
+  ClipLook &
+  ClipAudio & {
 
     assetId: string;
     assetIdHistory: string[];
@@ -453,7 +515,8 @@ export type ImageClipProps = ClipProps &
   };
 
 export type AudioClipProps = ClipProps &
-  SpeedProps & {
+  SpeedProps &
+  ClipAudio & {
     assetId: string;
     type: "audio";
     volume?: number;
@@ -835,6 +898,7 @@ export function clipSignature(clip: AnyClipProps): string {
           n(clip.fadeOut),
           n(clip.speed),
           masksSignature((clip as any)?.masks),
+          audioSignature(clip),
         );
         break;
       }
@@ -856,6 +920,7 @@ export function clipSignature(clip: AnyClipProps): string {
           n(a?.fadeIn),
           n(a?.fadeOut),
           n(a?.speed),
+          audioSignature(a),
         );
         break;
       }
@@ -996,6 +1061,15 @@ function encodeLineTransform(t: DrawingLineTransform | undefined): string {
     n(t.rotation),
     n(t.opacity),
   ].join(",");
+}
+
+/** The Audio tab's fields, compactly: effects and their parameters, loudness, channel, beats. */
+function audioSignature(clip: ClipAudio | undefined): string {
+  if (!clip) return "";
+  const fx = (clip.audioEffects ?? []).map((e) => `${e.type}:${e.id ?? ""}:${Object.entries(e.params ?? {}).map(([k, v]) => `${k}=${v}`).join(",")}`).join(";");
+  const l = clip.loudness;
+  const b = clip.beats;
+  return [fx, l ? `${l.enabled ? 1 : 0}/${l.target}/${l.measured ?? ""}` : "", clip.channel ?? "", b ? `${(b.manual ?? []).join(",")}/${b.auto ? 1 : 0}/${b.everyBeat ? 1 : 0}/${b.detected?.length ?? 0}` : ""].join("|");
 }
 
 function masksSignature(arr: MaskClipProps[] | undefined): string {

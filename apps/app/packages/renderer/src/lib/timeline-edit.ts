@@ -148,14 +148,15 @@ export function mainTrackPreview(
 export const SNAP_PX = 6;
 
 /**
- * What a dragged clip or edge snaps to, in frames: the playhead, the markers and the edges of
- * every clip on every track, except the ones being moved (`exclude`).
+ * What a dragged clip or edge snaps to, in frames: the playhead, the markers, the edges of
+ * every clip on every track, except the ones being moved (`exclude`), and the music's beat
+ * markers (`beats`: lib/beats.ts `beatSnapPoints`, as CapCut snaps to them).
  */
 export function snapPoints(
   clips: AnyClipProps[],
-  { playhead, markers, exclude }: { playhead: number; markers: Marker[]; exclude: Set<string> },
+  { playhead, markers, exclude, beats = [] }: { playhead: number; markers: Marker[]; exclude: Set<string>; beats?: number[] },
 ): number[] {
-  const points = [playhead, ...markers.map((m) => m.frame)];
+  const points = [playhead, ...markers.map((m) => m.frame), ...beats];
   for (const c of clips) {
     if (c.hidden || exclude.has(c.clipId)) continue;
     points.push(startOf(c), endOf(c));
