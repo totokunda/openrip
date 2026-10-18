@@ -13,7 +13,7 @@ pollster = "0.4"
 bytemuck = { version = "1", features = ["derive"] }
 thiserror.workspace = true
 swash = "0.2"
-openrip-media.workspace = true
+openrip-frame.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
@@ -23,6 +23,8 @@ objc2-io-surface = { version = "0.3", default-features = false, features = ["std
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "objc2-io-surface"] }
 
 [dev-dependencies]
+# Frames to draw in the tests come from the decoder.
+openrip-media.workspace = true
 openrip-model.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

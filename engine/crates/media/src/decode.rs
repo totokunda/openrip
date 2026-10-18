@@ -471,7 +471,7 @@ impl VideoDecoder {
             vt.submit(q.pkt, true)?;
             let Some(buffer) = vt.take(pts) else { return Ok(None) };
             let time = self.time_of(pts);
-            return Ok(Some(VideoFrame::from_pixel_buffer(buffer, self.colorspace, self.trc, time, self.nominal)));
+            return Ok(Some(crate::frame::cv_frame(buffer, self.colorspace, self.trc, time, self.nominal)));
         }
         Ok(None)
     }
@@ -747,7 +747,7 @@ impl VideoDecoder {
                         }
                         let time = self.time_of(ts);
                         let duration = if (*f).duration > 0 { Micros(ff::av_rescale_q((*f).duration, self.tb, MICROS)) } else { self.nominal };
-                        let frame = VideoFrame::reference(f, time, duration);
+                        let frame = crate::frame::av_frame(f, time, duration);
                         ff::av_frame_unref(f);
                         let frame = frame?;
                         if self.require_hardware && !frame.is_hardware() {
@@ -799,7 +799,7 @@ impl VideoDecoder {
                                 continue;
                             }
                             let time = self.time_of(pts);
-                            return Ok(Some(VideoFrame::from_pixel_buffer(buffer, self.colorspace, self.trc, time, self.nominal)));
+                            return Ok(Some(crate::frame::cv_frame(buffer, self.colorspace, self.trc, time, self.nominal)));
                         }
                         crate::vt::Next::Frame(_, None) => continue, // counted in vt.errors()
                         crate::vt::Next::Drained => return Ok(None),

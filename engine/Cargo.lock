@@ -1232,6 +1232,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "openrip-frame"
+version = "0.0.0"
+dependencies = [
+ "objc2-core-foundation",
+ "objc2-core-video",
+ "objc2-io-surface",
+ "openrip-model",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "openrip-media"
 version = "0.0.0"
 dependencies = [
@@ -1241,6 +1252,7 @@ dependencies = [
  "objc2-core-video",
  "objc2-io-surface",
  "objc2-video-toolbox",
+ "openrip-frame",
  "openrip-model",
  "serde",
  "thiserror 2.0.21",
@@ -1292,6 +1304,7 @@ dependencies = [
  "objc2-core-video",
  "objc2-io-surface",
  "objc2-metal",
+ "openrip-frame",
  "openrip-media",
  "openrip-model",
  "pollster",

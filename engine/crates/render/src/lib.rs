@@ -12,7 +12,8 @@
 //!
 //! Video frames from the hardware decoder are used in place: on macOS their IOSurface
 //! planes (NV12 / P010) become GPU textures without a copy and are converted to RGB on the
-//! GPU with the frame's own matrix and range.
+//! GPU with the frame's own matrix and range. Frames come as `openrip-frame` types: the
+//! compositor needs decoded pictures, not the decoder.
 
 pub mod adjust;
 pub mod grade;
@@ -73,7 +74,8 @@ impl Lut3d {
     }
 }
 
-use openrip_media::{Matrix, PixelFormat, VideoFrame};
+pub use openrip_frame::RgbaImage;
+use openrip_frame::{Matrix, PixelFormat, VideoFrame};
 use wgpu::util::DeviceExt;
 
 pub const DOWNSCALE_SHARPEN: f32 = 0.15;
@@ -84,14 +86,6 @@ pub enum RenderError {
     Adapter(String),
     #[error("GPU device: {0}")]
     Device(String),
-}
-
-/// Straight-alpha 8-bit RGBA pixels, row-major.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RgbaImage {
-    pub width: u32,
-    pub height: u32,
-    pub data: Vec<u8>,
 }
 
 /// Pixels for a layer.
@@ -989,7 +983,7 @@ impl Compositor {
         let (w, h) = (frame.width(), frame.height());
         let rgba = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
         let (inv0, inv1, k) = yuv_params(frame.matrix(), frame.full_range(), ten_bit);
-        let hlg = (frame.transfer() == openrip_media::Transfer::Hlg) as u8 as f32;
+        let hlg = (frame.transfer() == openrip_frame::Transfer::Hlg) as u8 as f32;
         let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0, inv1, misc: [1.0, hlg, k, sub_v] };
         self.pass_with(enc, &self.yuv, &luma, Some(&chroma), &rgba, params, Some(wgpu::Color::BLACK));
         Some((rgba, [luma, chroma]))

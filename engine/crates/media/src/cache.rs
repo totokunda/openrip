@@ -35,7 +35,7 @@ impl FrameCache {
     /// The frame shown at `t`, if the cache knows it.
     pub(crate) fn get(&self, t: Micros) -> Option<Result<VideoFrame, MediaError>> {
         let (_, e) = self.frames.range(..=t.0).next_back()?;
-        e.next.is_some_and(|n| t.0 < n).then(|| e.frame.try_clone())
+        e.next.is_some_and(|n| t.0 < n).then(|| e.frame.try_clone().map_err(MediaError::from))
     }
 
     /// The cached frame starting closest to `t`, if one starts within `tolerance` of it.

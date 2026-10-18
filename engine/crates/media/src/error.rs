@@ -10,6 +10,19 @@ pub enum MediaError {
     NoDecoder(String),
     #[error("{op} failed: {msg} ({code})")]
     Ffmpeg { op: &'static str, code: i32, msg: String },
+    /// A frame from another backend failed.
+    #[error("{0}")]
+    Frame(String),
+}
+
+/// A frame's error is its backend's own: for frames from this crate, a `MediaError`.
+impl From<openrip_frame::FrameError> for MediaError {
+    fn from(e: openrip_frame::FrameError) -> Self {
+        match e.0.downcast::<MediaError>() {
+            Ok(m) => *m,
+            Err(other) => MediaError::Frame(other.to_string()),
+        }
+    }
 }
 
 impl MediaError {

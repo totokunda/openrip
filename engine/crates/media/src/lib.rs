@@ -8,6 +8,8 @@
 //!
 //! Hardware frames stay on the GPU: on macOS a decoded frame is a `CVPixelBuffer` backed by
 //! an `IOSurface` (NV12 for 8-bit, P010 for 10-bit), ready for zero-copy hand-off.
+//! Frames are [`VideoFrame`]s of `openrip-frame`, which the compositor takes without
+//! depending on this crate; FFmpeg's and VideoToolbox's buffers are their pixels here.
 
 mod cache;
 mod decode;
@@ -21,7 +23,7 @@ mod vt;
 
 pub use decode::{DecodeStats, DecoderOptions, HardwareMode, VideoDecoder};
 pub use error::MediaError;
-pub use frame::{Matrix, PixelFormat, RgbImage, Transfer, VideoFrame};
+pub use openrip_frame::{FrameError, FramePixels, Matrix, PixelFormat, RgbImage, RgbaImage, Transfer, VideoFrame};
 pub use info::{probe, AudioInfo, ColorInfo, MediaInfo, VideoInfo};
 pub use openrip_model::{FrameRate, Micros};
 

@@ -1,77 +1,76 @@
+//! FFmpeg's and VideoToolbox's buffers as [`VideoFrame`] pixels.
+
 use ffmpeg_sys_next as ff;
+use openrip_frame::{FrameError, FramePixels, Matrix, PixelFormat, RgbImage, Transfer, VideoFrame};
 
 use crate::error::check;
 use crate::{MediaError, Micros};
 
-/// YCbCr→RGB matrix of a frame.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Matrix {
-    Bt601,
-    Bt709,
-    Bt2020,
-}
-
-/// How a frame's signal relates to light.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Transfer {
-    /// Standard dynamic range (BT.709/sRGB-like gamma, or unspecified).
-    Sdr,
-    /// HDR, hybrid log-gamma (BT.2100 HLG; iPhone HDR video).
-    Hlg,
-    /// HDR, perceptual quantizer (BT.2100 PQ / SMPTE ST 2084; HDR10).
-    Pq,
-}
-
-/// Memory layout of a decoded frame (for hardware frames, of the GPU surface).
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum PixelFormat {
-    Nv12,
-    P010,
-    /// 4:2:2 biplanar, 10 bits in 16 (ProRes 422 through VideoToolbox).
-    P210,
-    Yuv420p,
-    Yuv420p10,
-    Yuv422p,
-    Yuv444p,
-    Other(i32),
-}
-
-impl PixelFormat {
-    fn from_av(f: ff::AVPixelFormat) -> Self {
-        use ff::AVPixelFormat::*;
-        match f {
-            AV_PIX_FMT_NV12 => PixelFormat::Nv12,
-            AV_PIX_FMT_P010LE => PixelFormat::P010,
-            AV_PIX_FMT_P210LE => PixelFormat::P210,
-            AV_PIX_FMT_YUV420P | AV_PIX_FMT_YUVJ420P => PixelFormat::Yuv420p,
-            AV_PIX_FMT_YUV420P10LE => PixelFormat::Yuv420p10,
-            AV_PIX_FMT_YUV422P | AV_PIX_FMT_YUVJ422P => PixelFormat::Yuv422p,
-            AV_PIX_FMT_YUV444P | AV_PIX_FMT_YUVJ444P => PixelFormat::Yuv444p,
-            other => PixelFormat::Other(other as i32),
-        }
+fn pixel_format_of(f: ff::AVPixelFormat) -> PixelFormat {
+    use ff::AVPixelFormat::*;
+    match f {
+        AV_PIX_FMT_NV12 => PixelFormat::Nv12,
+        AV_PIX_FMT_P010LE => PixelFormat::P010,
+        AV_PIX_FMT_P210LE => PixelFormat::P210,
+        AV_PIX_FMT_YUV420P | AV_PIX_FMT_YUVJ420P => PixelFormat::Yuv420p,
+        AV_PIX_FMT_YUV420P10LE => PixelFormat::Yuv420p10,
+        AV_PIX_FMT_YUV422P | AV_PIX_FMT_YUVJ422P => PixelFormat::Yuv422p,
+        AV_PIX_FMT_YUV444P | AV_PIX_FMT_YUVJ444P => PixelFormat::Yuv444p,
+        other => PixelFormat::Other(other as i32),
     }
 }
 
-enum Pixels {
-    /// A frame from FFmpeg's decoder (software, or VideoToolbox through FFmpeg's hwaccel).
-    Av(*mut ff::AVFrame),
-    /// A frame from the native VideoToolbox decoder.
-    #[cfg(target_os = "macos")]
-    Cv { buffer: crate::vt::PixelBuffer, colorspace: ff::AVColorSpace, trc: ff::AVColorTransferCharacteristic },
+/// The YCbCr matrix a stream tags; unspecified streams follow the usual convention (BT.709
+/// from 720 lines up, BT.601 below).
+fn matrix_of(cs: ff::AVColorSpace, height: u32) -> Matrix {
+    use ff::AVColorSpace::*;
+    match cs {
+        AVCOL_SPC_BT709 => Matrix::Bt709,
+        AVCOL_SPC_BT2020_NCL | AVCOL_SPC_BT2020_CL => Matrix::Bt2020,
+        AVCOL_SPC_BT470BG | AVCOL_SPC_SMPTE170M => Matrix::Bt601,
+        _ if height >= 720 => Matrix::Bt709,
+        _ => Matrix::Bt601,
+    }
 }
 
-/// A decoded frame. Holds a reference on FFmpeg's buffer (or the hardware surface), so it
-/// is cheap to keep and to move between threads.
-pub struct VideoFrame {
-    pixels: Pixels,
-    /// Presentation time from the first frame of the stream.
-    pub time: Micros,
-    /// How long the frame is displayed.
-    pub duration: Micros,
+/// SDR unless the stream says HLG or PQ.
+fn transfer_of(trc: ff::AVColorTransferCharacteristic) -> Transfer {
+    match trc {
+        ff::AVColorTransferCharacteristic::AVCOL_TRC_ARIB_STD_B67 => Transfer::Hlg,
+        ff::AVColorTransferCharacteristic::AVCOL_TRC_SMPTE2084 => Transfer::Pq,
+        _ => Transfer::Sdr,
+    }
 }
 
-// The frame owns its own reference; FFmpeg frames and CVPixelBuffers may be used from any thread.
-unsafe impl Send for VideoFrame {}
+fn frame_error(e: MediaError) -> FrameError {
+    FrameError(Box::new(e))
+}
+
+/// A frame from FFmpeg's decoder (software, or VideoToolbox through FFmpeg's hwaccel): our
+/// own reference on its buffers.
+struct AvPixels(*mut ff::AVFrame);
+
+// The frame owns its own reference; FFmpeg frames may be used from any thread.
+unsafe impl Send for AvPixels {}
+
+/// A frame from the native VideoToolbox decoder.
+#[cfg(target_os = "macos")]
+struct CvPixels {
+    buffer: crate::vt::PixelBuffer,
+    colorspace: ff::AVColorSpace,
+    trc: ff::AVColorTransferCharacteristic,
+}
+
+/// A frame holding a new reference to `src` (no pixel copy).
+pub(crate) fn av_frame(src: *const ff::AVFrame, time: Micros, duration: Micros) -> Result<VideoFrame, MediaError> {
+    Ok(VideoFrame::new(Box::new(AvPixels::reference(src)?), time, duration))
+}
+
+/// A frame of a pixel buffer from the native VideoToolbox decoder.
+#[cfg(target_os = "macos")]
+pub(crate) fn cv_frame(buffer: crate::vt::PixelBuffer, colorspace: ff::AVColorSpace, trc: ff::AVColorTransferCharacteristic, time: Micros, duration: Micros) -> VideoFrame {
+    VideoFrame::new(Box::new(CvPixels { buffer, colorspace, trc }), time, duration)
+}
 
 #[cfg(target_os = "macos")]
 fn cv_format(pb: &objc2_core_video::CVPixelBuffer) -> (PixelFormat, bool) {
@@ -88,154 +87,129 @@ fn cv_format(pb: &objc2_core_video::CVPixelBuffer) -> (PixelFormat, bool) {
     }
 }
 
-impl VideoFrame {
-    /// Take a new reference to `src` (no pixel copy).
-    pub(crate) fn reference(src: *const ff::AVFrame, time: Micros, duration: Micros) -> Result<Self, MediaError> {
+impl AvPixels {
+    fn reference(src: *const ff::AVFrame) -> Result<Self, MediaError> {
         let raw = unsafe { ff::av_frame_clone(src) };
         if raw.is_null() {
             return Err(MediaError::ffmpeg("av_frame_clone", ff::AVERROR(ff::ENOMEM)));
         }
-        Ok(VideoFrame { pixels: Pixels::Av(raw), time, duration })
+        Ok(AvPixels(raw))
+    }
+}
+
+impl FramePixels for AvPixels {
+    fn width(&self) -> u32 {
+        unsafe { (*self.0).width as u32 }
+    }
+
+    fn height(&self) -> u32 {
+        unsafe { (*self.0).height as u32 }
+    }
+
+    fn is_hardware(&self) -> bool {
+        unsafe { (*self.0).format == ff::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX as i32 }
+    }
+
+    fn pixel_format(&self) -> PixelFormat {
+        unsafe {
+            let raw = self.0;
+            if self.is_hardware() && !(*raw).hw_frames_ctx.is_null() {
+                let fc = (*(*raw).hw_frames_ctx).data as *const ff::AVHWFramesContext;
+                return pixel_format_of((*fc).sw_format);
+            }
+            pixel_format_of(std::mem::transmute::<i32, ff::AVPixelFormat>((*raw).format))
+        }
+    }
+
+    fn matrix(&self) -> Matrix {
+        matrix_of(unsafe { (*self.0).colorspace }, self.height())
+    }
+
+    fn transfer(&self) -> Transfer {
+        transfer_of(unsafe { (*self.0).color_trc })
+    }
+
+    fn full_range(&self) -> bool {
+        unsafe { (*self.0).color_range == ff::AVColorRange::AVCOL_RANGE_JPEG }
+    }
+
+    fn to_rgb(&self) -> Result<RgbImage, FrameError> {
+        unsafe {
+            let raw = self.0;
+            if !self.is_hardware() {
+                return convert_rgb(raw).map_err(frame_error);
+            }
+            let mut tmp = ff::av_frame_alloc();
+            let mut r = ff::av_hwframe_transfer_data(tmp, raw, 0);
+            if r >= 0 {
+                // The transfer copies pixels only; the matrix and range come with the props.
+                r = ff::av_frame_copy_props(tmp, raw);
+            }
+            let result = if r < 0 { Err(MediaError::ffmpeg("av_hwframe_transfer_data", r)) } else { convert_rgb(tmp) };
+            ff::av_frame_free(&mut tmp);
+            result.map_err(frame_error)
+        }
+    }
+
+    fn try_clone(&self) -> Result<Box<dyn FramePixels>, FrameError> {
+        Ok(Box::new(AvPixels::reference(self.0).map_err(frame_error)?))
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn from_pixel_buffer(buffer: crate::vt::PixelBuffer, colorspace: ff::AVColorSpace, trc: ff::AVColorTransferCharacteristic, time: Micros, duration: Micros) -> Self {
-        VideoFrame { pixels: Pixels::Cv { buffer, colorspace, trc }, time, duration }
-    }
-
-    /// Another reference to the same pixels (no copy).
-    pub fn try_clone(&self) -> Result<Self, MediaError> {
-        match &self.pixels {
-            Pixels::Av(raw) => VideoFrame::reference(*raw, self.time, self.duration),
-            #[cfg(target_os = "macos")]
-            Pixels::Cv { buffer, colorspace, trc } => Ok(Self::from_pixel_buffer(crate::vt::PixelBuffer(buffer.0.clone()), *colorspace, *trc, self.time, self.duration)),
+    fn pixel_buffer(&self) -> Option<&objc2_core_video::CVPixelBuffer> {
+        if !self.is_hardware() {
+            return None;
         }
+        unsafe { ((*self.0).data[3] as *const objc2_core_video::CVPixelBuffer).as_ref() }
+    }
+}
+
+impl Drop for AvPixels {
+    fn drop(&mut self) {
+        unsafe { ff::av_frame_free(&mut self.0) }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl FramePixels for CvPixels {
+    fn width(&self) -> u32 {
+        objc2_core_video::CVPixelBufferGetWidth(&self.buffer.0) as u32
     }
 
-    pub fn width(&self) -> u32 {
-        match &self.pixels {
-            Pixels::Av(raw) => unsafe { (**raw).width as u32 },
-            #[cfg(target_os = "macos")]
-            Pixels::Cv { buffer, .. } => objc2_core_video::CVPixelBufferGetWidth(&buffer.0) as u32,
-        }
+    fn height(&self) -> u32 {
+        objc2_core_video::CVPixelBufferGetHeight(&self.buffer.0) as u32
     }
 
-    pub fn height(&self) -> u32 {
-        match &self.pixels {
-            Pixels::Av(raw) => unsafe { (**raw).height as u32 },
-            #[cfg(target_os = "macos")]
-            Pixels::Cv { buffer, .. } => objc2_core_video::CVPixelBufferGetHeight(&buffer.0) as u32,
-        }
+    fn is_hardware(&self) -> bool {
+        true
     }
 
-    /// True when the pixels live on the GPU (VideoToolbox on macOS).
-    pub fn is_hardware(&self) -> bool {
-        match &self.pixels {
-            Pixels::Av(raw) => unsafe { (**raw).format == ff::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX as i32 },
-            #[cfg(target_os = "macos")]
-            Pixels::Cv { .. } => true,
-        }
+    fn pixel_format(&self) -> PixelFormat {
+        cv_format(&self.buffer.0).0
     }
 
-    /// Layout of the pixels; for hardware frames, the layout of the GPU surface.
-    pub fn pixel_format(&self) -> PixelFormat {
-        match &self.pixels {
-            Pixels::Av(raw) => unsafe {
-                let raw = *raw;
-                if self.is_hardware() && !(*raw).hw_frames_ctx.is_null() {
-                    let fc = (*(*raw).hw_frames_ctx).data as *const ff::AVHWFramesContext;
-                    return PixelFormat::from_av((*fc).sw_format);
-                }
-                PixelFormat::from_av(std::mem::transmute::<i32, ff::AVPixelFormat>((*raw).format))
-            },
-            #[cfg(target_os = "macos")]
-            Pixels::Cv { buffer, .. } => cv_format(&buffer.0).0,
-        }
+    fn matrix(&self) -> Matrix {
+        matrix_of(self.colorspace, self.height())
     }
 
-    /// The frame's YCbCr matrix; unspecified streams follow the usual convention (BT.709
-    /// from 720 lines up, BT.601 below).
-    pub fn matrix(&self) -> Matrix {
-        let cs = match &self.pixels {
-            Pixels::Av(raw) => unsafe { (**raw).colorspace },
-            #[cfg(target_os = "macos")]
-            Pixels::Cv { colorspace, .. } => *colorspace,
-        };
-        use ff::AVColorSpace::*;
-        match cs {
-            AVCOL_SPC_BT709 => Matrix::Bt709,
-            AVCOL_SPC_BT2020_NCL | AVCOL_SPC_BT2020_CL => Matrix::Bt2020,
-            AVCOL_SPC_BT470BG | AVCOL_SPC_SMPTE170M => Matrix::Bt601,
-            _ if self.height() >= 720 => Matrix::Bt709,
-            _ => Matrix::Bt601,
-        }
+    fn transfer(&self) -> Transfer {
+        transfer_of(self.trc)
     }
 
-    /// The frame's transfer characteristic (SDR unless the stream says HLG or PQ).
-    pub fn transfer(&self) -> Transfer {
-        let trc = match &self.pixels {
-            Pixels::Av(raw) => unsafe { (**raw).color_trc },
-            #[cfg(target_os = "macos")]
-            Pixels::Cv { trc, .. } => *trc,
-        };
-        match trc {
-            ff::AVColorTransferCharacteristic::AVCOL_TRC_ARIB_STD_B67 => Transfer::Hlg,
-            ff::AVColorTransferCharacteristic::AVCOL_TRC_SMPTE2084 => Transfer::Pq,
-            _ => Transfer::Sdr,
-        }
+    fn full_range(&self) -> bool {
+        cv_format(&self.buffer.0).1
     }
 
-    /// True for full-range ("pc"/JPEG) samples, false for limited (TV) range.
-    pub fn full_range(&self) -> bool {
-        match &self.pixels {
-            Pixels::Av(raw) => unsafe { (**raw).color_range == ff::AVColorRange::AVCOL_RANGE_JPEG },
-            #[cfg(target_os = "macos")]
-            Pixels::Cv { buffer, .. } => cv_format(&buffer.0).1,
-        }
+    fn to_rgb(&self) -> Result<RgbImage, FrameError> {
+        unsafe { cv_to_rgb(&self.buffer.0, self.colorspace) }.map_err(frame_error)
     }
 
-    /// The `CVPixelBuffer` behind a hardware frame (borrowed; valid while the frame lives).
-    #[cfg(target_os = "macos")]
-    pub fn pixel_buffer(&self) -> Option<&objc2_core_video::CVPixelBuffer> {
-        match &self.pixels {
-            Pixels::Av(raw) => unsafe {
-                if !self.is_hardware() {
-                    return None;
-                }
-                ((**raw).data[3] as *const objc2_core_video::CVPixelBuffer).as_ref()
-            },
-            Pixels::Cv { buffer, .. } => Some(&buffer.0),
-        }
+    fn try_clone(&self) -> Result<Box<dyn FramePixels>, FrameError> {
+        Ok(Box::new(CvPixels { buffer: crate::vt::PixelBuffer(self.buffer.0.clone()), colorspace: self.colorspace, trc: self.trc }))
     }
 
-    /// The `IOSurface` backing a hardware frame, for zero-copy hand-off to the GPU / Electron.
-    #[cfg(target_os = "macos")]
-    pub fn io_surface(&self) -> Option<objc2_core_foundation::CFRetained<objc2_io_surface::IOSurfaceRef>> {
-        objc2_core_video::CVPixelBufferGetIOSurface(Some(self.pixel_buffer()?))
-    }
-
-    /// Download (if needed) and convert to packed 8-bit RGB with full-range output, using the
-    /// frame's own matrix and range. For tests, thumbnails and analysis, not the playback path.
-    pub fn to_rgb(&self) -> Result<RgbImage, MediaError> {
-        match &self.pixels {
-            Pixels::Av(raw) => unsafe {
-                let raw = *raw;
-                if !self.is_hardware() {
-                    return convert_rgb(raw);
-                }
-                let mut tmp = ff::av_frame_alloc();
-                let mut r = ff::av_hwframe_transfer_data(tmp, raw, 0);
-                if r >= 0 {
-                    // The transfer copies pixels only; the matrix and range come with the props.
-                    r = ff::av_frame_copy_props(tmp, raw);
-                }
-                let result = if r < 0 { Err(MediaError::ffmpeg("av_hwframe_transfer_data", r)) } else { convert_rgb(tmp) };
-                ff::av_frame_free(&mut tmp);
-                result
-            },
-            #[cfg(target_os = "macos")]
-            Pixels::Cv { buffer, colorspace, .. } => unsafe { cv_to_rgb(&buffer.0, *colorspace) },
-        }
+    fn pixel_buffer(&self) -> Option<&objc2_core_video::CVPixelBuffer> {
+        Some(&self.buffer.0)
     }
 }
 
@@ -303,39 +277,4 @@ unsafe fn convert_rgb(f: *mut ff::AVFrame) -> Result<RgbImage, MediaError> {
     ff::sws_freeContext(sws);
     check("sws_scale", r)?;
     Ok(RgbImage { width: w as u32, height: h as u32, data })
-}
-
-impl Drop for VideoFrame {
-    fn drop(&mut self) {
-        if let Pixels::Av(raw) = &mut self.pixels {
-            unsafe { ff::av_frame_free(raw) }
-        }
-    }
-}
-
-impl std::fmt::Debug for VideoFrame {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VideoFrame")
-            .field("time", &self.time)
-            .field("duration", &self.duration)
-            .field("size", &(self.width(), self.height()))
-            .field("hardware", &self.is_hardware())
-            .field("format", &self.pixel_format())
-            .finish()
-    }
-}
-
-/// Packed 8-bit RGB pixels, row-major, no padding.
-#[derive(Clone, Debug)]
-pub struct RgbImage {
-    pub width: u32,
-    pub height: u32,
-    pub data: Vec<u8>,
-}
-
-impl RgbImage {
-    pub fn pixel(&self, x: u32, y: u32) -> [u8; 3] {
-        let i = ((y * self.width + x) * 3) as usize;
-        [self.data[i], self.data[i + 1], self.data[i + 2]]
-    }
 }
