@@ -375,17 +375,13 @@ export function prepareExportClipsForValue(
   }
 
   // --- Attach filters as applicators based on clip position score ---
-  const filterClips = getClipsByType("filter");
+  // Copies: these are the store's clips, which the undo history shares (a field written onto
+  // them would come back with an undo or redo).
+  const filterClips = getClipsByType("filter").map((c) => ({ ...c, score: getClipPositionScore(c.clipId) }));
   clips = sortClipsForStacking(
     clips.filter((c) => c.type !== "filter"),
     timelines,
   );
-
-  filterClips.forEach((c) => {
-    if (c.type === "filter") {
-      (c as any).score = getClipPositionScore(c.clipId);
-    }
-  });
 
   const exportClips: ExportClip[] = [];
 

@@ -6,6 +6,7 @@
 // state back goes through the stores too, so the autosave writes it and the engine syncs it.
 // See docs/plan/app-engine-integration.md.
 import { create } from "zustand";
+import { onMenuEdit } from "@app/preload";
 import _ from "lodash";
 import { useClipStore, pruneAssetsForClips } from "./clip";
 import { useControlsStore } from "./control";
@@ -294,4 +295,11 @@ export function initHistory() {
   );
   // Files dropped from the Finder come without a press in the window.
   window.addEventListener("drop", () => action++, opts);
+  // Edit ▸ Undo and Redo in the menu bar: a focused field's typing, as the menu would undo
+  // it, else the project.
+  onMenuEdit((cmd) => {
+    if (editable(document.activeElement)) document.execCommand(cmd);
+    else if (cmd === "undo") undo();
+    else redo();
+  });
 }
