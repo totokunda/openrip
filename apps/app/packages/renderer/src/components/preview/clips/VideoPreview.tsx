@@ -1712,9 +1712,13 @@ const VideoPreview: React.FC<
   const handleClick = useCallback(() => {
     if (isFullscreen) return;
     if (hidden) return;
+    // Only the pointer selects (and the mask tool, which draws on a photo or video, so a mask
+    // drag over one may select it): a drag with a shape or drawing tool, or the hand, belongs to
+    // that tool, not to the clip under it.
+    if (tool !== "pointer" && tool !== "mask") return;
     clearSelection();
     addClipSelection(clipId);
-  }, [addClipSelection, clipId, isFullscreen, hidden]);
+  }, [addClipSelection, clipId, isFullscreen, hidden, tool]);
 
   // If we become visible after being hidden (prewarmed), force a redraw so the
   // already-decoded backing canvas is displayed immediately.

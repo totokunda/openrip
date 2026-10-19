@@ -458,9 +458,12 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
 
   const handleClick = useCallback(() => {
     if (isFullscreen) return;
+    // Only the pointer selects: a drag with a mask, shape or drawing tool, or the hand, that
+    // starts over a shape belongs to that tool, not to the shape under it.
+    if (tool !== "pointer") return;
     clearSelection();
     addClipSelection(clipId);
-  }, [addClipSelection, clipId, isFullscreen]);
+  }, [addClipSelection, clipId, isFullscreen, tool]);
 
   const handleDragStart = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {

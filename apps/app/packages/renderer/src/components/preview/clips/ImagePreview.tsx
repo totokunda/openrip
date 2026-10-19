@@ -827,10 +827,14 @@ const ImagePreview: React.FC<
 
   const handleClick = useCallback(() => {
     if (isFullscreen) return;
+    // Only the pointer selects (and the mask tool, which draws on a photo or video, so a mask
+    // drag over one may select it): a drag with a shape or drawing tool, or the hand, belongs to
+    // that tool, not to the clip under it.
+    if (tool !== "pointer" && tool !== "mask") return;
     // deselect all other clips
     clearSelection();
     addClipSelection(clipId);
-  }, [addClipSelection, clipId, isFullscreen]);
+  }, [addClipSelection, clipId, isFullscreen, tool]);
 
   useEffect(() => {
     const transformer = transformerRef.current;
