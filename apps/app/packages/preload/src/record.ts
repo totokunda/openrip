@@ -24,6 +24,11 @@ export function recordSources(): Promise<RecordSources> {
   return ipcRenderer.invoke("record:sources");
 }
 
+/** Test mode: the page records fake devices (a tone for the microphone), nothing real. */
+export function recordFake(): Promise<boolean> {
+  return ipcRenderer.invoke("record:fake");
+}
+
 /** What the system allows: "granted", "denied", "restricted", "not-determined" or "unknown". */
 export function recordPermission(kind: RecordKind): Promise<string> {
   return ipcRenderer.invoke("record:permission", kind);

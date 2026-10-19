@@ -41,7 +41,7 @@ import {
   generatePosterCanvas,
 } from "@/lib/media/timeline";
 import Draggable from "@/components/dnd/Draggable";
-import { revealPathInFolder } from "@app/preload";
+import { revealMediaFile } from "@app/preload";
 
 /** A long name cut in the middle, so its start and its extension both show ("abc…xyz.mp4"). */
 const middle = (name: string, max: number) => {
@@ -531,7 +531,7 @@ const Item: React.FC<ItemProps> = ({
                 <DropdownMenuItem
                   className="py-1 rounded"
                   onClick={() => {
-                    void revealPathInFolder(item.absPath);
+                    void revealMediaFile(item.absPath);
                   }}
                 >
                   <TbFolderOpen className="w-3.5 h-3.5" />

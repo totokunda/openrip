@@ -7,8 +7,30 @@
 
 export type AudioInput = { id: string; label: string };
 
+/**
+ * Test mode's microphones (the main process says when, `recordFake`): oscillators at a quarter
+ * of full scale, one tone each, so a take shows which device was picked.
+ */
+export const FAKE_MICS = [
+  { id: "fake-mic-1", label: "Test microphone", hz: 440 },
+  { id: "fake-mic-2", label: "Second test microphone", hz: 880 },
+];
+
+/** A stream that hears a tone: the stand-in for a microphone in test mode. */
+export function fakeMicStream(ctx: AudioContext, id?: string): { node: AudioNode; stop: () => void } {
+  const hz = (FAKE_MICS.find((m) => m.id === id) ?? FAKE_MICS[0]).hz;
+  const osc = ctx.createOscillator();
+  osc.frequency.value = hz;
+  const level = ctx.createGain();
+  level.gain.value = 0.25;
+  osc.connect(level);
+  osc.start();
+  return { node: level, stop: () => osc.stop() };
+}
+
 /** The microphones, by name when the system has let the page see them (after a permission). */
-export async function listAudioInputs(): Promise<AudioInput[]> {
+export async function listAudioInputs(fake = false): Promise<AudioInput[]> {
+  if (fake) return FAKE_MICS.map(({ id, label }) => ({ id, label }));
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     return devices
@@ -28,6 +50,8 @@ export type MicOptions = {
   echoReduction: boolean;
   /** Called with each block's peak (0..1, after the gain) while it records. */
   onLevel: (peak: number) => void;
+  /** Test mode: hear a tone instead of a microphone. */
+  fake?: boolean;
 };
 
 export type MicTake = { pcm: Int16Array; rate: number; channels: number; durationSec: number };
@@ -40,7 +64,8 @@ export class MicError extends Error {
 }
 
 export class MicRecorder {
-  #stream: MediaStream;
+  #stream: MediaStream | null;
+  #stopSource: () => void;
   #ctx: AudioContext;
   #gain: GainNode;
   #node: ScriptProcessorNode;
@@ -48,8 +73,9 @@ export class MicRecorder {
   #frames = 0;
   #open = true;
 
-  private constructor(stream: MediaStream, ctx: AudioContext, gain: GainNode, node: ScriptProcessorNode) {
+  private constructor(stream: MediaStream | null, stopSource: () => void, ctx: AudioContext, gain: GainNode, node: ScriptProcessorNode) {
     this.#stream = stream;
+    this.#stopSource = stopSource;
     this.#ctx = ctx;
     this.#gain = gain;
     this.#node = node;
@@ -57,9 +83,9 @@ export class MicRecorder {
 
   /** Open the microphone and start keeping what it hears. */
   static async start(o: MicOptions): Promise<MicRecorder> {
-    let stream: MediaStream;
+    let stream: MediaStream | null = null;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
+      if (!o.fake) stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           ...(o.deviceId ? { deviceId: { exact: o.deviceId } } : {}),
           echoCancellation: o.echoReduction,
@@ -75,11 +101,12 @@ export class MicRecorder {
       throw new MicError("other", e instanceof Error ? e.message : String(e));
     }
     const ctx = new AudioContext();
-    const source = ctx.createMediaStreamSource(stream);
+    const fake = o.fake ? fakeMicStream(ctx, o.deviceId) : null;
+    const source = fake ? fake.node : ctx.createMediaStreamSource(stream!);
     const gain = ctx.createGain();
     gain.gain.value = o.gain;
     const node = ctx.createScriptProcessor(2048, 1, 1);
-    const rec = new MicRecorder(stream, ctx, gain, node);
+    const rec = new MicRecorder(stream, fake?.stop ?? (() => {}), ctx, gain, node);
     node.onaudioprocess = (e) => {
       if (!rec.#open) return;
       const input = e.inputBuffer.getChannelData(0);
@@ -107,7 +134,8 @@ export class MicRecorder {
     this.#node.onaudioprocess = null;
     this.#node.disconnect();
     this.#gain.disconnect();
-    for (const t of this.#stream.getTracks()) t.stop();
+    for (const t of this.#stream?.getTracks() ?? []) t.stop();
+    this.#stopSource();
     void this.#ctx.close();
   }
 

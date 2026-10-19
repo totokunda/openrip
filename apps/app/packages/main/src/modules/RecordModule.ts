@@ -1,6 +1,3 @@
-import { writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { app, desktopCapturer, ipcMain, session, systemPreferences } from "electron";
 import { AppModule } from "../AppModule.js";
 import { ModuleContext } from "../ModuleContext.js";
@@ -13,9 +10,9 @@ import { ModuleContext } from "../ModuleContext.js";
  * saved by the preload (lib/record.ts, preload/record.ts).
  *
  * With `OPENRIP_FAKE_MIC` or `OPENRIP_FAKE_CAPTURE` set (automated tests) nothing real is
- * captured or asked: Chromium's fake camera and microphone (a steady 440 Hz tone, quarter of
- * full scale) stand in for the devices, and the screen list is two made-up entries the page
- * draws itself. `OPENRIP_FAKE_MIC=denied` and `OPENRIP_FAKE_CAPTURE=denied` play refused
+ * captured or asked: Chromium's fake camera and the page's own test microphone (a steady
+ * 440 Hz tone, a quarter of full scale) stand in for the devices, and the screen list is two
+ * made-up entries the page draws itself. `OPENRIP_FAKE_MIC=denied` and `OPENRIP_FAKE_CAPTURE=denied` play refused
  * permissions instead.
  */
 
@@ -31,32 +28,15 @@ const fakeMode = () => process.env.OPENRIP_FAKE_CAPTURE || process.env.OPENRIP_F
 const fakeDenied = () => process.env.OPENRIP_FAKE_CAPTURE === "denied" || process.env.OPENRIP_FAKE_MIC === "denied";
 
 /**
- * Before the app is ready: in test mode, Chromium's fake media devices and a tone for the fake
- * microphone to hear (a 16-bit mono 48 kHz WAV that it loops).
+ * Before the app is ready: in test mode, Chromium's fake camera (a moving test picture) and
+ * no permission prompt. The microphone is faked in the page instead (lib/mic.ts `FAKE_MICS`): a
+ * tone from an oscillator, because Chromium's fake microphone needs the audio service, which
+ * the sandboxes automated tests run in don't have.
  */
 export function applyFakeCapture(): void {
   if (!fakeMode()) return;
-  const file = join(tmpdir(), "openrip-fake-mic.wav");
-  const rate = 48_000;
-  const n = rate * 2;
-  const wav = Buffer.alloc(44 + n * 2);
-  wav.write("RIFF", 0);
-  wav.writeUInt32LE(36 + n * 2, 4);
-  wav.write("WAVEfmt ", 8);
-  wav.writeUInt32LE(16, 16);
-  wav.writeUInt16LE(1, 20);
-  wav.writeUInt16LE(1, 22);
-  wav.writeUInt32LE(rate, 24);
-  wav.writeUInt32LE(rate * 2, 28);
-  wav.writeUInt16LE(2, 32);
-  wav.writeUInt16LE(16, 34);
-  wav.write("data", 36);
-  wav.writeUInt32LE(n * 2, 40);
-  for (let i = 0; i < n; i++) wav.writeInt16LE(Math.round(0.25 * 32767 * Math.sin((2 * Math.PI * 440 * i) / rate)), 44 + i * 2);
-  writeFileSync(file, wav);
   app.commandLine.appendSwitch("use-fake-device-for-media-stream");
   app.commandLine.appendSwitch("use-fake-ui-for-media-stream");
-  app.commandLine.appendSwitch("use-file-for-fake-audio-capture", file);
 }
 
 const permission = (kind: "camera" | "microphone" | "screen"): string => {
@@ -75,11 +55,14 @@ export class RecordModule implements AppModule {
   #picked: string | null = null;
 
   enable(_context: ModuleContext): void {
-    for (const channel of ["record:sources", "record:permission", "record:ask", "record:pick"]) {
+    for (const channel of ["record:sources", "record:permission", "record:ask", "record:pick", "record:fake"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
     }
+
+    // Test mode: the page records fake devices (a tone for the microphone).
+    ipcMain.handle("record:fake", () => !!fakeMode());
 
     ipcMain.handle("record:permission", (_e, kind: "camera" | "microphone" | "screen") => permission(kind));
 

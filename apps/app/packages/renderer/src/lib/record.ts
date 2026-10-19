@@ -1,5 +1,5 @@
 import { recordPick } from "@app/preload";
-import { MicError } from "./mic";
+import { fakeMicStream, MicError } from "./mic";
 
 /**
  * Recording the screen, the camera or both (the Media tab's Record): the page captures them
@@ -19,6 +19,8 @@ export type RecordOptions = {
   cameraId?: string;
   /** Also record the microphone (the Voiceover panel's input device). */
   microphone: boolean;
+  /** Test mode: the microphone is a tone and the camera Chromium's fake one. */
+  fake?: boolean;
   /** Called if the capture ends by itself (the shared window was closed). */
   onEnded?: () => void;
 };
@@ -134,8 +136,20 @@ export class Recorder {
       let audio: MediaStream | null = null;
       if (o.microphone) {
         const id = rememberedMic();
-        audio = await navigator.mediaDevices.getUserMedia({ audio: { ...(id ? { deviceId: { exact: id } } : {}), echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-        cleanup.push(() => audio?.getTracks().forEach((t) => t.stop()));
+        if (o.fake) {
+          const ctx = new AudioContext();
+          const tone = fakeMicStream(ctx, id);
+          const dest = ctx.createMediaStreamDestination();
+          tone.node.connect(dest);
+          audio = dest.stream;
+          cleanup.push(() => {
+            tone.stop();
+            void ctx.close();
+          });
+        } else {
+          audio = await navigator.mediaDevices.getUserMedia({ audio: { ...(id ? { deviceId: { exact: id } } : {}), echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+          cleanup.push(() => audio?.getTracks().forEach((t) => t.stop()));
+        }
       }
 
       let video: MediaStreamTrack;

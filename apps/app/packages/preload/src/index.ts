@@ -57,7 +57,7 @@ export { voiceoverStatus, voiceoverStart, voiceoverStop, voiceoverCancel, voiceo
 export type { VoiceoverStatus, VoiceoverStart, VoiceoverStop, VoiceoverLevel, VoiceoverTake } from "./voiceover.js";
 
 // Record (screen, camera) and the Voiceover panel's own capture
-export { recordSources, recordPermission, recordAsk, recordPick, recordingSave, voiceoverSaveTake, voiceoverAsk, voiceoverBegin, voiceoverEnd } from "./record.js";
+export { recordFake, recordSources, recordPermission, recordAsk, recordPick, recordingSave, voiceoverSaveTake, voiceoverAsk, voiceoverBegin, voiceoverEnd } from "./record.js";
 export type { RecordSource, RecordSources, RecordKind, SavedRecording, SavedTake } from "./record.js";
 
 // The Stickers tab's downloads and cache

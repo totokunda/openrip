@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
 import { LuCamera, LuMonitor, LuMonitorPlay } from "react-icons/lu";
-import { recordAsk, recordSources, recordingSave } from "@app/preload";
+import { recordAsk, recordFake, recordSources, recordingSave } from "@app/preload";
 import type { RecordSource, RecordSources } from "@app/preload";
 import { useControlsStore } from "@/lib/control";
 import { useProjectsStore } from "@/lib/projects";
@@ -132,7 +132,7 @@ export const RecordPanel: React.FC = () => {
         setMessage({ text: SCREEN_OFF, error: true });
         return;
       }
-      recorder.current = await Recorder.start({ mode, sourceId, cameraId: cameraId || undefined, microphone, onEnded: () => void stop() });
+      recorder.current = await Recorder.start({ mode, sourceId, cameraId: cameraId || undefined, microphone, fake: await recordFake().catch(() => false), onEnded: () => void stop() });
     } catch (e) {
       setPhase("idle");
       if (e instanceof MicError && e.reason === "denied") setMessage({ text: mode === "camera" ? CAMERA_OFF : SCREEN_OFF, error: true });

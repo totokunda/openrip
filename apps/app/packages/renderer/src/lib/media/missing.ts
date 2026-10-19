@@ -2,7 +2,9 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { mediaMissing } from "@app/preload";
 import { useClipStore } from "@/lib/clip";
-import { useMediaLibraryVersion } from "./library";
+import { useQueryClient } from "@tanstack/react-query";
+import { useProjectsStore } from "@/lib/projects";
+import { bumpMediaLibraryVersion, useMediaLibraryVersion } from "./library";
 
 /**
  * Which of the project's media files are gone (moved, deleted, a drive unplugged): the
@@ -36,12 +38,21 @@ export async function refreshMissingMedia(extra: string[] = []): Promise<void> {
 export function useMissingMediaWatcher(): void {
   const assets = useClipStore((s) => s.assets);
   const version = useMediaLibraryVersion();
+  const queryClient = useQueryClient();
+  const folder = useProjectsStore((s) => s.getActiveProject()?.folderUuid);
   useEffect(() => {
     void refreshMissingMedia();
   }, [assets, version]);
   useEffect(() => {
-    const onFocus = () => void refreshMissingMedia();
+    const onFocus = async () => {
+      await refreshMissingMedia();
+      // The Media tab's cards too: when a card's file came or went, the list is read again.
+      const items = queryClient.getQueryData<{ assetUrl: string; missing?: boolean }[]>(["media", "converted", folder ?? null]);
+      if (!items?.length) return;
+      const gone = new Set(await mediaMissing(items.map((i) => i.assetUrl)));
+      if (items.some((i) => !!i.missing !== gone.has(i.assetUrl))) bumpMediaLibraryVersion();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, []);
+  }, [queryClient, folder]);
 }

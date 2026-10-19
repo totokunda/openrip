@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
 import { LuCheck, LuChevronDown, LuChevronUp, LuMic } from "react-icons/lu";
-import { voiceoverAsk, voiceoverBegin, voiceoverEnd, voiceoverSaveTake, voiceoverStatus } from "@app/preload";
+import { recordFake, voiceoverAsk, voiceoverBegin, voiceoverEnd, voiceoverSaveTake, voiceoverStatus } from "@app/preload";
 import type { VoiceoverStatus } from "@app/preload";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
@@ -178,9 +178,11 @@ export const VoiceoverPanel: React.FC = () => {
   const startedAt = useRef(0);
   const clock$ = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const fake = useRef(false);
   const refresh = async () => {
     void voiceoverStatus().then(setStatus, () => setStatus(null));
-    setDevices(await listAudioInputs());
+    fake.current = await recordFake().catch(() => false);
+    setDevices(await listAudioInputs(fake.current));
   };
   useEffect(() => {
     if (open) void refresh();
@@ -188,7 +190,7 @@ export const VoiceoverPanel: React.FC = () => {
   // Microphones plugged in or out while the panel is open.
   useEffect(() => {
     if (!open) return;
-    const onChange = () => void listAudioInputs().then(setDevices);
+    const onChange = () => void listAudioInputs(fake.current).then(setDevices);
     navigator.mediaDevices?.addEventListener?.("devicechange", onChange);
     return () => navigator.mediaDevices?.removeEventListener?.("devicechange", onChange);
   }, [open]);
@@ -223,7 +225,7 @@ export const VoiceoverPanel: React.FC = () => {
         return;
       }
       const device = deviceId && devices.some((d) => d.id === deviceId) ? deviceId : undefined;
-      mic.current = await MicRecorder.start({ deviceId: device, gain: volume / 100, echoReduction: echo, onLevel: setPeak });
+      mic.current = await MicRecorder.start({ deviceId: device, gain: volume / 100, echoReduction: echo, onLevel: setPeak, fake: fake.current });
     } catch (e) {
       setPhase("idle");
       if (e instanceof MicError && e.reason === "denied") setDenied(true);
