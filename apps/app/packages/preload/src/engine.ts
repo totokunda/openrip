@@ -176,6 +176,11 @@ export function engineExport(projectId: number, snapshot: unknown, path: string,
   return ipcRenderer.invoke("engine:export", projectId, snapshot, path, options);
 }
 
+/** The video codecs the platform's encoder can write ("h264", "hevc", "hevc-alpha", "prores-422", ...); empty without the engine. */
+export function engineExportCodecs(): Promise<string[]> {
+  return ipcRenderer.invoke("engine:export-codecs");
+}
+
 /** Stop the running engine export (its promise resolves with `cancelled`). */
 export function engineExportCancel(): Promise<void> {
   return ipcRenderer.invoke("engine:export-cancel");

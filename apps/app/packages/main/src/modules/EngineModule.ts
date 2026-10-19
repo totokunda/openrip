@@ -64,6 +64,8 @@ export type EngineAddon = {
   exportGif?(json: string, path: string, shortSide: number, fps: number): Promise<{ frames: number; seconds: number; skippedLayers: number }>;
   exportProgress(): { done: number; total: number };
   cancelExport(): void;
+  /** The video codecs the platform's encoder can write (absent in engines built before it). */
+  exportCodecs?(): string[];
   setThumbnailCacheDir(dir: string): void;
   /** Performance › Speed up hardware decoding (absent in engines built before it). */
   setHardwareDecoding?(on: boolean): void;
@@ -674,6 +676,14 @@ export class EngineModule implements AppModule {
     });
 
     ipcMain.handle("engine:export-cancel", () => addon?.cancelExport());
+    // The codecs the Export dialog may offer beyond H.264 and HEVC: only what this platform's encoder has.
+    ipcMain.handle("engine:export-codecs", (): string[] => {
+      try {
+        return addon?.exportCodecs?.() ?? [];
+      } catch {
+        return [];
+      }
+    });
 
     // Motion tracking over a video's own frames; progress goes to the asking window as
     // `engine:track-progress` (frames done, total).

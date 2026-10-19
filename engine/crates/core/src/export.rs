@@ -8,13 +8,14 @@ use crate::Result;
 
 pub use openrip_export::Codec;
 
-/// The video codec named `name`: "hevc" (or "h265") for HEVC, anything else H.264.
+/// The video codec named `name` (see [`Codec::name`]; "h265" is HEVC); anything else H.264.
 pub fn codec_named(name: &str) -> Codec {
-    if name.eq_ignore_ascii_case("hevc") || name.eq_ignore_ascii_case("h265") {
-        Codec::Hevc
-    } else {
-        Codec::H264
-    }
+    Codec::named(name).unwrap_or(Codec::H264)
+}
+
+/// The names of the codecs the platform's encoder can write, in menu order.
+pub fn available_codecs() -> Vec<&'static str> {
+    openrip_export::available_codecs().into_iter().map(Codec::name).collect()
 }
 
 #[derive(Clone, Debug)]

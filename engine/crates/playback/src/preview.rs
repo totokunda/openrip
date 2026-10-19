@@ -402,6 +402,8 @@ pub struct PreviewEngine {
     following: bool,
     /// The frame is for a preview surface (shown at its size), not an export or a still.
     preview_surface: bool,
+    /// Frames read back by `render_image` are drawn over nothing (an export with alpha).
+    transparent: bool,
     /// The canvas colour of the frame gathered last: its main-track clip's canvas fill, if
     /// it's a colour, else black.
     background: [u8; 3],
@@ -442,6 +444,7 @@ impl PreviewEngine {
             last_time: None,
             following: false,
             preview_surface: false,
+            transparent: false,
             background: [0, 0, 0],
         })
     }
@@ -492,6 +495,12 @@ impl PreviewEngine {
         media_path(&self.project, segment)
     }
 
+    /// Draw the frames `render_image` reads back over nothing instead of the canvas colour, so
+    /// what is not covered stays clear (premultiplied RGBA).
+    pub fn set_transparent(&mut self, on: bool) {
+        self.transparent = on;
+    }
+
     /// Render the frame at `t` and read it back.
     pub fn render_image(&mut self, t: Micros, width: u32, height: u32) -> Result<(RgbaImage, FrameReport), PreviewError> {
         let t0 = std::time::Instant::now();
@@ -501,7 +510,7 @@ impl PreviewEngine {
         let layers = self.layers(&pixels, t, width, height);
         let t2 = std::time::Instant::now();
         let written = self.compositor.pixels_written();
-        let frame = self.compositor.render(width, height, self.background, &layers);
+        let frame = if self.transparent { self.compositor.render_transparent(width, height, &layers) } else { self.compositor.render(width, height, self.background, &layers) };
         if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 30 {
             let ms = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1e3;
             let mp = (self.compositor.pixels_written() - written) as f64 / 1e6;

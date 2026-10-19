@@ -1,9 +1,12 @@
-//! VideoToolbox's H.264/HEVC encoder through FFmpeg, muxed by FFmpeg (MP4/MOV), with AAC
-//! audio: the export encoder on Apple platforms.
+//! VideoToolbox's H.264, HEVC and ProRes encoders through FFmpeg, muxed by FFmpeg (MP4/MOV), with
+//! AAC audio: the export encoder on Apple platforms.
 //!
 //! Each frame is composited on the GPU straight into an NV12 (BT.709, limited range)
 //! IOSurface from a CoreVideo pool, which goes to the encoder as a hardware frame: no pixel
 //! copies and no CPU colour conversion.
+//!
+//! The codecs with an alpha channel (HEVC with alpha) take frames drawn over a transparent
+//! canvas and read back (premultiplied RGBA) instead, as BGRA pictures.
 
 use std::ffi::CString;
 use std::path::Path;
@@ -11,7 +14,7 @@ use std::path::Path;
 use ffmpeg_sys_next as ff;
 use openrip_playback::{FrameReport, PreviewError};
 
-use crate::{Codec, Encoder, ExportError, ExportOptions, Picture, AUDIO_RATE};
+use crate::{Codec, Encoder, ExportError, ExportOptions, Picture, ProRes, AUDIO_RATE};
 
 const AUDIO_BITRATE: i64 = 192_000;
 
@@ -20,6 +23,69 @@ fn check(op: &'static str, code: i32) -> Result<i32, ExportError> {
         Err(ExportError::Ffmpeg { op, code })
     } else {
         Ok(code)
+    }
+}
+
+fn encoder_name(codec: Codec) -> &'static str {
+    match codec {
+        Codec::H264 => "h264_videotoolbox",
+        Codec::Hevc | Codec::HevcAlpha => "hevc_videotoolbox",
+        Codec::ProRes(_) => "prores_videotoolbox",
+    }
+}
+
+/// The options a codec's encoder has beyond the picture's: ProRes's profile, HEVC's alpha quality.
+unsafe fn set_codec_options(e: *mut ff::AVCodecContext, codec: Codec) {
+    let set = |key: &str, value: &str| {
+        let (k, v) = (CString::new(key).unwrap(), CString::new(value).unwrap());
+        ff::av_opt_set((*e).priv_data, k.as_ptr(), v.as_ptr(), 0);
+    };
+    match codec {
+        Codec::HevcAlpha => set("alpha_quality", "0.75"),
+        Codec::ProRes(p) => set(
+            "profile",
+            match p {
+                ProRes::Lt => "lt",
+                ProRes::Standard => "standard",
+                ProRes::Hq => "hq",
+                ProRes::FourFourFourFour => "4444",
+            },
+        ),
+        _ => {}
+    }
+}
+
+/// The codecs the encoders here can open on this machine (each is tried: an encoder that is
+/// built in may still be refused by the system, or by this Mac's hardware).
+pub(crate) fn available() -> Vec<Codec> {
+    static CODECS: std::sync::OnceLock<Vec<Codec>> = std::sync::OnceLock::new();
+    CODECS.get_or_init(|| Codec::ALL.into_iter().filter(|c| probe(*c)).collect()).clone()
+}
+
+fn probe(codec: Codec) -> bool {
+    let name = CString::new(encoder_name(codec)).unwrap();
+    unsafe {
+        let enc = ff::avcodec_find_encoder_by_name(name.as_ptr());
+        if enc.is_null() {
+            return false;
+        }
+        let mut e = ff::avcodec_alloc_context3(enc);
+        (*e).width = 256;
+        (*e).height = 144;
+        (*e).time_base = ff::AVRational { num: 1, den: 30 };
+        (*e).framerate = ff::AVRational { num: 30, den: 1 };
+        if codec.has_alpha() {
+            (*e).pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_BGRA;
+            (*e).color_range = ff::AVColorRange::AVCOL_RANGE_JPEG;
+        } else {
+            (*e).pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+            (*e).sw_pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_NV12;
+        }
+        (*e).bit_rate = 2_000_000;
+        set_codec_options(e, codec);
+        let ok = ff::avcodec_open2(e, enc, std::ptr::null_mut()) >= 0;
+        ff::avcodec_free_context(&mut e);
+        ok
     }
 }
 
@@ -65,11 +131,7 @@ impl Drop for Output {
 impl Output {
     fn open(path: &Path, o: &ExportOptions) -> Result<Output, ExportError> {
         let cpath = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| ExportError::Other("path has a NUL byte".into()))?;
-        let name = CString::new(match o.codec {
-            Codec::H264 => "h264_videotoolbox",
-            Codec::Hevc => "hevc_videotoolbox",
-        })
-        .unwrap();
+        let name = CString::new(encoder_name(o.codec)).unwrap();
         unsafe {
             let mut out = Output { fmt: std::ptr::null_mut(), enc: std::ptr::null_mut(), stream: std::ptr::null_mut(), pkt: ff::av_packet_alloc(), frame: ff::av_frame_alloc(), audio: None };
             check("avformat_alloc_output_context2", ff::avformat_alloc_output_context2(&mut out.fmt, std::ptr::null(), std::ptr::null(), cpath.as_ptr()))?;
@@ -83,19 +145,30 @@ impl Output {
             (*e).height = o.height as i32;
             (*e).time_base = ff::AVRational { num: o.fps.den as i32, den: o.fps.num as i32 };
             (*e).framerate = ff::AVRational { num: o.fps.num as i32, den: o.fps.den as i32 };
-            // Frames arrive as CVPixelBuffers (NV12) we rendered into on the GPU.
-            (*e).pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
-            (*e).sw_pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_NV12;
+            if o.codec.has_alpha() {
+                // Frames arrive as BGRA pixels read back from the GPU.
+                (*e).pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_BGRA;
+            } else {
+                // Frames arrive as CVPixelBuffers (NV12) we rendered into on the GPU.
+                (*e).pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+                (*e).sw_pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_NV12;
+            }
             (*e).bit_rate = o.bitrate as i64;
             (*e).gop_size = (o.fps.as_f64() * 2.0).round() as i32;
-            (*e).color_range = ff::AVColorRange::AVCOL_RANGE_MPEG;
-            (*e).colorspace = ff::AVColorSpace::AVCOL_SPC_BT709;
-            (*e).color_primaries = ff::AVColorPrimaries::AVCOL_PRI_BT709;
-            (*e).color_trc = ff::AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+            // (The picture with alpha is RGB: it carries no YCbCr matrix or range.)
+            if o.codec.has_alpha() {
+                (*e).color_range = ff::AVColorRange::AVCOL_RANGE_JPEG;
+            } else {
+                (*e).color_range = ff::AVColorRange::AVCOL_RANGE_MPEG;
+                (*e).colorspace = ff::AVColorSpace::AVCOL_SPC_BT709;
+                (*e).color_primaries = ff::AVColorPrimaries::AVCOL_PRI_BT709;
+                (*e).color_trc = ff::AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+            }
             if (*(*out.fmt).oformat).flags & ff::AVFMT_GLOBALHEADER != 0 {
                 (*e).flags |= ff::AV_CODEC_FLAG_GLOBAL_HEADER as i32;
             }
-            if o.exact_bitrate {
+            set_codec_options(e, o.codec);
+            if o.exact_bitrate && !matches!(o.codec, Codec::ProRes(_)) {
                 // macOS 13 or newer; older systems refuse the open, which then fails.
                 let key = CString::new("constant_bit_rate").unwrap();
                 ff::av_opt_set_int((*e).priv_data, key.as_ptr(), 1, 0);
@@ -103,6 +176,10 @@ impl Output {
             check("avcodec_open2", ff::avcodec_open2(e, codec, std::ptr::null_mut()))?;
             out.stream = ff::avformat_new_stream(out.fmt, std::ptr::null());
             check("avcodec_parameters_from_context", ff::avcodec_parameters_from_context((*out.stream).codecpar, e))?;
+            // Apple's players want HEVC tagged "hvc1" (parameter sets in the header), not "hev1".
+            if matches!(o.codec, Codec::Hevc | Codec::HevcAlpha) {
+                (*(*out.stream).codecpar).codec_tag = u32::from_le_bytes(*b"hvc1");
+            }
             (*out.stream).time_base = (*e).time_base;
             (*out.stream).avg_frame_rate = (*e).framerate;
             if o.audio {
@@ -217,6 +294,26 @@ impl Output {
         }
     }
 
+    /// Send one BGRA picture (premultiplied alpha, `width * 4` bytes a row) and write what comes out.
+    fn encode_bgra(&mut self, bgra: &[u8], pts: i64) -> Result<(), ExportError> {
+        unsafe {
+            let f = self.frame;
+            ff::av_frame_unref(f);
+            (*f).format = ff::AVPixelFormat::AV_PIX_FMT_BGRA as i32;
+            (*f).width = (*self.enc).width;
+            (*f).height = (*self.enc).height;
+            (*f).pts = pts;
+            check("av_frame_get_buffer", ff::av_frame_get_buffer(f, 0))?;
+            let (w, h, stride) = ((*f).width as usize, (*f).height as usize, (*f).linesize[0] as usize);
+            for y in 0..h {
+                std::ptr::copy_nonoverlapping(bgra.as_ptr().add(y * w * 4), (*f).data[0].add(y * stride), w * 4);
+            }
+            check("avcodec_send_frame", ff::avcodec_send_frame(self.enc, f))?;
+            ff::av_frame_unref(f);
+            Self::drain(self.fmt, self.enc, self.stream, self.pkt)
+        }
+    }
+
     fn finish(&mut self) -> Result<(), ExportError> {
         self.encode(None)?;
         unsafe { check("av_write_trailer", ff::av_write_trailer(self.fmt)).map(|_| ()) }
@@ -256,22 +353,36 @@ impl Pool {
 
 /// The pool and the encoder for one export.
 pub(crate) struct VtEncoder {
-    pool: Pool,
+    /// The NV12 pool; none for a codec with alpha, which takes read-back pixels.
+    pool: Option<Pool>,
+    image: Option<openrip_render::RgbaImage>,
     out: Output,
     path: std::path::PathBuf,
 }
 
 impl VtEncoder {
     pub(crate) fn open(path: &Path, o: &ExportOptions) -> Result<VtEncoder, ExportError> {
-        let pool = Pool::new(o.width, o.height).ok_or_else(|| ExportError::Other("can't create the frame pool".into()))?;
+        let pool = if o.codec.has_alpha() { None } else { Some(Pool::new(o.width, o.height).ok_or_else(|| ExportError::Other("can't create the frame pool".into()))?) };
         let out = Output::open(path, o)?;
-        Ok(VtEncoder { pool, out, path: path.to_path_buf() })
+        Ok(VtEncoder { pool, image: None, out, path: path.to_path_buf() })
     }
 }
 
 impl Encoder for VtEncoder {
     fn video(&mut self, index: i64, draw: &mut dyn FnMut(Picture<'_>) -> Result<FrameReport, PreviewError>) -> Result<FrameReport, ExportError> {
-        let pb = self.pool.next().ok_or_else(|| ExportError::Other("frame pool exhausted".into()))?;
+        let Some(pool) = &self.pool else {
+            let (w, h) = unsafe { ((*self.out.enc).width as u32, (*self.out.enc).height as u32) };
+            let mut image = self.image.take().unwrap_or(openrip_render::RgbaImage { width: w, height: h, data: Vec::new() });
+            let report = draw(Picture::Rgba(&mut image))?;
+            // RGBA to BGRA, in place.
+            for px in image.data.chunks_exact_mut(4) {
+                px.swap(0, 2);
+            }
+            self.out.encode_bgra(&image.data, index)?;
+            self.image = Some(image);
+            return Ok(report);
+        };
+        let pb = pool.next().ok_or_else(|| ExportError::Other("frame pool exhausted".into()))?;
         let report = draw(Picture::Nv12(&pb))?;
         self.out.encode(Some((&pb, index)))?;
         Ok(report)

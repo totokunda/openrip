@@ -23,6 +23,7 @@ export {
   onEngineEnded,
   engineExport,
   engineExportCancel,
+  engineExportCodecs,
   engineThumbnails,
   engineEffectCatalog,
   engineEffectPreviews,

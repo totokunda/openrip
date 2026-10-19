@@ -10,6 +10,9 @@
 set -eu
 
 VERSION=9.0.2
+# Bumped when the configure flags change, so an older build is made again.
+REVISION=2
+STAMP="$VERSION.$REVISION"
 # Pinned from ffmpeg.org on 2026-10-16, after checking its release signature (key
 # FCF986EA15E6E293A5644F10B4322F04D67658D8).
 SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
@@ -24,7 +27,7 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 ROOT="$HERE/.ffmpeg"
 PREFIX="$ROOT/$ARCH"
 SRC="$ROOT/src/ffmpeg-$VERSION"
-if [ -f "$PREFIX/lib/libavcodec.a" ] && [ "$(cat "$PREFIX/.version" 2>/dev/null)" = "$VERSION" ]; then
+if [ -f "$PREFIX/lib/libavcodec.a" ] && [ "$(cat "$PREFIX/.version" 2>/dev/null)" = "$STAMP" ]; then
   echo "FFmpeg $VERSION for $ARCH is already built in $PREFIX"
   exit 0
 fi
@@ -71,7 +74,7 @@ fi
   --enable-decoder=h264,hevc,prores,vp8,vp9,av1,mpeg4,mpeg1video,mpeg2video,h263,dnxhd,mjpeg,png,bmp,tiff,webp,gif \
   --enable-decoder=aac,aac_latm,mp3,mp3float,mp2,mp2float,ac3,eac3,flac,alac,opus,vorbis \
   --enable-decoder=pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_f64le,pcm_u8,pcm_alaw,pcm_mulaw \
-  --enable-encoder=aac,h264_videotoolbox,hevc_videotoolbox \
+  --enable-encoder=aac,h264_videotoolbox,hevc_videotoolbox,prores_videotoolbox \
   --enable-muxer=mp4,mov,matroska \
   --enable-parser=h264,hevc,av1,vp8,vp9,mpeg4video,mpegvideo,h263,dnxhd,mjpeg,png,bmp,webp,gif,aac,aac_latm,mpegaudio,ac3,flac,opus,vorbis \
   --enable-bsf=vp9_superframe_split,av1_frame_split,extract_extradata,h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc \
@@ -80,5 +83,5 @@ fi
 
 make -j"$(sysctl -n hw.ncpu)"
 make install
-echo "$VERSION" > "$PREFIX/.version"
+echo "$STAMP" > "$PREFIX/.version"
 echo "FFmpeg $VERSION for $ARCH installed in $PREFIX"

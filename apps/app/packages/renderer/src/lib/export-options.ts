@@ -26,12 +26,27 @@ export const BITRATES: Choice<BitrateMode>[] = [
   { value: "custom", label: "Custom" },
 ];
 
-export type VideoCodec = "h264" | "hevc";
+export type VideoCodec = "h264" | "hevc" | "hevc-alpha" | "prores-lt" | "prores-422" | "prores-hq" | "prores-4444";
 
 export const CODECS: Choice<VideoCodec>[] = [
   { value: "h264", label: "H.264", note: "The most common compression method" },
   { value: "hevc", label: "HEVC", note: "Efficient compression, saving space" },
+  { value: "hevc-alpha", label: "HEVC with alpha", note: "Efficient compression, with transparency" },
+  { value: "prores-lt", label: "ProRes 422 LT", note: "Light editing format, smaller files" },
+  { value: "prores-422", label: "ProRes 422", note: "High-quality editing format" },
+  { value: "prores-hq", label: "ProRes 422 HQ", note: "Higher-quality editing format" },
+  { value: "prores-4444", label: "ProRes 4444", note: "Highest quality, with an alpha channel" },
 ];
+
+/** The codecs every build offers; the others (alpha, ProRes) only where the platform's encoder has them. */
+export const BASIC_CODECS: VideoCodec[] = ["h264", "hevc"];
+
+/** ProRes and HEVC with alpha are written to a .mov, with a bit rate of their own. */
+export const isProRes = (c: VideoCodec) => c.startsWith("prores");
+export const needsMov = (c: VideoCodec) => isProRes(c) || c === "hevc-alpha";
+
+/** ProRes's bit rate at 1080P and 30 fps, in kilobits a second (Apple's published targets). */
+const PRORES_KBPS: Record<string, number> = { "prores-lt": 102_000, "prores-422": 147_000, "prores-hq": 220_000, "prores-4444": 330_000 };
 
 export type VideoFormat = "mp4" | "mov";
 
@@ -120,6 +135,8 @@ export type VideoSettings = {
 
 /** The bit rate the video is written at, in bits per second. */
 export function videoBitrate(v: VideoSettings, size: { width: number; height: number }): number {
+  // ProRes has a rate of its own, by profile, size and frame rate.
+  if (isProRes(v.codec)) return Math.round(PRORES_KBPS[v.codec] * ((size.width * size.height) / (1920 * 1080)) * (Math.max(1, v.fps) / 30)) * 1000;
   const kbps = v.bitrate === "custom" ? v.customKbps : presetKbps(v.bitrate, size.width, size.height, v.fps);
   return Math.max(100, Math.round(kbps)) * 1000;
 }

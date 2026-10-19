@@ -152,6 +152,8 @@ export function exportProject(json: string, path: string, options: ExportOptions
 export function exportProgress(): { done: number; total: number }
 /** Stop the running export; the unfinished file is removed. */
 export function cancelExport(): void
+/** The video codecs this platform can export, by the names ExportOptions.codec takes. */
+export function exportCodecs(): Array<string>
 
 // Motion tracking.
 

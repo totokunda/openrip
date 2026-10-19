@@ -727,7 +727,12 @@ fn export_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         Some(f) => openrip_model::FrameRate::from_f64(f.parse()?),
         None => project.fps,
     };
-    let codec = if args.iter().any(|a| a == "--hevc") { openrip_export::Codec::Hevc } else { openrip_export::Codec::H264 };
+    // --codec <name> (h264, hevc, hevc-alpha, prores-422, ...), or --hevc.
+    let codec = match opt("--codec") {
+        Some(n) => openrip_export::Codec::named(&n).ok_or("unknown --codec")?,
+        None if args.iter().any(|a| a == "--hevc") => openrip_export::Codec::Hevc,
+        None => openrip_export::Codec::H264,
+    };
     let mbps: f64 = opt("--mbps").map(|m| m.parse()).transpose()?.unwrap_or(10.0);
     let duration = project.duration().as_secs_f64();
     let audio = !args.iter().any(|a| a == "--no-audio");

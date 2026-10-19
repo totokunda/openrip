@@ -192,7 +192,7 @@ impl Compositor {
         let surface = objc2_core_video::CVPixelBufferGetIOSurface(Some(target)).ok_or_else(|| RenderError::Device("target has no IOSurface".into()))?;
         let canvas = self.wrap_surface(&surface, 0, (w, h), wgpu::TextureFormat::Bgra8Unorm, true).ok_or_else(|| RenderError::Device("can't render into that surface".into()))?;
         let mut enc = self.device.create_command_encoder(&Default::default());
-        let textures = self.encode_frame(&mut enc, &canvas, background, layers);
+        let textures = self.encode_frame(&mut enc, &canvas, Some(background), layers);
         let done = self.queue.submit([enc.finish()]);
         self.wait_for(done)?;
         self.recycle(textures.scratch);
@@ -223,7 +223,7 @@ impl Compositor {
         let (w, h) = plane(0);
         let canvas = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
         let mut enc = self.device.create_command_encoder(&Default::default());
-        let mut textures = self.encode_frame(&mut enc, &canvas, background, layers);
+        let mut textures = self.encode_frame(&mut enc, &canvas, Some(background), layers);
         let (kr, kb) = (0.2126f32, 0.0722f32);
         let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0: [0.0; 4], inv1: [kr, 1.0 - kr - kb, kb, 0.0], misc: [0.0; 4] };
         self.pass(&mut enc, &self.luma, &canvas, &luma, params, Some(wgpu::Color::BLACK));

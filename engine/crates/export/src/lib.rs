@@ -46,10 +46,65 @@ pub enum ExportError {
     Cancelled,
 }
 
+/// A ProRes profile (the 422 family, and 4444).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ProRes {
+    Lt,
+    Standard,
+    Hq,
+    FourFourFourFour,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Codec {
     H264,
     Hevc,
+    /// HEVC with an alpha channel: where nothing is drawn the picture is transparent.
+    HevcAlpha,
+    ProRes(ProRes),
+}
+
+impl Codec {
+    /// Every codec, in the order a menu lists them.
+    pub const ALL: [Codec; 7] = [Codec::H264, Codec::Hevc, Codec::HevcAlpha, Codec::ProRes(ProRes::Lt), Codec::ProRes(ProRes::Standard), Codec::ProRes(ProRes::Hq), Codec::ProRes(ProRes::FourFourFourFour)];
+
+    /// The name the API knows it by.
+    pub fn name(self) -> &'static str {
+        match self {
+            Codec::H264 => "h264",
+            Codec::Hevc => "hevc",
+            Codec::HevcAlpha => "hevc-alpha",
+            Codec::ProRes(ProRes::Lt) => "prores-lt",
+            Codec::ProRes(ProRes::Standard) => "prores-422",
+            Codec::ProRes(ProRes::Hq) => "prores-hq",
+            Codec::ProRes(ProRes::FourFourFourFour) => "prores-4444",
+        }
+    }
+
+    /// The codec named `name` (as [`Codec::name`] writes it; "h265" is HEVC).
+    pub fn named(name: &str) -> Option<Codec> {
+        let name = name.to_ascii_lowercase();
+        if name == "h265" {
+            return Some(Codec::Hevc);
+        }
+        Codec::ALL.into_iter().find(|c| c.name() == name)
+    }
+
+    /// Whether the picture carries an alpha channel (frames are drawn on a transparent
+    /// canvas, not over the project's background colour).
+    pub fn has_alpha(self) -> bool {
+        self == Codec::HevcAlpha
+    }
+}
+
+/// The codecs this build's platform encoder can write (H.264 and HEVC where there is an
+/// encoder at all; the others where the platform has them). Empty when the build has no
+/// video encoder.
+pub fn available_codecs() -> Vec<Codec> {
+    #[cfg(all(feature = "ffmpeg", target_vendor = "apple"))]
+    return videotoolbox::available();
+    #[cfg(not(all(feature = "ffmpeg", target_vendor = "apple")))]
+    Vec::new()
 }
 
 #[derive(Clone, Debug)]
@@ -129,6 +184,7 @@ pub fn export(project: Project, path: &Path, o: &ExportOptions, mut progress: im
     let mut mixed: i64 = 0;
     let mut block = Vec::new();
     let mut engine = PreviewEngine::new(project)?;
+    engine.set_transparent(o.codec.has_alpha());
     let mut out = open_encoder(path, o)?;
     let mut stats = ExportStats::default();
     for n in 0..total {
@@ -175,4 +231,19 @@ pub fn export(project: Project, path: &Path, o: &ExportOptions, mut progress: im
     stats.encode_seconds += e0.elapsed().as_secs_f64();
     stats.seconds = t0.elapsed().as_secs_f64();
     Ok(stats)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codec_names_round_trip() {
+        for c in Codec::ALL {
+            assert_eq!(Codec::named(c.name()), Some(c));
+        }
+        assert_eq!(Codec::named("H265"), Some(Codec::Hevc));
+        assert_eq!(Codec::named("vp9"), None);
+        assert!(Codec::HevcAlpha.has_alpha() && !Codec::Hevc.has_alpha());
+    }
 }

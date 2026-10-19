@@ -1323,12 +1323,13 @@ impl Compositor {
         self.import_video(&mut enc, frame).is_some()
     }
 
-    /// Record the passes that draw `layers` (bottom first) over `background` into `canvas`.
+    /// Record the passes that draw `layers` (bottom first) over `background` (none: transparent)
+    /// into `canvas`.
     /// Returns the intermediate textures, which must live until the work is submitted.
-    fn encode_frame(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, background: [u8; 3], layers: &[Layer]) -> FrameTextures {
+    fn encode_frame(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, background: Option<[u8; 3]>, layers: &[Layer]) -> FrameTextures {
         let (width, height) = (canvas.width(), canvas.height());
         let place_pipeline = if canvas.format() == wgpu::TextureFormat::Bgra8Unorm { &self.place_bgra } else { &self.place };
-        let bg = wgpu::Color { r: background[0] as f64 / 255.0, g: background[1] as f64 / 255.0, b: background[2] as f64 / 255.0, a: 1.0 };
+        let bg = background.map_or(wgpu::Color::TRANSPARENT, |b| wgpu::Color { r: b[0] as f64 / 255.0, g: b[1] as f64 / 255.0, b: b[2] as f64 / 255.0, a: 1.0 });
         // Clear the canvas with an empty placement pass.
         let blank = self.texture(1, 1, CANVAS, wgpu::TextureUsages::empty());
         let mut keep = Vec::new(); // textures must outlive the submission
@@ -1567,6 +1568,16 @@ impl Compositor {
     /// Render `layers` (bottom first) over an opaque `background` at `width`×`height` and
     /// read the frame back (tests, stills, analysis).
     pub fn render(&self, width: u32, height: u32, background: [u8; 3], layers: &[Layer]) -> RgbaImage {
+        self.render_over(width, height, Some(background), layers)
+    }
+
+    /// Render `layers` over nothing: where none draws, the frame is clear. The pixels come back
+    /// premultiplied (colour already multiplied by alpha), as the canvas holds them.
+    pub fn render_transparent(&self, width: u32, height: u32, layers: &[Layer]) -> RgbaImage {
+        self.render_over(width, height, None, layers)
+    }
+
+    fn render_over(&self, width: u32, height: u32, background: Option<[u8; 3]>, layers: &[Layer]) -> RgbaImage {
         let canvas = self.texture(width, height, CANVAS, wgpu::TextureUsages::COPY_SRC);
         let mut enc = self.device.create_command_encoder(&Default::default());
         let mut textures = self.encode_frame(&mut enc, &canvas, background, layers);

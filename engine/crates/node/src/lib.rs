@@ -441,7 +441,7 @@ pub struct ExportOptions {
     pub width: u32,
     pub height: u32,
     pub fps: f64,
-    /// "h264" or "hevc".
+    /// "h264", "hevc", "hevc-alpha" or "prores-lt" / "prores-422" / "prores-hq" / "prores-4444" (see `exportCodecs`); the ProRes ones and HEVC with alpha want a .mov.
     pub codec: String,
     /// Bits per second.
     pub bitrate: f64,
@@ -547,6 +547,13 @@ pub fn export_progress() -> ExportProgress {
 #[napi]
 pub fn cancel_export() {
     EXPORT.cancel();
+}
+
+/// The video codecs this platform's encoder can write, by the names `exportProject`'s `codec`
+/// takes ("h264", "hevc", "hevc-alpha", "prores-lt", "prores-422", "prores-hq", "prores-4444").
+#[napi]
+pub fn export_codecs() -> Vec<String> {
+    openrip_core::available_codecs().into_iter().map(String::from).collect()
 }
 
 // ---- motion tracking -------------------------------------------------------------

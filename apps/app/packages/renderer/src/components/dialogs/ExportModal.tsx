@@ -17,11 +17,12 @@ import { useControlsStore } from "@/lib/control";
 import { useViewportStore } from "@/lib/viewport";
 import { useProjectsStore } from "@/lib/projects";
 import { getMediaInfoCached } from "@/lib/media/utils";
-import { pickMediaPaths } from "@app/preload";
+import { engineExportCodecs, pickMediaPaths } from "@app/preload";
 import { ExportCredits } from "./ExportCredits";
 import type { VideoClipProps } from "@/lib/types";
 import {
   AUDIO_FORMATS,
+  BASIC_CODECS,
   BITRATES,
   CAPTION_FORMATS,
   CODECS,
@@ -32,7 +33,9 @@ import {
   durationLabel,
   timeLeftLabel,
   estimateBytes,
+  isProRes,
   nearestRate,
+  needsMov,
   outputSize,
   presetKbps,
   sizeLabel,
@@ -329,6 +332,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
   const [hasCaptions, setHasCaptions] = useState(false);
   const [fps, setFps] = useState(nearestRate(projectFps || 30));
   const wasOpen = useRef(false);
+  // The codecs beyond H.264 and HEVC this platform's encoder has; the others stay hidden.
+  const [platformCodecs, setPlatformCodecs] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    void engineExportCodecs().then((c) => live && setPlatformCodecs(c), () => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // What the project (or the clip) holds, read each time the dialog opens.
   useEffect(() => {
@@ -369,7 +381,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
   });
   const setV = (patch: Partial<Saved["v"]>) => set({ v: { ...saved.v, ...patch } });
 
-  const video: VideoSettings = { ...saved.v, fps };
+  // ProRes and HEVC with alpha are .mov files whatever the Format menu said.
+  const video: VideoSettings = { ...saved.v, fps, format: needsMov(saved.v.codec) ? "mov" : saved.v.format };
+  const codecs = CODECS.filter((c) => BASIC_CODECS.includes(c.value) || platformCodecs.includes(c.value));
+  const proRes = isProRes(saved.v.codec);
   const size = outputSize(video.resolution, ratio);
   const on = {
     video: sections.video && saved.video,
@@ -464,7 +479,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
                       {saved.v.bitrate === "custom" && <Tip text="A higher bit rate keeps more detail and makes a larger file." />}
                     </Label>
                     <div className="flex flex-col gap-2">
-                      <Select testId="export-bitrate" disabled={dim(on.video)} value={saved.v.bitrate} options={BITRATES} onChange={pickBitrate} />
+                      <Select testId="export-bitrate" disabled={dim(on.video || proRes)} value={saved.v.bitrate} options={BITRATES} onChange={pickBitrate} />
                       {saved.v.bitrate === "custom" && (
                         <div className="flex items-center gap-3">
                           <input
@@ -485,14 +500,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
                   </div>
                   <div className={row}>
                     <Label on={on.video}>Codec</Label>
-                    <Select testId="export-codec" disabled={dim(on.video)} value={video.codec} options={CODECS} onChange={(v) => setV({ codec: v })} />
+                    <Select testId="export-codec" disabled={dim(on.video)} value={video.codec} options={codecs.some((c) => c.value === video.codec) ? codecs : CODECS} onChange={(v) => setV({ codec: v })} />
                   </div>
                   <div className={cn("text-[12px] leading-[17px] pt-2 pb-1", on.video ? "text-[#a8a8a8]" : "text-[#525252]")} data-testid="export-codec-note">
-                    {video.codec === "h264" ? "The current setting is the same as that of the project. Changing it may affect your video quality." : "HEVC saves space but some players and editors can't open it. Changing it may affect your video quality."}
+                    {video.codec === "h264"
+                      ? "The current setting is the same as that of the project. Changing it may affect your video quality."
+                      : video.codec === "hevc"
+                        ? "HEVC saves space but some players and editors can't open it. Changing it may affect your video quality."
+                        : video.codec === "hevc-alpha"
+                          ? "Parts of the picture nothing covers are transparent. Plays in Apple's players and editors; saved as a .mov."
+                          : "ProRes is an editing format: large files, high quality, saved as a .mov. The bit rate is set by the profile."}
                   </div>
                   <div className={row}>
                     <Label on={on.video}>Format</Label>
-                    <Select testId="export-format" disabled={dim(on.video)} value={video.format} options={FORMATS} onChange={(v) => setV({ format: v })} />
+                    <Select testId="export-format" disabled={dim(on.video || needsMov(saved.v.codec))} value={video.format} options={FORMATS} onChange={(v) => setV({ format: v })} />
                   </div>
                   <div className={row}>
                     <Label on={on.video}>Frame rate</Label>
