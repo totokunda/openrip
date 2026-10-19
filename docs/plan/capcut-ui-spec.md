@@ -610,11 +610,11 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 
 | Area | Has | Partly | Missing |
 |---|---:|---:|---:|
-| 6.1 App menu bar (macOS) | 9 | 3 | 3 |
-| 6.2 Home screen | 14 | 1 | 1 |
-| 6.3 Settings and shortcuts | 18 | 10 | 7 |
-| 6.4 Editor top bar and layout | 7 | 1 | 0 |
-| 6.5 Left panel: Media | 10 | 2 | 11 |
+| 6.1 App menu bar (macOS) | 14 | 0 | 1 |
+| 6.2 Home screen | 15 | 1 | 0 |
+| 6.3 Settings and shortcuts | 25 | 4 | 6 |
+| 6.4 Editor top bar and layout | 8 | 0 | 0 |
+| 6.5 Left panel: Media | 14 | 2 | 7 |
 | 6.6 Left panel: Audio | 4 | 0 | 0 |
 | 6.7 Left panel: Text | 4 | 1 | 0 |
 | 6.8 Left panel: Stickers | 3 | 0 | 0 |
@@ -625,25 +625,25 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.13 Left panel: Adjustment | 3 | 0 | 0 |
 | 6.14 Left panel: Templates | 1 | 0 | 0 |
 | 6.15 Player | 12 | 1 | 0 |
-| 6.16 Inspector: project (nothing selected) | 6 | 4 | 1 |
-| 6.17 Inspector: video clip | 34 | 2 | 4 |
+| 6.16 Inspector: project (nothing selected) | 7 | 4 | 0 |
+| 6.17 Inspector: video clip | 38 | 2 | 0 |
 | 6.18 Inspector: photo clip | (see 6.17) | | |
-| 6.19 Inspector: audio clip | 5 | 1 | 1 |
-| 6.20 Inspector: text clip | 19 | 1 | 3 |
+| 6.19 Inspector: audio clip | 6 | 1 | 0 |
+| 6.20 Inspector: text clip | 19 | 2 | 2 |
 | 6.21 Inspector: sticker clip | 2 | 0 | 0 |
 | 6.22 Inspector: effect, filter and transition clips | 5 | 0 | 1 |
 | 6.23 Inspector: adjustment layer (also the video Adjust tab) | 8 | 3 | 0 |
-| 6.24 Inspector: caption clip | 1 | 0 | 3 |
-| 6.25 Inspector: multiple selection and compound clips | 0 | 2 | 4 |
-| 6.26 Timeline toolbar | 16 | 4 | 2 |
+| 6.24 Inspector: caption clip | 1 | 1 | 2 |
+| 6.25 Inspector: multiple selection and compound clips | 2 | 2 | 2 |
+| 6.26 Timeline toolbar | 18 | 4 | 0 |
 | 6.27 Timeline tracks, clips, ruler | 23 | 0 | 1 |
-| 6.28 Context menus | 6 | 4 | 11 |
-| 6.29 Export dialog | 14 | 0 | 2 |
-| 6.30 Other dialogs | 5 | 1 | 0 |
-| 6.31 Classic-algorithm features brought into scope | 10 | 1 | 1 |
-| **Total (353 in-scope features)** | **251** | **45** | **57** |
+| 6.28 Context menus | 14 | 4 | 3 |
+| 6.29 Export dialog | 15 | 0 | 1 |
+| 6.30 Other dialogs | 6 | 0 | 0 |
+| 6.31 Classic-algorithm features brought into scope (2026-10-18) | 10 | 1 | 1 |
+| **Total (353 in-scope features)** | **289** | **36** | **28** |
 
-Re-audited 2026-10-19 against main 06c8dac7: every row was checked against the code and the smoke steps, and the counts above are the rows' current statuses (251 has, 45 partly, 57 missing of 353; 71.1% strict, 77.5% with partly as half). Before it the table read 127 / 75 / 149 as written, but the rows themselves already read 170 / 69 / 114 (the summary lagged them). An earlier re-audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows.
+Re-audited 2026-10-19 against main ab4960fe: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (289 has, 36 partly, 28 missing of 353; 81.9% strict, 87.0% with partly as half). Before it (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows.
 
 ### 6.1 App menu bar (macOS)
 
@@ -659,15 +659,15 @@ Captured from Home, so editor-only items show disabled (see §7).
 | App menu › Layout › Default, Media, Attributes, Vertical, Reset current layout | `003-layout-submenu.png` | has (Attributes is OpenRip's Inspector layout) |
 | App menu › More › Third-party copyright (licences view) | `007-more-submenu.png`, `31-dialogs/006-third-party-copyright.png` | has (OpenRip's npm and Cargo notices, made from the lockfiles at build time) |
 | App menu › Quit ⌘Q | `002-capcut-menu.png` | has |
-| File › New Project ⌘N | `004-file-menu.png`, `008-editor-file-menu.png` | partly (⌘N works; no menu item) |
+| File › New Project ⌘N | `004-file-menu.png`, `008-editor-file-menu.png` | has (File menu item and ⌘N) |
 | File › New timeline (several timelines per project) | `008-editor-file-menu.png` | missing |
-| File › Import ⌘I | `004-file-menu.png` | partly (⌘I opens the Media tab's picker; no menu item) |
-| File › Export ⌘E | `004-file-menu.png` | partly (⌘E opens Export; no menu item) |
+| File › Import ⌘I | `004-file-menu.png` | has (File menu item and ⌘I) |
+| File › Export ⌘E | `004-file-menu.png` | has (File menu item and ⌘E) |
 | Edit › Undo ⌘Z, Redo ⇧⌘Z | `005-edit-menu.png` | has |
-| Edit › Split ⌘B | `009-editor-edit-menu.png` | missing |
+| Edit › Split ⌘B | `009-editor-edit-menu.png` | has (Edit menu item and ⌘B) |
 | Edit › Copy, Cut, Paste, Delete | `005-edit-menu.png` | has |
 | Help › Shortcut | `006-help-menu.png` | has (opens the Shortcuts window) |
-| Help › Walkthrough (first-run tour: spotlight, step counter, Next/Exit) | `006-help-menu.png`, `31-dialogs/042-walkthrough-import-step.png` | missing |
+| Help › Walkthrough (first-run tour: spotlight, step counter, Next/Exit) | `006-help-menu.png`, `31-dialogs/042-walkthrough-import-step.png` | has (Help menu; spotlight, step counter, Next and Exit; harness walkthrough) |
 
 Out of scope: Terms of Service, Privacy Policy, Network Testing, Help › Feedback (OpenRip links to its issue tracker instead).
 
@@ -682,7 +682,7 @@ Screenshots are in `01-home/` unless a path says otherwise.
 | Project grid with cover thumbnails | `001-at-rest.png` | has (covers drawn from the saved cover file) |
 | Card details: name, size, duration | `001-at-rest.png` | has (name, then size and length) |
 | Card hover "…" and menu: Rename | `018-project-card-hover.png`, `019-project-card-context-menu.png` | has (inline rename in the Topbar) |
-| Card menu: Duplicate | `019-project-card-context-menu.png` | missing (the menu has Open, Rename, Show the file, Save as template, Delete) |
+| Card menu: Duplicate | `019-project-card-context-menu.png` | has (the menu has Open, Rename, Duplicate, Show the file, Save as template, Delete) |
 | Card menu: Delete (to Trash) | `019-project-card-context-menu.png` | has (moves to the Trash; see below) |
 | Grid / List view switch | `014-project-view-dropdown.png` | has |
 | List view: Name, Size, Duration, Last edited, sortable | `015-projects-list-view.png` | has (cover, name, ratio, length, size, last edited; a Sort menu) |
@@ -703,7 +703,7 @@ Screenshots are in `02-settings/` unless a path says otherwise.
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
 | Draft › Save to (projects folder) | `02-settings/001-draft.png`, `020-draft-save-path-picker.png` | has (the projects, covers and mask data move to the folder chosen) |
-| Draft › Screen recording folder | `001-draft.png`, `021-draft-recording-path-picker.png` | missing (no screen recording; the row shows disabled) |
+| Draft › Screen recording folder | `001-draft.png`, `021-draft-recording-path-picker.png` | missing (the row shows disabled; recording itself works from Media, Record) |
 | Draft › Cache: don't delete / auto delete after 90, 60, 30, 15 days; cache size + clear | `001-draft.png`, `002-draft-cache-age-dropdown.png` | has (engine thumbnails, export audio mixes, kept exports; old files deleted at start) |
 | Draft › Preset save path | `001-draft.png`, `023-draft-preset-path-picker.png` | missing (no saved presets; the row shows disabled) |
 | Edit › Step forward or back many N frames | `005-edit.png` | has (⇧← / ⇧→) |
@@ -726,16 +726,16 @@ Screenshots are in `02-settings/` unless a path says otherwise.
 | Shortcuts window: categories Timeline, Player, Basic, Other | `026-shortcuts-timeline.png`–`034-shortcuts-other.png` | has |
 | Shortcuts: click to rebind, Reset, Save | `026-shortcuts-timeline.png` | has (a key another action has is refused and named) |
 | Shortcuts: presets 1–5 | `036-shortcuts-preset-dropdown.png` | has |
-| Keys: Space play/pause, ←/→ frame step, Home/End, K/L shuttle | `031-shortcuts-player.png`, `026-shortcuts-timeline.png` | partly (no J/K/L shuttle) |
+| Keys: Space play/pause, ←/→ frame step, Home/End, K/L shuttle | `031-shortcuts-player.png`, `026-shortcuts-timeline.png` | has (J/K/L shuttle, harness shuttle) |
 | Keys: ⌘B split, ⌘⇧B split all, Q/W delete left/right | `026-shortcuts-timeline.png` | has |
-| Keys: A select mode, B split mode, [ ] select leftward/rightward | `026-shortcuts-timeline.png` | partly ([ and ]; no select or split mode) |
-| Keys: P magnet, N snapping, ~ linkage, S preview axis | `026-shortcuts-timeline.png` | partly (no preview axis) |
-| Keys: M marker, ⌥M new-colour marker, ⇧M / ⌥⇧M next/previous marker | `028-shortcuts-timeline-2.png` | partly (no ⌥M) |
-| Keys: ⌥K keyframe panel, ⇧⌥K add keyframe | `029-shortcuts-timeline-3.png` | partly (⌥K) |
-| Keys: ⌘+ / ⌘− zoom, ⇧Z zoom to fit, ⌘scroll zoom, ⌥scroll pan | `026-shortcuts-timeline.png` | partly (no ⌘scroll zoom; ⇧scroll pans) |
-| Keys: V activate/deactivate clip, ⇧⌃S extract audio | `026-shortcuts-timeline.png` | partly (⇧⌃S; no activate) |
+| Keys: A select mode, B split mode, [ ] select leftward/rightward | `026-shortcuts-timeline.png` | has (A, B, [ and ]) |
+| Keys: P magnet, N snapping, ~ linkage, S preview axis | `026-shortcuts-timeline.png` | partly (preview axis has no default key) |
+| Keys: M marker, ⌥M new-colour marker, ⇧M / ⌥⇧M next/previous marker | `028-shortcuts-timeline-2.png` | has |
+| Keys: ⌥K keyframe panel, ⇧⌥K add keyframe | `029-shortcuts-timeline-3.png` | has |
+| Keys: ⌘+ / ⌘− zoom, ⇧Z zoom to fit, ⌘scroll zoom, ⌥scroll pan | `026-shortcuts-timeline.png` | has (⌘scroll zooms, ⇧scroll pans) |
+| Keys: V activate/deactivate clip, ⇧⌃S extract audio | `026-shortcuts-timeline.png` | has |
 | Keys: ⌘C/⌘X/⌘V, ⌘Z/⌘⇧Z, ⌫ | `032-shortcuts-basic.png` | has |
-| Keys: ⌘⇧C / ⌘⇧V copy/paste attributes | `032-shortcuts-basic.png` | missing |
+| Keys: ⌘⇧C / ⌘⇧V copy/paste attributes | `032-shortcuts-basic.png` | has |
 | Keys: ⌘⇧F full-screen preview, ⌘⌥R rulers, ⌘; guides | `031-shortcuts-player.png` | has (⌘⇧F, ⌘⌥R rulers, ⌘; guides) |
 
 Out of scope: Download to, Auto sync, Synced items, Default space, Size limit, Dreamina sync, the shortcuts for Generate captions and voice isolation.
@@ -746,7 +746,7 @@ Screenshots are in `03-editor-overview/` unless a path says otherwise.
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Autosave status "Auto saved: hh:mm:ss" | `03-editor-overview/003-base-timeline-built.png` | partly (autosaves, shows no status) |
+| Autosave status "Auto saved: hh:mm:ss" | `03-editor-overview/003-base-timeline-built.png` | has ("Auto saved: hh:mm:ss" in the top bar) |
 | Project title, click to rename | `003-base-timeline-built.png` | has |
 | Layout menu: Default, Media, Attributes, Vertical | `04-top-bar/001-layout-menu-default.png`, `03-editor-overview/004-media-layout.png`–`006-vertical-layout.png` | has (Default, Media, Inspector, Vertical; also in the app menu) |
 | Reset current layout | `04-top-bar/001-layout-menu-default.png` | has (Topbar and app menu) |
@@ -765,7 +765,7 @@ Screenshots are in `05-left-media/` unless a path says otherwise.
 |---|---|---|
 | Import from device (file picker), Import button with menu | `05-left-media/001-empty-import-dropdown.png`, `003-import-dropdown-with-media.png`, `31-dialogs/012-import-file-dialog.png` | has |
 | Drop files from Finder onto the panel; empty drop zone "Import / Drag and drop videos, photos, and audio files here" | `03-editor-overview/001-empty-editor.png` | has |
-| Record (screen/camera) button | `05-left-media/010-record-hover.png` | missing |
+| Record (screen/camera) button | `05-left-media/010-record-hover.png` | has (screen, camera or both, with microphone; harness record) |
 | Search imported media; no-match state | `011-media-search-open.png` (`32-states/004-media-search-no-match.png` does not show the empty state) | partly (search works; no no-match state) |
 | Grid / list (filmstrip) view toggle | `009-media-list-view.png` | has (a toggle in the toolbar) |
 | Sort: time imported, time created, name, type, duration; newest/oldest first | `007-media-sort-menu.png` | partly (Name, Duration, Date Added, ascending or descending; no time created or type) |
@@ -781,10 +781,10 @@ Screenshots are in `05-left-media/` unless a path says otherwise.
 | Card menu: New timeline with selected item (several timelines per project) | `006-media-item-context-menu.png` | missing |
 | Card menu: Export selected clips | `006-media-item-context-menu.png` | missing |
 | Card menu: Create multi-camera clip | `006-media-item-context-menu.png` | missing |
-| Card menu: Link to media (relink missing files) | `006-media-item-context-menu.png` | missing |
+| Card menu: Link to media (relink missing files) | `006-media-item-context-menu.png` | has (Link to media on a missing card, and link missing in a folder; harness relink) |
 | Subprojects library (compound clips you can reuse) | `012-subprojects-empty.png` | missing |
-| Yours › Favorites | `013-yours-favorites-empty.png`, `014-favorites-type-filter.png` | missing |
-| Yours › My presets (saved clip presets) | `015-my-presets-library.png` | missing |
+| Yours › Favorites | `013-yours-favorites-empty.png`, `014-favorites-type-filter.png` | has (starred stock media) |
+| Yours › My presets (saved clip presets) | `015-my-presets-library.png` | has (saved clip presets; harness presets) |
 | Library: stock videos and photos (categories, search, Videos / Photos, tiles with length, hover and player preview, "+", drag, favourites, download spinner, credits) from key-free openly licensed sources (Openverse CC0/PDM/CC BY, Wikimedia Commons CC0/PD/CC BY, NASA) | `023-library-default.png`, `031-library-filter-menu.png` | has (no Commercial filter, everything listed is free to use; CC BY credits are in Library > Credits) |
 
 Out of scope: Import › From library (stock), Generate (AI image, AI video, AI dialogue scene: `15-left-ai-and-other/009-media-generate-default.png`–`15-left-ai-and-other/034-dialogue-react-tab.png`), Spaces and Brand assets (`017-spaces-default.png`–`020-spaces-asset-context.png`, `016-brand-assets-empty.png`), the Library's Commercial filter (`031-library-filter-menu.png`–`034-library-search-orientation-menu.png`), Dreamina (`15-left-ai-and-other/035-dreamina-default.png`), the media card's Transcript is in scope since 2026-10-19 with a local model (§6.31), as is Split scenes, the "AI clipper" bottom bar, the empty state's Generate and AI avatars tiles.
@@ -811,7 +811,7 @@ Screenshots are in `07-left-text/` unless a path says otherwise.
 | Add text: "Default text" tile (click or drag to add) | `07-left-text/001-add-text-default.png` | has (a Default text tile: click or drag; T draws a box on the player) |
 | Text style presets grid (OpenRip's own styles) | `003-text-effects-default.png` | has (OpenRip's own presets in Basic, Title, Caption and Style, with search; click or drag; harness textpresets) |
 | Text templates (local, multi-paragraph) | `004-text-template-default.png` | has (about 55 of OpenRip's own designs in eight categories as groups of text and shape clips; search, favourites, hover play, click preview, "+", drag; words edited in the group's Text template tab) |
-| Yours › Favorites, Presets (saved text styles) | `002-text-yours.png` | partly (favourites on text templates only; no saved text styles) |
+| Yours › Favorites, Presets (saved text styles) | `002-text-yours.png` | partly (saved clip presets live in Media, Yours, My presets; the Text tab has no Yours of its own) |
 | Local captions entry (SRT import, see 6.11) | `001-add-text-default.png` | has (the Text tab's Captions entry is Add captions, see 6.11) |
 
 Out of scope: AI packaging (`15-left-ai-and-other/038-text-ai-packaging.png`), Auto captions, CapCut text effects and templates, "AI generated" templates.
@@ -938,7 +938,7 @@ Screenshots are in `17-inspector-project/` unless a path says otherwise.
 | Project settings › Resolution: Adapted, Custom | `006-resolution-dropdown.png` | has (Custom is W × H fields) |
 | Project settings › Frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `007-frame-rate-dropdown.png` | has |
 | Project settings › Performance: Proxy on/off, proxy resolution 720P/540P | `008-project-settings-performance.png`, `009-proxy-resolution-dropdown.png` | partly (shown disabled: the engine plays the originals) |
-| Global edits › Make volume consistent (classic loudness matching) | `011-project-smart-suggestions.png`, `012-project-global-edits-bottom.png` | missing |
+| Global edits › Make volume consistent (classic loudness matching) | `011-project-smart-suggestions.png`, `012-project-global-edits-bottom.png` | has |
 
 Out of scope: Smart suggestions › Analyze, Make colors better, Make voice clearer, Make video clearer, Retouch face.
 
@@ -959,10 +959,10 @@ Tabs: Video (Basic, Remove BG, Mask, Retouch), Audio, Speed, Animation, Adjust, 
 | Keyframe navigator on every animatable property (‹ ◇ ›) | `001-video-selected-basic-top.png` | has (video, photo, text, audio volume, effects and filters) |
 | Blend › Mode: Default, Color dodge, Linear burn, Hard light, Multiply, Color burn, Overlay, Brighten, Darken, Soft light, Screen | `025-blend-mode-menu.png` | has |
 | Blend › Opacity | `002-basic-blend-enhancement-controls.png` | has |
-| Stabilize › Level (classic stabilisation) | `005-stabilize-options-view.png` | missing |
-| Reduce image noise (classic denoise) | `004-basic-enhancement-sections.png` | missing |
-| Remove flickers (classic deflicker) | `006-basic-ai-canvas-lower.png` | missing |
-| Motion blur (frame blending) | `006-basic-ai-canvas-lower.png` | missing |
+| Stabilize › Level (classic stabilisation) | `005-stabilize-options-view.png` | has (Level) |
+| Reduce image noise (classic denoise) | `004-basic-enhancement-sections.png` | has |
+| Remove flickers (classic deflicker) | `006-basic-ai-canvas-lower.png` | has |
+| Motion blur (frame blending) | `006-basic-ai-canvas-lower.png` | has |
 | Canvas › None, Blur (4 strengths), Color (swatches) | `007-basic-bottom-canvas.png`, `008-canvas-type-menu.png`, `009-canvas-blur-options.png`, `010-canvas-color-options.png` | has |
 | Canvas › Pattern (OpenRip's own patterns) | `011-canvas-pattern-options.png` | partly (an image from a file; no patterns of our own yet) |
 | Canvas › Apply to all | `007-basic-bottom-canvas.png` | has |
@@ -1010,7 +1010,7 @@ Tabs: Basic, Voice changer, Speed.
 | Volume (dB) with keyframes | `001-basic-volume-fades.png` | has |
 | Fade in, Fade out (s) | `001-basic-volume-fades.png` | has |
 | Normalize loudness (to a target level) | `001-basic-volume-fades.png` | has (a switch in the Basic tab and in the clip menu) |
-| Reduce noise (classic DSP) | `002-basic-channel-section.png` | missing |
+| Reduce noise (classic DSP) | `002-basic-channel-section.png` | has |
 | Fill channel (copy L to R or R to L) | `002-basic-channel-section.png` | has |
 | Voice changer › Voice filters with OpenRip's own DSP presets (search, favourites, Apply to all) | `003-voice-changer-library.png` | partly (OpenRip's DSP presets with search and Apply to all; no favourites) |
 | Speed (with pitch option) | not captured for audio; see 6.17 | has |
@@ -1044,7 +1044,7 @@ Tabs: Text (Basic, Bubble, Effects), Animation (In, Out, Loop), Tracking, Text t
 | Glow › Colour, Intensity, Range, X/Y offset | `015-glow-controls.png` | has |
 | Shadow › Colour, Opacity, Blur, Distance, Angle | `016-shadow-controls.png` | has (X/Y offset in place of distance/angle) |
 | Curve › Strength (curved text) | `017-curve-controls.png` | partly (engine renders it from drafts; no UI) |
-| Save as preset | `004-basic-default-text.png` | missing |
+| Save as preset | `004-basic-default-text.png` | partly (the clip menu's Save preset; no button in the text inspector) |
 | Animation › In with duration | `020-animation-in-grid.png`, `021-animation-type-slide-applied.png` | has (In, Out and Loop kinds) |
 | Animation › Out, Loop | `020-animation-in-grid.png` | has |
 | Template text: per-paragraph text fields | `001-template-basic-paragraphs.png` | has (the group's Text template tab) |
@@ -1100,7 +1100,7 @@ Screenshots are in `27-inspector-caption/` unless a path says otherwise.
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Text › "Apply to all main captions" plus the text controls (6.20) | `27-inspector-caption/001-caption-text-basic.png` | missing |
+| Text › "Apply to all main captions" plus the text controls (6.20) | `27-inspector-caption/001-caption-text-basic.png` | partly (the text controls; no Apply to all) |
 | Captions › list editor: search, numbered rows, edit text in place | `002-caption-list-editor.png` | missing |
 | Captions › Find and replace (Replace all) | `003-caption-search-replace.png` | missing |
 | Word-by-word caption display styles | – | has (whole, three-word and one-word styles for word-timed captions) |
@@ -1109,9 +1109,9 @@ Screenshots are in `27-inspector-caption/` unless a path says otherwise.
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Multi-select "Properties" tab: shared Transform, mixed values shown as "-", align and distribute | `29-inspector-multi/001-multiple-selection-transform.png` | missing |
-| Multi-select of videos: tabs Video, Speed, Adjust; sub-tabs Basic, Retouch | `29-inspector-multi/002-multiple-video-context-menu.png` | missing |
-| Multi-select menu: Group ⌘G, Create compound clip ⌥G, Create multi-camera clip, Save preset, Export selected clips (Copy/paste attributes disabled) | `29-inspector-multi/002-multiple-video-context-menu.png` | partly (Group exists) |
+| Multi-select "Properties" tab: shared Transform, mixed values shown as "-", align and distribute | `29-inspector-multi/001-multiple-selection-transform.png` | has (harness multisel) |
+| Multi-select of videos: tabs Video, Speed, Adjust; sub-tabs Basic, Retouch | `29-inspector-multi/002-multiple-video-context-menu.png` | has (Video, Speed, Adjust; harness multisel) |
+| Multi-select menu: Group ⌘G, Create compound clip ⌥G, Create multi-camera clip, Save preset, Export selected clips (Copy/paste attributes disabled) | `29-inspector-multi/002-multiple-video-context-menu.png` | partly (Group, Save preset, Copy/paste attributes; no compound clip, multi-camera or Export selected) |
 | Compound clip: selected compound uses the video inspector | `28-inspector-compound/001-compound-basic.png` | missing |
 | Compound clip: open the nested timeline, breadcrumb back | `28-inspector-compound/002-compound-open-timeline.png` | missing |
 | Compound clip menu: Undo compound clip ⌥⇧G, Pre-process compound clip (render it) | `28-inspector-compound/003-compound-context-menu.png` | partly (Ungroup exists for groups) |
@@ -1124,8 +1124,8 @@ Screenshots are in `30-timeline-toolbar/` unless a path says otherwise.
 |---|---|---|
 | Add (+) menu | `03-editor-overview/003-base-timeline-built.png` (menu not captured) | partly (an Add track menu in the track header column; none in the toolbar) |
 | Selection tool: Select (A) | `30-timeline-toolbar/026-selection-tool-menu.png` | has |
-| Selection tool: Split/blade tool (B) | `026-selection-tool-menu.png` | missing |
-| Selection tool: Select leftward ([), Select rightward (]) (select every clip before/after) | `026-selection-tool-menu.png` | has (keys [ and ]; no toolbar menu) |
+| Selection tool: Split/blade tool (B) | `026-selection-tool-menu.png` | has (B, harness tltools) |
+| Selection tool: Select leftward ([), Select rightward (]) (select every clip before/after) | `026-selection-tool-menu.png` | has (toolbar menu and the keys [ and ]) |
 | Undo, Redo | `03-editor-overview/003-base-timeline-built.png` | has |
 | Split at playhead | `03-editor-overview/003-base-timeline-built.png`, `028-split-video-state.png` | has |
 | Delete left of playhead, Delete right of playhead | `03-editor-overview/003-base-timeline-built.png` | has (Q and W too) |
@@ -1136,11 +1136,11 @@ Screenshots are in `30-timeline-toolbar/` unless a path says otherwise.
 | Reverse | `031-clip-transform-tools-menu.png`, `034-reversed-video-state.png` | has |
 | Mirror | `032-mirrored-video-state.png` | has |
 | Rotate (90° steps) | `003-video-context-edit.png` | has |
-| Record voiceover (input device, monitoring) | `31-dialogs/036-voiceover-panel.png`, `31-dialogs/037-voiceover-input-menu.png` | partly (records the default microphone with level meter and Mute project; no input device menu, input volume or echo reduction) |
+| Record voiceover (input device, monitoring) | `31-dialogs/036-voiceover-panel.png`, `31-dialogs/037-voiceover-input-menu.png` | has (input device, input volume, Echo reduction, level meter, Mute project; harness voiceoveroptions) |
 | Main-track magnet (ripple the main track) | `03-editor-overview/003-base-timeline-built.png` | has (harness tlmagnet) |
 | Auto snap toggle | `03-editor-overview/003-base-timeline-built.png` | has |
 | Linkage toggle and Linkage settings (which overlay types move/delete with main-track clips) | `31-dialogs/038-linkage-settings.png` | partly (the toggle works; no Linkage settings dialog) |
-| Preview axis (hover-scrub preview; video and audio, or video only) | `027-preview-axis-menu.png` | missing |
+| Preview axis (hover-scrub preview; video and audio, or video only) | `027-preview-axis-menu.png` | partly (video only; the video-and-audio choice is disabled) |
 | Zoom to fit | `037-timeline-fit-toggles-off.png` | has (⇧Z too) |
 | Zoom range from 30 s majors down to single frames | `035-timeline-zoom-minimum.png`, `036-timeline-zoom-maximum.png` | partly (zoom levels 1-10, down to 5 frames across; not single frames) |
 | Zoom out, slider, zoom in | `03-editor-overview/003-base-timeline-built.png` | has |
@@ -1188,23 +1188,23 @@ Video clip menu (`30-timeline-toolbar/001-video-context-menu.png` to `012-video-
 |---|---|---|
 | Copy ⌘C, Cut ⌘X, Delete ⌫ | `001-video-context-menu.png` | has |
 | Paste (empty space) | `022-empty-space-context-menu.png` | has |
-| Copy/paste attributes › Copy attributes ⌘⇧C, Paste attributes | `002-video-context-attributes.png`, `017-adjustment-attributes-submenu.png` | missing |
+| Copy/paste attributes › Copy attributes ⌘⇧C, Paste attributes | `002-video-context-attributes.png`, `017-adjustment-attributes-submenu.png` | has |
 | Edit › Freeze, Reverse, Mirror, Rotate, Crop | `003-video-context-edit.png` | partly (Freeze and Reverse; Mirror and Rotate are in the toolbar's tools menu, Crop in the toolbar) |
 | Extract audio ⇧⌃S | `001-video-context-menu.png` | has (Detach audio) |
-| Enhance audio › Normalize loudness; Reduce noise (classic) | `006-video-context-enhance-audio.png` | partly (Normalize loudness; no Reduce noise) |
-| Enhance visuals › Stabilize (classic) | `007-video-context-enhance-visuals.png` | missing |
-| Enhance motion › Motion blur | `009-video-context-enhance-motion.png` | missing |
+| Enhance audio › Normalize loudness; Reduce noise (classic) | `006-video-context-enhance-audio.png` | has (Normalize loudness, Reduce noise) |
+| Enhance visuals › Stabilize (classic) | `007-video-context-enhance-visuals.png` | has (Stabilize, Reduce image noise, Remove flickers) |
+| Enhance motion › Motion blur | `009-video-context-enhance-motion.png` | has |
 | Group / Ungroup | `001-video-context-menu.png` | has |
 | Create compound clip (subproject) ⌥G | `001-video-context-menu.png` | partly (groups) |
-| Save preset | `001-video-context-menu.png` | missing |
+| Save preset | `001-video-context-menu.png` | has |
 | Export selected clips | `001-video-context-menu.png` | partly (single clip export) |
-| Deactivate clip (V) | `001-video-context-menu.png` | missing |
-| More clip actions › Replace clip, Trim clip, Open file location | `010-video-context-more-actions.png` | missing |
+| Deactivate clip (V) | `001-video-context-menu.png` | has |
+| More clip actions › Replace clip, Trim clip, Open file location | `010-video-context-more-actions.png` | partly (Replace clip and Open file location; Trim clip is greyed) |
 | Range › Select by clip ⇧X, Deselect | `011-video-context-range.png`, `018-adjustment-range-submenu.png` | missing |
 | Render › Whole timeline, In, Out, Delete rendering cache | `012-video-context-render.png` | missing |
-| Audio clip › Auto mark beats (classic beat detection) | `020-audio-context-menu.png` | missing |
+| Audio clip › Auto mark beats (classic beat detection) | `020-audio-context-menu.png` | has (Auto mark beats in the clip menu: Beat 1, Beat 2, Off, Mark beat, Clear beats) |
 | Sticker clip › Mirror | `025-sticker-context-menu.png` | missing |
-| Empty space › Close gap, Close all gaps, Select | `022-empty-space-context-menu.png` | missing |
+| Empty space › Close gap, Close all gaps, Select | `022-empty-space-context-menu.png` | has |
 | Transition › Delete | `013-transition-context-menu.png` | has |
 | Split at playhead from the menu | – (CapCut keeps it in the toolbar) | has |
 
@@ -1226,7 +1226,7 @@ References: `31-dialogs/016-export-video-settings.png` to `026-export-caption-fo
 | Bit rate: Lower, Recommended, Higher | `018-export-bitrate-menu.png` | has (5 000 / 8 000 / 11 000 Kbps at 1080P 24 fps, scaled by size and rate) |
 | Bit rate › Custom (Kbps) | `019-export-custom-bitrate.png` | has (held to within 10% by a constant-rate encode) |
 | Codec: H.264, HEVC (with one-line descriptions) | `020-export-codec-menu.png` | has |
-| Codec: HEVC with alpha, ProRes 422 / LT / HQ | `020-export-codec-menu.png` | missing (the engine writes H.264 and HEVC) |
+| Codec: HEVC with alpha, ProRes 422 / LT / HQ | `020-export-codec-menu.png` | has (ProRes 422 LT, 422, HQ, 4444 and HEVC with alpha; harness exportcodecs) |
 | Format: mp4, mov | `021-export-format-menu.png` | has |
 | Frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `022-export-frame-rate-menu.png` | has (the engine renders at the chosen rate) |
 | Color space (shown, follows the project) | `016-export-video-settings.png` | has (Rec. 709 SDR, read-only) |
@@ -1246,7 +1246,7 @@ Screenshots are in `31-dialogs/` unless a path says otherwise.
 | Cover › Select from video (frame scrubber) | `31-dialogs/027-cover-frame-selector.png` | has (engine frame at a scrubber over a filmstrip; harness `covereditor`) |
 | Cover › Local image | `027-cover-frame-selector.png` | has |
 | Cover › basic text on the cover | `029-cover-design-text.png`, `035-cover-exit-confirmation.png` | has (title, subtitle, body text; drag, words, size, colour, bold; Save, Cancel with Exit editing?; templates, stickers and AI left out) |
-| Voiceover panel: record, timer, level meter, input device, input volume, Echo reduction, Mute project | `036-voiceover-panel.png`, `037-voiceover-input-menu.png` | partly (record, timer, level meter, Mute project; no input device, input volume or echo reduction) |
+| Voiceover panel: record, timer, level meter, input device, input volume, Echo reduction, Mute project | `036-voiceover-panel.png`, `037-voiceover-input-menu.png` | has |
 | Native file dialogs for media and caption import | `012-import-file-dialog.png`, `013-import-captions-file-dialog.png` | has (media and caption files) |
 | Confirm before discarding unsaved edits | `035-cover-exit-confirmation.png` | has (alert dialog for deletes; editor autosaves) |
 
