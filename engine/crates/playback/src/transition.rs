@@ -58,6 +58,9 @@ pub enum Step {
     /// The clips drawn each on a canvas of its own and put together, in place of the clip
     /// drawn as usual.
     Mix(Mix),
+    /// The clips drawn each on a canvas of its own and given to a shader transition
+    /// (openrip_render::glt) as its two pictures.
+    Gl(openrip_render::glt::GlFx),
 }
 
 /// The two clips put together: each moved and faded, the incoming one over the outgoing one
@@ -167,8 +170,54 @@ fn halves(p: f64) -> (bool, f64) {
     }
 }
 
+/// A shader transition's parameters from the project's (by name, as the app keeps them: a number,
+/// a flag, `[x, y]`, or a colour as "#rrggbb"), the defaults for what's missing.
+fn gl_values(tr: &Transition, t: &openrip_render::glt::GlTransition) -> [[f32; 4]; openrip_render::glt::MAX_PARAMS] {
+    use openrip_render::glt::Kind;
+    use serde_json::Value;
+    let mut values = [[0.0; 4]; openrip_render::glt::MAX_PARAMS];
+    for (slot, p) in values.iter_mut().zip(t.params) {
+        *slot = p.default;
+        let Some(v) = tr.params.get(p.name) else { continue };
+        let num = |v: &Value| v.as_f64().or_else(|| v.as_bool().map(|b| b as u8 as f64)).map(|x| x as f32);
+        match (p.kind, v) {
+            (Kind::Float | Kind::Int | Kind::Bool, v) => {
+                if let Some(x) = num(v) {
+                    slot[0] = x;
+                }
+            }
+            (Kind::Vec2 | Kind::IVec2, Value::Array(a)) => {
+                for (s, x) in slot.iter_mut().zip(a.iter().filter_map(num)) {
+                    *s = x;
+                }
+            }
+            (Kind::Vec3 | Kind::Vec4, Value::String(hex)) => {
+                let h = hex.trim_start_matches('#');
+                if h.len() >= 6 {
+                    for i in 0..3 {
+                        if let Ok(c) = u8::from_str_radix(&h[i * 2..i * 2 + 2], 16) {
+                            slot[i] = c as f32 / 255.0;
+                        }
+                    }
+                }
+            }
+            (Kind::Vec3 | Kind::Vec4, Value::Array(a)) => {
+                for (s, x) in slot.iter_mut().zip(a.iter().filter_map(num)) {
+                    *s = x;
+                }
+            }
+            _ => {}
+        }
+    }
+    values
+}
+
 pub fn steps(tr: &Transition, p: f64) -> Vec<Step> {
     let Some(builtin) = tr.builtin.as_deref() else { return Vec::new() };
+    if let Some(t) = openrip_render::glt::find(builtin) {
+        let values = gl_values(tr, t);
+        return vec![Step::Gl(openrip_render::glt::GlFx { id: t.id, progress: p.clamp(0.0, 1.0) as f32, values })];
+    }
     let (kind, direction) = split_direction(builtin);
     let dir = direction.unwrap_or(Direction::Left).vector();
     let shot = |alpha: f32| Some(Shot { alpha, ..Shot::STILL });
@@ -312,7 +361,7 @@ mod tests {
             keyframes: Vec::new(),
         };
         p.tracks.push(Track { id: "t".into(), kind: TrackKind::Video, name: String::new(), segments: vec![seg("a", 0, 2_000_000, &["tr"]), seg("b", 2_000_000, 2_000_000, &[])], muted: false, hidden: false, locked: false });
-        p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: String::new(), duration: Micros(500_000), overlap: false, builtin: Some(builtin.into()), library: None, resource: Some("/b".into()) });
+        p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: String::new(), duration: Micros(500_000), overlap: false, builtin: Some(builtin.into()), library: None, resource: Some("/b".into()), params: Default::default() });
         p
     }
 

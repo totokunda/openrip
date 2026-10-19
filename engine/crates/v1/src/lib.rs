@@ -1241,8 +1241,11 @@ fn app_transition(id: &str, clip: &Value, length: Micros) -> Option<Transition> 
     let resource = Some(s(t, "resource")).filter(|r| !r.is_empty());
     // Blink draws CapCut's own image sequence.
     let builtin = app::engine_builtin(&ty, t.get("params"), &app::BUILTIN_TRANSITION).filter(|_| ty != "blink" || resource.is_some())?;
-    let overlap = app::OVERLAPPING.contains(&ty.as_str());
-    (duration.0 > 0).then(|| Transition { id: MaterialId(format!("{id}-transition")), name: s(t, "name"), duration, overlap, builtin: Some(builtin), library: None, resource })
+    let shader = app::is_shader_transition(&ty);
+    let overlap = shader || app::OVERLAPPING.contains(&ty.as_str());
+    // A shader transition's own parameters, as the app keeps them.
+    let params = t.get("params").and_then(Value::as_object).filter(|_| shader).map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default();
+    (duration.0 > 0).then(|| Transition { id: MaterialId(format!("{id}-transition")), name: s(t, "name"), duration, overlap, builtin: Some(builtin), library: None, resource, params })
 }
 
 /// A segment's animations: all its animation materials' items.

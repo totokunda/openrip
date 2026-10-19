@@ -967,6 +967,10 @@ pub struct Transition {
     /// from it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
+    /// The transition's own parameters by name (a direction, a colour, a smoothness): the
+    /// app's values as it keeps them, for the shader transitions.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub params: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// Loudness normalisation of a clip's sound (CapCut's "Normalize loudness"): the clip is

@@ -13,6 +13,9 @@
 //!   openrip-dev decode-bench <media-file> [--sw | --ffmpeg-hw]
 //!       Measure sequential decode speed, random-seek latency and scrubbing (default: native
 //!       VideoToolbox where possible; --ffmpeg-hw uses FFmpeg's hwaccel, --sw software).
+//!   openrip-dev transition-sheet <out.png> [--frames N] [--size PX]
+//!       Every shader transition played on two sample pictures, a row each (the app's hover
+//!       previews).
 //!   openrip-dev render-frame <project.json> <seconds> <width> <height> <out.png>
 //!       Render one frame of an imported project with the GPU compositor: images, video
 //!       frames straight from the hardware decoder, and plain text (fill only so far).
@@ -102,6 +105,7 @@ use openrip_model::Project;
 mod analysis;
 mod audio;
 mod motion;
+mod transition_sheet;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -112,6 +116,7 @@ fn main() -> ExitCode {
         Some("v1-scan") if args.len() >= 2 => v1_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("probe") if args.len() >= 2 => probe(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("slowmo") if args.len() >= 2 => motion::slowmo(&args).map_err(|e| e.to_string()),
+        Some("transition-sheet") if args.len() >= 2 => transition_sheet::sheet(&args).map_err(|e| e.to_string()),
         Some("track") if args.len() >= 2 => motion::track(&args).map_err(|e| e.to_string()),
         Some("render-frame") if args.len() >= 6 => render_frame(&args[1..]).map_err(|e| e.to_string()),
         Some("play-bench") if args.len() >= 2 => play_bench(&args[1..]).map_err(|e| e.to_string()),

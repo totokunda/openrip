@@ -53,7 +53,7 @@ fn project(transition: Option<&str>) -> Project {
     }))
     .unwrap();
     if let Some(builtin) = transition {
-        p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: String::new(), duration: Micros(500_000), overlap: true, builtin: Some(builtin.into()), library: None, resource: None });
+        p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: String::new(), duration: Micros(500_000), overlap: true, builtin: Some(builtin.into()), library: None, resource: None, params: Default::default() });
         p.tracks[0].segments[0].attachments.push(MaterialId("tr".into()));
     }
     p
@@ -191,7 +191,7 @@ fn video_project(path: &Path) -> Project {
         "materials": { "media": [{ "id": "m", "kind": "video", "path": path, "width": 640, "height": 128, "duration": 10000000 }] }
     }))
     .unwrap();
-    p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: String::new(), duration: Micros(600_000), overlap: true, builtin: Some("mix".into()), library: None, resource: None });
+    p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: String::new(), duration: Micros(600_000), overlap: true, builtin: Some("mix".into()), library: None, resource: None, params: Default::default() });
     p
 }
 
@@ -217,4 +217,26 @@ fn the_clips_play_on_from_their_media_across_a_mix() {
         let want = 255.0 * (a * (1.0 - 5.0 / 6.0) + b * 5.0 / 6.0);
         assert!((block(bit) - want).abs() < 12.0, "bit {bit}: {} vs {want}", block(bit));
     }
+}
+
+#[test]
+fn shader_transitions_draw_the_clips_through_the_collection() {
+    // Each is red before its window and blue after it, and at the cut (half way) not one clip
+    // all over.
+    for id in ["gl_directionalwipe", "gl_CrossZoom", "gl_fadecolor", "gl_circleopen", "gl_Swirl"] {
+        let mut e = PreviewEngine::new(project(Some(id))).unwrap();
+        assert!(near(px(&mut e, 1.5, 32, 18), [255, 0, 0]), "{id} before");
+        assert!(near(px(&mut e, 2.5, 32, 18), [0, 0, 255]), "{id} after");
+        let (img, _) = e.render_image(Micros(2_000_000), W, H).unwrap();
+        let red = img.data.chunks(4).filter(|p| near([p[0], p[1], p[2]], [255, 0, 0])).count();
+        let blue = img.data.chunks(4).filter(|p| near([p[0], p[1], p[2]], [0, 0, 255])).count();
+        assert!(red + blue < (W * H) as usize || (red > 0 && blue > 0), "{id}: all one clip at the cut");
+    }
+    // Its parameters go through: fading through green rather than black.
+    let mut p = project(Some("gl_fadecolor"));
+    p.materials.transitions[0].params.insert("color".into(), serde_json::json!("#00ff00"));
+    p.materials.transitions[0].params.insert("colorPhase".into(), serde_json::json!(1.0));
+    let mut e = PreviewEngine::new(p).unwrap();
+    let at_cut = px(&mut e, 2.0, 32, 18);
+    assert!(at_cut[1] > 200 && at_cut[0] < 60 && at_cut[2] < 60, "{at_cut:?}");
 }

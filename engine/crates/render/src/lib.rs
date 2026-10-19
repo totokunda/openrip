@@ -20,6 +20,7 @@ pub mod blend;
 pub mod exposure;
 mod effects;
 mod flow;
+pub mod glt;
 pub mod fonts;
 pub mod grade;
 mod interop;
@@ -220,6 +221,10 @@ pub struct Mix {
     pub outgoing: Option<Shot>,
     pub incoming: Option<Shot>,
     pub mask: MixMask,
+    /// A shader transition (`glt`) drawn in place of the placed, masked mix: the two groups
+    /// are its pictures (each `Some` shot says the group is drawn; the rest of the shot is
+    /// unused).
+    pub fx: Option<glt::GlFx>,
 }
 
 /// One clip's group in a [`Mix`].
@@ -468,6 +473,8 @@ pub struct Compositor {
     queue: wgpu::Queue,
     layout: wgpu::BindGroupLayout,
     yuv_layout: wgpu::BindGroupLayout,
+    /// The shader transitions' pipelines (glt).
+    glt: glt::Pipelines,
     /// A hardware frame's YUV planes -> RGBA (only the Apple interop imports planes so far).
     #[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
     yuv: wgpu::RenderPipeline,
@@ -763,6 +770,7 @@ impl Compositor {
                 usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             }),
+            glt: glt::Pipelines::new(&device),
             device,
             queue,
             layout,
@@ -1092,6 +1100,11 @@ impl Compositor {
     /// Put a transition's two groups together over `target` (see mix.wgsl); a group the mix
     /// doesn't draw is `None`, and `blank` stands in for it.
     fn mix_pass(&self, enc: &mut wgpu::CommandEncoder, mix: &Mix, outgoing: Option<&wgpu::Texture>, incoming: Option<&wgpu::Texture>, blank: &wgpu::Texture, target: &wgpu::Texture) {
+        if let Some(fx) = &mix.fx {
+            // Where a clip isn't drawn its group is clear (or what's below shows).
+            self.glt.draw(&self.device, enc, fx, outgoing.unwrap_or(blank), incoming.unwrap_or(blank), target);
+            return;
+        }
         let row = |s: Option<&Shot>, r: usize| s.map_or([0.0; 4], |s| [s.inverse[r][0], s.inverse[r][1], s.inverse[r][2], if r == 0 { s.alpha } else { s.zoom_blur }]);
         let (a, b) = (mix.outgoing.as_ref().filter(|_| outgoing.is_some()), mix.incoming.as_ref().filter(|_| incoming.is_some()));
         let on = |s: Option<&Shot>| if s.is_some() { 1.0 } else { 0.0 };

@@ -55,7 +55,7 @@ fn a_group_put_back_where_it_was_is_untouched() {
         Layer::pass(Source::BeginGroup(Some([0, 0, 0]))),
         Layer::from_model(&src, [64, 32], [0.0, 0.0], [1.0, 1.0], 0.0),
         Layer::pass(Source::EndGroup),
-        Layer::pass(Source::Mix(Mix { outgoing: Some(STILL), incoming: None, mask: MixMask::All })),
+        Layer::pass(Source::Mix(Mix { outgoing: Some(STILL), incoming: None, mask: MixMask::All, fx: None })),
     ];
     assert_eq!(c.render(64, 32, [0, 0, 0], &layers).data, src.data);
 }
@@ -64,7 +64,7 @@ fn a_group_put_back_where_it_was_is_untouched() {
 fn a_mix_cross_fades() {
     let Some(c) = gpu() else { return };
     let (a, b) = (image(16, 16, |_, _| [200, 100, 0, 255]), image(16, 16, |_, _| [0, 100, 200, 255]));
-    let out = mixed(&c, &a, &b, Mix { outgoing: Some(STILL), incoming: Some(Shot { alpha: 0.25, ..STILL }), mask: MixMask::All });
+    let out = mixed(&c, &a, &b, Mix { outgoing: Some(STILL), incoming: Some(Shot { alpha: 0.25, ..STILL }), mask: MixMask::All, fx: None });
     let p = px(&out, 8, 8);
     for (v, want) in p.iter().zip([150, 100, 50, 255]) {
         assert!((*v as i32 - want).abs() <= 1, "{p:?}");
@@ -78,11 +78,11 @@ fn moved_groups_leave_what_is_below() {
     // A push halfway to the left: the outgoing clip's right half on the left, the incoming
     // clip's left half on the right.
     let shifted = |dx: f32| Shot { inverse: [[1.0, 0.0, -dx], [0.0, 1.0, 0.0]], ..STILL };
-    let out = mixed(&c, &a, &b, Mix { outgoing: Some(shifted(-16.0)), incoming: Some(shifted(16.0)), mask: MixMask::All });
+    let out = mixed(&c, &a, &b, Mix { outgoing: Some(shifted(-16.0)), incoming: Some(shifted(16.0)), mask: MixMask::All, fx: None });
     assert_eq!(px(&out, 4, 4), [255, 0, 0, 255]);
     assert_eq!(px(&out, 28, 4), [0, 0, 255, 255]);
     // Moved further, nothing covers the right edge: the black below shows.
-    let out = mixed(&c, &a, &b, Mix { outgoing: Some(shifted(-24.0)), incoming: None, mask: MixMask::All });
+    let out = mixed(&c, &a, &b, Mix { outgoing: Some(shifted(-24.0)), incoming: None, mask: MixMask::All, fx: None });
     assert_eq!(px(&out, 4, 4), [255, 0, 0, 255]);
     assert_eq!(px(&out, 28, 4), [0, 0, 0, 255]);
 }
@@ -92,10 +92,10 @@ fn masks_show_the_incoming_clip_past_an_edge_or_in_a_circle() {
     let Some(c) = gpu() else { return };
     let (a, b) = (image(64, 64, |_, _| [255, 0, 0, 255]), image(64, 64, |_, _| [0, 0, 255, 255]));
     // The incoming clip right of the middle.
-    let out = mixed(&c, &a, &b, Mix { outgoing: Some(STILL), incoming: Some(STILL), mask: MixMask::Edge { toward: [1.0, 0.0], at: 0.0, feather: 0.01 } });
+    let out = mixed(&c, &a, &b, Mix { outgoing: Some(STILL), incoming: Some(STILL), mask: MixMask::Edge { toward: [1.0, 0.0], at: 0.0, feather: 0.01 }, fx: None });
     assert_eq!((px(&out, 10, 32), px(&out, 54, 32)), ([255, 0, 0, 255], [0, 0, 255, 255]));
     // Inside a circle a quarter of the height across.
-    let out = mixed(&c, &a, &b, Mix { outgoing: Some(STILL), incoming: Some(STILL), mask: MixMask::Circle { radius: 0.25, feather: 0.01 } });
+    let out = mixed(&c, &a, &b, Mix { outgoing: Some(STILL), incoming: Some(STILL), mask: MixMask::Circle { radius: 0.25, feather: 0.01 }, fx: None });
     assert_eq!((px(&out, 32, 32), px(&out, 2, 2), px(&out, 32, 4)), ([0, 0, 255, 255], [255, 0, 0, 255], [255, 0, 0, 255]));
 }
 
@@ -110,7 +110,7 @@ fn mirrored_groups_repeat_their_edges() {
             Layer::pass(Source::BeginGroup(Some([0, 0, 0]))),
             Layer::from_model(&src, [32, 32], [0.0, 0.0], [1.0, 1.0], 0.0),
             Layer::pass(Source::EndGroup),
-            Layer::pass(Source::Mix(Mix { outgoing: Some(shot), incoming: None, mask: MixMask::All })),
+            Layer::pass(Source::Mix(Mix { outgoing: Some(shot), incoming: None, mask: MixMask::All, fx: None })),
         ]
     };
     // Left of the shrunk picture: its white left edge mirrored there, or nothing (black).
@@ -167,7 +167,7 @@ fn pull_in_samples_as_capcuts_shader_does() {
             Layer::pass(Source::BeginGroup(Some([0, 0, 0]))),
             Layer::from_model(&src, [96, 54], [0.0, 0.0], [1.0, 1.0], 0.0),
             Layer::pass(Source::EndGroup),
-            Layer::pass(Source::Mix(Mix { outgoing: Some(shot), incoming: None, mask: MixMask::All })),
+            Layer::pass(Source::Mix(Mix { outgoing: Some(shot), incoming: None, mask: MixMask::All, fx: None })),
         ];
         let out = c.render(96, 54, [0, 0, 0], &layers);
         let want = zoom_near(&src, k, blur);

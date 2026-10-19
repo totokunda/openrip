@@ -139,7 +139,7 @@ fn transition_groups_carry_each_clips_fill() {
     let grey = still("cmp-grey3.png", [128, 128, 128]);
     let colour = |r: f32, g: f32| CanvasFillKind::Color { color: Rgba { r, g, b: 0.0, a: 1.0 } };
     let mut mats = Materials { media: vec![photo("m", &grey)], canvas_fills: vec![fill("ca", colour(1.0, 0.0)), fill("cb", colour(0.0, 1.0))], ..Default::default() };
-    mats.transitions.push(Transition { id: MaterialId("tr".into()), name: String::new(), duration: Micros(1_000_000), overlap: true, builtin: Some("mix".into()), library: None, resource: None });
+    mats.transitions.push(Transition { id: MaterialId("tr".into()), name: String::new(), duration: Micros(1_000_000), overlap: true, builtin: Some("mix".into()), library: None, resource: None, params: Default::default() });
     let p = project(vec![track("main", vec![clip("a", "m", 0, 0.5, &["ca", "tr"]), clip("b", "m", 2_000_000, 0.5, &["cb"])])], mats);
     assert!(near(px(&frame(p.clone(), 2.0), 2, 2), [128, 128, 0], 3), "{:?}", px(&frame(p.clone(), 2.0), 2, 2));
     assert_eq!(px(&frame(p.clone(), 1.0), 2, 2), [255, 0, 0]);

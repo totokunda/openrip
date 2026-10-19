@@ -877,6 +877,7 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         builtin,
                         resource: Some(s(m, "path")).filter(|p| !p.is_empty()),
                         library: Some(lib),
+                        params: Default::default(),
                     });
                     true
                 }

@@ -653,10 +653,16 @@ impl PreviewEngine {
                 Some((steps, outgoing, incoming)) => (steps, Some((outgoing, incoming))),
                 None => (Vec::new(), None),
             };
+            // A shader transition takes both clips whole: a mix with each clip in place.
+            let gl = steps.iter().find_map(|s| match s {
+                crate::transition::Step::Gl(fx) => Some(*fx),
+                _ => None,
+            });
             let mix = steps.iter().find_map(|s| match s {
                 crate::transition::Step::Mix(m) => Some(*m),
                 _ => None,
             });
+            let mix = mix.or_else(|| gl.map(|_| crate::transition::Mix { outgoing: Some(crate::transition::Shot::STILL), incoming: Some(crate::transition::Shot::STILL), mask: crate::transition::Mask::All }));
             match (mix, clips) {
                 // A transition that mixes the clips draws each into a group of its own, the
                 // other one at this time too (on past its end, or ahead of its start). Main-track
@@ -686,7 +692,7 @@ impl PreviewEngine {
                         }
                         out.push((clip.clone(), Pixels::End));
                     }
-                    out.push((seg.clone(), Pixels::Mix(mix_pixels(&m, w, h))));
+                    out.push((seg.clone(), Pixels::Mix(mix_pixels(&m, w, h, gl))));
                 }
                 _ => {
                     self.draw_with_effects(&seg, t, w, h, &mut out, &mut report);
@@ -926,7 +932,7 @@ impl PreviewEngine {
         use crate::transition::Step;
         Some(match step {
             // Drawn with the clips (see `gather`).
-            Step::Mix(_) => return None,
+            Step::Mix(_) | Step::Gl(_) => return None,
             Step::Wash(c, amount) => Pixels::Wash(std::sync::Arc::new(RgbaImage { width: 4, height: 4, data: c.repeat(16) }), key_of(("wash", c)), amount),
             Step::Blur(px) => Pixels::Blur(px * w as f32 / self.project.canvas.width.max(1) as f32),
             Step::Frame(path) => {
@@ -1925,7 +1931,7 @@ fn rgb8(c: &openrip_model::Rgba) -> [u8; 3] {
 
 /// A transition's mix in output pixels: each clip's move, scale and turn about the canvas
 /// centre as the map from an output pixel to its group's.
-fn mix_pixels(m: &crate::transition::Mix, w: u32, h: u32) -> openrip_render::Mix {
+fn mix_pixels(m: &crate::transition::Mix, w: u32, h: u32, fx: Option<openrip_render::glt::GlFx>) -> openrip_render::Mix {
     use crate::transition::Mask;
     let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
     let shot = |s: &crate::transition::Shot| {
@@ -1945,6 +1951,7 @@ fn mix_pixels(m: &crate::transition::Mix, w: u32, h: u32) -> openrip_render::Mix
             Mask::Edge { toward, at, feather } => openrip_render::MixMask::Edge { toward, at, feather },
             Mask::Circle { radius, feather } => openrip_render::MixMask::Circle { radius, feather },
         },
+        fx,
     }
 }
 

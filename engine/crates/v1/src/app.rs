@@ -108,10 +108,18 @@ const DIRECTED: [&str; 3] = ["slide", "push", "wipe"];
 /// Transitions that need both clips at once (CapCut's overlapping ones).
 pub(crate) const OVERLAPPING: [&str; 5] = ["mix", "slide", "push", "wipe", "circle"];
 
+/// One of the shader transitions (the gl-transitions collection): "gl_" and a name.
+pub(crate) fn is_shader_transition(ty: &str) -> bool {
+    ty.strip_prefix("gl_").is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+}
+
 /// The app's type and parameters for an engine built-in it draws ("slide_left" is a slide
 /// with `{"direction": "left"}`), or "" and none for one only the source app draws.
 pub(crate) fn app_type(builtin: &Option<String>, known: &[&str]) -> (String, Option<Value>) {
     let Some(b) = builtin.as_deref() else { return (String::new(), None) };
+    if is_shader_transition(b) && known.contains(&"pull_in") {
+        return (b.to_string(), None);
+    }
     if let Some((ty, dir)) = b.rsplit_once('_').filter(|(ty, dir)| DIRECTED.contains(ty) && ["left", "right", "up", "down"].contains(dir)) {
         if known.contains(&ty) {
             return (ty.to_string(), Some(json!({ "direction": dir })));
@@ -122,6 +130,11 @@ pub(crate) fn app_type(builtin: &Option<String>, known: &[&str]) -> (String, Opt
 
 /// The engine built-in for the app's type and parameters, if the engine draws it.
 pub(crate) fn engine_builtin(ty: &str, params: Option<&Value>, known: &[&str]) -> Option<String> {
+    // The shader transitions (render/src/glt) are named "gl_" and the collection's name; the
+    // engine skips one it doesn't have.
+    if is_shader_transition(ty) && known.contains(&"pull_in") {
+        return Some(ty.to_string());
+    }
     if !known.contains(&ty) {
         return None;
     }
@@ -513,6 +526,8 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                         let mut v = json!({ "type": ty, "name": t.name, "duration": num(t.duration.as_secs_f64()), "resource": t.resource });
                         if let Some(p) = params {
                             v["params"] = p;
+                        } else if !t.params.is_empty() {
+                            v["params"] = Value::Object(t.params.iter().map(|(k, x)| (k.clone(), x.clone())).collect());
                         }
                         v
                     }),
@@ -888,7 +903,7 @@ mod tests {
                 Animation { kind: AnimationKind::Caption, start: Micros(0), duration: Micros(2_000_000), builtin: Some("caption_word_color".into()), library: None, resource: None },
             ],
         });
-        p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: "White Flash".into(), duration: Micros(500_000), overlap: false, builtin: Some("white_flash".into()), library: None, resource: None });
+        p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: "White Flash".into(), duration: Micros(500_000), overlap: false, builtin: Some("white_flash".into()), library: None, resource: None, params: Default::default() });
         for t in &mut p.tracks {
             for s in &mut t.segments {
                 s.attachments.push(MaterialId(if s.id == "c" { "an" } else { "tr" }.into()));
@@ -1008,7 +1023,7 @@ mod tests {
             items: vec![a(AnimationKind::In, "zoom_in", 500_000), a(AnimationKind::Out, "slide_down", 1_000_000), a(AnimationKind::Combo, "swing", 4_000_000)],
         });
         p.materials.animations.push(Animations { id: MaterialId("ca".into()), items: vec![a(AnimationKind::Out, "fade_out", 400_000), a(AnimationKind::Loop, "pulse", 1_000_000)] });
-        p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: "Push".into(), duration: Micros(500_000), overlap: true, builtin: Some("push_left".into()), library: None, resource: None });
+        p.materials.transitions.push(Transition { id: MaterialId("tr".into()), name: "Push".into(), duration: Micros(500_000), overlap: true, builtin: Some("push_left".into()), library: None, resource: None, params: Default::default() });
         for t in &mut p.tracks {
             for s in &mut t.segments {
                 let ids: &[&str] = if s.id == "c" { &["ca"] } else { &["va", "tr"] };
@@ -1100,6 +1115,26 @@ mod tests {
         // The caption's loop stays on both halves, its Out on the right one.
         assert_eq!(kinds("c"), vec![(AnimationKind::Loop, Micros(1_000_000))]);
         assert_eq!(kinds("c2"), vec![(AnimationKind::Out, Micros(400_000)), (AnimationKind::Loop, Micros(1_000_000))]);
+    }
+
+    #[test]
+    fn a_shader_transition_keeps_its_parameters_through_the_engine() {
+        let mut doc = to_app_project(&moving(), &mut |_| None);
+        for clip in doc["timeline"]["clips"].as_array_mut().unwrap() {
+            if clip["clipId"] == "v" {
+                clip["transitionOut"] = json!({"type": "gl_fadecolor", "name": "Fade through color", "duration": 0.8, "params": {"color": "#00ff00", "colorPhase": 0.6}});
+            }
+        }
+        let back = import_v1_json(&doc).unwrap().project;
+        let tr = back.materials.transitions.iter().find(|t| segment(&back, "v").attachments.contains(&t.id)).unwrap();
+        assert_eq!((tr.builtin.as_deref(), tr.overlap, tr.duration), (Some("gl_fadecolor"), true, Micros(800_000)));
+        assert_eq!(tr.params.get("color"), Some(&json!("#00ff00")));
+        let again = to_app_project(&back, &mut |_| None);
+        let v = again["timeline"]["clips"].as_array().unwrap().iter().find(|c| c["clipId"] == "v").unwrap();
+        assert_eq!(v["transitionOut"]["type"], "gl_fadecolor");
+        assert_eq!(v["transitionOut"]["params"], json!({"color": "#00ff00", "colorPhase": 0.6}));
+        // A malformed type isn't a shader transition.
+        assert!(!is_shader_transition("gl_") && !is_shader_transition("gl_a b") && is_shader_transition("gl_coord-from-in"));
     }
 
     #[test]
