@@ -299,7 +299,11 @@ export default async (ctx) => {
     const { fleft: gx, ftop: gy, fw: gw, fh: gh } = await frameOn();
     await select(ctx, d, video.clipId, 3);
     await win.keyboard.press("v");
-    await settled(win, () => drag(win, gx + gw - 0.5, gy + gh - 0.5, gx + gw * 0.8 + 2, gy + gh * 0.8 + 2));
+    // The handle is a circle centred on the frame's corner, which is the stage's own edge: its
+    // outer half is clipped, and the hit canvas misses the last half pixel row at the edge. Take
+    // it 2 px inside the corner (still on the handle; Konva keeps that offset), and let go at the
+    // guide so the edge comes to 2 px short of it, as the comment above says.
+    await settled(win, () => drag(win, gx + gw - 2, gy + gh - 2, gx + gw * 0.8, gy + gh * 0.8));
     d = await doc();
     const t = d.timeline.clips.find((c) => c.clipId === video.clipId).transform ?? {};
     const right = (t.x ?? 0) + (t.width ?? 0) * (t.scaleX ?? 1);
