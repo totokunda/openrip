@@ -27,7 +27,8 @@ const tick = (now: number) => {
   const c = useControlsStore.getState();
   const end = useClipStore.getState().clipDuration;
   // The user moved the playhead (a click on the ruler, a key): the run is over.
-  if (c.focusFrame !== expected || c.isPlaying) {
+  // (The engine sets its last frame a moment after a pause: a few frames off is still the run.)
+  if (Math.abs(c.focusFrame - expected) > Math.max(3, c.fps / 4) || c.isPlaying) {
     rate = 0;
     return;
   }
@@ -72,13 +73,15 @@ const start = (next: number) => {
     return;
   }
   const end = useClipStore.getState().clipDuration;
-  if ((rate < 0 && c.focusFrame <= 0) || (rate > 0 && c.focusFrame >= end)) {
+  // Where the playhead is now, after a pause has settled.
+  const at = useControlsStore.getState().focusFrame;
+  if ((rate < 0 && at <= 0) || (rate > 0 && at >= end)) {
     rate = 0;
     return;
   }
   carry = 0;
   last = performance.now();
-  expected = c.focusFrame;
+  expected = at;
   if (raf == null) raf = requestAnimationFrame(tick);
 };
 

@@ -335,12 +335,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
   // The codecs beyond H.264 and HEVC this platform's encoder has; the others stay hidden.
   const [platformCodecs, setPlatformCodecs] = useState<string[]>([]);
   useEffect(() => {
+    if (!open) return;
+    // Asked each time the dialog opens: the engine may load after the editor does.
     let live = true;
     void engineExportCodecs().then((c) => live && setPlatformCodecs(c), () => {});
     return () => {
       live = false;
     };
-  }, []);
+  }, [open]);
 
   // What the project (or the clip) holds, read each time the dialog opens.
   useEffect(() => {
@@ -479,7 +481,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
                       {saved.v.bitrate === "custom" && <Tip text="A higher bit rate keeps more detail and makes a larger file." />}
                     </Label>
                     <div className="flex flex-col gap-2">
-                      <Select testId="export-bitrate" disabled={dim(on.video || proRes)} value={saved.v.bitrate} options={BITRATES} onChange={pickBitrate} />
+                      <Select testId="export-bitrate" disabled={!on.video || proRes} value={saved.v.bitrate} options={BITRATES} onChange={pickBitrate} />
                       {saved.v.bitrate === "custom" && (
                         <div className="flex items-center gap-3">
                           <input
@@ -513,7 +515,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
                   </div>
                   <div className={row}>
                     <Label on={on.video}>Format</Label>
-                    <Select testId="export-format" disabled={dim(on.video || needsMov(saved.v.codec))} value={video.format} options={FORMATS} onChange={(v) => setV({ format: v })} />
+                    <Select testId="export-format" disabled={!on.video || needsMov(saved.v.codec)} value={video.format} options={FORMATS} onChange={(v) => setV({ format: v })} />
                   </div>
                   <div className={row}>
                     <Label on={on.video}>Frame rate</Label>

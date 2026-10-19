@@ -45,7 +45,7 @@ export default async (ctx) => {
   await shot("d2-grid");
   await win.locator("[data-testid=home-view]").click();
   await win.waitForTimeout(400);
-  await win.getByText("List", { exact: true }).first().click().catch(() => {});
+  await win.locator("[data-testid=home-view-list]").click();
   await win.waitForTimeout(600);
   check("and in the list", (await win.getByText(`${origName} copy`).count()) >= 1);
   await shot("d3-list");
@@ -54,6 +54,7 @@ export default async (ctx) => {
   // Open the copy and empty it; the original stays.
   await win.getByText(`${origName} copy`).first().click().catch(() => {});
   await win.waitForTimeout(500);
+  await win.locator("[data-testid=editor]").waitFor({ timeout: 6000 }).catch(() => {});
   if (!(await win.locator("[data-testid=editor]").count())) {
     await win.locator(`[title="Open ${origName} copy"]`).first().click();
   }

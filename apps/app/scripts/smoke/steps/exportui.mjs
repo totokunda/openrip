@@ -136,7 +136,7 @@ export default async (ctx) => {
   const rate = await options("export-bitrate", "x03-bitrate-menu");
   check(`Bit rate: ${rate.join(", ")}`, rate.join(",") === "Lower,Recommended,Higher,Custom");
   const codecs = await options("export-codec", "x05-codec-menu");
-  check(`Codec, each with its line: ${codecs.join(" | ")}`, codecs.length === 2 && /^H\.264 The most common compression method$/.test(codecs[0]) && /^HEVC Efficient compression, saving space$/.test(codecs[1]));
+  check(`Codec, each with its line: ${codecs.join(" | ")}`, /^H\.264 The most common compression method$/.test(codecs[0]) && /^HEVC Efficient compression, saving space$/.test(codecs[1]) && (codecs.length === 2 || codecs.length === 7)); // 7 where the platform encoder has HEVC with alpha and ProRes (exportcodecs checks them)
   const formats = await options("export-format", "x06-format-menu");
   check(`Format: ${formats.join(", ")}`, formats.join(",") === "mov,mp4");
   const fpsList = await options("export-fps", "x07-frame-rate-menu");

@@ -50,6 +50,7 @@ export default async (ctx) => {
   check("K stops", Math.abs(stopped) < 0.05, `${stopped.toFixed(2)}×`);
   const reached = await time();
   check("the playhead moved on from where L started", reached > t0 + 2, `${t0.toFixed(2)} → ${reached.toFixed(2)} s`);
+  await seek(win, map, 9);
   await press("j");
   await win.waitForTimeout(300);
   const b1 = await rate(800);

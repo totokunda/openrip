@@ -37,7 +37,8 @@ export default async (ctx) => {
     await T(id).scrollIntoViewIfNeeded();
     await T(id).click();
     await win.waitForTimeout(250);
-    await win.locator(`[data-testid=${id}-option]`).filter({ hasText: label }).first().click();
+    // The option whose own title is `label` ("ProRes 422" is not "ProRes 422 LT").
+    await win.locator(`[data-testid=${id}-option]`).filter({ has: win.getByText(label, { exact: true }) }).first().click();
     await win.waitForTimeout(250);
   };
   const estimate = async () => +(await T("export-estimate").getAttribute("data-bytes"));
@@ -75,6 +76,7 @@ export default async (ctx) => {
     const labels = (await win.locator("[data-testid=export-codec-option]").allInnerTexts()).map((t) => t.split("\n")[0].trim());
     await shot("c1-codec-menu");
     await win.keyboard.press("Escape");
+    await win.waitForTimeout(400);
     return labels;
   })();
   const want = ["H.264", "HEVC", "HEVC with alpha", "ProRes 422 LT", "ProRes 422", "ProRes 422 HQ", "ProRes 4444"];
