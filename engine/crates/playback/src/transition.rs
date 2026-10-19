@@ -9,7 +9,7 @@
 //! need both at once: CapCut plays the outgoing clip on past its end and the incoming one
 //! from before its start, and OpenRip takes those frames from their media.
 
-use openrip_model::{Micros, Project, Segment, Transition};
+use openrip_model::{Micros, Project, Segment, Track, Transition};
 
 /// The cut a clip is at: the transition, how far through it (0 to 1, the cut at 0.5), and
 /// the two clips it joins.
@@ -22,11 +22,12 @@ pub struct Cut<'a> {
 }
 
 /// The transition a clip is in at `t`. A transition is drawn only where a clip on the same
-/// track starts as the one with it ends.
-pub fn transition_at<'a>(project: &'a Project, seg: &Segment, t: Micros) -> Option<Cut<'a>> {
+/// track starts as the one with it ends. `tracks` are the ones `seg` is on (the project's,
+/// or those of a compound clip's content).
+pub fn transition_at<'a>(project: &'a Project, tracks: &'a [Track], seg: &Segment, t: Micros) -> Option<Cut<'a>> {
     let of = |s: &Segment| s.attachments.iter().find_map(|id| project.materials.transitions.iter().find(|tr| &tr.id == id && tr.builtin.is_some() && tr.duration.0 > 0));
     let progress = |tr: &Transition, cut: i64| (t.0 - (cut - tr.duration.0 / 2)) as f64 / tr.duration.0 as f64;
-    let track = project.tracks.iter().find(|tr| tr.segments.iter().any(|s| s.id == seg.id))?;
+    let track = tracks.iter().find(|tr| tr.segments.iter().any(|s| s.id == seg.id))?;
     let meets = |a: &Segment, b: &Segment| a.id != b.id && (a.target.end().0 - b.target.start.0).abs() <= 1_000;
     let this = track.segments.iter().find(|s| s.id == seg.id)?;
     // Into the cut at the end of this clip.
@@ -384,7 +385,7 @@ mod tests {
     fn a_transition_spans_the_cut() {
         let p = project("white_flash");
         let (a, b) = (&p.tracks[0].segments[0], &p.tracks[0].segments[1]);
-        let at = |s: &Segment, t: i64| transition_at(&p, s, Micros(t)).map(|c| (c.progress, c.outgoing.id.clone(), c.incoming.id.clone()));
+        let at = |s: &Segment, t: i64| transition_at(&p, &p.tracks, s, Micros(t)).map(|c| (c.progress, c.outgoing.id.clone(), c.incoming.id.clone()));
         assert!(at(a, 1_700_000).is_none());
         assert_eq!(at(a, 1_850_000), Some((0.2, "a".into(), "b".into())));
         assert_eq!(at(b, 2_000_000), Some((0.5, "a".into(), "b".into())));
@@ -397,12 +398,12 @@ mod tests {
         let mut p = project("white_flash");
         p.tracks[0].segments.pop();
         let a = &p.tracks[0].segments[0];
-        assert!(transition_at(&p, a, Micros(1_850_000)).is_none());
+        assert!(transition_at(&p, &p.tracks, a, Micros(1_850_000)).is_none());
         // A gap before the next clip is no cut either.
         let mut p = project("white_flash");
         p.tracks[0].segments[1].target.start = Micros(2_500_000);
         let a = &p.tracks[0].segments[0];
-        assert!(transition_at(&p, a, Micros(1_850_000)).is_none());
+        assert!(transition_at(&p, &p.tracks, a, Micros(1_850_000)).is_none());
     }
 
     #[test]

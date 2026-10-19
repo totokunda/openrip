@@ -10,7 +10,7 @@ use std::path::Path;
 
 pub use openrip_media::load_png;
 use openrip_media::{open_video, Decoder, DecoderOptions, MediaError, ReverseReader, VideoFrame};
-use openrip_model::{Animation, CanvasFillKind, CropRect, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
+use openrip_model::{Animation, CanvasFillKind, CropRect, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, Track, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_platform::assets;
 use openrip_render::fonts;
 use openrip_render::text::{self, Align, Font, TextStyle};
@@ -201,6 +201,10 @@ enum Pixels {
     /// An adjustment layer's grade over everything below it (its colour tools are the layer's
     /// own, read in `layers`), limited to its masks.
     Grade(Vec<Painted>),
+    /// A compound clip's content, drawn between a `Begin` and this into a group the canvas's
+    /// size, put on the canvas as one picture (placed, faded, blended and graded like a
+    /// video's).
+    Group(Vec<Painted>),
 }
 
 /// The picture a blurred canvas fill is made of: the clip's frame (and its turn), or its
@@ -221,7 +225,7 @@ const BLUR_SIGMA_TAPS: f64 = 4.03;
 /// The media file a segment plays (for a reversed clip, the copy played backward when it has
 /// one; see `timing`).
 fn media_path(p: &Project, segment: &str) -> Option<String> {
-    let s = p.tracks.iter().flat_map(|t| t.segments.iter()).find(|s| s.id == segment)?;
+    let s = p.all_tracks().flat_map(|t| t.segments.iter()).find(|s| s.id == segment)?;
     let m = p.materials.media.iter().find(|m| m.id == s.material)?;
     Some(match m.kind {
         MediaKind::Audio => m.path.clone(),
@@ -403,6 +407,13 @@ pub struct PreviewEngine {
     /// Decoded stickers.
     stickers: crate::sticker::Stickers,
     prefetch: Prefetcher,
+    /// While a compound clip's content is drawn: its tracks, moved to where the frame's time
+    /// reads them (see `draw_compound`); the clips' neighbours, tracks and fills are found in
+    /// them rather than in the project's.
+    scope: Option<Vec<Track>>,
+    /// Each compound clip's content as `scope` takes it, by segment, with the shift it was made
+    /// for (a clip moved or trimmed needs it made again).
+    compound_tracks: HashMap<String, (i64, Vec<Track>)>,
     tick: u64,
     /// The time of the last frame gathered.
     last_time: Option<Micros>,
@@ -447,6 +458,8 @@ impl PreviewEngine {
             resolved_fonts: HashMap::new(),
             prepared: HashMap::new(),
             prefetch: Prefetcher::new(uploader),
+            scope: None,
+            compound_tracks: HashMap::new(),
             compositor,
             tick: 0,
             last_time: None,
@@ -467,6 +480,7 @@ impl PreviewEngine {
         let old = std::mem::replace(&mut self.project, project);
         let keep: Vec<String> = self.decoders.keys().filter(|id| self.media_path(id).is_some_and(|path| Some(path) == media_path(&old, id))).cloned().collect();
         self.decoders.retain(|id, _| keep.contains(id));
+        self.compound_tracks.clear();
         self.failed.clear(); // files may have been relinked
         self.scrub.forget_failures();
     }
@@ -483,7 +497,7 @@ impl PreviewEngine {
     /// Where a text segment's block of lines sits on the canvas at its start (left, top,
     /// width, height in canvas pixels, before its rotation), as it's drawn.
     pub fn text_block(&mut self, segment: &str) -> Option<[f64; 4]> {
-        let seg = self.project.tracks.iter().flat_map(|t| t.segments.iter()).find(|s| s.id == segment)?.clone();
+        let seg = self.project.all_tracks().flat_map(|t| t.segments.iter()).find(|s| s.id == segment)?.clone();
         self.project.materials.texts.iter().find(|m| m.id == seg.material)?;
         let (w, h) = (self.project.canvas.width, self.project.canvas.height);
         self.last_text_block = None;
@@ -571,15 +585,23 @@ impl PreviewEngine {
     /// The segments visible at `t`, bottom first (CapCut stacks by render index; text sits
     /// at 14000+, above video).
     fn active(&self, t: Micros) -> Vec<Segment> {
-        let mut active: Vec<Segment> = self
-            .project
-            .tracks
+        Self::active_in(&self.project.tracks, t)
+    }
+
+    /// The segments of `tracks` visible at `t`, bottom first.
+    fn active_in(tracks: &[Track], t: Micros) -> Vec<Segment> {
+        let mut active: Vec<Segment> = tracks
             .iter()
             .filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text | TrackKind::Sticker | TrackKind::Filter | TrackKind::Effect | TrackKind::Graphic | TrackKind::Adjustment) && !tr.hidden)
             .flat_map(|tr| tr.segments.iter().filter(|s| s.visible && s.target.contains(t)).cloned())
             .collect();
         active.sort_by_key(|s| s.render_index);
         active
+    }
+
+    /// The tracks the segments being drawn are on: the project's, or a compound clip's content.
+    fn tracks(&self) -> &[Track] {
+        self.scope.as_deref().unwrap_or(&self.project.tracks)
     }
 
     fn adopt(&mut self, done: Prefetched) {
@@ -664,11 +686,31 @@ impl PreviewEngine {
         if !self.scrubbing && !self.measure_only {
             self.load_stills_beside(&active);
         }
+        self.draw_segments(active, t, w, h, &mut out, &mut report);
+        report.layers = out.len();
+        // Full stills the scrub workers decoded that no layer collected.
+        for (path, img) in self.scrub.take_decoded() {
+            let tick = self.tick;
+            self.images.entry(path).or_insert((img, tick));
+        }
+        self.evict_stills();
+        self.evict_decoders();
+        let tick = self.tick;
+        self.texts.retain(|_, (_, _, last)| tick - *last < 3);
+        self.shapes.retain(|_, (_, _, last)| tick - *last < 3);
+        self.prepared.retain(|_, (_, last)| tick - *last < 3);
+        self.mattes.retain(|_, (_, last)| tick - *last < 3);
+        (out, report)
+    }
+
+    /// Draw the segments `active` (bottom first) at `t` into `out`, each with the transition
+    /// at its cut and the fill of its canvas.
+    fn draw_segments(&mut self, active: Vec<Segment>, t: Micros, w: u32, h: u32, out: &mut Vec<(Segment, Pixels)>, report: &mut FrameReport) {
         for seg in active {
             self.load_exposure_luts(&seg);
-            self.load_clip_lut(&seg, &mut report);
+            self.load_clip_lut(&seg, report);
             // A transition at the cut before or after this clip, and what it draws now.
-            let cut = crate::transition::transition_at(&self.project, &seg, t).map(|c| (crate::transition::steps(c.transition, c.progress), c.outgoing.clone(), c.incoming.clone()));
+            let cut = crate::transition::transition_at(&self.project, self.tracks(), &seg, t).map(|c| (crate::transition::steps(c.transition, c.progress), c.outgoing.clone(), c.incoming.clone()));
             let (steps, clips) = match cut {
                 Some((steps, outgoing, incoming)) => (steps, Some((outgoing, incoming))),
                 None => (Vec::new(), None),
@@ -696,7 +738,7 @@ impl PreviewEngine {
                         }
                         if clip.id != seg.id {
                             self.load_exposure_luts(clip);
-                            self.load_clip_lut(clip, &mut report);
+                            self.load_clip_lut(clip, report);
                         }
                         let fill = self.fill_of(clip);
                         let backdrop = match &fill {
@@ -706,21 +748,21 @@ impl PreviewEngine {
                         };
                         out.push((clip.clone(), Pixels::Begin(backdrop)));
                         let at = out.len();
-                        self.draw_with_effects(clip, t, w, h, &mut out, &mut report);
+                        self.draw_with_effects(clip, t, w, h, out, report);
                         if let Some(fill) = fill {
-                            self.insert_fill(clip, &fill, at, w, h, &mut out, &mut report);
+                            self.insert_fill(clip, &fill, at, w, h, out, report);
                         }
                         out.push((clip.clone(), Pixels::End));
                     }
                     out.push((seg.clone(), Pixels::Mix(mix_pixels(&m, w, h, gl))));
                 }
                 _ => {
-                    self.draw_with_effects(&seg, t, w, h, &mut out, &mut report);
+                    self.draw_with_effects(&seg, t, w, h, out, report);
                     // A main-track clip's canvas fill, under everything: a colour is the
                     // frame's background; a blur or an image goes first.
                     match self.fill_of(&seg) {
                         Some(CanvasFillKind::Color { color }) => self.background = rgb8(&color),
-                        Some(fill) => self.insert_fill(&seg, &fill, 0, w, h, &mut out, &mut report),
+                        Some(fill) => self.insert_fill(&seg, &fill, 0, w, h, out, report),
                         None => {}
                     }
                 }
@@ -732,24 +774,13 @@ impl PreviewEngine {
                 }
             }
         }
-        report.layers = out.len();
-        // Full stills the scrub workers decoded that no layer collected.
-        for (path, img) in self.scrub.take_decoded() {
-            let tick = self.tick;
-            self.images.entry(path).or_insert((img, tick));
-        }
-        self.evict_stills();
-        self.evict_decoders();
-        let tick = self.tick;
-        self.texts.retain(|_, (_, _, last)| tick - *last < 3);
-        self.shapes.retain(|_, (_, _, last)| tick - *last < 3);
-        self.prepared.retain(|_, (_, last)| tick - *last < 3);
-        self.mattes.retain(|_, (_, last)| tick - *last < 3);
-        (out, report)
     }
 
     /// Draw a segment at `t` into `out`, noting media that failed to load.
     fn draw(&mut self, seg: &Segment, t: Micros, w: u32, h: u32, out: &mut Vec<(Segment, Pixels)>, report: &mut FrameReport) {
+        if self.project.materials.compounds.iter().any(|c| c.id == seg.material) {
+            return self.draw_compound(seg, t, w, h, out, report);
+        }
         let t0 = std::time::Instant::now();
         let got = self.pixels(seg, t, w, h);
         if std::env::var_os("OPENRIP_TRACE").is_some() && t0.elapsed().as_millis() >= 10 {
@@ -763,6 +794,36 @@ impl PreviewEngine {
                 report.missing.push((path, why));
             }
         }
+    }
+
+    /// Draw a compound clip: its content's segments at the matching time, into a group of their
+    /// own (`Begin`), then the group as the clip's picture (`Group`). The content's tracks are
+    /// moved so a segment reads the frame's time as it reads its own (a constant shift: a
+    /// compound plays at speed 1), and so draw as ordinary tracks do, transitions, effects
+    /// and all.
+    fn draw_compound(&mut self, seg: &Segment, t: Micros, w: u32, h: u32, out: &mut Vec<(Segment, Pixels)>, report: &mut FrameReport) {
+        let Some(content) = self.project.materials.compounds.iter().find(|c| c.id == seg.material) else { return };
+        let shift = seg.target.start.0 - seg.source.map_or(0, |s| s.start.0);
+        let tracks = match self.compound_tracks.remove(&seg.id) {
+            Some((was, tracks)) if was == shift => tracks,
+            _ => content
+                .tracks
+                .iter()
+                .map(|tr| {
+                    let mut tr = tr.clone();
+                    tr.segments.iter_mut().for_each(|s| s.target.start = Micros(s.target.start.0 + shift));
+                    tr
+                })
+                .collect(),
+        };
+        out.push((seg.clone(), Pixels::Begin(None)));
+        let outer = self.scope.replace(tracks);
+        let active = Self::active_in(self.scope.as_deref().unwrap_or_default(), t);
+        self.draw_segments(active, t, w, h, out, report);
+        let tracks = std::mem::replace(&mut self.scope, outer).unwrap_or_default();
+        self.compound_tracks.insert(seg.id.clone(), (shift, tracks));
+        let mattes = self.masked(seg, (w, h), 0, t, seg.local_time(t), None);
+        out.push((seg.clone(), Pixels::Group(mattes)));
     }
 
     /// OpenRip's effect `effect` on `seg` at clip-local time `local`, with its keyframed values.
@@ -785,7 +846,7 @@ impl PreviewEngine {
             .filter_map(|e| Self::effect_pass(seg, e, local))
             .filter(|p| p.intensity > 0.0)
             .collect();
-        if passes.is_empty() || !matches!(self.project.tracks.iter().find(|tr| tr.segments.iter().any(|s| s.id == seg.id)).map(|tr| tr.kind), Some(TrackKind::Video | TrackKind::Text | TrackKind::Graphic | TrackKind::Sticker)) {
+        if passes.is_empty() || !matches!(self.tracks().iter().find(|tr| tr.segments.iter().any(|s| s.id == seg.id)).map(|tr| tr.kind), Some(TrackKind::Video | TrackKind::Text | TrackKind::Graphic | TrackKind::Sticker)) {
             return self.draw(seg, t, w, h, out, report);
         }
         // The group's own markers carry another id, so a canvas fill still finds the clip.
@@ -801,6 +862,10 @@ impl PreviewEngine {
     /// The canvas fill of a clip on the main track (the lowest video track), unless it's
     /// black; other clips fill nothing, as in CapCut.
     fn fill_of(&self, seg: &Segment) -> Option<CanvasFillKind> {
+        // (A compound clip's content has no canvas of its own to fill.)
+        if self.scope.is_some() {
+            return None;
+        }
         let main = self.project.tracks.iter().find(|t| t.kind == TrackKind::Video)?;
         if !main.segments.iter().any(|s| s.id == seg.id) {
             return None;
@@ -875,7 +940,7 @@ impl PreviewEngine {
 
     /// Whether `seg` is on an adjustment track (CapCut's adjustment layer).
     fn is_adjustment(&self, seg: &Segment) -> bool {
-        self.project.tracks.iter().any(|tr| tr.kind == TrackKind::Adjustment && tr.segments.iter().any(|s| s.id == seg.id))
+        self.tracks().iter().any(|tr| tr.kind == TrackKind::Adjustment && tr.segments.iter().any(|s| s.id == seg.id))
     }
 
     /// A filter's lookup table, read once per file: the app's Hald CLUT image (`lut`), a
@@ -1872,7 +1937,7 @@ impl PreviewEngine {
                 let tr = &seg.transform;
                 let (mut pos, mut scale, mut rot) = (tr.position.sample(local), tr.scale.sample(local), tr.rotation.sample(local));
                 // Its animations on top of the clip's own (keyframed) transform.
-                let motion = if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Text(..) | Pixels::Sticker(..)) { self.motion_of(seg, local) } else { None };
+                let motion = if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Text(..) | Pixels::Sticker(..) | Pixels::Group(..)) { self.motion_of(seg, local) } else { None };
                 if let Some(m) = motion {
                     pos = openrip_model::Vec2::new(pos.x + m.offset[0], pos.y + m.offset[1]);
                     scale = openrip_model::Vec2::new(scale.x * m.scale, scale.y * m.scale);
@@ -1904,6 +1969,7 @@ impl PreviewEngine {
                         let tween = Tween { from: Picture::Video(&frames.0), to: Picture::Video(&frames.1), t: *between, key: *key, mode: *mode };
                         Layer { mattes: painted(mattes), ..Layer::from_model_oriented(Source::Tween(tween), [w, h], [pos.x, pos.y], scale, rot, *orientation) }
                     }
+                    Pixels::Group(mattes) => Layer { mattes: painted(mattes), ..Layer::from_model(Source::Group(w, h), [w, h], [pos.x, pos.y], scale, rot) },
                     Pixels::Filter(lut, strength) => Layer::pass(Source::Filter(lut, *strength)),
                     // Twice the canvas, so the image's soft edge is off it.
                     Pixels::Wash(img, key, amount) => Layer { opacity: *amount, ..Layer::placed(Source::Cached(*key, img), [w as f64 / 2.0, h as f64 / 2.0], [2.0 * w as f64, 2.0 * h as f64]) },
@@ -1985,7 +2051,7 @@ impl PreviewEngine {
                 if let Some(m) = motion {
                     layer.opacity *= m.alpha;
                 }
-                if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..)) {
+                if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Group(..)) {
                     // The scale along the stored picture's vertical axis (sideways video swaps).
                     let sideways = matches!(p, Pixels::Video(_, o, ..) | Pixels::Tween(_, _, _, _, o, ..) if o.rem_euclid(180) == 90);
                     let tex_scale = if sideways { scale[0] } else { scale[1] };
@@ -1996,7 +2062,7 @@ impl PreviewEngine {
                     layer.match_lut = self.match_of(seg, local);
                     self.enhance_layer(seg, p, &mut layer);
                 }
-                if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Text(..) | Pixels::Sticker(..)) {
+                if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Text(..) | Pixels::Sticker(..) | Pixels::Group(..)) {
                     layer.blend = self.blend_of(seg);
                 }
                 vec![layer]

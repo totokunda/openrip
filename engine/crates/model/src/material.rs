@@ -58,6 +58,8 @@ pub struct Materials {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub beats: Vec<Beats>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compounds: Vec<Compound>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreign: Vec<Foreign>,
 }
 
@@ -82,6 +84,7 @@ pub enum MaterialRef<'a> {
     Chroma(&'a Chroma),
     Channels(&'a ChannelMap),
     Beats(&'a Beats),
+    Compound(&'a Compound),
     Foreign(&'a Foreign),
 }
 
@@ -107,6 +110,7 @@ impl MaterialRef<'_> {
             MaterialRef::Chroma(m) => AnyMaterial::Chroma(m.clone()),
             MaterialRef::Channels(m) => AnyMaterial::Channels(m.clone()),
             MaterialRef::Beats(m) => AnyMaterial::Beats(m.clone()),
+            MaterialRef::Compound(m) => AnyMaterial::Compound(m.clone()),
             MaterialRef::Foreign(m) => AnyMaterial::Foreign(m.clone()),
         }
     }
@@ -139,6 +143,7 @@ impl Materials {
         find!(chromas, Chroma);
         find!(channels, Channels);
         find!(beats, Beats);
+        find!(compounds, Compound);
         find!(foreign, Foreign);
         None
     }
@@ -166,6 +171,7 @@ impl Materials {
             + self.chromas.len()
             + self.channels.len()
             + self.beats.len()
+            + self.compounds.len()
             + self.foreign.len()
     }
 
@@ -1417,6 +1423,28 @@ pub struct Sticker {
     pub library: Option<LibraryRef>,
 }
 
+/// A compound clip's content (CapCut's "combination", a subproject): a timeline of its own
+/// that a segment plays as one picture and one sound. Its tracks are ordinary tracks in the
+/// compound's own time, from 0; their segments use the project's materials, so ids are
+/// unique across the project. A segment reading it has `source` = the part of that time it
+/// plays (a trim), constant speed 1, and carries the clip's own transform, opacity, blend,
+/// effects and the rest like any other picture.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Compound {
+    pub id: MaterialId,
+    #[serde(default)]
+    pub name: String,
+    /// Bottom first, like the project's own.
+    pub tracks: Vec<crate::project::Track>,
+}
+
+impl Compound {
+    /// Length of the content: the end of its last segment.
+    pub fn duration(&self) -> Micros {
+        self.tracks.iter().flat_map(|t| t.segments.iter()).map(|s| s.target.end()).max().unwrap_or(Micros::ZERO)
+    }
+}
+
 /// A material OpenRip doesn't interpret yet, kept verbatim.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Foreign {
@@ -1450,6 +1478,7 @@ pub enum AnyMaterial {
     Chroma(Chroma),
     Channels(ChannelMap),
     Beats(Beats),
+    Compound(Compound),
     Foreign(Foreign),
 }
 
@@ -1474,6 +1503,7 @@ impl AnyMaterial {
             AnyMaterial::Chroma(m) => &m.id,
             AnyMaterial::Channels(m) => &m.id,
             AnyMaterial::Beats(m) => &m.id,
+            AnyMaterial::Compound(m) => &m.id,
             AnyMaterial::Foreign(m) => &m.id,
         }
     }
@@ -1505,6 +1535,7 @@ impl Materials {
             AnyMaterial::Chroma(m) => put(&mut self.chromas, m, index),
             AnyMaterial::Channels(m) => put(&mut self.channels, m, index),
             AnyMaterial::Beats(m) => put(&mut self.beats, m, index),
+            AnyMaterial::Compound(m) => put(&mut self.compounds, m, index),
             AnyMaterial::Foreign(m) => put(&mut self.foreign, m, index),
         }
     }
@@ -1536,6 +1567,7 @@ impl Materials {
         take!(chromas, Chroma);
         take!(channels, Channels);
         take!(beats, Beats);
+        take!(compounds, Compound);
         take!(foreign, Foreign);
         None
     }

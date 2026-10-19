@@ -229,3 +229,39 @@ fn loudness_normalisation_turns_the_clip_to_the_target() {
     // Louder than the target: turned down.
     assert!((ratio(&with(-13.0, -1.0), &plain) - 10f64.powf(-10.0 / 20.0)).abs() < 1e-3);
 }
+
+/// A compound clip plays its content's sound where the clip reads it, cut to the part the clip
+/// shows, at the clip's volume.
+#[test]
+fn a_compound_plays_its_contents_sound_inside_its_clip() {
+    let Some(path) = noise() else { return };
+    let plain = mix(project(path.to_str().unwrap(), &[(false, false, 1.0)]));
+    let inner = project(path.to_str().unwrap(), &[(false, false, 1.0)]);
+    let compound = |source_start: i64, volume: f32| {
+        let mut p = inner.clone();
+        p.materials.compounds.push(openrip_model::Compound { id: "c".into(), name: String::new(), tracks: std::mem::take(&mut p.tracks) });
+        let mut clip = serde_json::json!({ "id": "outer", "material": "c", "source": { "start": source_start, "duration": 2500000 }, "target": { "start": 500000, "duration": 2500000 },
+            "speed": 1.0, "visible": true, "render_index": 0,
+            "transform": { "position": { "value": { "x": 0.0, "y": 0.0 } }, "scale": { "value": { "x": 1.0, "y": 1.0 } }, "rotation": { "value": 0.0 } },
+            "opacity": { "value": 1.0 }, "volume": { "value": volume } });
+        clip["attachments"] = serde_json::json!([]);
+        p.tracks.push(serde_json::from_value(serde_json::json!({ "id": "main", "kind": "video", "segments": [clip] })).unwrap());
+        mix(p)
+    };
+    // Read from the content's 0: it plays half a second later than it is in the content.
+    let out = compound(0, 1.0);
+    let shift = RATE as usize / 2 * CHANNELS;
+    let (start, end) = (RATE as usize * CHANNELS, 2 * RATE as usize * CHANNELS);
+    assert_eq!(&out[start + shift..end + shift], &plain[start..end]);
+    assert!(out[..start + shift].iter().all(|v| *v == 0.0));
+    // Read from 1.25 s: the content's sound, which starts at 1 s, is cut at its head.
+    let trimmed = compound(1_250_000, 1.0);
+    let head = (RATE as usize / 4) * CHANNELS;
+    assert!(trimmed[..RATE as usize / 2 * CHANNELS].iter().all(|v| *v == 0.0));
+    assert_eq!(&trimmed[RATE as usize / 2 * CHANNELS..RATE as usize / 2 * CHANNELS + 1000], &plain[start + head..start + head + 1000]);
+    // The clip's volume.
+    let half = compound(0, 0.5);
+    for (a, b) in out.iter().zip(&half) {
+        assert!((a * 0.5 - b).abs() < 1e-6);
+    }
+}

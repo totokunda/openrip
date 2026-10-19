@@ -59,7 +59,7 @@ mod tempo {
 use std::collections::HashMap;
 use std::path::Path;
 
-use openrip_model::{AudioFade, ChannelFill, EffectCategory, MediaKind, Micros, Project, Remap, Segment, TrackKind};
+use openrip_model::{AudioFade, ChannelFill, EffectCategory, MediaKind, Micros, Project, Remap, Segment, TimeRange, Track, TrackKind};
 
 #[cfg(feature = "ffmpeg")]
 pub use decode::AudioDecoder;
@@ -162,6 +162,65 @@ struct ReverseWindow {
     samples: Vec<f32>,
 }
 
+/// The project with the sound of its compound clips' content on tracks of their own (a
+/// compound clip is a timeline played inside the clip): each of the content's clips moved to
+/// where the compound plays it, cut to the part the compound shows, at the compound's volume.
+/// The mixer then plays them like any other clips. (A compound's fades, speed curve and
+/// keyframed volume aren't applied to its sound; a constant volume is.)
+fn with_compound_sound(mut project: Project) -> Project {
+    if project.materials.compounds.is_empty() {
+        return project;
+    }
+    let mut extra = Vec::new();
+    splice_compounds(&project.tracks, &project, 0, None, 1.0, true, &mut extra);
+    project.tracks.extend(extra);
+    project
+}
+
+/// Collect onto `out` the clips of the compounds played by `tracks` (which sit `shift` µs
+/// later than their own time, within `window` if any), `gain` louder; with `top` unset, the
+/// clips of `tracks` themselves too.
+fn splice_compounds(tracks: &[Track], project: &Project, shift: i64, window: Option<TimeRange>, gain: f32, top: bool, out: &mut Vec<Track>) {
+    for track in tracks.iter().filter(|t| !t.muted && !t.hidden && matches!(t.kind, TrackKind::Video | TrackKind::Audio)) {
+        let mut kept = Vec::new();
+        for seg in track.segments.iter().filter(|s| s.visible) {
+            // Where the clip plays in the outer timeline, within the window.
+            let (mut start, mut end) = (seg.target.start.0 + shift, seg.target.end().0 + shift);
+            if let Some(w) = window {
+                start = start.max(w.start.0);
+                end = end.min(w.end().0);
+            }
+            if end <= start {
+                continue;
+            }
+            if let Some(c) = project.materials.compounds.iter().find(|c| c.id == seg.material) {
+                let inner = seg.target.start.0 + shift - seg.source.map_or(0, |s| s.start.0);
+                let volume = gain * seg.volume.sample(Micros::ZERO);
+                splice_compounds(&c.tracks, project, inner, Some(TimeRange::new(Micros(start), Micros(end - start))), volume, false, out);
+            } else if !top {
+                let mut seg = seg.clone();
+                let (cut_head, cut_tail) = (start - (seg.target.start.0 + shift), (seg.target.end().0 + shift) - end);
+                if let Some(src) = seg.source.as_mut() {
+                    let played = |d: i64| (d as f64 * seg.speed).round() as i64;
+                    let (head, tail) = (played(cut_head), played(cut_tail));
+                    // The head is skipped from the in-point, or from the out-point when reversed.
+                    let (from_start, from_end) = if seg.reverse { (tail, head) } else { (head, tail) };
+                    src.start = Micros(src.start.0 + from_start);
+                    src.duration = Micros((src.duration.0 - from_start - from_end).max(1));
+                }
+                seg.target = TimeRange::new(Micros(start), Micros(end - start));
+                if (gain - 1.0).abs() > 1e-6 {
+                    seg.volume = openrip_model::Animated::constant(gain * seg.volume.sample(Micros::ZERO));
+                }
+                kept.push(seg);
+            }
+        }
+        if !kept.is_empty() {
+            out.push(Track { id: format!("{}#sound{}", track.id, out.len()), segments: kept, ..track.clone() });
+        }
+    }
+}
+
 pub struct Mixer {
     project: Project,
     rate: u32,
@@ -186,6 +245,7 @@ impl Mixer {
     }
 
     pub fn with_rate(project: Project, rate: u32) -> Self {
+        let project = with_compound_sound(project);
         Mixer { project, rate, stretches: HashMap::new(), reversed: HashMap::new(), copies: HashMap::new(), decoders: HashMap::new(), voices: HashMap::new(), limiter: (1.0, -1), resampled: Vec::new() }
     }
 
@@ -195,6 +255,7 @@ impl Mixer {
 
     /// Replace the project after an edit, keeping decoders of clips that still exist.
     pub fn set_project(&mut self, project: Project) {
+        let project = with_compound_sound(project);
         let ids: std::collections::HashSet<&str> = project.tracks.iter().flat_map(|t| t.segments.iter().map(|s| s.id.as_str())).collect();
         self.decoders.retain(|id, _| ids.contains(id.as_str()));
         self.copies.retain(|id, _| ids.contains(id.as_str()));

@@ -271,6 +271,24 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
         });
     }
 
+    let canvas = project.canvas;
+    project.tracks = build_tracks(timeline, &clock, &world, canvas, &mut project.materials, &mut report);
+    report.tracks = project.tracks.len();
+    report.segments = project.tracks.iter().map(|t| t.segments.len()).sum();
+
+    for m in &project.materials.media {
+        if !m.path.is_empty() && !openrip_platform::assets::exists(Path::new(&m.path)) {
+            report.missing_media.push(m.path.clone());
+        }
+    }
+    report.problems = project.validate();
+    Ok(Imported { project, report })
+}
+
+/// The tracks of a timeline (the project's, or a compound clip's content) from the app's
+/// `tracks` and `clips`: the clips converted into segments with their materials, stacked and
+/// cleared of overlaps.
+fn build_tracks(timeline: &Value, clock: &Clock, world: &World, canvas: Canvas, materials: &mut Materials, report: &mut ImportReport) -> Vec<Track> {
     // Tracks: v1 top row first → model bottom first.
     let mut tracks: Vec<Track> = Vec::new();
     for t in timeline.get("tracks").and_then(Value::as_array).into_iter().flatten().rev() {
@@ -334,11 +352,19 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
             }
         }
         // A clip converted from a CapCut draft (or any model project) carries its segment.
-        let canvas = project.canvas;
+                // A compound clip: its content is a timeline of its own, built first (its tracks go in
+        // a `Compound` material the clip then plays).
+        if ty == "video" {
+            if let Some(content) = clip.get("compound").filter(|c| c.is_object()) {
+                let inner = build_tracks(content, clock, world, canvas, materials, report);
+                materials.compounds.retain(|m| m.id.0 != format!("{}-compound", s(clip, "clipId")));
+                materials.compounds.push(Compound { id: MaterialId(format!("{}-compound", s(clip, "clipId"))), name: s(clip, "name"), tracks: inner });
+            }
+        }
         let converted = match clip.get("engine").filter(|e| e.get("segment").is_some()) {
-            Some(engine) => engine_segment(clip, engine, &ty, &clock, &world, canvas, &mut project.materials, &mut report),
-            None => convert_clip(clip, &ty, &clock, &world, &mut project.materials, &mut report).map(|mut seg| {
-                keys::apply(&mut seg, clip, None, clock.fps.as_f64(), &world, canvas, &mut project.materials);
+            Some(engine) => engine_segment(clip, engine, &ty, clock, world, canvas, materials, report),
+            None => convert_clip(clip, &ty, clock, world, materials, report).map(|mut seg| {
+                keys::apply(&mut seg, clip, None, clock.fps.as_f64(), world, canvas, materials);
                 let kind = match ty.as_str() {
                     "video" | "image" => TrackKind::Video,
                     "audio" => TrackKind::Audio,
@@ -432,17 +458,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
             seg.render_index = index as i32;
         }
     }
-    report.tracks = tracks.len();
-    report.segments = tracks.iter().map(|t| t.segments.len()).sum();
-    project.tracks = tracks;
-
-    for m in &project.materials.media {
-        if !m.path.is_empty() && !openrip_platform::assets::exists(Path::new(&m.path)) {
-            report.missing_media.push(m.path.clone());
-        }
-    }
-    report.problems = project.validate();
-    Ok(Imported { project, report })
+    tracks
 }
 
 /// A clip the app opened from a converted project (`app.rs`): its own segment and materials,
@@ -859,7 +875,9 @@ fn convert_clip(
         return None;
     }
     let is_av = matches!(ty, "video" | "audio");
-    let speed = if is_av { f(clip, "speed", 1.0).clamp(0.1, 100.0) } else { 1.0 };
+    let compound = ty == "video" && clip.get("compound").is_some_and(Value::is_object);
+    // A compound plays its content at its own speed, 1.
+    let speed = if is_av && !compound { f(clip, "speed", 1.0).clamp(0.1, 100.0) } else { 1.0 };
     let mut attachments = Vec::new();
 
     // Source range. v1 trims are in timeline frames before speed (preview semantics).
@@ -881,6 +899,8 @@ fn convert_clip(
 
     let material = match ty {
         _ if freeze.is_some() => freeze.clone().unwrap(),
+        // A compound clip plays the content `build_tracks` made for it.
+        "video" if clip.get("compound").is_some_and(Value::is_object) => MaterialId(format!("{id}-compound")),
         "video" | "image" | "audio" => {
             let asset = s(clip, "assetId");
             if !materials.contains(&MaterialId(asset.clone())) {
@@ -1035,7 +1055,10 @@ fn convert_clip(
         (_, Some(t)) => {
             let shape_type = s(clip, "shapeType");
             let center_pivot = ty == "shape" && matches!(shape_type.as_str(), "ellipse" | "polygon" | "star");
-            let fit = if matches!(ty, "video" | "image") {
+            // A compound's picture is the whole canvas, so its box fits the world as it is.
+            let fit = if compound {
+                Some((world.w, world.h))
+            } else if matches!(ty, "video" | "image") {
                 let (mw, mh) = (f(clip, "mediaWidth", 0.0), f(clip, "mediaHeight", 0.0));
                 let crop = t.get("crop").map(|c| CropRect {
                     x: f(c, "x", 0.0),
@@ -2252,6 +2275,38 @@ mod tests {
         assert!((m("1").expansion - 0.05).abs() < 1e-6);
         // Both cut the clip: a clear outside, the second's too.
         assert!(m("1").outside == MaskPaint::Color(Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+    }
+
+    #[test]
+    fn a_compound_clip_plays_a_timeline_of_its_own() {
+        let mut d = doc();
+        let tick = |frame: i64| ((frame * 1_000_000) / 24).to_string();
+        let clips = d["timeline"]["clips"].as_array_mut().unwrap();
+        // A video clip with a content: its own tracks and clips, in its own time from 0.
+        clips.push(json!({"clipId": "cc", "type": "video", "name": "Compound 1", "timelineId": "T-media", "volume": -6.0,
+            "startTick": tick(100), "endTick": tick(148), "trimStartTick": tick(10), "trimEndTick": tick(0), "speed": 2.0,
+            "transform": {"x": 0, "y": 0, "width": 1066.6666666666667, "height": 600, "scaleX": 0.5, "scaleY": 0.5, "rotation": 0, "opacity": 80},
+            "compound": {"tracks": [{"type": "media", "timelineId": "I-media", "muted": false, "hidden": false}, {"type": "text", "timelineId": "I-text", "muted": false, "hidden": false}],
+                "clips": [
+                    {"clipId": "iv", "type": "video", "timelineId": "I-media", "assetId": "A1", "startTick": tick(0), "endTick": tick(48), "trimStartTick": tick(0), "trimEndTick": tick(0), "mediaWidth": 1920, "mediaHeight": 1080,
+                     "transform": {"x": 0, "y": 0, "width": 1066.6666666666667, "height": 600, "scaleX": 1, "scaleY": 1, "rotation": 0, "opacity": 100}},
+                    {"clipId": "it", "type": "text", "timelineId": "I-text", "text": "inside", "startTick": tick(0), "endTick": tick(24), "trimStartTick": "0", "trimEndTick": "0"}]}}));
+        let Imported { project, report } = import_v1_json(&d).unwrap();
+        assert!(report.problems.is_empty(), "{:?}", report.problems);
+        let seg = project.tracks.iter().flat_map(|t| &t.segments).find(|s| s.id == "cc").unwrap();
+        let content = project.materials.compounds.iter().find(|c| c.id == seg.material).unwrap();
+        assert_eq!(content.name, "Compound 1");
+        // Its segments are in the content's tracks, not the project's, and the content has the clips' materials.
+        assert!(project.tracks.iter().flat_map(|t| &t.segments).all(|s| s.id != "iv" && s.id != "it"));
+        let mut inner: Vec<&str> = content.tracks.iter().flat_map(|t| &t.segments).map(|s| s.id.as_str()).collect();
+        inner.sort();
+        assert_eq!(inner, ["it", "iv"]);
+        assert_eq!(content.duration(), Micros(2_000_000));
+        // Plays at speed 1 from its trim, with its own placement and sound.
+        assert_eq!(seg.speed, 1.0);
+        assert_eq!(seg.source.unwrap().start, Micros(10 * 1_000_000 / 24 + 1));
+        assert!((seg.opacity.sample(Micros(0)) - 0.8).abs() < 1e-6 && (seg.transform.scale.sample(Micros(0)).x - 0.5).abs() < 1e-6);
+        assert!((seg.volume.sample(Micros(0)) - 10f32.powf(-6.0 / 20.0)).abs() < 1e-5);
     }
 
     #[test]

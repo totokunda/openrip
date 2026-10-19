@@ -200,6 +200,10 @@ pub enum Source<'a> {
     Mix(Mix),
     /// A frame made in between two frames of a video (Smooth slow-mo, Optical flow).
     Tween(Tween<'a>),
+    /// The group begun last, finished and placed as a picture of the canvas's size (`w`×`h`)
+    /// with everything else a layer has (placement, opacity, blend, adjustments, masks): a
+    /// compound clip's content drawn as one clip.
+    Group(u32, u32),
     /// Not an image: one of OpenRip's own video effects (`effects.wgsl`) over everything drawn
     /// so far on the canvas, or in the open group.
     Effect(EffectPass),
@@ -215,6 +219,7 @@ impl Source<'_> {
             Source::Image(i) | Source::Cached(_, i) => (i.width, i.height),
             Source::Video(f) => (f.width(), f.height()),
             Source::Tween(t) => t.from.size(),
+            Source::Group(w, h) => (*w, *h),
             Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) | Source::Effect(_) | Source::Grade => (1, 1),
         }
     }
@@ -1353,6 +1358,9 @@ impl Compositor {
         let mut open: Vec<wgpu::Texture> = Vec::new();
         let mut finished: Vec<wgpu::Texture> = Vec::new();
         for layer in layers {
+            // A finished group placed as a picture leaves the open ones first: it and the layers
+            // after it draw one level up.
+            let mut group = if matches!(layer.source, Source::Group(..)) { open.pop() } else { None };
             // Layers draw into the group begun last, else the canvas.
             let canvas = open.last().unwrap_or(canvas);
             let place_pipeline = if canvas.format() == wgpu::TextureFormat::Bgra8Unorm { &self.place_bgra } else { &self.place };
@@ -1414,6 +1422,7 @@ impl Compositor {
                         Source::Image(img) => self.upload(enc, img, None, &mut scratch),
                         Source::Cached(key, img) => self.upload(enc, img, Some(key), &mut scratch),
                         Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) | Source::Effect(_) | Source::Grade => unreachable!("canvas passes are drawn above"),
+                        Source::Group(..) => group.take().unwrap_or_else(|| self.texture(width, height, CANVAS, wgpu::TextureUsages::empty())),
                         Source::Video(frame) => self.video_texture(enc, frame, &mut keep, &mut scratch),
                         Source::Tween(tween) => {
                             let a = self.picture_texture(enc, tween.from, &mut keep, &mut scratch);

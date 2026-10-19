@@ -237,6 +237,11 @@ impl Project {
         }
     }
 
+    /// The project's tracks, then those of each compound's content (each in its own time).
+    pub fn all_tracks(&self) -> impl Iterator<Item = &Track> {
+        self.tracks.iter().chain(self.materials.compounds.iter().flat_map(|c| c.tracks.iter()))
+    }
+
     /// End of the last segment on any track.
     pub fn duration(&self) -> Micros {
         self.tracks
@@ -254,7 +259,7 @@ impl Project {
     /// Structural problems that would make the project unsafe to render.
     pub fn validate(&self) -> Vec<String> {
         let mut problems = Vec::new();
-        for track in &self.tracks {
+        for track in self.all_tracks() {
             let mut ranges: Vec<&TimeRange> = Vec::new();
             for seg in &track.segments {
                 if seg.target.duration.0 <= 0 {
