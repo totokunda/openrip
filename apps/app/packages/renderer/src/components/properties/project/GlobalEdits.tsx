@@ -11,7 +11,8 @@ import ReferencePicker from "../adjust/ReferencePicker";
 import { Analysing } from "../adjust/AutoAdjust";
 
 /** The project inspector's tab (CapCut opens it on Project). */
-export const useProjectInspectorTab = create<{ tab: "project" | "details" }>(() => ({ tab: "project" }));
+// Details first, as CapCut shows an empty project (17-inspector-project/010); Project is a click away.
+export const useProjectInspectorTab = create<{ tab: "project" | "details" }>(() => ({ tab: "details" }));
 
 /**
  * The project inspector's Project tab: Global edits, as CapCut lists them, each a row with its
