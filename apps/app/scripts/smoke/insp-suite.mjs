@@ -2,8 +2,9 @@
 // fresh profile under out/insp/, and prints every PASS/FAIL line.
 //   node insp-suite.mjs <appDir> <video> <photo> [case...]
 // CLIP_NAME / PHOTO_NAME name them in the media panel (default: their file names without the
-// extension). inspadjust sets the old sliders through the store, so run the renderer's dev
-// server and pass MODE=development VITE_DEV_SERVER_URL=… as for `keyframes`.
+// extension). inspadjust sets the old sliders through the store, and inspmask reads the tool
+// from it (its Pen, Brush and Done checks), so run the renderer's dev server and pass
+// MODE=development VITE_DEV_SERVER_URL=… as for `keyframes`; on a built app those checks fail.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
