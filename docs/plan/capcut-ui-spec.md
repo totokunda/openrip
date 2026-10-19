@@ -686,8 +686,8 @@ Screenshots are in `01-home/` unless a path says otherwise.
 | List view: Name, Size, Duration, Last edited, sortable | `015-projects-list-view.png` | missing |
 | Search projects by name | `016-project-search-open.png` | partly (search in the Topbar switcher) |
 | No-results state | `017-project-search-empty.png` | missing |
-| Trash: recently deleted (30-day retention), Restore, Delete permanently, empty trash, grid/list | `020-trash-view.png`–`024-trash-list-view.png` | missing |
-| Home sidebar: Home, Templates (local templates) | `001-at-rest.png`, `028-templates-page.png` | missing |
+| Trash: recently deleted (30-day retention), Restore, Delete permanently, empty trash, grid/list | `020-trash-view.png`–`024-trash-list-view.png` | has (Delete moves a project, its cover, masks and media folder to a trash folder; Home's Trash window: "Recently moved (n)", days left, Grid / List, a circle to select, right-click Delete / Restore, Empty trash; 30 days, then emptied at start-up; the delete toast has Undo. Harness `trash`) |
+| Home sidebar: Home, Templates (local templates) | `001-at-rest.png`, `028-templates-page.png` | has (no store: the page's search, Orientation and Duration filters and tall cards, filled by "Save as template" on a project's menu; Use template starts a project with its own copy of the media; empty state explains it. Library page: Media tab, All / Videos / Images / Audio, search, Favorites, Grid / List, Sort, refresh over the files the projects import. Harness `templatespage`, `librarypage`) |
 | Settings gear (Settings, Third-party copyright, Version) | `079-settings-menu.png`, `012-settings-tooltip.png` | has (Version opens About) |
 | Update-available indicator | `010-update-tooltip.png` | partly (update toasts) |
 | Open a CapCut draft as a project (OpenRip-only) | – | has (Projects › Open CapCut Project) |
@@ -1156,7 +1156,7 @@ Screenshots are in `30-timeline-toolbar/` unless a path says otherwise.
 | Track header: mute | `03-editor-overview/003-base-timeline-built.png` | has |
 | Track "…" › Track height: Short, Default, Tall | `023-track-height-menu.png` | has (video and audio tracks; Short and Tall are 0.7× and 1.4× the row, not captured) |
 | Track "…" › Audio waveform size: 30%, 60%, 100% | `024-track-waveform-size-menu.png` | has (bars 1×, 2× and 3.3× as tall; 60% and 100% not captured) |
-| Cover tile on the main track, cover frame picker | `03-editor-overview/003-base-timeline-built.png`, `31-dialogs/027-cover-frame-selector.png` | partly (covers are generated automatically, not editable or shown) |
+| Cover tile on the main track, cover frame picker | `03-editor-overview/003-base-timeline-built.png`, `31-dialogs/027-cover-frame-selector.png` | has (the tile opens the cover editor; the automatic cover is the first frame until one is chosen) |
 | Video thumbnails on clips | `03-editor-overview/003-base-timeline-built.png` | has |
 | Audio waveforms | `03-editor-overview/003-base-timeline-built.png` | has (CapCut's bars, scale, volume line and colours: renderer/src/lib/waveform.ts) |
 | Video clip's own audio waveform in a bottom band | `03-editor-overview/003-base-timeline-built.png` | has |
@@ -1216,7 +1216,7 @@ References: `31-dialogs/016-export-video-settings.png` to `026-export-caption-fo
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
 | Export dialog with Name and Export to + folder | `016-export-video-settings.png` | has |
-| Cover preview with "Edit cover" | `016-export-video-settings.png`, `027-cover-frame-selector.png` | missing |
+| Cover preview with "Edit cover" | `016-export-video-settings.png`, `027-cover-frame-selector.png` | the editor is there: `openCoverEditor()` in `lib/cover.ts`; the export dialog's preview and button are not (ExportModal) |
 | Export timeline (choose which timeline) | `016-export-video-settings.png` | missing (one timeline per project) |
 | Video section on/off (export audio only) | `016-export-video-settings.png`, `023-export-audio-gif-captions.png` | missing |
 | Resolution: 480P, 720P, 1080P, 2K, 4K, 8K | `017-export-resolution-menu.png` | has (no 8K) |
@@ -1240,9 +1240,9 @@ Screenshots are in `31-dialogs/` unless a path says otherwise.
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Cover › Select from video (frame scrubber) | `31-dialogs/027-cover-frame-selector.png` | missing |
-| Cover › Local image | `027-cover-frame-selector.png` | missing |
-| Cover › basic text on the cover | `029-cover-design-text.png` | missing |
+| Cover › Select from video (frame scrubber) | `31-dialogs/027-cover-frame-selector.png` | has (engine frame at a scrubber over a filmstrip; harness `covereditor`) |
+| Cover › Local image | `027-cover-frame-selector.png` | has |
+| Cover › basic text on the cover | `029-cover-design-text.png`, `035-cover-exit-confirmation.png` | has (title, subtitle, body text; drag, words, size, colour, bold; Save, Cancel with Exit editing?; templates, stickers and AI left out) |
 | Voiceover panel: record, timer, level meter, input device, input volume, Echo reduction, Mute project | `036-voiceover-panel.png`, `037-voiceover-input-menu.png` | missing |
 | Native file dialogs for media and caption import | `012-import-file-dialog.png`, `013-import-captions-file-dialog.png` | has (media); captions missing |
 | Confirm before discarding unsaved edits | `035-cover-exit-confirmation.png` | has (alert dialog for deletes; editor autosaves) |
