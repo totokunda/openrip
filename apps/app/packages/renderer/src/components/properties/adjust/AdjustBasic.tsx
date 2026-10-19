@@ -4,6 +4,7 @@ import { useClipStore } from "@/lib/clip";
 import { clearKeyframes, hasKeyframes, ADJUST_PROPERTIES } from "@/lib/keyframes";
 import { ADJUST_SLIDERS, colorOf, hasLegacyAdjustments, migrateLegacyAdjustments, setLut } from "@/lib/color";
 import type { AdjustSlider, AnyClipProps, ImageClipProps, KeyframeProperty, VideoClipProps } from "@/lib/types";
+import { useAdjustmentLibrary } from "@/lib/adjustment";
 import Section from "../Section";
 import PropertyRow from "../PropertyRow";
 import KeyframedSlider from "../KeyframedSlider";
@@ -57,12 +58,15 @@ const LutSection: React.FC<{ clipId: string; clip: Media }> = ({ clipId, clip })
   const clips = useClipStore((s) => s.clips);
   // The LUTs this project uses, to pick again; then Import.
   const known = new Map<string, string>();
+  // The Adjustment tab's imported LUTs too.
+  for (const l of useAdjustmentLibrary((s) => s.luts)) known.set(l.path, l.name);
   for (const c of clips) {
     const l = (c as Media).color?.lut;
     if (l?.path) known.set(l.path, l.name ?? l.path.split(/[\\/]/).pop()!);
   }
   const pick = async () => {
     const [path] = await pickMediaPaths({ title: "Import a LUT", filters: [{ name: "LUTs", extensions: ["cube", "png", "jpg"] }] });
+    if (path) useAdjustmentLibrary.getState().addLut({ path, name: path.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, "") });
     if (path) update(clipId, setLut(now(clipId), { path, name: path.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, ""), intensity: lut?.intensity ?? 100 }));
   };
   const choose = (v: string) => {

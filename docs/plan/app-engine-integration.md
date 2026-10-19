@@ -101,7 +101,7 @@ Done (2026-10-16): Projects ▸ Open CapCut Project… lists the drafts CapCut s
 - **Still CapCut's alone:**
   - the draft's masks aren't shown in the panels, nor the keys of the properties `keyframes` doesn't cover (below);
   - video effects aren't drawn: the one local use's bundle isn't in CapCut's cache;
-  - adjustment layers and log wheels aren't drawn (no local draft uses either);
+  - log wheels aren't drawn (no local draft uses them). Adjustment layers are: an adjustment track's segment (a draft's bar, or the app's own filter clip with `adjustment: true` and the Adjust tab's `color` and `masks`) grades the canvas drawn so far with its attachments' LUT and Adjust tools, inside its masks, for its duration (`Source::Grade` in the compositor, `Pixels::Grade` in the preview);
   - CapCut's AI colour match and correction can't be drawn without its models;
   - a sticker's size at scale 1 is unchecked against CapCut.
 

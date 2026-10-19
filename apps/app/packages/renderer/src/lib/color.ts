@@ -62,7 +62,7 @@ export const IDENTITY_CURVE: CurvePointXY[] = [
 ];
 
 /** The clip's colour tools, or none. */
-export const colorOf = (clip: AnyClipProps): ClipColor => ((clip.type === "video" || clip.type === "image") && (clip as any).color) || {};
+export const colorOf = (clip: AnyClipProps): ClipColor => ((clip.type === "video" || clip.type === "image" || (clip.type === "filter" && (clip as any).adjustment)) && (clip as any).color) || {};
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const sliderInfo = (key: AdjustSlider) => ADJUST_SLIDERS.find((s) => s.key === key)!;

@@ -17,6 +17,7 @@ import AdjustBasic from '../properties/adjust/AdjustBasic'
 import AdjustHsl from '../properties/adjust/AdjustHsl'
 import AdjustCurves from '../properties/adjust/AdjustCurves'
 import AdjustWheels from '../properties/adjust/AdjustWheels'
+import AdjustmentLayerProperties from '../properties/AdjustmentLayerProperties'
 import AutoAdjust from '../properties/adjust/AutoAdjust'
 import ColorMatch from '../properties/adjust/ColorMatch'
 import { cn } from '@/lib/utils'
@@ -185,6 +186,23 @@ const ClipPropertiesPanel: React.FC = () => {
           speed(false),
         ];
       case 'filter':
+        // An adjustment layer: CapCut's Adjust tab (the video Adjust tab's panels and Mask).
+        if ((clip as any).adjustment) {
+          const own = (content: React.ReactNode) => <AdjustmentLayerProperties clipId={clipId}>{content}</AdjustmentLayerProperties>;
+          return [
+            {
+              id: 'adjust',
+              label: 'Adjust',
+              sections: [
+                { id: 'basic', label: 'Basic', own: true, content: own(<AdjustBasic key="basic" clipId={clipId} />) },
+                { id: 'hsl', label: 'HSL', own: true, content: own(<AdjustHsl clipId={clipId} />) },
+                { id: 'curves', label: 'Curves', own: true, content: own(<AdjustCurves clipId={clipId} />) },
+                { id: 'wheels', label: 'Color wheel', own: true, content: own(<AdjustWheels clipId={clipId} />) },
+                { id: 'mask', label: 'Mask', own: true, content: own(<MaskPropertiesPanel clipId={clipId} />) },
+              ],
+            },
+          ];
+        }
         // One of OpenRip's own video effects: CapCut's "Special effects" with its Details.
         if ((clip as any).effectId) {
           return [{ id: 'filter', label: 'Special effects', sections: [{ id: 'basic', label: 'Basic', content: stack(<EffectProperties key="effect" clipId={clipId} />) }] }];

@@ -883,9 +883,9 @@ Screenshots are in `13-left-adjustment/` unless a path says otherwise.
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| "Custom adjustment" tile: add an adjustment layer clip | `13-left-adjustment/001-add-adjustment.png`, `004-custom-hover.png` | partly (filter clips apply to clips beneath; adjustment layers only render from imported drafts) |
-| LUT list of local .cube files | `13-left-adjustment/003-lut.png` (wrong view captured, see §7) | partly (LUT packs live in Filters) |
-| My adjustment presets | `002-yours.png` | missing |
+| "Custom adjustment" tile: add an adjustment layer clip | `13-left-adjustment/001-add-adjustment.png`, `004-custom-hover.png` | has (the tile, its hover "+", a click or drag onto the timeline; the layer is a bar on a track of its own that grades everything beneath it) |
+| LUT list of local .cube files | `13-left-adjustment/003-lut.png` (wrong view captured, see §7) | has (Import, the list, click previews, "+" or a drag adds a layer with that LUT) |
+| My adjustment presets | `002-yours.png` | has (Yours lists the presets saved with Save as preset, kept in the app's storage; "+" and a drag add a layer with them; no brand presets) |
 
 Out of scope: Brand presets (cloud).
 
@@ -1077,7 +1077,7 @@ Screenshots are in `25-inspector-adjustment-layer/` unless a path says otherwise
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Adjustment layer clip that grades everything beneath it | `001-basic-top.png` | partly (filter clips act as applicators; adjustment layers only from drafts) |
+| Adjustment layer clip that grades everything beneath it | `001-basic-top.png` | has (a filter-track bar with the Adjust tab's tools; the engine draws it over the composite beneath, for its duration) |
 | LUT › Name (local .cube list), Intensity | `001-basic-top.png`, `002-lut-dropdown.png` | has (the project's LUTs and Import) |
 | Adjust › Color: Temp, Tint, Saturation | `003-basic-color.png` | has |
 | Adjust › Lightness: Exposure, Contrast, Highlight, Shadow, Whites, Blacks, Brilliance | `004-basic-scroll-2.png` | has |
@@ -1086,8 +1086,8 @@ Screenshots are in `25-inspector-adjustment-layer/` unless a path says otherwise
 | HSL: 8 channels × Hue, Saturation, Brightness; eyedropper | `007-hsl-red.png` | has |
 | Curves: Luma, Red, Green, Blue; eyedropper | `015-curves-luma.png`, `029-curves-red-full.png` | has |
 | Color wheel: Primary (Shadows, Middle grey, Highlights, Offset) and Log (Shadow, Middle tone, Highlight, Offset) with Intensity and R/G/B fields | `019-color-wheel-primary.png`, `021-color-wheel-mode-dropdown.png`, `022-color-wheel-log.png`, `023-color-wheel-log-bottom.png`, `030-primary-wheels-lower-controls.png` | partly (Primary; Log not offered) |
-| Mask on an adjustment layer (several masks, shapes, settings) | `024-multiple-masks.png`–`026-rectangle-mask-controls.png` | partly |
-| Save as preset | `001-basic-top.png` | missing |
+| Mask on an adjustment layer (several masks, shapes, settings) | `024-multiple-masks.png`–`026-rectangle-mask-controls.png` | partly (the Mask tab's panel, drawn by the engine; no handles on the player yet) |
+| Save as preset | `001-basic-top.png` | has (to Yours in the Adjustment tab; no brand kit) |
 
 Out of scope: Color correction, Protect skin tone (Auto adjust, Color match and Track mask are in §6.31), "Add presets to brand kit".
 

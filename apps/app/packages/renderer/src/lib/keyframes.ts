@@ -65,7 +65,8 @@ export const keyframeableProperties = (clip: AnyClipProps): KeyframeProperty[] =
     case "sticker":
       return ["position", "scale", "rotation", "opacity"];
     case "filter":
-      return ["intensity"];
+      // An adjustment layer keys the Adjust tab's tools, as a video does.
+      return (clip as any).adjustment ? [...COLOR_PROPERTIES] : ["intensity"];
     default:
       return [];
   }

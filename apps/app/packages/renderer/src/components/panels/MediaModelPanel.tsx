@@ -25,6 +25,7 @@ import type { SidebarSection } from "@/lib/types";
 import MediaMenu from "@/components/menus/MediaMenu";
 import FilterMenu, { filterSections, useFilters } from "../menus/FilterMenu";
 import EffectsMenu, { effectSections } from "../menus/EffectsMenu";
+import AdjustmentMenu, { adjustmentSections } from "../menus/AdjustmentMenu";
 import { useEffectCatalog } from "@/lib/effects/catalog";
 import TextMenu from "../menus/TextMenu";
 import TransitionMenu from "../menus/TransitionMenu";
@@ -97,7 +98,7 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
     { id: "lyrics", label: "Auto lyrics" },
     { id: "add", label: "Add captions" },
   ],
-  adjustment: [{ id: "adjustment", label: "Adjustment" }],
+  adjustment: adjustmentSections,
   templates: [{ id: "templates", label: "Templates" }],
 };
 
@@ -227,6 +228,8 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
         return <FilterMenu part={sub} />;
       case "effects":
         return <EffectsMenu part={sub} />;
+      case "adjustment":
+        return <AdjustmentMenu part={sub} />;
       case "text":
         return <TextMenu part={sub} />;
       case "captions":

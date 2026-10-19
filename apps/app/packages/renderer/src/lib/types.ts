@@ -896,6 +896,15 @@ export type FilterClipProps = ClipProps & {
    */
   draftKind?: string;
   drawn?: boolean;
+  /**
+   * An adjustment layer (lib/adjustment.ts): the bar applies `color` (the Adjust tab's tools,
+   * as a video's) to everything under it for its duration, inside its `masks`. `transform` is
+   * the canvas's box, which the masks are placed in.
+   */
+  adjustment?: boolean;
+  color?: ClipColor;
+  masks?: MaskClipProps[];
+  masksOff?: boolean;
 };
 
 export interface DrawingLineTransform {

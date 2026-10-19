@@ -48,6 +48,7 @@ import type { TransitionDrag } from "../menus/TransitionMenu";
 import { addLibraryShape, type ShapeDrag } from "../menus/ShapesMenu";
 import type { StickerDrag } from "../menus/StickersMenu";
 import { addSticker, useStickerLibrary } from "@/lib/stickers/library";
+import { dropAdjustment, type AdjustmentDrag } from "@/lib/adjustment";
 import KeyframeGraph from "./KeyframeGraph";
 import { imageDurationFrames } from "@/lib/preferences";
 import { openCoverEditor } from "@/lib/cover";
@@ -544,6 +545,15 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         const frame = Math.hypot(event.delta.x, event.delta.y) > 3 ? frameUnder(event) : null;
         const sticker = useStickerLibrary.getState().stickers.find((x) => x.id === stickerDrag.id);
         if (frame != null && sticker) void addSticker(sticker, { startFrame: frame });
+        setIsDragging(false);
+        return;
+      }
+      // An adjustment tile (Custom adjustment, a saved preset, a LUT) goes in as a layer at the
+      // time it's let go at (the Adjustment tab handles a press without a move).
+      const adjustmentDrag = data as unknown as AdjustmentDrag;
+      if (adjustmentDrag.type === "adjustment-tile") {
+        const frame = Math.hypot(event.delta.x, event.delta.y) > 3 ? frameUnder(event) : null;
+        if (frame != null) dropAdjustment(adjustmentDrag, frame);
         setIsDragging(false);
         return;
       }

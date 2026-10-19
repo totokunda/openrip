@@ -217,7 +217,8 @@ const serializeMaskKeyframesForJson = (
 };
 
 const serializeMasksForJson = (clip: AnyClipProps): SerializedMaskForJson[] => {
-  if (clip.type !== "video" && clip.type !== "image") return [];
+  // A video's or photo's, or an adjustment layer's.
+  if (clip.type !== "video" && clip.type !== "image" && !(clip.type === "filter" && (clip as any).adjustment)) return [];
   const masks = (clip as any).masks as MaskClipProps[] | undefined;
   if (!Array.isArray(masks) || masks.length === 0) return [];
   return masks.map((m) => ({
@@ -774,7 +775,7 @@ const hydrateStoresFromProjectJson = async (
         const mergedAny = merged as any;
 
         if (
-          (mergedAny.type === "video" || mergedAny.type === "image") &&
+          (mergedAny.type === "video" || mergedAny.type === "image" || (mergedAny.type === "filter" && mergedAny.adjustment)) &&
           Array.isArray((c as any).masks)
         ) {
           mergedAny.masks = (c as any).masks
