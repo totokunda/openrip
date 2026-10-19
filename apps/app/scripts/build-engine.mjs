@@ -9,7 +9,7 @@
 //
 // Without a Rust toolchain this warns and exits 0: the app then runs on its own preview.
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { alignLinkedit } from "./align-linkedit.mjs";
@@ -56,19 +56,28 @@ if (ffmpeg.status !== 0) {
 const targetDir = join(engineDir, "target", "addon");
 const hostArch = process.arch;
 const crossTarget = arch !== hostArch ? rustTarget : null;
-const cargoArgs = ["build", "-p", "openrip-node", "--features", "static-ffmpeg"];
-if (profile === "release") cargoArgs.push("--release");
-if (crossTarget) cargoArgs.push("--target", crossTarget);
+const cargoEnv = { ...process.env, FFMPEG_DIR: join(engineDir, ".ffmpeg", ffmpegArch), CARGO_TARGET_DIR: targetDir };
+const profileArgs = [...(profile === "release" ? ["--release"] : []), ...(crossTarget ? ["--target", crossTarget] : [])];
+
+// Rust bundles a static library into the crate that links it when that crate is compiled, and
+// nothing tells cargo the FFmpeg libraries changed: after FFmpeg is rebuilt (a new version, or
+// encoders added) ffmpeg-sys-next is cleaned so the addon links the new libraries, not the copy
+// cached with the old build.
+const ffmpegStamp = readFileSync(join(engineDir, ".ffmpeg", ffmpegArch, ".version"), "utf8").trim();
+const linkedStamp = join(targetDir, `ffmpeg-${ffmpegArch}-${profile}.version`);
+if (existsSync(targetDir) && (!existsSync(linkedStamp) || readFileSync(linkedStamp, "utf8").trim() !== ffmpegStamp)) {
+  console.log(`[build-engine] FFmpeg is now ${ffmpegStamp}: rebuilding its bindings`);
+  spawnSync("cargo", ["clean", "-p", "ffmpeg-sys-next", ...profileArgs], { cwd: engineDir, stdio: "inherit", env: cargoEnv });
+}
+
+const cargoArgs = ["build", "-p", "openrip-node", "--features", "static-ffmpeg", ...profileArgs];
 console.log(`[build-engine] cargo ${cargoArgs.join(" ")}`);
-const built = spawnSync("cargo", cargoArgs, {
-  cwd: engineDir,
-  stdio: "inherit",
-  env: { ...process.env, FFMPEG_DIR: join(engineDir, ".ffmpeg", ffmpegArch), CARGO_TARGET_DIR: targetDir },
-});
+const built = spawnSync("cargo", cargoArgs, { cwd: engineDir, stdio: "inherit", env: cargoEnv });
 if (built.status !== 0) {
   console.error("[build-engine] cargo build failed");
   process.exit(built.status ?? 1);
 }
+writeFileSync(linkedStamp, `${ffmpegStamp}\n`);
 
 const libName = process.platform === "darwin" ? "libopenrip_node.dylib" : "libopenrip_node.so";
 const libPath = join(targetDir, ...(crossTarget ? [crossTarget] : []), profile, libName);
