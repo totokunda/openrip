@@ -7,6 +7,13 @@ interface ZoomLevelConfig {
   majorTickFormat: "frame" | "second";
 }
 
+/** The least step from a short list (1, 2, 5, 10, 20, 50 …) that's at least `n` frames. */
+export const niceFrameStep = (n: number): number => {
+  for (let scale = 1; ; scale *= 10) {
+    for (const k of [1, 2, 5]) if (k * scale >= n) return k * scale;
+  }
+};
+
 // Calculate dynamic tick intervals based on duration and zoom level
 export const getZoomLevelConfig = (
   zoomLevel: ZoomLevel,
@@ -24,16 +31,17 @@ export const getZoomLevelConfig = (
   // Calculate minor tick interval to achieve target tick count
   let minorTickInterval = durationInSeconds / targetTicks;
   let format: "frame" | "second" = "second";
+  let frameMajor = 0;
 
   // For higher zoom levels (7-10), switch to frame-based ticks
   const seventyPercentThresh =
     minZoomLevel + (maxZoomLevel - minZoomLevel) * 0.7;
   if (zoomLevel >= seventyPercentThresh) {
     format = "frame";
-    minorTickInterval = Math.max(
-      1,
-      Math.round((endFrame - startFrame) / targetTicks),
-    );
+    // Down to single frames, as CapCut's ruler: a label (2f, 4f, 6f) about every third of the
+    // window, a tick on every frame (or half the label's step) between them.
+    frameMajor = niceFrameStep((endFrame - startFrame) / 3);
+    minorTickInterval = frameMajor >= 2 && frameMajor % 2 === 0 ? frameMajor / 2 : 1;
   } else {
     // For second-based ticks, ensure intervals convert to whole frames
     // Calculate what the interval would be in frames
@@ -61,7 +69,7 @@ export const getZoomLevelConfig = (
   // Major tick interval is typically 5-10x the minor interval
   const majorTickInterval =
     format === "frame"
-      ? Math.max(2, Math.round(minorTickInterval * 5))
+      ? frameMajor
       : minorTickInterval * 10;
 
   return {

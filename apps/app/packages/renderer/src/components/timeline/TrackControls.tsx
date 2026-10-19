@@ -230,7 +230,7 @@ export const useTrackReorder = (rows: () => { id: string; top: number; height: n
   return { onMouseDown, indicator };
 };
 
-const TRACK_TYPES: { type: TimelineType; label: string }[] = [
+export const TRACK_TYPES: { type: TimelineType; label: string }[] = [
   { type: "media", label: "Video track" },
   { type: "audio", label: "Audio track" },
   { type: "text", label: "Text track" },

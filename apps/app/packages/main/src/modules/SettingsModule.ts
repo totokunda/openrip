@@ -52,6 +52,8 @@ export interface Preferences {
   presetsDir: string;
   /** Performance › Auto clear: the oldest rendering-cache files go once it's over this many GB. */
   renderCacheMaxGb: number;
+  /** The timeline's Linkage settings: the kinds of clip that do not move or get deleted with the main track's clips (lib/linkage.ts). */
+  linkageOff: string[];
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -76,6 +78,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   recordingsDir: "",
   presetsDir: "",
   renderCacheMaxGb: 10,
+  linkageOff: [],
 };
 
 interface Settings {

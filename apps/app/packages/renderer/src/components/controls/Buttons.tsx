@@ -11,7 +11,7 @@ import { FiTrash } from "react-icons/fi";
 import { CgMergeVertical } from "react-icons/cg";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { MAX_DURATION } from "@/lib/settings";
 import { LuSquareSplitVertical, LuCrop, LuUndo2, LuRedo2 } from "react-icons/lu";
@@ -367,6 +367,8 @@ const SeparateButton = () => {
   );
 };
 
+import { OPEN_CROP_EVENT } from "@/lib/crop";
+
 const CropButton = () => {
   const selectedClipIds = useControlsStore((state) => state.selectedClipIds);
   const getClipById = useClipStore((state) => state.getClipById);
@@ -385,6 +387,12 @@ const CropButton = () => {
     if (disabled) return;
     setIsDialogOpen(true);
   };
+  // The clip menu's Edit ▸ Crop.
+  useEffect(() => {
+    const open = () => setIsDialogOpen(true);
+    window.addEventListener(OPEN_CROP_EVENT, open);
+    return () => window.removeEventListener(OPEN_CROP_EVENT, open);
+  }, []);
 
   return (
     <>

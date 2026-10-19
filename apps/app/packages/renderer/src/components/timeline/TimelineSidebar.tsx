@@ -13,11 +13,8 @@ import { TimelineProps } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useControlsStore } from "@/lib/control";
 import { MdPhotoFilter } from "react-icons/md";
+import { trackDy, trackTop, trackView } from "@/lib/timeline-view";
 import { AddTrackButton, TrackButtons, openTrackMenu, useTrackReorder } from "./TrackControls";
-
-interface TimelineSidebarProps {
-  clampedScroll: number; // for the scroll position
-}
 
 // The track's kind, dimmer than its controls (CapCut's #5e5e5e beside #d8d8d8).
 const TypeIcon: React.FC<{ type: TimelineProps["type"] }> = ({ type }) => (
@@ -38,16 +35,15 @@ const TypeIcon: React.FC<{ type: TimelineProps["type"] }> = ({ type }) => (
 const TimelineSidebarItem: React.FC<{
   track: TimelineProps;
   isCollapsed: boolean;
-  clampedScroll: number;
   onMouseDown: (e: React.MouseEvent) => void;
-}> = ({ track, isCollapsed, clampedScroll, onMouseDown }) => {
-  const { type, timelineHeight, timelineY, locked } = track;
+}> = ({ track, isCollapsed, onMouseDown }) => {
+  const { type, timelineHeight, locked } = track;
   return (
     <div
       data-track-header={track.timelineId}
       style={{
         height: (timelineHeight ?? 0) - 8,
-        top: (timelineY ?? 0) + 32 - clampedScroll,
+        top: trackTop(track),
       }}
       className={cn("bg-brand-light/5  w-full absolute flex items-center justify-center cursor-grab", locked && "bg-brand-light/[0.02]")}
       onMouseDown={onMouseDown}
@@ -69,7 +65,7 @@ const TimelineSidebarItem: React.FC<{
   );
 };
 
-const TimelineSidebar: React.FC<TimelineSidebarProps> = ({ clampedScroll }) => {
+const TimelineSidebar: React.FC = () => {
   const collapsedWidth = 40; // ~ w-14
   const expandedWidth = 123; // CapCut's: the kind, lock, hide, mute and the menu
   // Open, as CapCut's always is; its rail still folds it to the kinds alone.
@@ -84,12 +80,12 @@ const TimelineSidebar: React.FC<TimelineSidebarProps> = ({ clampedScroll }) => {
   // The headers as laid out on screen, for dragging them.
   const reorder = useTrackReorder(() => {
     const top = listRef.current?.getBoundingClientRect().top ?? 0;
-    return timelines.map((t) => ({ id: t.timelineId, top: top + (t.timelineY ?? 0) + 32 - clampedScroll, height: (t.timelineHeight ?? 0) - 8 }));
+    return timelines.map((t) => ({ id: t.timelineId, top: top + trackTop(t), height: (t.timelineHeight ?? 0) - 8 }));
   });
   const indicatorTop = (gap: number) => {
     const t = timelines[Math.min(gap, timelines.length - 1)];
     const y = gap < timelines.length ? (t.timelineY ?? 0) + 32 - 5 : (t.timelineY ?? 0) + (t.timelineHeight ?? 0) + 32 - 7;
-    return y - clampedScroll;
+    return y + trackDy(t);
   };
 
   const endDrag = useCallback(() => {
@@ -164,15 +160,28 @@ const TimelineSidebar: React.FC<TimelineSidebarProps> = ({ clampedScroll }) => {
         onMouseDown={(e) => startDrag(e)}
       />
       <div className="relative h-full" ref={listRef}>
-        {timelines.map((timeline) => (
-          <TimelineSidebarItem
-            key={timeline.timelineId}
-            track={timeline}
-            isCollapsed={!isOpen}
-            clampedScroll={clampedScroll}
-            onMouseDown={(e) => reorder.onMouseDown(e, timeline.timelineId)}
-          />
-        ))}
+        {/* With the main track pinned the headers above it scroll under a clip, like their tracks. */}
+        <div className="absolute left-0 right-0 overflow-hidden" style={trackView.pinned ? { top: 24, height: Math.max(0, trackView.overBottom - 24) } : { top: 0, bottom: 0 }}>
+          <div className="absolute left-0 right-0" style={{ top: trackView.pinned ? -24 : 0, height: "100%" }}>
+            {timelines.filter((t) => !trackView.pinned || (t.timelineY ?? 0) < trackView.from).map((timeline) => (
+              <TimelineSidebarItem
+                key={timeline.timelineId}
+                track={timeline}
+                isCollapsed={!isOpen}
+                onMouseDown={(e) => reorder.onMouseDown(e, timeline.timelineId)}
+              />
+            ))}
+          </div>
+        </div>
+        {trackView.pinned &&
+          timelines.filter((t) => (t.timelineY ?? 0) >= trackView.from).map((timeline) => (
+            <TimelineSidebarItem
+              key={timeline.timelineId}
+              track={timeline}
+              isCollapsed={!isOpen}
+              onMouseDown={(e) => reorder.onMouseDown(e, timeline.timelineId)}
+            />
+          ))}
         {/* Where a dragged track would go. */}
         {reorder.indicator != null && (
           <div
@@ -183,7 +192,7 @@ const TimelineSidebar: React.FC<TimelineSidebarProps> = ({ clampedScroll }) => {
         {timelines.length > 0 && (
           <div
             className="absolute left-0 right-0"
-            style={{ top: (last?.timelineY ?? 0) + (last?.timelineHeight ?? 0) + 30 - clampedScroll }}
+            style={{ top: (last?.timelineY ?? 0) + (last?.timelineHeight ?? 0) + 30 + trackDy(last) }}
           >
             <AddTrackButton />
           </div>

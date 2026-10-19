@@ -44,7 +44,8 @@ import { ensureFullMediaStats } from "@/lib/media/utils";
 import { convertFrameRange } from "@/lib/media/fps";
 import { useViewportStore } from "@/lib/viewport";
 import { insertionFrame, mainTrackOf, mainTrackPreview } from "@/lib/timeline-edit";
-import { MarkerEditor, MarkerFlags } from "./Markers";
+import { layoutTracks, trackAt, trackDy, trackView } from "@/lib/timeline-view";
+import { MarkerEditor, MarkerFlags, RangeBand } from "./Markers";
 import { RULER_HEIGHT, TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { bladeFrame, frameAtStageX, stageXOfFrame } from "@/lib/timeline-tools";
 import { applyTransition, cutsOn, useTransitionDropStore } from "@/lib/transitions";
@@ -350,6 +351,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
   // While media is dragged over the main track with the magnet on: the point it would go in at.
   const insertAtRef = useRef<number | null>(null);
   const timelinesLayerRef = useRef<Konva.Layer | null>(null);
+  const pinnedLayerRef = useRef<Konva.Layer | null>(null);
+  const clipDragging = useClipStore((s) => s.isDragging);
   const haldClutRef = useWebGLHaldClut();
   const [verticalScroll, setVerticalScroll] = useState(0);
   const verticalScrollRef = useRef(0);
@@ -391,8 +394,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     if (!start || !el || typeof start.clientX !== "number") return null;
     const r = el.getBoundingClientRect();
     const x = start.clientX + event.delta.x - r.left;
-    const y = start.clientY + event.delta.y - r.top + clampedScroll;
-    const track = timelines.find((t) => y >= (t.timelineY ?? 0) + 32 && y <= (t.timelineY ?? 0) + (t.timelineHeight ?? 0) + 24);
+    const y = start.clientY + event.delta.y - r.top;
+    const track = trackAt(timelines, y);
     if (!track || x < 0 || x > r.width) return null;
     const [vs, ve] = controlStore.timelineDuration;
     const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
@@ -416,11 +419,11 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     const cx = start.clientX + event.delta.x;
     const cy = start.clientY + event.delta.y;
     if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return;
-    const y = cy - r.top + clampedScroll;
+    const y = cy - r.top;
     const [vs, ve] = controlStore.timelineDuration;
     const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
     const frame = Math.max(0, Math.round(vs + (cx - r.left - TIME_ZERO_X) * perPx));
-    const track = timelines.find((t) => y >= (t.timelineY ?? 0) + 32 && y <= (t.timelineY ?? 0) + (t.timelineHeight ?? 0) + 24);
+    const track = trackAt(timelines, y);
     const onClip = track && clips.find((c) => c.timelineId === track.timelineId && takesEffects(c.type) && c.startFrame <= frame && frame < c.endFrame);
     if (onClip) void applyEffectToClip(onClip.clipId, effectId);
     else void addEffectBar(effectId, frame);
@@ -437,11 +440,11 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     const cx = start.clientX + event.delta.x;
     const cy = start.clientY + event.delta.y;
     if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return;
-    const y = cy - r.top + clampedScroll;
+    const y = cy - r.top;
     const [vs, ve] = controlStore.timelineDuration;
     const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
     const frame = Math.max(0, Math.round(vs + (cx - r.left - TIME_ZERO_X) * perPx));
-    const track = timelines.find((t) => y >= (t.timelineY ?? 0) + 32 && y <= (t.timelineY ?? 0) + (t.timelineHeight ?? 0) + 24);
+    const track = trackAt(timelines, y);
     const onClip = track && clips.find((c) => c.timelineId === track.timelineId && c.startFrame <= frame && frame < c.endFrame);
     if (!onClip) return;
     const selected = controlStore.selectedClipIds;
@@ -706,8 +709,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         (window as any).__apex_lastPointerX = pointerX;
       } catch {}
       // check if the pointer is over a dashed line
-      const stage = timelinesLayerRef.current;
-      const children = stage?.children || [];
+      const children = [...(pinnedLayerRef.current?.children || []), ...(timelinesLayerRef.current?.children || [])];
       let hoveredTimelineIdCurrent: string | null = null;
 
       for (const child of children) {
@@ -755,7 +757,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       let activeTimelineId: string | null = null;
       for (let i = 0; i < timelines.length; i++) {
         const t = timelines[i];
-        const top = (t.timelineY ?? 0) + 8 - (verticalScrollRef.current || 0);
+        const top = (t.timelineY ?? 0) + 8 + trackDy(t);
         const height = t.timelineHeight ?? 54;
         const left = timelinePadding;
         const right = left + stageWidth;
@@ -1255,25 +1257,37 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     ],
   );
 
-  // Compute vertical content height for scrollbar logic
-  const contentHeight = useMemo(() => {
-    if (!timelines || timelines.length === 0) return dimensions.stageHeight;
-    const bottoms = timelines.map((t) => {
-      const y = t.timelineY || 0;
-      const h = t.timelineHeight || 54;
-      return y + h + 32; // include padding/offsets in Timeline rendering
-    });
-    return Math.max(...bottoms, 0) + SCROLL_BOTTOM_PADDING;
-  }, [timelines, dimensions.stageHeight]);
-
-  const maxScroll = useMemo(
-    () => Math.max(0, contentHeight - dimensions.stageHeight),
-    [contentHeight, dimensions.stageHeight],
+  // The tracks' vertical layout: the main track (and what's below) pinned at the bottom with the
+  // overlay tracks above it scrolling, or one scroll for everything when they don't fit that way.
+  const trackLayout0 = useMemo(
+    () => layoutTracks(timelines, mainTrackOf(timelines), dimensions.stageHeight, 0, SCROLL_BOTTOM_PADDING),
+    [timelines, dimensions.stageHeight],
   );
+  const maxScroll = trackLayout0.maxScroll;
+  // Content height for the scrollbar's thumb.
+  const contentHeight = dimensions.stageHeight + maxScroll;
   const clampedScroll = useMemo(
     () => Math.max(0, Math.min(verticalScroll, maxScroll)),
     [verticalScroll, maxScroll],
   );
+  const trackLayout = useMemo(
+    () => layoutTracks(timelines, mainTrackOf(timelines), dimensions.stageHeight, clampedScroll, SCROLL_BOTTOM_PADDING),
+    [timelines, dimensions.stageHeight, clampedScroll],
+  );
+  // Read by the drag code and the headers (set while laying out, not after, so they agree).
+  Object.assign(trackView, trackLayout);
+
+  // With the main track pinned, the overlay tracks sit scrolled to the bottom, by the main track;
+  // a new track above them keeps it so.
+  const wasBottomRef = useRef(true);
+  const prevMaxRef = useRef(0);
+  useEffect(() => {
+    if (trackLayout.pinned && wasBottomRef.current && maxScroll !== prevMaxRef.current) setVerticalScroll(maxScroll);
+    prevMaxRef.current = maxScroll;
+  }, [maxScroll, trackLayout.pinned]);
+  useEffect(() => {
+    wasBottomRef.current = trackLayout.pinned ? clampedScroll >= maxScroll - 1 : false;
+  }, [clampedScroll, maxScroll, trackLayout.pinned]);
 
   useEffect(() => {
     setVerticalScroll((prev) => Math.max(0, Math.min(prev, maxScroll)));
@@ -1469,6 +1483,23 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     [controlStore, controlStore.timelineDuration, dimensions.stageWidth],
   );
 
+  const renderTrack = (timeline: (typeof timelines)[number], index: number) => (
+    <Timeline
+      key={timeline.timelineId}
+      scrollY={clampedScroll}
+      timelinePadding={timeline.timelinePadding}
+      index={index}
+      type={timeline.type}
+      muted={timeline.muted}
+      hidden={timeline.hidden}
+      timelineWidth={dimensions.stageWidth}
+      timelineY={timeline.timelineY}
+      timelineHeight={timeline.timelineHeight}
+      timelineId={timeline.timelineId}
+      assetMode={false}
+    />
+  );
+
   const handleRulerClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       controlStore.clearSelection();
@@ -1498,7 +1529,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
 
   return (
     <div className="relative h-full flex flex-row overflow-hidden">
-      {hasClips && <TimelineSidebar clampedScroll={clampedScroll} />}
+      {hasClips && <TimelineSidebar />}
       <div
         className="relative h-full w-full overflow-hidden"
         ref={containerRef}
@@ -1520,32 +1551,35 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                   onMouseLeave={leaveStage}
                   style={{ cursor: isRulerDragging ? "grabbing" : "default" }}
                 >
-                  <Layer
-                    ref={timelinesLayerRef}
-                    visible={hasClips}
-                    y={-clampedScroll}
-                  >
-                    {timelines.map((timeline, index) => (
-                      <Timeline
-                      
-                        key={timeline.timelineId}
-                        scrollY={clampedScroll}
-                        timelinePadding={timeline.timelinePadding}
-                        index={index}
-                        type={timeline.type}
-                        muted={timeline.muted}
-                        hidden={timeline.hidden}
-                        timelineWidth={dimensions.stageWidth}
-                        timelineY={timeline.timelineY}
-                        timelineHeight={timeline.timelineHeight}
-                        timelineId={timeline.timelineId}
-                        assetMode={false}
-                      />
-                    ))}
+                  {/* The main track and what's below it, fixed at the bottom of the track area. */}
+                  <Layer ref={pinnedLayerRef} visible={hasClips} y={trackLayout.pin}>
+                    {timelines.map((timeline, index) =>
+                      trackLayout.pinned && (timeline.timelineY ?? 0) >= trackLayout.from ? renderTrack(timeline, index) : null,
+                    )}
                     {(() => {
                       // Where Timeline draws the main track's band (its y + 32, 8 px shorter).
                       const main = mainTrackOf(timelines);
-                      if (!main) return null;
+                      if (!main || !trackLayout.pinned) return null;
+                      return <CoverTile top={(main.timelineY ?? 0) + 32} height={(main.timelineHeight ?? 0) - 8} />;
+                    })()}
+                  </Layer>
+                  {/* The tracks above, scrolling, kept above the pinned ones by a clip (until a clip is dragged). */}
+                  <Layer
+                    ref={timelinesLayerRef}
+                    visible={hasClips}
+                    y={trackLayout.over}
+                    clipFunc={
+                      trackLayout.pinned && !clipDragging
+                        ? (ctx) => ctx.rect(0, 24 - trackLayout.over, dimensions.stageWidth, trackLayout.overBottom - 24)
+                        : undefined
+                    }
+                  >
+                    {timelines.map((timeline, index) =>
+                      trackLayout.pinned && (timeline.timelineY ?? 0) >= trackLayout.from ? null : renderTrack(timeline, index),
+                    )}
+                    {(() => {
+                      const main = mainTrackOf(timelines);
+                      if (!main || trackLayout.pinned) return null;
                       return <CoverTile top={(main.timelineY ?? 0) + 32} height={(main.timelineHeight ?? 0) - 8} />;
                     })()}
                   </Layer>
@@ -1589,6 +1623,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                         return thumbY;
                       }}
                     />
+                    <RangeBand stageWidth={dimensions.stageWidth} startPadding={TIME_ZERO_X} stageHeight={dimensions.stageHeight} />
                     <MarkerFlags stageWidth={dimensions.stageWidth} startPadding={TIME_ZERO_X} />
                   </Layer>
                   {/* Snap guideline overlay */}
@@ -1753,7 +1788,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
           </>
         )}
         <MarkerEditor anchor={containerRef} stageWidth={dimensions.stageWidth} startPadding={TIME_ZERO_X} />
-        {hasClips && <KeyframeGraph stageWidth={dimensions.stageWidth} scrollY={clampedScroll} />}
+        {hasClips && <KeyframeGraph stageWidth={dimensions.stageWidth} />}
         <div style={{ display: hasClips ? undefined : "none" }}>
           <ScrubControl
             stageHeight={dimensions.stageHeight - 30}

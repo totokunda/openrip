@@ -73,9 +73,9 @@ export const flipOf = (clip: AnyClipProps): Required<ClipFlip> => {
   return { horizontal: !!f?.horizontal, vertical: !!f?.vertical };
 };
 
-/** A patch mirroring a video or photo left to right (CapCut's Mirror) or top to bottom. */
+/** A patch mirroring a video, photo or sticker left to right (CapCut's Mirror) or top to bottom. */
 export const toggleFlip = (clip: AnyClipProps, axis: "horizontal" | "vertical"): Partial<AnyClipProps> => {
-  if (clip.type !== "video" && clip.type !== "image") return {};
+  if (clip.type !== "video" && clip.type !== "image" && clip.type !== "sticker") return {};
   const f = flipOf(clip);
   return { flip: { ...f, [axis]: !f[axis] } } as Partial<AnyClipProps>;
 };

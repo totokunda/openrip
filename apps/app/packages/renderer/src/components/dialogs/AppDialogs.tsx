@@ -16,6 +16,7 @@ import NoticesWindow from "./NoticesWindow";
 import ProjectSettingsModal from "./ProjectSettingsModal";
 import CoverEditor from "./CoverEditor";
 import Walkthrough from "./Walkthrough";
+import LinkageDialog from "./LinkageDialog";
 
 const LAYOUTS: AppLayoutId[] = ["default", "media", "properties", "vertical"];
 
@@ -66,6 +67,7 @@ export const AppDialogs: React.FC = () => {
       <AboutWindow open={s.aboutOpen} onOpenChange={s.setAboutOpen} />
       <NoticesWindow open={s.noticesOpen} onOpenChange={s.setNoticesOpen} />
       {s.view === "editor" && <CoverEditor />}
+      {s.view === "editor" && <LinkageDialog open={s.linkageOpen} onOpenChange={s.setLinkageOpen} />}
       <Walkthrough />
       {s.view === "editor" && <ProjectSettingsModal open={s.projectSettingsOpen} onOpenChange={s.setProjectSettingsOpen} />}
     </>

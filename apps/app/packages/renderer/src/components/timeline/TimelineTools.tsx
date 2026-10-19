@@ -4,7 +4,7 @@
 // the toolbar's other buttons, its tooltip naming its shortcut, so any toolbar can place them.
 import React from "react";
 import { TbArrowBarToLeft, TbArrowBarToRight, TbArrowsHorizontal, TbSeparatorVertical, TbSnowflake, TbTransform } from "react-icons/tb";
-import { LuCheck, LuChevronLeft, LuChevronRight, LuFlipHorizontal2, LuHistory, LuLink, LuMagnet, LuMousePointer2, LuRotateCw, LuScissors, LuScan, LuShield } from "react-icons/lu";
+import { LuCheck, LuChevronLeft, LuChevronRight, LuFlipHorizontal2, LuHistory, LuLink, LuMagnet, LuPlus, LuMousePointer2, LuRotateCw, LuScissors, LuScan, LuShield } from "react-icons/lu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { freezeAtPlayhead, freezeTarget, reverseTarget, toggleReverse } from "@/lib/timeline-motion";
 import { rotate90, toggleFlip } from "@/lib/transform-presets";
@@ -16,6 +16,8 @@ import { trail } from "@/lib/compound";
 import { closeCompound } from "@/lib/compound-edit";
 import { keyLabels, useKeymapStore, useShortcutTitle } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
+import { TRACK_TYPES } from "./TrackControls";
+import { useShellStore } from "@/lib/shell";
 
 const buttonClass = (disabled: boolean) =>
   cn(
@@ -65,6 +67,28 @@ export const AddMarkerButton = () => {
   );
 };
 
+/**
+ * CapCut's Add (+) at the toolbar's left end: a menu of the tracks that can be added empty
+ * (the track headers' + offers the same), each going where its kind belongs.
+ */
+export const AddMenuButton = () => {
+  const addTrack = useClipStore((s) => s.addTrack);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger title="Add" data-testid="tool-add" className="h-7 w-7 flex items-center justify-center text-brand-light opacity-80 hover:opacity-100 outline-none">
+        <LuPlus className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className={cn(menuContent, "w-[190px]")}>
+        {TRACK_TYPES.map((t) => (
+          <DropdownMenuItem key={t.type} data-testid={`add-${t.type}`} className={menuRow} onClick={() => addTrack(t.type)}>
+            Add {t.label.toLowerCase()}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
 /** A toggle: on, its glyph in the accent on a dark chip (CapCut's 24×23); off, a grey glyph. */
 const Toggle: React.FC<{ title: string; on: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }> = ({
   title,
@@ -87,6 +111,10 @@ const Toggle: React.FC<{ title: string; on: boolean; disabled?: boolean; onClick
     {children}
   </div>
 );
+
+const menuContent = "dark bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] p-1";
+const menuRow = "dark h-9 text-[13px] text-brand-light gap-x-2.5 px-3 rounded-[4px] cursor-pointer focus:bg-brand-hover";
+const menuKey = "ml-auto text-[12px] text-[#8a8a8a]";
 
 export const MagnetToggle = () => {
   const magnet = useClipStore((s) => s.magnet);
@@ -111,12 +139,25 @@ export const SnappingToggle = () => {
 };
 
 export const LinkageToggle = () => {
-  const linkage = useControlsStore((s) => s.linkage);
-  const setLinkage = useControlsStore((s) => s.setLinkage);
+  const linkage = useControlsStore((c) => c.linkage);
+  const setLinkage = useControlsStore((c) => c.setLinkage);
+  const setOpen = useShellStore((s) => s.setLinkageOpen);
   return (
-    <Toggle title={useShortcutTitle("Linkage", "linkage")} on={linkage} onClick={() => setLinkage(!linkage)}>
-      <LuLink className="h-3.5 w-3.5" />
-    </Toggle>
+    <div className="flex items-center">
+      <Toggle title={useShortcutTitle("Linkage", "linkage")} on={linkage} onClick={() => setLinkage(!linkage)}>
+        <LuLink data-testid="tool-linkage" className="h-3.5 w-3.5" />
+      </Toggle>
+      <DropdownMenu>
+        <DropdownMenuTrigger data-testid="tool-linkage-menu" title="Linkage options" className="h-[23px] w-3 flex items-center justify-center text-brand-light/70 hover:text-brand-light outline-none">
+          <span className="w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px] border-t-current" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className={cn(menuContent, "w-[200px]")}>
+          <DropdownMenuItem data-testid="linkage-settings" className={menuRow} onClick={() => setOpen(true)}>
+            Linkage settings
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 };
 
@@ -130,10 +171,6 @@ export const ZoomToFitButton = () => {
     </Toggle>
   );
 };
-
-const menuContent = "dark bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] p-1";
-const menuRow = "dark h-9 text-[13px] text-brand-light gap-x-2.5 px-3 rounded-[4px] cursor-pointer focus:bg-brand-hover";
-const menuKey = "ml-auto text-[12px] text-[#8a8a8a]";
 
 /**
  * CapCut's selection tool (▾): Select (A) and the Split blade (B) are the timeline's tools, the

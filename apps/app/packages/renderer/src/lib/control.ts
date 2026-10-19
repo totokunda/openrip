@@ -120,6 +120,13 @@ interface ControlStore {
    */
   linkage: boolean;
   setLinkage: (on: boolean) => void;
+  /**
+   * The timeline's range (CapCut's Range): the frames between an In and an Out point, drawn on
+   * the ruler; set by I and O, or from the selected clips (⇧X), cleared by Deselect. Export range
+   * writes it. Not part of the project.
+   */
+  range: { start: number; end: number } | null;
+  setRange: (range: { start: number; end: number } | null) => void;
   /** The timeline's tool: Select (A) or the Split blade (B), which cuts the clip it's clicked on. */
   timelineTool: "select" | "split";
   setTimelineTool: (tool: "select" | "split") => void;
@@ -396,6 +403,8 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
   setSnapping: (on) => set({ snapping: on }),
   linkage: true,
   setLinkage: (on) => set({ linkage: on }),
+  range: null,
+  setRange: (range) => set({ range: range && range.end > range.start ? range : null }),
   timelineTool: "select",
   setTimelineTool: (tool) => set({ timelineTool: tool }),
   previewAxis: false,

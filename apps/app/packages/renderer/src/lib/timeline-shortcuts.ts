@@ -2,6 +2,7 @@
 // markers, the magnet and snapping toggles, selection, timeline zoom, the keyframe graph, the
 // transform tools and the player's zoom. The keyboard handler in Controls.tsx passes keys here
 // first; which key is which action is lib/keymap.ts's (the Shortcuts window changes it).
+import { spanOf, withEnd } from "./range";
 import { useClipStore } from "./clip";
 import { zoomFit, zoomIn, zoomOut } from "./player-zoom";
 import { usePlayerStore } from "./player";
@@ -151,6 +152,20 @@ export const selectBeside = (side: "left" | "right") => {
   controls.setSelectedClipIds(picked.map((c) => c.clipId));
 };
 
+/** Range: In or Out at the playhead. */
+export const setRangeEnd = (which: "in" | "out") => {
+  const c = useControlsStore.getState();
+  c.setRange(withEnd(c.range, which, c.focusFrame, useClipStore.getState().clipDuration));
+};
+
+/** Range ▸ Select by clip: the range becomes the span of the selected clips. */
+export const rangeByClip = (ids?: string[]) => {
+  const c = useControlsStore.getState();
+  const wanted = new Set(ids ?? c.selectedClipIds);
+  const span = spanOf(useClipStore.getState().clips.filter((x) => wanted.has(x.clipId)));
+  if (span) c.setRange(span);
+};
+
 /** The selected (else the last selected) video or photo, for Mirror and Rotate. */
 const visualTarget = () => {
   const { selectedClipIds } = useControlsStore.getState();
@@ -245,6 +260,10 @@ const RUN: Record<string, () => void> = {
     if (viewport.tool === "pointer" && selected.length > 0) useClipStore.getState().setClipsDeactivated(selected);
     else viewport.setTool("pointer");
   },
+  rangeIn: () => setRangeEnd("in"),
+  rangeOut: () => setRangeEnd("out"),
+  rangeByClip: () => rangeByClip(),
+  rangeDeselect: () => useControlsStore.getState().setRange(null),
   selectLeft: () => selectBeside("left"),
   selectRight: () => selectBeside("right"),
   // The toolbar's transform tools.

@@ -42,6 +42,8 @@ import { allClips, breakApart, cloneContent, createCompound, isCompound, type Co
 
 import _ from "lodash";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
+import { carriedClips } from "./linkage";
+import { preferences } from "./preferences";
 
 interface ClipStore {
   // Clips
@@ -507,11 +509,14 @@ const withTimelineRules =
 /** Whether linked clips are edited together (CapCut's linkage, the toolbar's toggle). */
 const linkage = () => useControlsStore.getState().linkage;
 
+/** Linkage settings: what the main track's clips carry besides their linked clips; undefined with linkage off. */
+const carry = (assets: Record<string, Asset>) => (linkage() ? { off: preferences().linkageOff ?? [], assets } : undefined);
+
 /** The clips linked to `clip` that its edits carry along: none with linkage off. */
 const partners = (clips: AnyClipProps[], clip: AnyClipProps | undefined) => (linkage() ? linkedClips(clips, clip) : []);
 
 /** The two halves of `clip` cut at `cutFrame` (between its ends), with new ids. */
-const splitClipAt = (clip: AnyClipProps, cutFrame: number): [AnyClipProps, AnyClipProps] => {
+export const splitClipAt = (clip: AnyClipProps, cutFrame: number): [AnyClipProps, AnyClipProps] => {
   // create new clip ids
   const newClipId1 = uuidv4();
   const newClipId2 = uuidv4();
@@ -1352,7 +1357,22 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
 
       // Linked clips (a video's extracted audio) go with it.
       const linked = new Set(partners(state.clips, clipToDelete).map((c) => c.clipId));
+      // Linkage settings: the overlays over a main track clip go with it, and with the magnet on
+      // those over the clips after it move back by its length with them.
+      const main = mainTrackOf(state.timelines);
+      const withClip = carry(state.assets);
+      let shiftBack: Map<string, number> | null = null;
+      if (clipToDelete && withClip && main && clipToDelete.timelineId === main.timelineId) {
+        for (const c of carriedClips(state.clips, state.timelines, main.timelineId, [clipToDelete], withClip.off, withClip.assets)) linked.add(c.clipId);
+        if (state.magnet && !main.locked) {
+          const len = (clipToDelete.endFrame ?? 0) - (clipToDelete.startFrame ?? 0);
+          const after = state.clips.filter((c) => c.timelineId === main.timelineId && !c.hidden && (c.startFrame ?? 0) >= (clipToDelete.endFrame ?? 0));
+          shiftBack = new Map();
+          for (const c of carriedClips(state.clips, state.timelines, main.timelineId, after, withClip.off, withClip.assets)) shiftBack.set(c.clipId, len);
+        }
+      }
       let newClips: AnyClipProps[] = state.clips.filter((c) => !linked.has(c.clipId));
+      if (shiftBack) newClips = newClips.map((c) => (shiftBack!.has(c.clipId) ? ({ ...c, startFrame: (c.startFrame ?? 0) - shiftBack!.get(c.clipId)!, endFrame: (c.endFrame ?? 0) - shiftBack!.get(c.clipId)! } as AnyClipProps) : c));
 
       if (!clipToDelete) {
         const resolvedClips = resolveOverlaps(newClips);
@@ -2205,7 +2225,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
     }),
   closeGap: (timelineId, frame) => {
     const state = get();
-    const next = closeGaps(state.clips, state.timelines, timelineId, frame, linkage());
+    const next = closeGaps(state.clips, state.timelines, timelineId, frame, linkage(), carry(state.assets));
     if (next === state.clips) return false;
     set({ clips: resolveOverlaps(next), clipDuration: calculateTotalClipDuration(next) });
     return true;

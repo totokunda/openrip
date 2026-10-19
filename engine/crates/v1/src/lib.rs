@@ -675,6 +675,10 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
             compositing::set_flip(&mut seg.transform, clip.get("flip"));
         }
     }
+    // A sticker the app mirrored.
+    if ty == "sticker" && differs("flip") {
+        compositing::set_flip(&mut seg.transform, clip.get("flip"));
+    }
     if matches!(ty, "video" | "image" | "text") && differs("blendMode") {
         compositing::set_blend(&seg.id.clone(), clip.get("blendMode"), materials, &mut seg.attachments);
     }
@@ -1095,7 +1099,7 @@ fn convert_clip(
         }
     };
     let mut transform = transform;
-    if matches!(ty, "video" | "image") {
+    if matches!(ty, "video" | "image" | "sticker") {
         compositing::set_flip(&mut transform, clip.get("flip"));
     }
 
@@ -2075,6 +2079,7 @@ mod tests {
             "stickerId": "fluent-3d-red-heart", "stickerPath": "file:///cache/heart.png", "stickerWidth": 256, "stickerHeight": 256, "stickerAnimated": false,
             "animationIn": {"type": "fade_in", "duration": 0.5}, "startTick": "0", "endTick": "2000000", "trimStartTick": "0", "trimEndTick": "0",
             // 200 world units wide on a 1066.67-wide canvas.
+            "flip": {"horizontal": true, "vertical": false},
             "transform": {"x": 433.3333333333333, "y": 200, "width": 200, "height": 200, "scaleX": 1, "scaleY": 1, "rotation": 0, "opacity": 80}}));
         let Imported { project, report } = import_v1_json(&d).unwrap();
         assert!(report.kept_foreign.is_empty(), "{report:?}");
@@ -2088,6 +2093,8 @@ mod tests {
         // 0.791 of the 256-pixel design.
         assert!((seg.transform.scale.value.x - 202.5 / 256.0).abs() < 1e-9, "{:?}", seg.transform.scale);
         assert!((seg.opacity.value - 0.8).abs() < 1e-6);
+        // Mirrored by the app's Mirror.
+        assert!(seg.transform.flip_h && !seg.transform.flip_v);
         assert_eq!(project.materials.animations.iter().flat_map(|a| a.items.iter()).filter(|a| a.kind == AnimationKind::In).count(), 1);
     }
 

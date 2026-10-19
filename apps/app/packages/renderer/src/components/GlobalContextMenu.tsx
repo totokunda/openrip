@@ -11,10 +11,10 @@ import type { KeyframePreset } from "@/lib/types";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { cn } from "@/lib/utils";
-import type { AnyClipProps } from "@/lib/types";
 import { useMarkerEditorStore } from "@/components/timeline/Markers";
 import { dockPanel, popOutPanel } from "@/lib/panel-windows";
 import ExportModal from "@/components/dialogs/ExportModal";
+import { openClipsExport, useExportScope } from "@/lib/export-scope";
 
 const Key: React.FC<{ text: string }> = ({ text }) => (
   <span className="text-[12px] text-[#949494] tracking-wide">{text}</span>
@@ -79,30 +79,10 @@ const GlobalContextMenu: React.FC = () => {
   const view = doc.defaultView ?? window;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const clipsStore = useClipStore();
-  const getAssetById = useClipStore((s) => s.getAssetById);
-  const [exportModalOpen, setExportModalOpen] = useState(false);
-  const [exportKind, setExportKind] = useState<
-    "audio" | "image" | "video" | null
-  >(null);
-  const [exportClipId, setExportClipId] = useState<string | null>(null);
+  const exportScope = useExportScope((x) => x.scope);
+  const closeExport = useExportScope((x) => x.close);
 
-  const getDefaultNameForClip = (
-    clip: AnyClipProps | null | undefined,
-  ): string => {
-    if (!clip) return "export";
-    try {
-      const asset = getAssetById((clip as any)?.assetId);
-      if (!asset) return "export";
-      const parts = asset.path.split(/[\\/]/);
-      const last = parts[parts.length - 1] || "";
-      const stem = last.replace(/\.[^.]+$/, "");
-      return stem || "export";
-    } catch {
-      return "export";
-    }
-  };
-
-  const shouldShowMenu = open && !exportModalOpen;
+  const shouldShowMenu = open;
   // The row whose submenu is open.
   const [openSub, setOpenSub] = useState<string | null>(null);
   useEffect(() => setOpenSub(null), [open, groups]);
@@ -213,23 +193,7 @@ const GlobalContextMenu: React.FC = () => {
       else if (action === "separateAudio" && target.isVideo)
         clipsStore.separateClip(target.primaryClipId);
       else if (action === "export") {
-        try {
-          const primaryId = target.primaryClipId;
-          const clip = clipsStore.getClipById(primaryId) as
-            | AnyClipProps
-            | undefined;
-          if (!clip) return;
-          let kind: "audio" | "image" | "video" | null = null;
-          if (clip.type === "audio") kind = "audio";
-          else if (clip.type === "image") kind = "image";
-          else if (clip.type === "video") kind = "video";
-          if (!kind) return;
-          setExportClipId(primaryId);
-          setExportKind(kind);
-          setExportModalOpen(true);
-        } catch {
-          // swallow
-        }
+        openClipsExport(ids);
       } else if (action === "group") {
         clipsStore.groupClips(ids);
       } else if (action === "ungroup") {
@@ -322,17 +286,7 @@ const GlobalContextMenu: React.FC = () => {
           </div>,
           doc.body,
         )}
-      {exportKind && exportClipId && (
-        <ExportModal
-          open={exportModalOpen}
-          onOpenChange={setExportModalOpen}
-          scope={{
-            clipId: exportClipId,
-            kind: exportKind,
-            name: getDefaultNameForClip(clipsStore.getClipById(exportClipId) as AnyClipProps | undefined),
-          }}
-        />
-      )}
+      {exportScope && <ExportModal open onOpenChange={(o) => !o && closeExport()} scope={exportScope} />}
     </>
   );
 };

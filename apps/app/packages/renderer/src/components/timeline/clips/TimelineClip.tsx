@@ -1,3 +1,4 @@
+import { trackDy } from "@/lib/timeline-view";
 import React, {
   useCallback,
   useEffect,
@@ -41,6 +42,7 @@ import {
   MediaClipProps,
   GroupClipProps,
   AudioClipProps,
+  AnyClipProps,
 } from "@/lib/types";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -53,6 +55,10 @@ import MaskKeyframes from "./MaskKeyframes";
 import ClipKeyframes from "./ClipKeyframes";
 import MotionMarks from "./MotionMarks";
 import { freezeTarget } from "@/lib/timeline-motion";
+import { rotate90, toggleFlip } from "@/lib/transform-presets";
+import { rangeByClip } from "@/lib/timeline-shortcuts";
+import { OPEN_CROP_EVENT } from "@/lib/crop";
+import { openRangeExport } from "@/lib/export-scope";
 import BeatMarkers from "./BeatMarkers";
 import { projectBeatPoints, soundMenuItems } from "@/lib/audio-tools";
 import { analysisMenuItems } from "@/lib/analysis";
@@ -629,7 +635,7 @@ const TimelineClip: React.FC<
 
       // We only need the pointer position for proximity checks
 
-      const children = stage?.children[0]?.children || [];
+      const children = (stage?.children || []).slice(0, 2).flatMap((l) => l.children || []);
       const timelineState = useClipStore.getState();
       const timelineMap = new Map(
         timelineState.timelines.map((t) => [t.timelineId, t]),
@@ -671,7 +677,7 @@ const TimelineClip: React.FC<
         }
 
         // Also compute distance to the actual timeline track center for comparison
-        const timelineDistance = Math.abs(pointerY + scrollY - timelineCenterY);
+        const timelineDistance = Math.abs(pointerY - trackDy(timelineData) - timelineCenterY);
         if (timelineDistance < minTimelineDistance) {
           minTimelineDistance = timelineDistance;
           nearestTimelineForGhost = timelineKey;
@@ -720,7 +726,7 @@ const TimelineClip: React.FC<
           const fullH = t.timelineHeight ?? timelineHeight + 16;
           // Center Y in content coordinates: top is y + 40, track height is fullH - 16
           const centerY = (t.timelineY ?? 0) + 40 + Math.max(1, fullH - 16) / 2;
-          const d = Math.abs(pointerY + scrollY - centerY);
+          const d = Math.abs(pointerY - trackDy(t) - centerY);
           if (d < bestDist) {
             bestDist = d;
             bestId = t.timelineId!;
@@ -1231,27 +1237,15 @@ const TimelineClip: React.FC<
 
       const otherCommands: ContextMenuItem[] = [];
 
-      if (clip?.type === "image") {
+      // Export selected clips: the selected video, photo and audio clips, as one file.
+      const exportable = targetIds.filter((id) => {
+        const c = clipsState.getClipById(id);
+        return c?.type === "video" || c?.type === "image" || (c?.type === "audio" && !!c.assetId);
+      });
+      if (exportable.length > 0) {
         otherCommands.push({
           id: "export",
-          label: "Export as Image",
-          action: "export",
-        });
-      }
-      if (clip?.type === "video") {
-        const fps = useControlsStore.getState().fps;
-        const duration = (currentEndFrame - currentStartFrame) / fps;
-        if (duration <= 60) {
-          otherCommands.push({
-            id: "export",
-            label: "Export as Video",
-            action: "export",
-          });
-        }
-      } else if (clip?.type === "audio" && clip.assetId) {
-        otherCommands.push({
-          id: "export",
-          label: "Export as Audio",
+          label: "Export selected clips",
           action: "export",
         });
       }
@@ -1308,20 +1302,45 @@ const TimelineClip: React.FC<
         });
       }
 
-      // CapCut's Edit › on a video: Freeze (at the playhead, when it's on the clip) and Reverse.
+      // CapCut's Edit ›: Freeze (at the playhead, when it's on the clip) and Reverse on a video;
+      // Mirror, Rotate and Crop on a video or photo.
       const editTools: ContextMenuItem[] = [];
-      if (clip?.type === "video" && !compoundClip && !(clip as VideoClipProps).freeze && targetIds.length === 1) {
-        const canFreeze = !!freezeTarget(clipsState.clips, clipsState.timelines, controls.focusFrame, [clip.clipId]);
-        editTools.push({
-          id: "edit",
-          label: "Edit",
-          action: "none",
-          children: [
-            { id: "freeze", label: "Freeze", action: "freeze", disabled: !canFreeze, checked: false },
-            // A toggle: ticked while the clip plays backward.
-            { id: "reverse", label: "Reverse", action: "reverse", checked: !!(clip as VideoClipProps).reverse },
-          ],
-        });
+      const visuals = targetIds.map((id) => clipsState.getClipById(id)).filter((c): c is AnyClipProps => !!c && (c.type === "video" || c.type === "image") && !isCompound(c));
+      if (visuals.length > 0 && !compoundClip) {
+        const single = targetIds.length === 1;
+        const video = clip?.type === "video" && single && !(clip as VideoClipProps).freeze;
+        const children: ContextMenuItem[] = [];
+        if (video) {
+          const canFreeze = !!freezeTarget(clipsState.clips, clipsState.timelines, controls.focusFrame, [clip!.clipId]);
+          children.push({ id: "freeze", label: "Freeze", action: "freeze", disabled: !canFreeze, checked: false });
+          // A toggle: ticked while the clip plays backward.
+          children.push({ id: "reverse", label: "Reverse", action: "reverse", checked: !!(clip as VideoClipProps).reverse });
+        }
+        children.push(
+          {
+            id: "mirror",
+            label: "Mirror",
+            action: "custom",
+            run: () => visuals.forEach((v) => useClipStore.getState().updateClip(v.clipId, toggleFlip(v, "horizontal"))),
+          },
+          {
+            id: "rotate",
+            label: "Rotate",
+            action: "custom",
+            run: () => visuals.forEach((v) => useClipStore.getState().updateClip(v.clipId, rotate90(v, 1))),
+          },
+          {
+            id: "crop",
+            label: "Crop",
+            action: "custom",
+            disabled: !single,
+            run: () => {
+              useControlsStore.getState().setSelectedClipIds([visuals[0].clipId]);
+              window.dispatchEvent(new CustomEvent(OPEN_CROP_EVENT));
+            },
+          },
+        );
+        editTools.push({ id: "edit", label: "Edit", action: "none", children });
       }
 
       const clipActions: ContextMenuItem[] = [
@@ -1378,6 +1397,33 @@ const TimelineClip: React.FC<
           ],
         });
       }
+      // A sticker's Mirror, after Save preset as CapCut orders it.
+      const stickers = targetIds.map((id) => clipsState.getClipById(id)).filter((c): c is AnyClipProps => c?.type === "sticker");
+      const mirrorItems: ContextMenuItem[] =
+        stickers.length > 0
+          ? [
+              {
+                id: "mirror-sticker",
+                label: "Mirror",
+                action: "custom",
+                run: () => stickers.forEach((v) => useClipStore.getState().updateClip(v.clipId, toggleFlip(v, "horizontal"))),
+              },
+            ]
+          : [];
+      // Range ›: Select by clip (⇧X) makes the selection's span the range; Deselect clears it.
+      const range = useControlsStore.getState().range;
+      const rangeItems: ContextMenuItem[] = [
+        {
+          id: "range",
+          label: "Range",
+          action: "none",
+          children: [
+            { id: "range-select", label: "Select by clip", action: "custom", shortcut: "⇧X", run: () => rangeByClip(targetIds) },
+            { id: "range-deselect", label: "Deselect", action: "custom", disabled: !range, run: () => useControlsStore.getState().setRange(null) },
+            ...(range ? [{ id: "range-export", label: "Export range", action: "custom" as const, run: () => openRangeExport() }] : []),
+          ],
+        },
+      ];
       // Copy/paste attributes and Save preset (lib/clip-presets.ts).
       const attributeItems = attributeMenuItems(clip, targetIds);
       // Save preset after Group, as CapCut orders them.
@@ -1417,6 +1463,8 @@ const TimelineClip: React.FC<
             id: "other",
             items: [...otherCommands],
           },
+          { id: "mirror", items: mirrorItems },
+          { id: "range", items: rangeItems },
         ],
       });
     }

@@ -12,6 +12,9 @@
 // the picture's centre.
 import type { ClipTransform } from "./types";
 
+/** Asks the Crop dialog to open on the selected clip (the clip menu's Edit ▸ Crop). */
+export const OPEN_CROP_EVENT = "openrip:open-crop";
+
 export type CropRect = { x: number; y: number; width: number; height: number; rotation?: number };
 
 /** The window's edges, in picture pixels from the picture's centre, on the shown (turned) axes. */

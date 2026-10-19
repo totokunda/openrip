@@ -1,3 +1,4 @@
+import { trackTop } from "@/lib/timeline-view";
 import React, { useMemo, useRef, useState } from "react";
 import { LuChevronLeft, LuChevronRight } from "react-icons/lu";
 import { useClipStore } from "@/lib/clip";
@@ -74,7 +75,7 @@ const CURVES: { id: "custom" | "easeIn" | "easeOut" | "easeInOut"; label: string
  * accent diamonds and, for that span, the curve's two bezier handles: dragging them sets a
  * custom ease (lib/keyframes.ts `setKeyframeEase`). Numeric properties only.
  */
-const KeyframeGraph: React.FC<{ stageWidth: number; scrollY: number }> = ({ stageWidth, scrollY }) => {
+const KeyframeGraph: React.FC<{ stageWidth: number }> = ({ stageWidth }) => {
   const open = useKeyframeGraphStore((s) => s.open);
   const chosen = useKeyframeGraphStore((s) => s.property);
   const setProperty = useKeyframeGraphStore((s) => s.setProperty);
@@ -100,7 +101,7 @@ const KeyframeGraph: React.FC<{ stageWidth: number; scrollY: number }> = ({ stag
   const x0 = TIME_ZERO_X + (start - vs) * perFrame;
   const left = Math.max(TIME_ZERO_X, x0);
   const right = Math.min(TIME_ZERO_X + stageWidth - 12, x0 + len * perFrame);
-  const bandTop = (track.timelineY ?? 0) + 32 - scrollY;
+  const bandTop = trackTop(track);
   const top = bandTop - HEIGHT >= 22 ? bandTop - HEIGHT : bandTop + (track.timelineHeight ?? 0) - 8;
   if (right - left < 40) return null;
   const W = right - left;

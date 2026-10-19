@@ -3,7 +3,8 @@
 // functions of the clip store's clips and tracks; the store (lib/clip.ts) applies them to its
 // edits and the timeline's components use them while a drag is under way.
 // See docs/plan/app-engine-integration.md.
-import type { AnyClipProps, GroupClipProps, Marker, TimelineProps } from "./types";
+import type { Asset, AnyClipProps, GroupClipProps, Marker, TimelineProps } from "./types";
+import { carriedClips } from "./linkage";
 
 const startOf = (c: AnyClipProps) => c.startFrame ?? 0;
 const endOf = (c: AnyClipProps) => c.endFrame ?? 0;
@@ -122,7 +123,15 @@ export const gapAt = (clips: AnyClipProps[], timelineId: string, frame: number) 
  * `linked`) the clips linked to a moved one go with it, unless their track is locked. A locked
  * track stays as it is. Returns `clips` itself when nothing moves.
  */
-export function closeGaps(clips: AnyClipProps[], timelines: TimelineProps[], timelineId: string, frame: number | null, linked = true): AnyClipProps[] {
+export function closeGaps(
+  clips: AnyClipProps[],
+  timelines: TimelineProps[],
+  timelineId: string,
+  frame: number | null,
+  linked = true,
+  /** With linkage on, the kinds of Linkage settings that are off and the assets (sound effects): the main track's overlays go with its clips. */
+  carry?: { off: string[]; assets?: Record<string, Asset> },
+): AnyClipProps[] {
   if (isTrackLocked(timelines, timelineId)) return clips;
   const gaps = trackGaps(clips, timelineId).filter((g) => frame == null || (frame >= g.from && frame < g.to));
   if (gaps.length === 0) return clips;
@@ -135,6 +144,10 @@ export function closeGaps(clips: AnyClipProps[], timelines: TimelineProps[], tim
     if (c.type === "group") for (const id of ((c as GroupClipProps).children ?? []).flat()) moves.set(id, d);
     for (const p of linked ? linkedClips(clips, c) : []) {
       if (p.timelineId !== timelineId && !p.hidden && !isTrackLocked(timelines, p.timelineId)) moves.set(p.clipId, d);
+    }
+    // The overlays on the main track's clip (Linkage settings).
+    if (carry && mainTrackOf(timelines)?.timelineId === timelineId) {
+      for (const p of carriedClips(clips, timelines, timelineId, [c], carry.off, carry.assets)) moves.set(p.clipId, d);
     }
   }
   return clips.map((c) => {

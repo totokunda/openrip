@@ -76,7 +76,7 @@ export function captionsText(format: CaptionFormat): string | null {
 }
 
 /** Write the files `s` asks for. Resolves when the run ends; its outcome is in [`useExportRun`]. */
-export async function runExport(s: ExportSettings, scope?: { clipId: string }): Promise<void> {
+export async function runExport(s: ExportSettings, scope?: { clipIds: string[]; range?: { start: number; end: number } }): Promise<void> {
   const run = useExportRun;
   const targets = exportTargets(s);
   if (!targets.length || !s.name.trim() || !s.path.trim()) return;
@@ -119,7 +119,7 @@ export async function runExport(s: ExportSettings, scope?: { clipId: string }): 
         : t.kind === "audio"
           ? { ...base, kind: "audio" as const, audioFormat: s.audio! }
           : { ...base, kind: "gif" as const, shortSide: s.gif!, fps: GIF_FPS };
-    const r = await engineExportProject(request, at, scope?.clipId);
+    const r = await engineExportProject(request, at, scope);
     if (r.ok) {
       files.push({ label: t.label, path });
     } else if (r.cancelled) {

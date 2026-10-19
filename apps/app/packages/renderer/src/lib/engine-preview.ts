@@ -386,6 +386,8 @@ export function initEnginePreview() {
   });
 }
 
+import { clipsWithinRange } from "./range-clips";
+
 /** What an engine export takes from the export dialog. */
 export type EngineExportRequest = {
   path: string;
@@ -431,21 +433,38 @@ export function parseBitrate(value: string | number): number {
 }
 
 /**
- * The snapshot with only one clip in it, moved to the start: what exporting a single clip
- * writes (its own length, its effects and animations, its sound). Clips of the same group stay
- * with it.
+ * The snapshot with only some clips in it, moved to the start: what exporting the selected clips
+ * writes (their own span, their effects and animations, their sound). Clips of the same groups
+ * stay with them.
  */
-function soloClip<T>(snapshot: T, clipId: string): T {
+function soloClips<T>(snapshot: T, clipIds: string[]): T {
   const timeline = (snapshot as any)?.timeline;
   const all: any[] = Array.isArray(timeline?.clips) ? timeline.clips : [];
-  const clip = all.find((c) => c?.clipId === clipId);
-  if (!clip) return snapshot;
-  const keep = all.filter((c) => c === clip || (clip.groupId && c.groupId === clip.groupId));
+  const picked = all.filter((c) => clipIds.includes(c?.clipId));
+  if (picked.length === 0) return snapshot;
+  const groups = new Set(picked.map((c) => c.groupId).filter(Boolean));
+  const keep = all.filter((c) => picked.includes(c) || (c.groupId && groups.has(c.groupId)));
   const from = Math.min(...keep.map((c) => c.startFrame));
   const moved = keep.map((c) => ({ ...c, startFrame: c.startFrame - from, endFrame: c.endFrame - from }));
   const ids = new Set(moved.map((c) => c.timelineId));
   const tracks = (Array.isArray(timeline.tracks) ? timeline.tracks : []).filter((t: any) => ids.has(t.timelineId));
   return { ...(snapshot as any), timeline: { ...timeline, tracks, clips: moved, markers: [] }, editorState: { ...(snapshot as any).editorState, duration: Math.max(...moved.map((c) => c.endFrame)) } };
+}
+
+/**
+ * The snapshot cut to the range between `start` and `end` (frames): every clip that touches it
+ * trimmed to it (as a split would cut it, keeping its id so groups still hold) and moved to the
+ * start.
+ */
+function trimmedToRange<T>(snapshot: T, range: { start: number; end: number }): T {
+  const timeline = (snapshot as any)?.timeline;
+  const all: any[] = Array.isArray(timeline?.clips) ? timeline.clips : [];
+  const moved = clipsWithinRange(all, range.start, range.end);
+  if (moved.length === 0) return snapshot;
+  const ids = new Set(moved.map((c) => c.timelineId));
+  const tracks = (Array.isArray(timeline.tracks) ? timeline.tracks : []).filter((t: any) => ids.has(t.timelineId));
+  const markers = (Array.isArray(timeline.markers) ? timeline.markers : []).filter((m: any) => m.frame >= range.start && m.frame < range.end).map((m: any) => ({ ...m, frame: m.frame - range.start }));
+  return { ...(snapshot as any), timeline: { ...timeline, tracks, clips: moved, markers }, editorState: { ...(snapshot as any).editorState, duration: range.end - range.start } };
 }
 
 /** The open project as the engine reads it (originals in place of proxies), for tools that ask the engine about it (Auto captions' timeline mix); null with no project. */
@@ -455,10 +474,10 @@ export async function engineProjectSnapshot(): Promise<{ projectId: number; snap
 }
 
 /** Export the open project with the engine (the snapshot the preview gets, with originals). */
-export async function engineExportProject(request: EngineExportRequest, onProgress: (ratio: number) => void, clipId?: string): Promise<EngineExportResult> {
+export async function engineExportProject(request: EngineExportRequest, onProgress: (ratio: number) => void, scope?: { clipIds: string[]; range?: { start: number; end: number } }): Promise<EngineExportResult> {
   const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any);
   if (!snap) return { ok: false, error: "no project open" };
-  const snapshot = await withOriginalMedia(clipId ? soloClip(snap.snapshot, clipId) : snap.snapshot);
+  const snapshot = await withOriginalMedia(scope?.range ? trimmedToRange(snap.snapshot, scope.range) : scope?.clipIds?.length ? soloClips(snap.snapshot, scope.clipIds) : snap.snapshot);
   await registerBundledFonts();
   const off = onEngineExportProgress((done, total) => onProgress(total > 0 ? done / total : 0));
   try {

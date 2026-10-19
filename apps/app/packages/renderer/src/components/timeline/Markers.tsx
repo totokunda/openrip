@@ -12,6 +12,8 @@ import { useControlsStore } from "@/lib/control";
 import { useContextMenuStore } from "@/lib/context-menu";
 import { MARKER_COLORS, SNAP_PX, snapPoints, snapToPoints } from "@/lib/timeline-edit";
 import { cn } from "@/lib/utils";
+import { withEnd } from "@/lib/range";
+
 import { formatTimecode, parseTimecode } from "@/lib/timecode";
 
 /** The marker whose box is open, if any. */
@@ -31,6 +33,59 @@ const FLAG_BOTTOM = 31;
 // A time in frames as CapCut writes it, HH:MM:SS:FF, and back, in Settings › Edit › Time
 // code's style (lib/timecode.ts).
 export { formatTimecode, parseTimecode };
+
+/**
+ * The range (lib/range.ts) on the ruler: a lavender band between its In and Out, with an edge
+ * at each end to drag, and the edges carried down over the tracks as thin lines.
+ */
+export const RangeBand: React.FC<{ stageWidth: number; startPadding: number; stageHeight: number }> = ({ stageWidth, startPadding, stageHeight }) => {
+  const range = useControlsStore((s) => s.range);
+  const [start, end] = useControlsStore((s) => s.timelineDuration);
+  if (!range) return null;
+  const span = Math.max(1, end - start);
+  const xOf = (f: number) => startPadding + ((f - start) / span) * stageWidth;
+  const frameOf = (x: number) => Math.max(0, Math.round(start + ((x - startPadding) / stageWidth) * span));
+  const [x0, x1] = [xOf(range.start), xOf(range.end)];
+  const edge = (which: "in" | "out", x: number) => (
+    <Rect
+      key={which}
+      name="range-edge"
+      x={x - 3}
+      y={1}
+      width={6}
+      height={16}
+      cornerRadius={2}
+      fill="#ae81ce"
+      draggable
+      dragBoundFunc={(pos) => ({ x: pos.x, y: 0 })}
+      onMouseDown={(e) => {
+        e.cancelBubble = true;
+      }}
+      onDragEnd={(e) => {
+        const f = frameOf(e.target.x() + 3);
+        const c = useControlsStore.getState();
+        if (c.range) c.setRange(withEnd(c.range, which, f, c.range.end));
+        e.target.x(xOf(useControlsStore.getState().range?.[which === "in" ? "start" : "end"] ?? f) - 3);
+      }}
+      onMouseEnter={(e) => {
+        const c = e.target.getStage()?.container();
+        if (c) c.style.cursor = "ew-resize";
+      }}
+      onMouseLeave={(e) => {
+        const c = e.target.getStage()?.container();
+        if (c) c.style.cursor = "default";
+      }}
+    />
+  );
+  return (
+    <Group name="timeline-range" listening>
+      <Rect x={Math.max(startPadding, x0)} y={1} width={Math.max(0, Math.min(startPadding + stageWidth, x1) - Math.max(startPadding, x0))} height={16} fill="rgba(174,129,206,0.35)" listening={false} />
+      <Rect x={Math.max(startPadding, x0)} y={18} width={Math.max(0, Math.min(startPadding + stageWidth, x1) - Math.max(startPadding, x0))} height={Math.max(0, stageHeight - 18)} fill="rgba(174,129,206,0.07)" listening={false} />
+      {x0 >= startPadding && x0 <= startPadding + stageWidth && edge("in", x0)}
+      {x1 >= startPadding && x1 <= startPadding + stageWidth && edge("out", x1)}
+    </Group>
+  );
+};
 
 /** The markers' tags, for the ruler's layer. The selected one has a white edge. */
 export const MarkerFlags: React.FC<{ stageWidth: number; startPadding: number }> = ({ stageWidth, startPadding }) => {

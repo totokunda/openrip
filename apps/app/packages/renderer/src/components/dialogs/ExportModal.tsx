@@ -49,9 +49,9 @@ import {
 import { cancelExportRun, exportTargets, revealExported, runExport, useExportRun, type ExportSettings } from "@/lib/export-run";
 import { timelineCues } from "@/lib/caption-actions";
 import { openCoverEditor } from "@/lib/cover";
+import type { ExportScope } from "@/lib/export-scope";
 
-/** One clip to export instead of the project: its id, what it is, and the name to propose. */
-export type ExportScope = { clipId: string; kind: "video" | "audio" | "image"; name: string };
+export type { ExportScope };
 
 interface ExportModalProps {
   open: boolean;
@@ -357,8 +357,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
     const { clips } = foldStack(compoundStack, useClipStore.getState().clips, useClipStore.getState().timelines);
     const clipDuration = compoundStack[0]?.clipDuration ?? useClipStore.getState().clipDuration;
     const rate = useControlsStore.getState().fps || 30;
-    const one = scope ? getClipById(scope.clipId) : undefined;
-    const pool = allClips(one ? [one] : clips);
+    const rangeOf = scope?.range;
+    const ones = scope ? (rangeOf ? clips.filter((c) => !c.hidden && (c.endFrame ?? 0) > rangeOf.start && (c.startFrame ?? 0) < rangeOf.end) : scope.clipIds.map((id) => getClipById(id)).filter(Boolean)) : [];
+    const pool = allClips(scope ? (ones as any[]) : clips);
     const audible = pool.some((c: any) => {
       if (c.hidden) return false;
       if (c.type === "audio") return true;
@@ -366,7 +367,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
       return false;
     });
     setHasAudio(audible);
-    setSeconds(one ? Math.max(0, ((one as any).endFrame - (one as any).startFrame) / rate) : (clipDuration || 0) / rate);
+    const span = (() => {
+      if (!scope) return (clipDuration || 0) / rate;
+      if (rangeOf) return (Math.min(rangeOf.end, clipDuration || rangeOf.end) - rangeOf.start) / rate;
+      const list = ones as any[];
+      return list.length ? (Math.max(...list.map((c) => c.endFrame)) - Math.min(...list.map((c) => c.startFrame))) / rate : 0;
+    })();
+    setSeconds(Math.max(0, span));
     setHasCaptions(!scope && timelineCues().length > 0);
     setFps(nearestRate(rate));
     setName(scope?.name || project?.name || "Export");
@@ -457,7 +464,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
             <div className="flex-1 min-w-0 overflow-y-auto pr-[17px] pb-3" data-testid="export-settings">
               <div className={cn(row, "pt-[14px]")}>
                 <Label on>Export timeline</Label>
-                <div className="text-[12px] leading-[22px] text-[#a8a8a8]">{scope ? "Selected clip" : "Timeline 01"}</div>
+                <div className="text-[12px] leading-[22px] text-[#a8a8a8]">{scope ? (scope.range ? "Range" : scope.clipIds.length > 1 ? "Selected clips" : "Selected clip") : "Timeline 01"}</div>
               </div>
               <div className={row}>
                 <Label on>Name</Label>
@@ -540,7 +547,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
                     <Label on={on.audio}>Format</Label>
                     <Select testId="export-audio-format" disabled={dim(on.audio)} value={saved.audioFormat} options={AUDIO_FORMATS} onChange={(v) => set({ audioFormat: v })} />
                   </div>
-                  {!hasAudio && <div className="text-[12px] text-[#525252] pt-1">There's no sound in {scope ? "this clip" : "the project"}.</div>}
+                  {!hasAudio && <div className="text-[12px] text-[#525252] pt-1">There's no sound in {scope ? (scope.range ? "the range" : scope.clipIds.length > 1 ? "these clips" : "this clip") : "the project"}.</div>}
                 </Section>
               )}
 

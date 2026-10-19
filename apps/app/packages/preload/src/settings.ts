@@ -34,6 +34,8 @@ export interface Preferences {
   recordingsDir: string;
   presetsDir: string;
   renderCacheMaxGb: number;
+  /** The timeline's Linkage settings: the kinds of clip that do not move or get deleted with the main track's clips (lib/linkage.ts). */
+  linkageOff: string[];
 }
 
 function getPreferences(): Promise<Preferences> {

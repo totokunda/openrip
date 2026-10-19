@@ -25,6 +25,7 @@ import {
   DeleteLeftButton,
   DeleteRightButton,
   LinkageToggle,
+  AddMenuButton,
   MagnetToggle,
   CompoundBar,
   SnappingToggle,
@@ -471,6 +472,7 @@ const Controls = () => {
         {/* CapCut's order, left to right; Undo and Redo name themselves. Split stays
             right after Redo. */}
         <div className="flex items-center gap-x-2 [&>div]:h-7 [&>div]:w-7 [&>div]:py-0">
+          <AddMenuButton />
           <SelectionToolMenu />
           <UndoButton />
           <RedoButton />

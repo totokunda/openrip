@@ -41,6 +41,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   recordingsDir: "",
   presetsDir: "",
   renderCacheMaxGb: 10,
+  linkageOff: [],
 };
 
 /** CapCut's choices for the rows with a menu. */
