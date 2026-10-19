@@ -831,10 +831,10 @@ Screenshots are in `09-left-effects/` unless a path says otherwise.
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Video effect library (OpenRip's own shader effects), drag to the timeline as an effect clip or onto a clip | `09-left-effects/001-video-effects-trending.png` | missing |
-| Favorites with empty state | `044-favorites.png` | missing |
-| Search with recent searches (removable, clear all) | `045-search-open.png`, `046-unmatched-search-results.png` | missing |
-| Tile hover: favourite, download/add | `047-classic-item-hover.png`, `048-download-hover.png` | missing |
+| Video effect library (OpenRip's own shader effects), drag to the timeline as an effect clip or onto a clip | `09-left-effects/001-video-effects-trending.png` | has (79 effects, harness `effectsui`) |
+| Favorites with empty state | `044-favorites.png` | has |
+| Search with recent searches (removable, clear all) | `045-search-open.png`, `046-unmatched-search-results.png` | partly (search, no recent searches) |
+| Tile hover: favourite, download/add | `047-classic-item-hover.png`, `048-download-hover.png` | has (the tile plays; star and +) |
 
 Out of scope: CapCut effect content, Body effects (ML segmentation), Magic cutout, Trending searches.
 
@@ -1063,7 +1063,7 @@ Out of scope: CapCut animation content (Tracking is in §6.31).
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Effect › Details: name, per-effect parameters (e.g. Speed) with keyframes | `23-inspector-effect/001-fade-in-basic.png` | missing |
+| Effect › Details: name, per-effect parameters (e.g. Speed) with keyframes | `23-inspector-effect/001-fade-in-basic.png` | has (Intensity and each effect's own parameters) |
 | Effect › Mask tab | `002-fade-in-mask.png` | missing |
 | Filter › name, Intensity | `24-inspector-filter/001-cool-black-inspector.png` | has |
 | Filter › Intensity keyframes | `002-keyframe-hover.png` | missing |
