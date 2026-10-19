@@ -57,7 +57,7 @@ const run = async (ctx, server) => {
   // ---- The column and the first list ------------------------------------------------------------
   await win.locator("[data-testid=assets-tab-media]").click();
   const column = () => win.evaluate(() => [...document.querySelectorAll("nav[aria-label=Sections] button")].map((b) => b.innerText.trim()));
-  check("the column opens with Import open on Media and Library folded", (await column()).join() === "Import,Media,Yours,Library", JSON.stringify(await column()));
+  check("the column opens with Import open on Media and Subprojects, Yours and Library folded", (await column()).join() === "Import,Media,Subprojects,Yours,Library", JSON.stringify(await column()));
   await win.locator('[data-testid="assets-group-Library"]').click();
   await win.waitForTimeout(400);
   check("opening Library folds Import and selects Trending", (await column()).slice(0, 3).join() === "Import,Yours,Library" && (await win.locator('[data-testid="assets-section-library:trending"]').getAttribute("aria-pressed")) === "true", JSON.stringify((await column()).slice(0, 4)));
