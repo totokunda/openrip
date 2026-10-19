@@ -116,7 +116,16 @@ export default async (ctx) => {
   const saved = await win.evaluate(() => Object.entries(localStorage).filter(([k]) => k.includes("openrip:layout:default")).map(([k, v]) => `${k}=${v.slice(0, 80)}`));
   check("a dragged panel's size is saved", handle && (await width()) > w0 + 40 && saved.some((s) => s.includes(":upper")), `${w0.toFixed(0)} → ${(await width()).toFixed(0)} px; ${saved.join(" | ")}`);
   ctx.panelWidth = await width();
-  const frame = await engineFrame(win);
-  check("the engine still draws after the layouts", frame.w > 16 && frame.light > 0.05, JSON.stringify(frame));
+  // The frame for the panel's new width is rendered and handed over asynchronously (it can be
+  // slow on a busy machine), so wait, up to 6 s, for a drawn frame rather than read once.
+  const drawn = (f) => f.w > 16 && f.light > 0.05;
+  const t0 = Date.now();
+  let frame = await engineFrame(win);
+  while (!drawn(frame) && Date.now() - t0 < 6000) {
+    await win.waitForTimeout(150);
+    frame = await engineFrame(win);
+  }
+  const { count: _unused, ...seen } = frame;
+  check("the engine still draws after the layouts", drawn(frame), `${JSON.stringify(seen)} after ${Date.now() - t0} ms`);
   return report();
 };
