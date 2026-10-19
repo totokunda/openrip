@@ -304,7 +304,6 @@ mod tests {
         let floor_in = band(&clip[a..b], 2000.0, 12_000.0);
         let floor_out = band(&out[a + SIZE * CHANNELS..b], 2000.0, 12_000.0);
         let drop = db(floor_in, floor_out);
-        eprintln!("tone {:.2} dB, noise floor -{drop:.1} dB", db(tone_out, tone_in));
         assert!(drop > 20.0, "the noise floor dropped {drop} dB");
     }
 
