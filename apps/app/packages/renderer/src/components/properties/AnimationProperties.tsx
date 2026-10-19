@@ -49,7 +49,7 @@ const within = (d: number, max: number) => Math.round(Math.max(MIN, Math.min(d, 
 
 /** The kinds a clip of this type has, in its sub-tabs' order (none for other types). */
 export const animationKinds = (type: AnyClipProps["type"]): AnimationKind[] =>
-  type === "video" || type === "image" ? ["in", "out", "combo"] : type === "text" ? ["in", "out", "loop"] : [];
+  type === "video" || type === "image" ? ["in", "out", "combo"] : type === "text" || type === "sticker" ? ["in", "out", "loop"] : [];
 
 export const KIND_LABEL: Record<AnimationKind, string> = { in: "In", out: "Out", combo: "Combo", loop: "Loop" };
 

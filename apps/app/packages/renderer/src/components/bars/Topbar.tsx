@@ -128,7 +128,7 @@ const TopBar: React.FC<TopBarProps> = () => {
         return Boolean((clip as AnyClipProps & { assetId?: string }).assetId);
       }
 
-      if (clip.type === "draw" || clip.type === "text" || clip.type === "shape") {
+      if (clip.type === "draw" || clip.type === "text" || clip.type === "shape" || clip.type === "sticker") {
         return true;
       }
 

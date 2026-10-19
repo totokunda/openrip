@@ -62,6 +62,7 @@ export const keyframeableProperties = (clip: AnyClipProps): KeyframeProperty[] =
     case "text":
       return ["position", "scale", "rotation", "opacity", ...TEXT_PROPERTIES];
     case "shape":
+    case "sticker":
       return ["position", "scale", "rotation", "opacity"];
     case "filter":
       return ["intensity"];

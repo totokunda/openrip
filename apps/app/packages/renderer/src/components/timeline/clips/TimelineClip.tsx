@@ -78,6 +78,7 @@ import {
   generateTimelineThumbnailImage,
   generateTimelineThumbnailVideo,
   generateTimelineThumbnailShape,
+  generateTimelineThumbnailSticker,
   generateTimelineThumbnailText,
   generateTimelineThumbnailFilter,
   generateTimelineThumbnailDrawing,
@@ -510,6 +511,8 @@ const TimelineClip: React.FC<
       );
     } else if (clipType === "shape") {
       generateTimelineThumbnailShape(clipType, imageCanvas, groupRef);
+    } else if (clipType === "sticker") {
+      generateTimelineThumbnailSticker(clipType, imageCanvas, groupRef);
     } else if (clipType === "text") {
       generateTimelineThumbnailText(clipType, imageCanvas, groupRef);
     } else if (clipType === "filter") {
@@ -2016,7 +2019,7 @@ const TimelineClip: React.FC<
               />
             </Group>
           )}
-          {clipType === "filter" && (currentClip as FilterClipProps)?.name && (
+          {(clipType === "filter" || clipType === "sticker") && (currentClip as FilterClipProps)?.name && (
             <Group>
               <Rect
                 x={12 - 4}

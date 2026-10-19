@@ -61,7 +61,7 @@ const current = (clipId: string) => useClipStore.getState().getClipById(clipId);
 
 const TRANSFORM_KEYS: KeyframeProperty[] = ["scale", "position", "rotation"];
 
-const TransformSection: React.FC<{ clipId: string }> = ({ clipId }) => {
+export const TransformSection: React.FC<{ clipId: string }> = ({ clipId }) => {
   const clip = useClipStore((s) => s.getClipById(clipId)) as Media | undefined;
   const { frame, fps } = usePlayhead();
   const { world, px } = useWorld();

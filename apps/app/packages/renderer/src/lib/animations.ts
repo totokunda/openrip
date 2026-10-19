@@ -115,6 +115,10 @@ const TEXT_MOVES = new Set(["fade_in", "fade_out", "zoom_in", "zoom_out", "slide
 /** The animations of `kind` a clip of this type can take, in panel order (none for other types). */
 export const animationsFor = (clipType: AnyClipProps["type"], kind: AnimationKind): BuiltinAnimation[] => {
   const media = clipType === "video" || clipType === "image";
+  // A sticker takes a text's kinds (In, Out, Loop) with the clip moves, not the typing intros.
+  if (clipType === "sticker") {
+    return kind === "in" ? MOVES_IN : kind === "out" ? MOVES_OUT : kind === "loop" ? LOOPS : [];
+  }
   if (!media && clipType !== "text") return [];
   switch (kind) {
     case "in":

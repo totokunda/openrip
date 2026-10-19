@@ -13,6 +13,7 @@ export type ClipType =
   | "audio"
   | "text"
   | "shape"
+  | "sticker"
   | "draw"
   | "filter"
   | "group";
@@ -21,6 +22,7 @@ export type TimelineType =
   | "audio"
   | "text"
   | "shape"
+  | "sticker"
   | "draw"
   | "filter";
 export type ViewTool = "pointer" | "hand" | "mask" | "draw" | "shape" | "text";
@@ -704,6 +706,33 @@ export type ShapeClipProps = ClipProps & {
   penDrawing?: boolean;
 };
 
+/**
+ * A sticker from the Stickers library on the timeline (CapCut models its library stickers the
+ * same way: a picture or an animation on a track of its own, with a transform, an Animation
+ * tab and keyframes). The picture is the file the library cached (`stickerPath`, a PNG, an SVG
+ * or an animated WebP) and `stickerWidth` × `stickerHeight` its size in pixels, which the
+ * engine lays the clip's box out against (`transform` is the box in world units). The engine
+ * tells a still from an animation by the file's content, and loops an animation by its own
+ * frame times, from the clip's start.
+ */
+export type StickerClipProps = ClipProps & {
+  type: "sticker";
+  /** The library's id for it (lib/stickers/library.ts). */
+  stickerId: string;
+  name: string;
+  category?: string;
+  /** Where the file is on this machine (the engine reads it; the renderer loads it from there). */
+  stickerPath: string;
+  stickerWidth: number;
+  stickerHeight: number;
+  stickerAnimated?: boolean;
+  /** The set it came from, for the credit it needs (CC BY asks for one). */
+  stickerSet?: string;
+  animationIn?: ClipAnimation | null;
+  animationOut?: ClipAnimation | null;
+  animationLoop?: ClipAnimation | null;
+};
+
 export type PolygonClipProps = ShapeClipProps & {
   shapeType: "polygon";
   sides?: number;
@@ -1001,6 +1030,7 @@ export type AnyClipProps =
   | ImageClipProps
   | AudioClipProps
   | ShapeClipProps
+  | StickerClipProps
   | PolygonClipProps
   | TextClipProps
   | FilterClipProps
@@ -1161,6 +1191,11 @@ export function clipSignature(clip: AnyClipProps): string {
           n(s.strokeWidth),
           JSON.stringify([s.fillEnabled, s.strokeEnabled, s.strokeStyle, s.capStart, s.capEnd, s.shadowEnabled, s.shadowColor, s.shadowOpacity, s.shadowDistance, s.shadowAngle, s.path, s.pathClosed]),
         );
+        break;
+      }
+      case "sticker": {
+        const k = clip as any;
+        parts.push(k.stickerId ?? "", k.stickerPath ?? "", n(k.stickerWidth), n(k.stickerHeight));
         break;
       }
       case "text": {

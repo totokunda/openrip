@@ -55,6 +55,10 @@ export type { EngineTrackRequest, EngineTrackResult, EngineTrackSample } from ".
 export { voiceoverStatus, voiceoverStart, voiceoverStop, voiceoverCancel, voiceoverList, onVoiceoverLevel } from "./voiceover.js";
 export type { VoiceoverStatus, VoiceoverStart, VoiceoverStop, VoiceoverLevel, VoiceoverTake } from "./voiceover.js";
 
+// The Stickers tab's downloads and cache
+export { stickersCached, stickerDownload, stickerStore } from "./stickers.js";
+export type { StickerFile } from "./stickers.js";
+
 // App updates (Electron auto-updater)
 export * from "./appUpdates.js";
 

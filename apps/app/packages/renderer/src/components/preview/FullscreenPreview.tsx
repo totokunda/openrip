@@ -240,6 +240,16 @@ const LegacyStage: React.FC<{ size: { width: number; height: number } }> = ({ si
                       applicators={applicators}
                     />
                   );
+                case "sticker":
+                  return (
+                    <ShapePreview
+                      key={clip.clipId}
+                      {...(clip as any)}
+                      rectWidth={rectWidth}
+                      rectHeight={rectHeight}
+                      applicators={applicators}
+                    />
+                  );
                 case "text":
                   return (
                     <TextPreview

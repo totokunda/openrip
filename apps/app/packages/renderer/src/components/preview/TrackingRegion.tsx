@@ -31,7 +31,7 @@ const TrackingRegion: React.FC = () => {
   const position = useViewportStore((s) => s.position);
   const drag = useRef<Drag | null>(null);
   const settings = trackingOf(clip);
-  const trackable = clip && (clip.type === "text" || clip.type === "image" || (clip.type === "filter" && (clip as any).draftKind === "sticker"));
+  const trackable = clip && (clip.type === "text" || clip.type === "image" || clip.type === "sticker" || (clip.type === "filter" && (clip as any).draftKind === "sticker"));
   const showing = trackable && tab === "tracking" && settings.enabled && settings.mode === "motion" && focusFrame >= (clip!.startFrame ?? 0) && focusFrame < (clip!.endFrame ?? 0);
   if (!showing || !clip) return null;
   const r = drawn ?? regionOf(clip);

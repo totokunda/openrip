@@ -16,6 +16,7 @@ import { engineModule } from "./modules/EngineModule.js";
 import { voiceoverModule } from "./modules/VoiceoverModule.js";
 import { capCutImportModule } from "./modules/CapCutImportModule.js";
 import { appMenu } from "./modules/AppMenu.js";
+import { stickerLibraryModule } from "./modules/StickerLibraryModule.js";
 import { app } from "electron";
 
 export async function initApp(initConfig: AppInitConfig) {
@@ -35,6 +36,8 @@ export async function initApp(initConfig: AppInitConfig) {
     .init(voiceoverModule())
     .init(jsonPersistenceModule())
     .init(capCutImportModule())
+    // The Stickers tab's downloads and cache
+    .init(stickerLibraryModule())
     .init(appMenu())
     .init(appDirProtocol())
     .init(

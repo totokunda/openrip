@@ -46,6 +46,8 @@ import { RULER_HEIGHT, TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { applyTransition, cutsOn, useTransitionDropStore } from "@/lib/transitions";
 import type { TransitionDrag } from "../menus/TransitionMenu";
 import { addLibraryShape, type ShapeDrag } from "../menus/ShapesMenu";
+import type { StickerDrag } from "../menus/StickersMenu";
+import { addSticker, useStickerLibrary } from "@/lib/stickers/library";
 import KeyframeGraph from "./KeyframeGraph";
 import { imageDurationFrames } from "@/lib/preferences";
 import { openCoverEditor } from "@/lib/cover";
@@ -433,7 +435,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       const data = event.active?.data?.current as unknown as
         | MediaItem
         | undefined;
-      if (!data || (data as unknown as TransitionDrag).type === "transition" || (data as unknown as ShapeDrag).type === "shape-preset" || (data as unknown as EffectDrag).type === "effect-preset") return;
+      if (!data || (data as unknown as TransitionDrag).type === "transition" || (data as unknown as ShapeDrag).type === "shape-preset" || (data as unknown as EffectDrag).type === "effect-preset" || (data as unknown as StickerDrag).type === "sticker-tile") return;
 
       setIsDragging(true);
 
@@ -536,6 +538,15 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       // A shape goes in at the time it's let go at, on a new track at the top (the Shapes
       // tab handles a press without a move, and a drop on the player).
       const shapeDrag = data as unknown as ShapeDrag;
+      // A sticker from the Stickers tab the same way (it's downloaded first when it needs to be).
+      const stickerDrag = data as unknown as StickerDrag;
+      if (stickerDrag.type === "sticker-tile") {
+        const frame = Math.hypot(event.delta.x, event.delta.y) > 3 ? frameUnder(event) : null;
+        const sticker = useStickerLibrary.getState().stickers.find((x) => x.id === stickerDrag.id);
+        if (frame != null && sticker) void addSticker(sticker, { startFrame: frame });
+        setIsDragging(false);
+        return;
+      }
       if (shapeDrag.type === "shape-preset") {
         const frame = Math.hypot(event.delta.x, event.delta.y) > 3 ? frameUnder(event) : null;
         if (frame != null) void addLibraryShape(shapeDrag.shape, { startFrame: frame });

@@ -5,6 +5,7 @@ import {
   LuAudioWaveform,
   LuPaintbrush,
   LuShapes,
+  LuSticker,
   LuType,
 } from "react-icons/lu";
 import { LuLock } from "react-icons/lu";
@@ -24,6 +25,7 @@ const TypeIcon: React.FC<{ type: TimelineProps["type"] }> = ({ type }) => (
     {type === "media" && <GoFileMedia className="w-3 h-3 text-brand-light/40" />}
     {type === "audio" && <LuAudioWaveform className="w-3 h-3 text-brand-light/40" />}
     {type === "shape" && <LuShapes className="w-3 h-3 text-brand-light/40" />}
+    {type === "sticker" && <LuSticker className="w-3 h-3 text-brand-light/40" />}
     {type === "text" && <LuType className="w-3 h-3 text-brand-light/40" />}
     {type === "filter" && <MdPhotoFilter className="w-3 h-3 text-brand-light/40" />}
     {type === "draw" && <LuPaintbrush className="w-3 h-3 text-brand-light/40" />}

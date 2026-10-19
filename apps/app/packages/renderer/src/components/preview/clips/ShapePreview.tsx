@@ -765,7 +765,8 @@ const ShapePreview: React.FC<ShapePreviewProps> = ({
       dash: dashes(sc?.strokeStyle, strokeWidth),
       lineCap: (sc?.strokeStyle === "dotted" ? "round" : "butt") as "round" | "butt",
       draggable: tool === "pointer" && !isTransforming && !inputMode && !penEditing,
-      opacity: engineHides ? 0 : (clipTransform?.opacity ?? 100) / 100,
+      // A sticker clip keeps these handles only: the engine draws its picture.
+      opacity: engineHides || (clip as { type?: string } | undefined)?.type === "sticker" ? 0 : (clipTransform?.opacity ?? 100) / 100,
       onDragStart: handleDragStart,
       onDragMove: handleDragMove,
       onDragEnd: handleDragEnd,

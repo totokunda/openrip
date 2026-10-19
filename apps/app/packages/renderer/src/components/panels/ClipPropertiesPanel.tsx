@@ -30,6 +30,7 @@ import SpeedProperties from '../properties/SpeedProperties'
 import FilterProperties from '../properties/FilterProperties'
 import EffectProperties, { ClipEffectsProperties } from '../properties/EffectProperties'
 import ShapeProperties from '../properties/ShapeProperties'
+import { TransformSection } from '../properties/VideoBasicProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
 import { useInspectorStore } from '@/lib/inspector'
 import TrackingProperties from '../properties/TrackingProperties'
@@ -168,6 +169,13 @@ const ClipPropertiesPanel: React.FC = () => {
       // aren't here: shapes don't animate in the engine yet, and tracking is out of scope).
       case 'shape':
         return [{ id: 'shape', label: 'Shapes', sections: [{ id: 'shape', label: 'Shapes', content: <ShapeProperties clipId={clipId} /> }] }];
+      // CapCut's sticker clip: Stickers (its Transform), Animation (In, Out, Loop) and Tracking.
+      case 'sticker':
+        return [
+          { id: 'sticker', label: 'Stickers', sections: [{ id: 'sticker', label: 'Stickers', content: <TransformSection clipId={clipId} /> }] },
+          animation,
+          tracking,
+        ];
       case 'audio':
         // CapCut's tabs for an audio clip: Basic, Voice changer, Speed.
         return [

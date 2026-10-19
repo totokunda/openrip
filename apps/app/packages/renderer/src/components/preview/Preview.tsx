@@ -36,6 +36,7 @@ import { useEngineDraws } from "@/lib/engine-preview";
 import DrawingPreview from "./clips/DrawingPreview";
 import PenOverlay from "./PenOverlay";
 import ShapeLibraryPreview from "./ShapeLibraryPreview";
+import StickerLibraryPreview from "./StickerLibraryPreview";
 import MaskPreview from "./clips/MaskPreview";
 import { useControlsStore } from "@/lib/control";
 import {
@@ -2711,6 +2712,17 @@ const Preview: React.FC<PreviewProps> = () => {
                             applicators={applicators}
                           />
                         );
+                      // A sticker keeps a shape's handles; the engine draws its picture.
+                      case "sticker":
+                        return (
+                          <ShapePreview
+                            key={clip.clipId}
+                            {...(clip as any)}
+                            rectWidth={rectWidth}
+                            rectHeight={rectHeight}
+                            applicators={applicators}
+                          />
+                        );
                       case "text":
                         return (
                           <TextPreview
@@ -2752,6 +2764,7 @@ const Preview: React.FC<PreviewProps> = () => {
                 {/* The Stickers tab's Pen: the path being drawn, or a pen shape's points. */}
                 <PenOverlay rectWidth={rectWidth} rectHeight={rectHeight} scale={scale} position={position} />
                 <ShapeLibraryPreview rectWidth={rectWidth} rectHeight={rectHeight} />
+                <StickerLibraryPreview rectWidth={rectWidth} rectHeight={rectHeight} />
                 {renderLassoPath()}
                 {renderMaskRectPreview()}
                 {renderMaskBrushDrawing()}

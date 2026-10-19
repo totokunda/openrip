@@ -131,7 +131,7 @@ await pool(emoji, 24, async (f) => {
 
 // ---- Categories ----------------------------------------------------------------------------
 const GROUP = {
-  "Smileys & Emotion": "Smileys", "People & Body": "People", "Animals & Nature": "Animals & nature", "Food & Drink": "Food & drink",
+  "Smileys & Emotion": "Smileys", "People & Body": "People", "Animals & Nature": "Nature", "Food & Drink": "Food",
   "Travel & Places": "Travel", Activities: "Activities", Objects: "Objects", Symbols: "Symbols", Flags: "Flags", Component: "Symbols",
 };
 const THEMES = [
@@ -148,7 +148,7 @@ const cat = (name) => {
   if (i < 0) i = categories.push(name) - 1;
   return i;
 };
-["Trending", "Emoji", "Animated", "Love", "Celebration", "Reactions", "Arrows", "Smileys", "People", "Animals & nature", "Food & drink", "Travel", "Activities", "Objects", "Symbols", "Flags"].forEach(cat);
+["Trending", "Emoji", "Animated", "Love", "Celebration", "Reactions", "Arrows", "Smileys", "People", "Nature", "Food", "Travel", "Activities", "Objects", "Symbols", "Flags"].forEach(cat);
 
 /** Words from tags like ":grin-sweat:". */
 const tagWords = (t) => t.replace(/:/g, "").replace(/[-_]/g, " ").trim().toLowerCase();
@@ -184,7 +184,8 @@ for (const f of emoji) {
   if (notoTree.has(notoFile)) add({ id: `noto-${k}`, set: "noto", ...entry, file: notoFile, thumb: `2D/png/128/${notoName}` });
   if (a) {
     const cp = a.codepoint;
-    const animCats = [...new Set([...entry.cats, cat("Animated")])];
+    // Animated ones list under Animated and the themes, not with the plain emoji.
+    const animCats = [...new Set([cat("Animated"), ...themes.map(cat)])];
     add({ id: `anim-${k}`, set: "noto-animated", ...entry, cats: animCats, file: `${cp}/512.webp`, thumb: notoTree.has(`2D/png/128/${notoName}`) ? `@noto:2D/png/128/${notoName}` : undefined });
   }
 }
