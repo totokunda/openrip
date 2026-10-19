@@ -70,6 +70,8 @@ const TEXT_PROPS: &[(&str, &[Param], bool, f64)] = &[
 fn resolve(name: &str, clip: &Value, seg: &Segment, materials: &Materials, world: &World, canvas: Canvas) -> Option<Prop> {
     let t = clip.get("transform").cloned().unwrap_or(Value::Null);
     let ty = s(clip, "type");
+    // What carries the Adjust tab's colour tools: a video or photo, or an adjustment layer.
+    let colour_host = matches!(ty.as_str(), "video" | "image") || (ty == "filter" && crate::b(clip, "adjustment"));
     Some(match name {
         // The box's centre in world units (y down).
         "position" => {
@@ -109,14 +111,14 @@ fn resolve(name: &str, clip: &Value, seg: &Segment, materials: &Materials, world
         n if crate::app::ADJUST_KEYS.contains(&n) && matches!(ty.as_str(), "video" | "image") => prop(Target::Params(MaterialId(format!("{}-adj-{n}", seg.id)), vec![Param::Intensity]), 1, 1.0),
         // The Adjust tab's colour tools (`color`): a slider on CapCut's scale, an HSL range's
         // hue, saturation or lightness (−100…100), the wheels' and a LUT's strength (0–100).
-        n if n.starts_with("adjust:") && matches!(ty.as_str(), "video" | "image") => {
+        n if n.starts_with("adjust:") && colour_host => {
             let slider = &n["adjust:".len()..];
             if !crate::color::SLIDERS.contains(&slider) {
                 return None;
             }
             prop(Target::Params(crate::color::slider_id(&seg.id, slider), vec![Param::Intensity]), 1, 1.0 / crate::app::capcut_scale(slider))
         }
-        n if n.starts_with("hsl:") && matches!(ty.as_str(), "video" | "image") => {
+        n if n.starts_with("hsl:") && colour_host => {
             let (range, part) = n["hsl:".len()..].split_once(':')?;
             if !crate::color::HSL_RANGES.contains(&range) {
                 return None;
@@ -129,8 +131,8 @@ fn resolve(name: &str, clip: &Value, seg: &Segment, materials: &Materials, world
             };
             prop(Target::Params(crate::color::hsl_id(&seg.id, range), vec![param]), 1, 1.0)
         }
-        "wheels:intensity" if matches!(ty.as_str(), "video" | "image") => prop(Target::Params(crate::color::wheels_id(&seg.id), vec![Param::WheelIntensity]), 1, 0.01),
-        "lut:intensity" if matches!(ty.as_str(), "video" | "image") => {
+        "wheels:intensity" if colour_host => prop(Target::Params(crate::color::wheels_id(&seg.id), vec![Param::WheelIntensity]), 1, 0.01),
+        "lut:intensity" if colour_host => {
             let id = crate::color::lut_id(&seg.id);
             if !materials.contains(&id) && clip.pointer("/color/lut/path").and_then(Value::as_str).is_none_or(str::is_empty) {
                 return None;

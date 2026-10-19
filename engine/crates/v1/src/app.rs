@@ -647,11 +647,11 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
             clip.insert("category".into(), json!("CapCut"));
             // What it is, and whether the engine draws it: filters with their bundle, at their
             // strength, and stickers with their picture, at their opacity (the bar's
-            // intensity); effects and adjustment layers not yet.
+            // intensity), and adjustment layers (a draft's carry their own adjustments).
             let filter = project.materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter);
             let sticker = project.materials.stickers.iter().find(|s| s.id == seg.material);
             clip.insert("draftKind".into(), json!(kind_name(track.kind)));
-            clip.insert("drawn".into(), json!((filter.is_some_and(|e| e.resource.is_some()) && track.kind == TrackKind::Filter) || sticker.is_some_and(|s| !s.path.is_empty())));
+            clip.insert("drawn".into(), json!((filter.is_some_and(|e| e.resource.is_some()) && track.kind == TrackKind::Filter) || track.kind == TrackKind::Adjustment || sticker.is_some_and(|s| !s.path.is_empty())));
             let intensity = if sticker.is_some() { seg.opacity.value as f64 } else { filter.and_then(|e| e.params.get("intensity").copied()).unwrap_or(1.0) };
             clip.insert("intensity".into(), num(intensity * 100.0));
         }

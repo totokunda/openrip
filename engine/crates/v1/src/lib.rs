@@ -29,6 +29,7 @@ const APP: &str = "openrip-v1";
 /// v1 canvas height in world units (`BASE_LONG_SIDE`).
 pub(crate) const WORLD_H: f64 = 600.0;
 
+mod adjustment;
 mod app;
 mod audio;
 mod color;
@@ -340,6 +341,8 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
                     "text" => TrackKind::Text,
                     // An effect bar is on an effect track, as CapCut's.
                     "filter" if !s(clip, "effectId").is_empty() => TrackKind::Effect,
+                    // An adjustment layer is on an adjustment track, as CapCut's.
+                    "filter" if b(clip, "adjustment") => TrackKind::Adjustment,
                     "filter" => TrackKind::Filter,
                     "sticker" => TrackKind::Sticker,
                     _ => TrackKind::Graphic,
@@ -349,7 +352,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
         };
         if let Some((seg, wanted)) = converted {
             // A filter track holding a draft's effects or stickers takes their kind.
-            if let Some(t) = tracks.iter_mut().find(|t| t.id == s(clip, "timelineId") && t.kind != wanted && t.segments.is_empty() && (clip.get("engine").is_some() || !s(clip, "effectId").is_empty())) {
+            if let Some(t) = tracks.iter_mut().find(|t| t.id == s(clip, "timelineId") && t.kind != wanted && t.segments.is_empty() && (clip.get("engine").is_some() || !s(clip, "effectId").is_empty() || b(clip, "adjustment"))) {
                 t.kind = wanted;
             }
             if let Some((group_track, rank, count)) = grouped.get(&s(clip, "clipId")) {
@@ -881,6 +884,12 @@ fn convert_clip(
             }
             mid
         }
+        // An adjustment layer: a bar whose colour tools (below) grade what is under it.
+        "filter" if b(clip, "adjustment") => {
+            let mid = MaterialId(format!("{id}-adjustment"));
+            materials.effects.push(Effect { id: mid.clone(), category: EffectCategory::Adjust, name: s(clip, "name"), params: BTreeMap::new(), builtin: Some("adjustment_layer".into()), resource: None, library: None, text_style: None });
+            mid
+        }
         // One of OpenRip's own effects on a bar.
         "filter" if fx::bar(&id, clip).is_some() => {
             let e = fx::bar(&id, clip).unwrap();
@@ -983,6 +992,14 @@ fn convert_clip(
         color::attach(&id, clip.get("color").unwrap_or(&Value::Null), materials, &mut attachments);
         compositing::set_chroma(&id, clip.get("chroma"), materials, &mut attachments);
         compositing::set_canvas(&id, clip.get("canvas"), materials, &mut attachments);
+    }
+    // An adjustment layer: the same colour tools and masks as a clip's Adjust tab.
+    if ty == "filter" && b(clip, "adjustment") {
+        for m in convert_masks(&id, clip, clock.fps.as_f64(), report) {
+            attachments.push(m.id.clone());
+            materials.masks.push(m);
+        }
+        color::attach(&id, clip.get("color").unwrap_or(&Value::Null), materials, &mut attachments);
     }
     if matches!(ty, "video" | "image" | "text") {
         compositing::set_blend(&id, clip.get("blendMode"), materials, &mut attachments);

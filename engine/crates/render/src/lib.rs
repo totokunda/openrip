@@ -201,6 +201,10 @@ pub enum Source<'a> {
     /// Not an image: one of OpenRip's own video effects (`effects.wgsl`) over everything drawn
     /// so far on the canvas, or in the open group.
     Effect(EffectPass),
+    /// Not an image: an adjustment layer. The layer's own `lut`, `match_lut` and `adjust` (the
+    /// Adjust tab's colour tools) grade everything drawn so far on the canvas, or in the open
+    /// group, and its `mattes` limit the grade to where they show.
+    Grade,
 }
 
 impl Source<'_> {
@@ -209,7 +213,7 @@ impl Source<'_> {
             Source::Image(i) | Source::Cached(_, i) => (i.width, i.height),
             Source::Video(f) => (f.width(), f.height()),
             Source::Tween(t) => t.from.size(),
-            Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) | Source::Effect(_) => (1, 1),
+            Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) | Source::Effect(_) | Source::Grade => (1, 1),
         }
     }
 }
@@ -1154,6 +1158,48 @@ impl Compositor {
         scratch.push(tmp);
     }
 
+    /// An adjustment layer: the layer's LUTs and colour grade applied to the canvas so far (CapCut's
+    /// order: Color match, LUT, then the Adjust tab's tools), limited to the layer's mattes, and
+    /// drawn back over it. Nothing set draws nothing.
+    fn grade_canvas(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, place_pipeline: &wgpu::RenderPipeline, layer: &Layer, scratch: &mut Vec<wgpu::Texture>) {
+        let (w, h) = (canvas.width(), canvas.height());
+        // The graded copy so far; `made` is false while it is still the canvas itself.
+        let (mut cur, mut made) = (canvas.clone(), false);
+        for (lut, strength) in [layer.match_lut, layer.lut].into_iter().flatten().filter(|(_, s)| *s > 0.0) {
+            let out = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+            self.lut_pass(enc, &cur, &out, lut, strength);
+            if made {
+                scratch.push(cur);
+            }
+            (cur, made) = (out, true);
+        }
+        if let Some((a, luts)) = layer.adjust.as_ref().filter(|(a, _)| !a.is_identity()) {
+            let (out, middle) = self.grade(enc, &cur, a, *luts);
+            scratch.extend(middle);
+            if made {
+                scratch.push(cur);
+            }
+            (cur, made) = (out, true);
+        }
+        if !made {
+            return;
+        }
+        for m in &layer.mattes {
+            let mask = self.upload(enc, m.mask, None, scratch);
+            let out = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+            let paint = |p: Option<[f32; 4]>| p.map_or([0.0, 0.0, 0.0, -1.0], |c| [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]]);
+            let params: Vec<f32> = paint(m.inside).into_iter().chain(paint(m.outside)).collect();
+            self.canvas_pass(enc, &self.matte, &cur, &mask, &out, &params);
+            scratch.push(cur);
+            scratch.push(mask);
+            cur = out;
+        }
+        // Back onto the canvas, pixel for pixel: inside the mattes the graded copy covers it.
+        let back = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0: [1.0, 0.0, 0.0, 0.0], inv1: [0.0, 1.0, 0.0, 0.0], misc: [1.0, 0.0, 0.0, 0.0] };
+        self.pass(enc, place_pipeline, &cur, canvas, back, None);
+        scratch.push(cur);
+    }
+
     /// `src` looked up through `lut` and mixed in by `strength`, into `dst` (same size).
     fn lut_pass(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, dst: &wgpu::Texture, lut: &Lut3d, strength: f32) {
         let table = {
@@ -1323,6 +1369,10 @@ impl Compositor {
                 self.filter_canvas(enc, canvas, place_pipeline, lut, strength, &mut scratch);
                 continue;
             }
+            if let Source::Grade = layer.source {
+                self.grade_canvas(enc, canvas, place_pipeline, layer, &mut scratch);
+                continue;
+            }
             if let Source::Effect(pass) = layer.source {
                 self.effect_canvas(enc, canvas, place_pipeline, &pass, open.is_empty(), &mut scratch);
                 continue;
@@ -1351,7 +1401,7 @@ impl Compositor {
                     let src = match layer.source {
                         Source::Image(img) => self.upload(enc, img, None, &mut scratch),
                         Source::Cached(key, img) => self.upload(enc, img, Some(key), &mut scratch),
-                        Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) | Source::Effect(_) => unreachable!("canvas passes are drawn above"),
+                        Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) | Source::Effect(_) | Source::Grade => unreachable!("canvas passes are drawn above"),
                         Source::Video(frame) => self.video_texture(enc, frame, &mut keep, &mut scratch),
                         Source::Tween(tween) => {
                             let a = self.picture_texture(enc, tween.from, &mut keep, &mut scratch);

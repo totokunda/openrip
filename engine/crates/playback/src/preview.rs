@@ -190,6 +190,9 @@ enum Pixels {
     /// A main-track clip's own picture covering the canvas and blurred (its canvas fill), the
     /// blur's taps this many output pixels apart.
     Backdrop(Backdrop, f32),
+    /// An adjustment layer's grade over everything below it (its colour tools are the layer's
+    /// own, read in `layers`), limited to its masks.
+    Grade(Vec<Painted>),
 }
 
 /// The picture a blurred canvas fill is made of: the clip's frame (and its turn), or its
@@ -555,7 +558,7 @@ impl PreviewEngine {
             .project
             .tracks
             .iter()
-            .filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text | TrackKind::Sticker | TrackKind::Filter | TrackKind::Effect | TrackKind::Graphic) && !tr.hidden)
+            .filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text | TrackKind::Sticker | TrackKind::Filter | TrackKind::Effect | TrackKind::Graphic | TrackKind::Adjustment) && !tr.hidden)
             .flat_map(|tr| tr.segments.iter().filter(|s| s.visible && s.target.contains(t)).cloned())
             .collect();
         active.sort_by_key(|s| s.render_index);
@@ -832,7 +835,7 @@ impl PreviewEngine {
     /// A clip's LUT (a filter attached to a video or photo, as CapCut's Adjust › LUT and the
     /// app's own), read once per file.
     fn load_clip_lut(&mut self, seg: &Segment, report: &mut FrameReport) {
-        if !self.project.materials.media.iter().any(|m| m.id == seg.material) {
+        if !self.project.materials.media.iter().any(|m| m.id == seg.material) && !self.is_adjustment(seg) {
             return;
         }
         // Color match's table, made from its parameters once.
@@ -851,6 +854,11 @@ impl PreviewEngine {
                 report.missing.push((path, why));
             }
         }
+    }
+
+    /// Whether `seg` is on an adjustment track (CapCut's adjustment layer).
+    fn is_adjustment(&self, seg: &Segment) -> bool {
+        self.project.tracks.iter().any(|tr| tr.kind == TrackKind::Adjustment && tr.segments.iter().any(|s| s.id == seg.id))
     }
 
     /// A filter's lookup table, read once per file: the app's Hald CLUT image (`lut`), a
@@ -1384,6 +1392,12 @@ impl PreviewEngine {
             let at = [cx - (center[0] - first.width as f64 / 2.0), cy - (center[1] - first.height as f64 / 2.0)];
             return Ok(Some(Pixels::Shape(layers, at)));
         }
+        // An adjustment layer: the Adjust tab's grade over everything below it, inside its masks.
+        if self.is_adjustment(seg) {
+            let local = seg.local_time(t);
+            let mattes = self.masked(seg, (w, h), 0, local, local, None);
+            return Ok(Some(Pixels::Grade(mattes)));
+        }
         // An effect bar: one of OpenRip's own effects over everything below it, for as long as
         // the bar lasts.
         if let Some(effect) = self.project.materials.effects.iter().find(|e| e.id == seg.material && e.builtin.as_deref().is_some_and(|b| b.starts_with(openrip_model::fx::BUILTIN_PREFIX))) {
@@ -1900,8 +1914,15 @@ impl PreviewEngine {
                     Pixels::End => Layer::pass(Source::EndGroup),
                     Pixels::Mix(m) => Layer::pass(Source::Mix(*m)),
                     Pixels::Effect(e) => Layer::pass(Source::Effect(*e)),
+                    Pixels::Grade(mattes) => Layer {
+                        mattes: painted(mattes),
+                        adjust: self.adjust_of(seg, t),
+                        lut: self.lut_of(seg, local),
+                        match_lut: self.match_of(seg, local),
+                        ..Layer::pass(Source::Grade)
+                    },
                 };
-                if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_) | Pixels::Begin(_) | Pixels::End | Pixels::Mix(_) | Pixels::Effect(_)) {
+                if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_) | Pixels::Begin(_) | Pixels::End | Pixels::Mix(_) | Pixels::Effect(_) | Pixels::Grade(_)) {
                     layer.opacity *= seg.opacity.sample(local);
                 }
                 if let Some(m) = motion {
