@@ -11,7 +11,7 @@
 // - Voiceover: the recording the main process made (preload `voiceoverStop`) as an asset and an
 //   audio clip on a new track at the playhead, as CapCut puts a voiceover.
 import type { AnyClipProps, Asset, AssetCredit, AudioClipProps, ChannelFill, ClipLoudness, TimelineProps, VideoClipProps } from "./types";
-import { preferences } from "./preferences";
+import { preferences } from "./preferences.ts";
 
 /** CapCut's loudness target, LUFS. */
 export const LOUDNESS_TARGET = -23;

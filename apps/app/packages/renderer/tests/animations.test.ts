@@ -25,7 +25,11 @@ const clip = (type: string, frames: number, extra: Record<string, unknown> = {})
   ({ clipId: "c", type, startFrame: 30, endFrame: 30 + frames, ...extra }) as any;
 
 test("the lists are what the engine draws", () => {
-  assert.deepEqual(TRANSITIONS.map((t) => t.type).sort(), engineList("BUILTIN_TRANSITION").sort());
+  const builtin = TRANSITIONS.filter((t) => !t.shader);
+  assert.deepEqual(builtin.map((t) => t.type).sort(), engineList("BUILTIN_TRANSITION").sort());
+  // The shader transitions go by their "gl_" names (app.rs is_shader_transition), all overlapping.
+  const shaders = TRANSITIONS.filter((t) => t.shader);
+  assert.ok(shaders.length > 0 && shaders.every((t) => /^gl_[A-Za-z0-9_-]+$/.test(t.type) && t.overlap));
   const types = (k: "in" | "out" | "combo" | "loop", c: string) => animationsFor(c as any, k).map((a) => a.type);
   const union = (...lists: string[][]) => [...new Set(lists.flat())].sort();
   assert.deepEqual(union(types("in", "video"), types("in", "text")), engineList("BUILTIN_IN").sort());
@@ -33,7 +37,7 @@ test("the lists are what the engine draws", () => {
   assert.deepEqual(types("combo", "image").sort(), engineList("BUILTIN_COMBO").sort());
   assert.deepEqual(types("loop", "text").sort(), engineList("BUILTIN_LOOP").sort());
   // The ones that show both clips are the engine's overlapping ones.
-  assert.deepEqual(TRANSITIONS.filter((t) => t.overlap).map((t) => t.type).sort(), engineList("OVERLAPPING").sort());
+  assert.deepEqual(builtin.filter((t) => t.overlap).map((t) => t.type).sort(), engineList("OVERLAPPING").sort());
 });
 
 test("each clip type gets its kinds", () => {

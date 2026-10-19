@@ -11,7 +11,7 @@
 // own curves until that bundle is on hand. See docs/parity/transitions.md and
 // docs/parity/clip-animations.md; docs/plan/app-engine-integration.md ("Transitions and
 // animations") has how the engine and the importer use them.
-import { GL_TRANSITIONS, type GlParamDef } from "./glTransitions";
+import { GL_TRANSITIONS, type GlParamDef } from "./glTransitions.ts";
 import type { AnimationDirection, AnimationParams, AnyClipProps, ClipAnimation, ClipTransition, TransitionParams } from "./types";
 
 /** The kinds of clip animation: In and Out on every clip, Combo on video and photos, Loop on text. */

@@ -157,7 +157,7 @@ export const cueFrames = (cues: Cue[], fps: number, offsetFrames = 0): { startFr
       prev.text += `\n${c.text}`;
       prev.endFrame = Math.max(prev.endFrame, endFrame);
     } else {
-      framed.push({ startFrame, endFrame, text: c.text, words: c.words });
+      framed.push({ startFrame, endFrame, text: c.text, ...(c.words ? { words: c.words } : {}) });
     }
   }
   framed.forEach((c, k) => {
