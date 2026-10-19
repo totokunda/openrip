@@ -10,6 +10,8 @@
 //! - [`Session`]: one open project for preview: render frames into surfaces the platform
 //!   shows, play with the audio clock, swap in edits.
 //! - [`effect_catalog`] and [`EffectPreviews`]: OpenRip's own video effects and frames of them.
+//! - [`ProjectPreviews`]: frames of a small project given as JSON, drawn as the player draws it
+//!   (a library tile's preview, such as a text template's).
 //! - [`Thumbnails`]: timeline thumbnails, waveforms and beats, cached on disk.
 //! - [`measure_loudness`] and [`Recorder`]: a clip's loudness for loudness normalisation, and
 //!   voiceover recording from the microphone (behind the audio input seam).
@@ -29,6 +31,7 @@ mod capcut;
 mod effects;
 mod export;
 mod fonts;
+mod previews;
 mod project;
 mod session;
 mod speech;
@@ -48,6 +51,7 @@ pub use fonts::{font_face, font_families, register_fonts, FontFace, FontFamily};
 pub use openrip_model::{Micros, Project};
 /// The Adjust sliders (the draft's −1…1), for a [`Look`].
 pub use openrip_render::Adjust;
+pub use previews::ProjectPreviews;
 pub use project::{load_project, parse_project_json, ProjectInfo, Source, TextBlock};
 pub use session::{DisplayFrame, FrameHandle, FrameJob, Image, RenderedFrame, Renderer, Session, Surface};
 pub use speech::{build_captions, decode_speech_audio, mix_speech_audio, models, transcribe, transcribe_audio, Caption, CaptionOptions, CaptionWord, Model, Segment, SpeechControl, SpeechError, SpeechInput, Transcript, Word, DEFAULT_MODEL, HAS_WHISPER, MODELS};

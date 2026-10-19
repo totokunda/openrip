@@ -26,6 +26,7 @@ export {
   engineThumbnails,
   engineEffectCatalog,
   engineEffectPreviews,
+  engineProjectPreviews,
   type EngineEffect,
   engineBeats,
   engineWaveform,

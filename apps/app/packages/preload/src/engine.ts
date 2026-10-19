@@ -336,3 +336,19 @@ export function engineEffectPreviews(
 ): Promise<{ width: number; height: number; rgba: Uint8Array }[]> {
   return ipcRenderer.invoke("engine:effect-previews", id, intensity, params, times, duration, width, height);
 }
+
+/**
+ * Frames of the small project in `json` (an OpenRip, v1 or CapCut project) drawn by the
+ * engine's renderer, so they match the player and an export: `width` × `height` at each of
+ * `times` seconds, cut to `crop` (`[x, y, width, height]`, fractions of the frame) when given.
+ * It doesn't touch the open project.
+ */
+export function engineProjectPreviews(
+  json: string,
+  times: number[],
+  width: number,
+  height: number,
+  crop: number[] | null = null,
+): Promise<{ width: number; height: number; rgba: Uint8Array }[]> {
+  return ipcRenderer.invoke("engine:project-previews", json, times, width, height, crop);
+}

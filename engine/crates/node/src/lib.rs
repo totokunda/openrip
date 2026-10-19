@@ -1205,6 +1205,49 @@ pub fn effect_previews(id: String, intensity: Option<f64>, params: Vec<f64>, tim
     AsyncTask::new(EffectPreviewTask { id, intensity, params, times, duration, width, height })
 }
 
+// ---- Previews of small projects ----
+
+fn project_previews_service() -> &'static openrip_core::ProjectPreviews {
+    static P: openrip_core::ProjectPreviews = openrip_core::ProjectPreviews::new();
+    &P
+}
+
+pub struct ProjectPreviewTask {
+    json: String,
+    times: Vec<f64>,
+    width: u32,
+    height: u32,
+    crop: Option<[f64; 4]>,
+}
+
+impl Task for ProjectPreviewTask {
+    type Output = Vec<(u32, u32, Vec<u8>)>;
+    type JsValue = Vec<Image>;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let frames = project_previews_service().frames(&self.json, &self.times, self.width, self.height, self.crop).map_err(err)?;
+        Ok(frames.into_iter().map(|i| (i.width, i.height, i.data)).collect())
+    }
+
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<Vec<Image>> {
+        Ok(out.into_iter().map(|(width, height, data)| Image { width, height, data: Buffer::from(data) }).collect())
+    }
+}
+
+/// Frames of the project in `json` (the formats `openProjectJson` reads) at `times` seconds,
+/// each drawn `width` x `height` by the engine's renderer (so they match the player and an
+/// export) and cropped to `crop` (`[x, y, width, height]`, fractions of the frame) when given.
+/// Independent of the open project.
+#[napi]
+pub fn project_previews(json: String, times: Vec<f64>, width: u32, height: u32, crop: Option<Vec<f64>>) -> Result<AsyncTask<ProjectPreviewTask>> {
+    let crop = match crop {
+        Some(c) if c.len() == 4 => Some([c[0], c[1], c[2], c[3]]),
+        Some(_) => return Err(Error::from_reason("crop is [x, y, width, height]")),
+        None => None,
+    };
+    Ok(AsyncTask::new(ProjectPreviewTask { json, times, width, height, crop }))
+}
+
 // ---- auto captions: local speech recognition ---------------------------------------
 
 #[napi(object)]

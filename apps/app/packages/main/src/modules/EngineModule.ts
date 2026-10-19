@@ -96,6 +96,8 @@ export type EngineAddon = {
   effectCatalog?(): string;
   /** Frames of an effect on a sample picture, drawn by the renderer (0–1 values). */
   effectPreviews?(id: string, intensity: number | null, params: number[], times: number[], duration: number, width: number, height: number): Promise<{ width: number; height: number; data: Buffer }[]>;
+  /** Frames of a small project given as JSON (a library tile's preview), cropped to `crop` (fractions of the frame) when given. */
+  projectPreviews?(json: string, times: number[], width: number, height: number, crop: number[] | null): Promise<{ width: number; height: number; data: Buffer }[]>;
   trackRegion(request: EngineTrackRequest): Promise<EngineTrackResult>;
   trackProgress(): { done: number; total: number };
   cancelTrack(): void;
@@ -434,7 +436,7 @@ export class EngineModule implements AppModule {
     ipcMain.handle("engine:info", () => info);
 
     // The Effects tab: OpenRip's own video effects and frames of them drawn by the engine.
-    for (const channel of ["engine:effect-catalog", "engine:effect-previews"]) {
+    for (const channel of ["engine:effect-catalog", "engine:effect-previews", "engine:project-previews"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -454,6 +456,18 @@ export class EngineModule implements AppModule {
         return frames.map((f) => ({ width: f.width, height: f.height, rgba: new Uint8Array(f.data) }));
       } catch (e) {
         console.warn("[engine] effect previews failed:", message(e));
+        return [];
+      }
+    });
+
+    // The Text tab's templates: frames of a small project drawn by the engine, as the player draws it.
+    ipcMain.handle("engine:project-previews", async (_event, json: string, times: number[], width: number, height: number, crop: number[] | null) => {
+      if (!addon?.projectPreviews) return [];
+      try {
+        const frames = await addon.projectPreviews(json, times, width, height, crop);
+        return frames.map((f) => ({ width: f.width, height: f.height, rgba: new Uint8Array(f.data) }));
+      } catch (e) {
+        console.warn("[engine] project previews failed:", message(e));
         return [];
       }
     });
