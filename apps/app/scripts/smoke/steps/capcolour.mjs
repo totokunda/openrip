@@ -4,12 +4,12 @@
 // playhead inside it. Each slider is set and the engine's frame checked; the HSL range's
 // saturation is moved; the curves are taken off; then the draft's are put back.
 import { checks, clipsWhere, focus, savedProject } from "./_anim.mjs";
-import { engineFrame, tab } from "./_preview.mjs";
+import { engineFrame, tab, pointerTool } from "./_preview.mjs";
 const KINDS = ["clarity", "vignette", "fade", "hsl", "curves"];
 export default async (ctx) => {
   const { win, shot, udDir } = ctx;
   const { check, report } = checks();
-  await win.keyboard.press("v");
+  await pointerTool(win);
   const doc = await savedProject(win, udDir);
   const kinds = (c) => new Set((c.draftAdjustments ?? []).map((a) => a.kind));
   const clip = clipsWhere(doc, (c) => KINDS.every((k) => kinds(c).has(k)))[0] ?? clipsWhere(doc, (c) => c.draftAdjustments?.length)[0];

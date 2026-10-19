@@ -3,12 +3,12 @@
 // the engine draws the sticker, the Filter tab shows its opacity, and setting it to
 // STICKER_OPACITY (default 30) fades the sticker.
 import { checks, clipsWhere, focus, savedProject } from "./_anim.mjs";
-import { engineFrame, tab } from "./_preview.mjs";
+import { engineFrame, tab, pointerTool } from "./_preview.mjs";
 export default async (ctx) => {
   const { win, shot, udDir } = ctx;
   const { check, report } = checks();
   const bright = "r + g + b > 200";
-  await win.keyboard.press("v");
+  await pointerTool(win);
   const doc = await savedProject(win, udDir);
   const sticker = clipsWhere(doc, (c) => c.draftKind === "sticker")[0];
   if (!sticker) throw new Error("no sticker bar");

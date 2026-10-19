@@ -2,11 +2,11 @@
 // photo with CapCut adjustments (as saved), with the playhead inside it. Sets the first slider
 // the engine draws to ADJUST_VALUE (default 40), removes it, then puts the draft's back, and
 // checks the engine's frame after each.
-import { engineFrame, tab } from "./_preview.mjs";
+import { engineFrame, tab, pointerTool } from "./_preview.mjs";
 import { clipsWhere, focus, savedProject } from "./_anim.mjs";
 export default async (ctx) => {
   const { win, shot, udDir } = ctx;
-  await win.keyboard.press("v");
+  await pointerTool(win);
   const doc = await savedProject(win, udDir);
   const clip = clipsWhere(doc, (c) => c.draftAdjustments?.length)[0];
   if (!clip) throw new Error("no clip with the draft's adjustments");

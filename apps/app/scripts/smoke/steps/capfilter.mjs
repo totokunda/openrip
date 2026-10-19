@@ -1,11 +1,11 @@
 // A CapCut filter bar's intensity on an opened draft: its first filter bar (as saved), with
 // the playhead inside it. Sets the Filter tab's intensity to 0, then 100, and checks the
 // engine's frame after each.
-import { engineFrame, tab } from "./_preview.mjs";
+import { engineFrame, tab, pointerTool } from "./_preview.mjs";
 import { clipsWhere, focus, savedProject } from "./_anim.mjs";
 export default async (ctx) => {
   const { win, shot, udDir } = ctx;
-  await win.keyboard.press("v");
+  await pointerTool(win);
   const doc = await savedProject(win, udDir);
   const bar = clipsWhere(doc, (c) => c.type === "filter" && c.draftKind !== "sticker")[0];
   if (!bar) throw new Error("no filter bar");

@@ -2,13 +2,13 @@
 // card) and White Flash on the cut after its first video that another clip follows on the same
 // track (the Transitions tab's +; both found in the project as saved), and the engine's frames
 // checked, a quarter second into the caption and at the cut.
-import { engineFrame, rulerMap, seek, tab } from "./_preview.mjs";
+import { engineFrame, rulerMap, seek, tab, pointerTool } from "./_preview.mjs";
 import { addTransition, choose, clipsWhere, savedProject, select } from "./_anim.mjs";
 
 export default async (ctx) => {
   const { win, shot, clock, udDir } = ctx;
   const out = [];
-  await win.keyboard.press("v");
+  await pointerTool(win);
   const map = (ctx.map ??= await rulerMap(win));
   const doc = await savedProject(win, udDir);
   const caption = clipsWhere(doc, (c) => c.type === "text")[0];

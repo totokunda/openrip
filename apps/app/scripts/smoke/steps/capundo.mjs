@@ -6,14 +6,14 @@
 // a third of the way into the caption. With DRAFT_ADJUST set, the clip is the first with the
 // draft's own adjustments instead (and the playhead in it): one set, one removed, then all put
 // back.
-import { drag, rulerMap, seek, settled } from "./_preview.mjs";
+import { drag, rulerMap, seek, settled, pointerTool } from "./_preview.mjs";
 import { bar, checks, clipsWhere, savedProject, select } from "./_anim.mjs";
 import { openTab, press, state, textCase, textFont, thumb, typeInto, undoCase } from "./_undo.mjs";
 
 export default async (ctx) => {
   const { win, udDir } = ctx;
   const { check, report } = checks();
-  await win.keyboard.press("v");
+  await pointerTool(win);
   const map = (ctx.map ??= await rulerMap(win));
   const doc = await savedProject(win, udDir);
   const caption = clipsWhere(doc, (c) => c.type === "text")[0];

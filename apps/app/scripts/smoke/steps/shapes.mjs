@@ -7,7 +7,7 @@
 // changing the frame, each undone and redone); and S with a number key dragging out a
 // triangle; and a drag with the S tool starting over a shape or the video drawing a shape without
 // selecting the clip under it.
-import { drag, engineFrame, previewRect, rulerMap, seek, settled, tab, timelineRect, sectionButton } from "./_preview.mjs";
+import { drag, engineFrame, previewRect, rulerMap, seek, settled, tab, timelineRect, sectionButton, pointerTool } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject, select } from "./_anim.mjs";
 import { press, state, undoCase } from "./_undo.mjs";
 
@@ -158,7 +158,7 @@ export default async (ctx) => {
   check("S then 3 picks the triangle", /triangle/.test(chip), chip);
   const tri0 = clipsWhere(await doc(), (c) => c.shapeType === "triangle").length;
   await settled(win, () => drag(win, p.x + p.w * 0.25, p.y + p.h * 0.25, p.x + p.w * 0.4, p.y + p.h * 0.45));
-  await win.keyboard.press("v");
+  await pointerTool(win);
   d = await doc();
   check("the drag makes a triangle", clipsWhere(d, (c) => c.shapeType === "triangle").length === tri0 + 1);
   check("the engine draws the shapes", (await engineFrame(win)).w > 16);
@@ -186,7 +186,7 @@ export default async (ctx) => {
   await win.waitForTimeout(200);
   await settled(win, () => drag(win, ux - 4, uy - 6, ux - 24, uy + 14));
   await shot("sh8-s-over-shape");
-  await win.keyboard.press("v");
+  await pointerTool(win);
   d = await doc();
   check("S-drag starting over a shape draws a new shape", clipsWhere(d, (c) => c.shapeType === "rectangle").length === rect0 + 1);
   check("and the shape under the drag is not selected", (await shapeGroups()) === 0, `${await shapeGroups()}`);
@@ -198,7 +198,7 @@ export default async (ctx) => {
   await win.keyboard.press("1");
   await win.waitForTimeout(200);
   await settled(win, () => drag(win, cv.x + cv.w * 0.1, cv.y + cv.h * 0.75, cv.x + cv.w * 0.25, cv.y + cv.h * 0.9));
-  await win.keyboard.press("v");
+  await pointerTool(win);
   d = await doc();
   check("S-drag over the video draws a shape", clipsWhere(d, (c) => c.shapeType === "rectangle").length === rect0 + 2);
   const tabsNow = await win.evaluate(() => [...document.querySelectorAll("[data-testid=inspector] [role=tab]")].map((t) => t.innerText.trim()));

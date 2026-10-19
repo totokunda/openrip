@@ -1,6 +1,6 @@
 // Measure the open project: playhead seeks and a scrub drag, playback smoothness, and how long
 // an edit takes to reach the picture, with the renderer's long tasks (stalls over 50 ms).
-import { playButton, previewRect, timelineRect, drag } from "./_preview.mjs";
+import { playButton, previewRect, timelineRect, drag, pointerTool } from "./_preview.mjs";
 
 const stats = (xs) => {
   if (!xs.length) return "n/a";
@@ -95,7 +95,7 @@ export default async ({ win, outDir, fs }) => {
     await win.mouse.click(tl.x + 20 + tl.w * 0.1, rulerY);
     await win.waitForTimeout(800);
     const r = await previewRect(win);
-    await win.keyboard.press("v");
+    await pointerTool(win);
     await drag(win, r.x + r.w * 0.5, r.y + r.h * 0.6, r.x + r.w * 0.58, r.y + r.h * 0.6);
     const t0 = await now();
     let lat = null;

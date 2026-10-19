@@ -3,7 +3,7 @@
 // with ⇧⌘Z: the engine's frame and the saved project should come back exactly (see
 // _undo.mjs). Then everything is undone at once back to the start and redone, by the
 // toolbar's buttons. UNDO_CASES="a,b" runs some of the cases only.
-import { clickSplit, drag, previewRect, seek, settled, timelineRect } from "./_preview.mjs";
+import { clickSplit, drag, previewRect, seek, settled, timelineRect, pointerTool } from "./_preview.mjs";
 import { addTransition, bar, checks, choose, savedProject, select } from "./_anim.mjs";
 import { field, openTab, press, state, textCase, textColor, textFont, thumb, typeInto, undoCase } from "./_undo.mjs";
 
@@ -100,7 +100,7 @@ export default async (ctx) => {
       await win.keyboard.press("t");
       await settled(win, () => drag(win, mid.x - 80, mid.y - 140, mid.x + 80, mid.y - 90));
       await win.keyboard.press("Escape");
-      await win.keyboard.press("v");
+      await pointerTool(win);
       await win.waitForTimeout(500);
     },
     // A filter from the Filters panel dropped on the timeline from 1 s, then its intensity.

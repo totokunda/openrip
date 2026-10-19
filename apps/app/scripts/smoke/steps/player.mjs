@@ -6,7 +6,7 @@
 // playing; the stereo meter moving while playing; full screen; the bar's order. Shots are named
 // after the CapCut references they match (16-player/0xx).
 import path from "node:path";
-import { drag, engineFrame, previewRect, rulerMap, seek, settled } from "./_preview.mjs";
+import { drag, engineFrame, previewRect, rulerMap, seek, settled, pointerTool } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject, select } from "./_anim.mjs";
 
 const menuOpen = async (win) => {
@@ -209,7 +209,7 @@ export default async (ctx) => {
   // The video dragged down so its top edge comes 2 px short of the guide: it snaps onto it.
   const video = clipsWhere(d, (c) => c.type === "video")[0];
   await select(ctx, d, video.clipId, 2);
-  await win.keyboard.press("v");
+  await pointerTool(win);
   const y0 = video.transform?.y ?? 0;
   const dy = guideAt * fh - 2;
   await settled(win, () => drag(win, fleft + fw * 0.5, ftop + fh * 0.6, fleft + fw * 0.5, ftop + fh * 0.6 + dy));
@@ -298,7 +298,7 @@ export default async (ctx) => {
     check("Edit guide moves a vertical guide to X 648 px (80%)", Math.abs((d.settings?.guides?.[0]?.at ?? 0) - 0.8) < 1e-6, JSON.stringify(d.settings?.guides));
     const { fleft: gx, ftop: gy, fw: gw, fh: gh } = await frameOn();
     await select(ctx, d, video.clipId, 3);
-    await win.keyboard.press("v");
+    await pointerTool(win);
     // The handle is a circle centred on the frame's corner, which is the stage's own edge: its
     // outer half is clipped, and the hit canvas misses the last half pixel row at the edge. Take
     // it 2 px inside the corner (still on the handle; Konva keeps that offset), and let go at the

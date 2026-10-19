@@ -226,3 +226,14 @@ export const sectionButton = async (win, id) => {
   if (opened) await win.waitForTimeout(200);
   return button;
 };
+
+/**
+ * Back to the pointer tool when another canvas tool (text, a shape, the pen) is on. V does it,
+ * but with the pointer already on and a clip selected V is CapCut's Deactivate clip, so it's
+ * pressed only when the tool chip says another tool is in use.
+ */
+export const pointerTool = async (win) => {
+  if (!(await win.locator("[data-testid=tool-chip]").count())) return;
+  await win.keyboard.press("v");
+  await win.waitForTimeout(100);
+};
