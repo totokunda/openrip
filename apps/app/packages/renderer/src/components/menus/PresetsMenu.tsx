@@ -23,6 +23,8 @@ const menuRow = "dark h-8 px-2.5 gap-2.5 rounded-[4px] text-[13px] cursor-pointe
  */
 const PresetTile: React.FC<{ preset: ClipPreset }> = ({ preset }) => {
   const [hover, setHover] = useState(false);
+  // The tile's buttons stay while its menu is open (the pointer is over the menu, not the tile).
+  const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(preset.name);
   const input = useRef<HTMLInputElement>(null);
@@ -57,10 +59,10 @@ const PresetTile: React.FC<{ preset: ClipPreset }> = ({ preset }) => {
         className={cn("relative w-[86px] h-[86px] rounded-[6px] bg-brand-background-light overflow-hidden cursor-pointer outline-none flex items-center justify-center", isDragging && "opacity-50")}
       >
         {preset.thumb ? <img src={preset.thumb} alt="" draggable={false} className="w-full h-full object-cover pointer-events-none" /> : <LuWandSparkles className="w-7 h-7 text-brand-light/70 pointer-events-none" />}
-        {hover && !isDragging && (
+        {(hover || menuOpen) && !isDragging && (
           <>
             <div className="absolute right-1 top-1" onPointerDown={own}>
-              <DropdownMenu>
+              <DropdownMenu onOpenChange={setMenuOpen}>
                 <DropdownMenuTrigger asChild>
                   <button type="button" aria-label={`${preset.name} menu`} data-testid="preset-menu" className="w-[18px] h-[18px] rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80">
                     <LuEllipsis className="w-3 h-3" />
