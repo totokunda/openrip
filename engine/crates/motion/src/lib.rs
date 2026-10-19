@@ -6,6 +6,8 @@
 //! - [`fit`]: least-squares and RANSAC fits of similarity and affine motions.
 //! - [`region`]: a region followed through a video (position, scale and rotation, with lost
 //!   tracking reported): the Tracking tab and Track mask.
+//! - [`stabilize`]: the camera's motion followed through a video, its path smoothed, and the
+//!   per-frame correction and zoom (Stabilize), plus flicker gains (Remove flickers).
 //! - [`flow`]: dense optical flow and motion-compensated interpolation on the CPU, the
 //!   reference for the compositor's GPU version (Smooth slow-mo and Optical flow).
 //!
@@ -19,6 +21,7 @@ pub mod flow;
 pub mod image;
 pub mod klt;
 pub mod region;
+pub mod stabilize;
 pub mod testing;
 
 pub use features::{good_features, Corner, CornerOptions};

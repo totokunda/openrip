@@ -19,6 +19,7 @@ pub mod adjust;
 pub mod blend;
 pub mod exposure;
 mod effects;
+mod enhance;
 mod flow;
 pub mod glt;
 pub mod fonts;
@@ -32,6 +33,7 @@ pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
 pub use blend::BlendMode;
 pub use grade::{CurvePoint, Curves, Hsl};
 pub use effects::{sample_scene, EffectPass};
+pub use enhance::Enhance;
 pub use flow::{work_factor, FlowField, Picture, Tween, TweenMode, WORK_SIDE};
 pub use interop::Surface;
 pub use upload::Uploader;
@@ -323,6 +325,10 @@ pub struct Layer<'a> {
     /// and its intensity, on its own pixels after the chroma key and before `lut`, as the
     /// Basic tab lists them.
     pub match_lut: Option<(&'a Lut3d, f32)>,
+    /// Reduce image noise, Motion blur and Remove flickers on a video's own pixels, before
+    /// anything else (and before it is resized, so a preview and an export clean the same
+    /// picture).
+    pub enhance: Option<Enhance<'a>>,
 }
 
 /// The app's own clip filters (`components/preview/webgl-filters`), on its scales.
@@ -413,6 +419,7 @@ impl<'a> Layer<'a> {
             chroma: None,
             lut: None,
             match_lut: None,
+            enhance: None,
         }
     }
 
@@ -458,6 +465,7 @@ impl<'a> Layer<'a> {
             chroma: None,
             lut: None,
             match_lut: None,
+            enhance: None,
         }
     }
 }
@@ -538,6 +546,8 @@ pub struct Compositor {
     readback: std::sync::Mutex<Option<wgpu::Buffer>>,
     /// The optical flow passes, made the first time a frame needs them.
     flow_fx: std::sync::OnceLock<flow::FlowFx>,
+    /// The clean-up passes, made the first time a frame needs them.
+    enhance_fx: std::sync::OnceLock<enhance::EnhanceFx>,
     /// Flow between pairs of frames, by the pair's key, with the frame last used in.
     flows: std::sync::Mutex<Vec<(u64, flow::FlowPair, u64)>>,
 }
@@ -786,6 +796,7 @@ impl Compositor {
             pool: Default::default(),
             readback: Default::default(),
             flow_fx: Default::default(),
+            enhance_fx: Default::default(),
             flows: Default::default(),
         })
     }
@@ -1411,6 +1422,11 @@ impl Compositor {
                             scratch.extend([a, b]);
                             out
                         }
+                    };
+                    // Clean-up of a video's own picture, at the size it was decoded.
+                    let src = match layer.enhance.as_ref().filter(|e| !e.is_identity()) {
+                        Some(e) => self.enhance_texture(enc, src, e, &mut keep, &mut scratch),
+                        None => src,
                     };
                     // The texture's own size (an oversize image is uploaded smaller).
                     let (sw, sh) = (src.width(), src.height());

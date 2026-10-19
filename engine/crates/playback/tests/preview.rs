@@ -160,7 +160,7 @@ fn a_freeze_frame_without_its_still_draws_the_video_frame() {
         reverse_path: None,
         freeze: Some(openrip_model::Freeze { video: a.to_string_lossy().into_owned(), at: fps.frame_start(123) + Micros(800) }),
         complement_frame: None,
-        smart_complement_frame: None,
+        smart_complement_frame: None, enhance: None,
     });
     p.tracks[0].segments[0].material = "fr".into();
     let mut e = PreviewEngine::new(p).unwrap();

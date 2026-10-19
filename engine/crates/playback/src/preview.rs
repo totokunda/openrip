@@ -14,7 +14,7 @@ use openrip_model::{Animation, CanvasFillKind, CropRect, EffectCategory, MediaKi
 use openrip_platform::assets;
 use openrip_render::fonts;
 use openrip_render::text::{self, Align, Font, TextStyle};
-use openrip_render::{Adjust, Compositor, ExposureLuts, Layer, Lut3d, Picture, RenderError, RgbaImage, Source, Surface, Tween, TweenMode, Uploader};
+use openrip_render::{Adjust, Compositor, Enhance, ExposureLuts, Layer, Lut3d, Picture, RenderError, RgbaImage, Source, Surface, Tween, TweenMode, Uploader};
 
 /// CapCut's default font, for CapCut's own text whose font isn't found (a draft names it).
 /// OpenRip's own text never uses it.
@@ -154,15 +154,23 @@ pub struct FrameReport {
 /// colour, or the clip's own pixels for `None`).
 type Painted = (std::sync::Arc<RgbaImage>, Option<[f32; 4]>, Option<[f32; 4]>);
 
+/// The frames either side of a video frame, kept while the clip's Reduce image noise or
+/// Motion blur needs them.
+#[derive(Default)]
+struct Around {
+    prev: Option<VideoFrame>,
+    next: Option<VideoFrame>,
+}
+
 enum Pixels {
     /// A still, its cache key, and its masks.
     Image(std::sync::Arc<RgbaImage>, u64, Vec<Painted>),
     /// A frame, the clockwise turn that displays it upright (phone video), and its masks
     /// (its cut-out first, if its background is removed).
-    Video(VideoFrame, i32, Vec<Painted>),
+    Video(VideoFrame, i32, Vec<Painted>, Around),
     /// A frame made between two source frames (Smooth slow-mo, Optical flow): the two
     /// frames, how far between them, the pair's key, how it's made, the turn and the masks.
-    Tween(Box<(VideoFrame, VideoFrame)>, f32, u64, TweenMode, i32, Vec<Painted>),
+    Tween(Box<(VideoFrame, VideoFrame)>, f32, u64, TweenMode, i32, Vec<Painted>, Around),
     /// Rasterised text, its cache key, and the canvas point its image centre goes to.
     Text(std::sync::Arc<RgbaImage>, u64, [f64; 2]),
     /// A filter track's lookup table and strength, applied to everything below it.
@@ -809,9 +817,9 @@ impl PreviewEngine {
             CanvasFillKind::Color { .. } => return,
             CanvasFillKind::Blur { amount } => {
                 let source = out[at..].iter().find(|(s, _)| s.id == seg.id).and_then(|(_, p)| match p {
-                    Pixels::Video(f, o, _) => f.try_clone().ok().map(|f| Backdrop::Video(f, *o)),
+                    Pixels::Video(f, o, ..) => f.try_clone().ok().map(|f| Backdrop::Video(f, *o)),
                     // Blurred, the frame before is as good as the one made in between.
-                    Pixels::Tween(frames, _, _, _, o, _) => frames.0.try_clone().ok().map(|f| Backdrop::Video(f, *o)),
+                    Pixels::Tween(frames, _, _, _, o, ..) => frames.0.try_clone().ok().map(|f| Backdrop::Video(f, *o)),
                     Pixels::Image(img, key, _) => Some(Backdrop::Image(img.clone(), *key)),
                     _ => None,
                 });
@@ -1492,7 +1500,7 @@ impl PreviewEngine {
             let upright = if orientation.rem_euclid(180) == 90 { (frame.height(), frame.width()) } else { (frame.width(), frame.height()) };
             let cutout = media.matte.as_deref().and_then(|dir| self.matte_at(dir, frame.time, orientation));
             let mattes = self.masked(seg, upright, orientation, source, seg.local_time(t), cutout);
-            return Ok(Some(Pixels::Video(frame, orientation, mattes)));
+            return Ok(Some(Pixels::Video(frame, orientation, mattes, Around::default())));
         }
         let key = seg.id.clone();
         self.await_prefetch(&key);
@@ -1559,11 +1567,25 @@ impl PreviewEngine {
         let cutout = media.matte.as_deref().and_then(|dir| self.matte_at(dir, matte_time, orientation));
         let upright = if orientation.rem_euclid(180) == 90 { (frame.height(), frame.width()) } else { (frame.width(), frame.height()) };
         let mattes = self.masked(seg, upright, orientation, source, seg.local_time(t), cutout);
+        // Reduce image noise and Motion blur look at the frames either side.
+        let around = if self.scrubbing || !media.enhance.as_ref().is_some_and(|e| e.denoise.is_some() || e.motion_blur.is_some()) {
+            Around::default()
+        } else {
+            let length = if frame.duration.0 > 0 { frame.duration } else { Micros(33_333) };
+            let d = self.decoders.get_mut(&key).unwrap();
+            let mut neighbour = |at: Micros, ahead: bool| match d.decoder.frame_at(at) {
+                Ok(Some(f)) if (ahead && f.time > frame.time) || (!ahead && f.time < frame.time) => Some(f),
+                _ => None,
+            };
+            let prev = (frame.time.0 > 0).then(|| neighbour(Micros(frame.time.0 - length.0 * 3 / 4), false)).flatten();
+            let next = (frame.time.0 + length.0 < media.duration.0).then(|| neighbour(Micros(frame.time.0 + length.0 + length.0 / 4), true)).flatten();
+            Around { prev, next }
+        };
         if let Some((n, between, mode)) = next {
             let pair = key_of(("tween", &path, frame.time.0, n.time.0));
-            return Ok(Some(Pixels::Tween(Box::new((frame, n)), between, pair, mode, orientation, mattes)));
+            return Ok(Some(Pixels::Tween(Box::new((frame, n)), between, pair, mode, orientation, mattes, around)));
         }
-        Ok(Some(Pixels::Video(frame, orientation, mattes)))
+        Ok(Some(Pixels::Video(frame, orientation, mattes, around)))
     }
 
     /// How a video clip's frame at `t` is made when it falls between two source frames, if
@@ -1816,6 +1838,32 @@ impl PreviewEngine {
         crate::animation::motion_at(items, seg.target.duration, local)
     }
 
+    /// A video clip's Stabilize (the picture moved, turned and zoomed to the smoothed path),
+    /// Reduce image noise, Motion blur and Remove flickers on `layer`, from the clip's media
+    /// and the analysis kept for its file (none yet: Stabilize and Remove flickers wait for it).
+    fn enhance_layer<'a>(&self, seg: &Segment, p: &'a Pixels, layer: &mut Layer<'a>) {
+        let (time, around, orientation) = match p {
+            Pixels::Video(f, o, _, around) => (f.time, around, *o),
+            Pixels::Tween(frames, between, _, _, o, _, around) => (Micros(frames.0.time.0 + ((frames.1.time.0 - frames.0.time.0) as f64 * *between as f64) as i64), around, *o),
+            _ => return,
+        };
+        let Some(media) = self.project.materials.media.iter().find(|m| m.id == seg.material) else { return };
+        let Some(e) = media.enhance.as_ref().filter(|e| !e.is_off()) else { return };
+        // The analysis is of the file as it plays forward.
+        let found = if e.needs_analysis() && !seg.reverse && media.freeze.is_none() { crate::enhance::analysis(&media.path) } else { None };
+        let mut gain = 1.0;
+        if let Some(a) = &found {
+            if e.deflicker {
+                gain = a.gain(time);
+            }
+            if let Some(c) = e.stabilize.and_then(|level| a.correction(level, time)) {
+                stabilise(layer, &c, orientation);
+            }
+        }
+        let (denoise, blur) = (e.denoise.unwrap_or(0.0).clamp(0.0, 1.0), e.motion_blur.unwrap_or(0.0).clamp(0.0, 1.0));
+        layer.enhance = Some(Enhance { prev: around.prev.as_ref().map(Picture::Video), next: around.next.as_ref().map(Picture::Video), denoise, blur, gain });
+    }
+
     fn layers<'a>(&'a self, pixels: &'a [(Segment, Pixels)], t: Micros, w: u32, h: u32) -> Vec<Layer<'a>> {
         pixels
             .iter()
@@ -1840,7 +1888,7 @@ impl PreviewEngine {
                         let ((sw, sh), o) = match p {
                             Pixels::Image(i, ..) => ((i.width, i.height), 0),
                             Pixels::Video(f, o, ..) => (Source::Video(f).size(), *o),
-                            Pixels::Tween(frames, _, _, _, o, _) => (Source::Video(&frames.0).size(), *o),
+                            Pixels::Tween(frames, _, _, _, o, ..) => (Source::Video(&frames.0).size(), *o),
                             _ => unreachable!(),
                         };
                         let up = if o.rem_euclid(180) == 90 { (sh, sw) } else { (sw, sh) };
@@ -1851,8 +1899,8 @@ impl PreviewEngine {
                 };
                 let mut layer = match p {
                     Pixels::Image(i, key, mattes) => Layer { mattes: painted(mattes), ..Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot) },
-                    Pixels::Video(f, orientation, mattes) => Layer { mattes: painted(mattes), ..Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation) },
-                    Pixels::Tween(frames, between, key, mode, orientation, mattes) => {
+                    Pixels::Video(f, orientation, mattes, _) => Layer { mattes: painted(mattes), ..Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation) },
+                    Pixels::Tween(frames, between, key, mode, orientation, mattes, _) => {
                         let tween = Tween { from: Picture::Video(&frames.0), to: Picture::Video(&frames.1), t: *between, key: *key, mode: *mode };
                         Layer { mattes: painted(mattes), ..Layer::from_model_oriented(Source::Tween(tween), [w, h], [pos.x, pos.y], scale, rot, *orientation) }
                     }
@@ -1939,13 +1987,14 @@ impl PreviewEngine {
                 }
                 if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..)) {
                     // The scale along the stored picture's vertical axis (sideways video swaps).
-                    let sideways = matches!(p, Pixels::Video(_, o, _) | Pixels::Tween(_, _, _, _, o, _) if o.rem_euclid(180) == 90);
+                    let sideways = matches!(p, Pixels::Video(_, o, ..) | Pixels::Tween(_, _, _, _, o, ..) if o.rem_euclid(180) == 90);
                     let tex_scale = if sideways { scale[0] } else { scale[1] };
                     layer.app_filters = self.app_filters_of(seg, layer.source.size().1, layer.size[1] / tex_scale.abs().max(1e-9), h, t);
                     layer.adjust = self.adjust_of(seg, t);
                     layer.chroma = self.chroma_of(seg, local);
                     layer.lut = self.lut_of(seg, local);
                     layer.match_lut = self.match_of(seg, local);
+                    self.enhance_layer(seg, p, &mut layer);
                 }
                 if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Text(..) | Pixels::Sticker(..)) {
                     layer.blend = self.blend_of(seg);
@@ -1954,6 +2003,25 @@ impl PreviewEngine {
             })
             .collect()
     }
+}
+
+/// Stabilize on a placed picture: its content moved by `c.dx`, `c.dy` (fractions of its own
+/// width and height, about its centre), turned by `c.rot` and zoomed by `c.zoom` (the shift
+/// too: it's the picture's own) before the clip's own transform. A uniform scale and a rotation about the centre compose with the
+/// layer's, so they go into its size, turn and centre.
+fn stabilise(layer: &mut Layer, c: &openrip_motion::stabilize::Correction, orientation: i32) {
+    let sideways = orientation.rem_euclid(180) == 90;
+    // The layer's size is along the stored picture's axes: swapped on screen when sideways.
+    let (up_w, up_h) = if sideways { (layer.size[1], layer.size[0]) } else { (layer.size[0], layer.size[1]) };
+    // On-screen mirroring of the picture (the layer's flips are the stored axes').
+    let (mx, my) = if sideways { (layer.flip_v, layer.flip_h) } else { (layer.flip_h, layer.flip_v) };
+    let (sx, sy) = (if mx { -1.0 } else { 1.0 }, if my { -1.0 } else { 1.0 });
+    // The shift is along the clip's own (turned) axes.
+    let (sin, cos) = (layer.rotation - orientation as f64).to_radians().sin_cos();
+    let (vx, vy) = (c.dx * c.zoom * up_w * sx, c.dy * c.zoom * up_h * sy);
+    layer.center = [layer.center[0] + vx * cos - vy * sin, layer.center[1] + vx * sin + vy * cos];
+    layer.size = [layer.size[0] * c.zoom, layer.size[1] * c.zoom];
+    layer.rotation += (c.rot * sx * sy).to_degrees();
 }
 
 /// A colour as 8-bit RGB over black (a canvas fill's).

@@ -15,6 +15,21 @@ use openrip_model::*;
 
 use crate::{WORLD_H, World};
 
+/// A video's clean-up as the app's `enhance` field (strengths and amounts 0–100).
+fn enhance_json(e: &Enhance) -> Value {
+    let level = |l: StabilizeLevel| match l {
+        StabilizeLevel::MinimalCut => "minimal_cut",
+        StabilizeLevel::Recommended => "recommended",
+        StabilizeLevel::MostStable => "most_stable",
+    };
+    json!({
+        "stabilize": e.stabilize.map_or(Value::Null, |l| json!({ "level": level(l) })),
+        "denoise": e.denoise.map_or(Value::Null, |v| json!({ "strength": (v * 100.0).round() })),
+        "deflicker": e.deflicker,
+        "motionBlur": e.motion_blur.map_or(Value::Null, |v| json!({ "amount": (v * 100.0).round() })),
+    })
+}
+
 /// The model's track kinds as the app's track types.
 fn app_track_type(kind: TrackKind) -> &'static str {
     match kind {
@@ -499,6 +514,8 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
                     });
                     clip.insert("smoothSlowMo".into(), mode.map_or(Value::Null, |mode| json!({ "mode": mode })));
                     clip.insert("opticalFlow".into(), m.smart_complement_frame.as_ref().map_or(Value::Null, |c| json!({ "fps": c.fps })));
+                    // Video › Basic's Stabilize, Reduce image noise and Remove flickers, and Motion blur.
+                    clip.insert("enhance".into(), m.enhance.as_ref().map_or(Value::Null, enhance_json));
                 }
                 clip.insert("volume".into(), json!(20.0 * (seg.volume.value.max(1e-4) as f64).log10()));
                 // Trims in timeline frames before the speed, as the app keeps them (a reversed
@@ -665,7 +682,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
     // What the engine needs to draw it as it was, and the app's fields as written, so an
     // import can tell what the app changed.
     let base_keys = [
-        "startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "reverse", "changePitch", "speedCurve", "freeze", "smoothSlowMo", "opticalFlow", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color",
+        "startTick", "endTick", "trimStartTick", "trimEndTick", "speed", "reverse", "changePitch", "speedCurve", "freeze", "smoothSlowMo", "opticalFlow", "enhance", "volume", "fadeIn", "fadeOut", "transform", "text", "fontSize", "color",
         "animationIn", "animationOut", "animationCombo", "animationLoop", "captionStyle", "transitionOut", "keyframes", "textEffect",
     ];
     let base: Map<String, Value> = base_keys
@@ -693,7 +710,7 @@ mod tests {
     /// attached, and a caption above it.
     fn project() -> Project {
         let mut p = Project::new("p", "P", Canvas { width: 1080, height: 1920 }, FrameRate::new(30, 1));
-        p.materials.media.push(Media { id: MaterialId("m".into()), kind: MediaKind::Video, path: "/tmp/clip.mov".into(), width: 1080, height: 1920, duration: Micros(10_000_000), has_audio: true, matte: Some("/tmp/matte".into()), reverse_path: None, freeze: None, complement_frame: None, smart_complement_frame: None });
+        p.materials.media.push(Media { id: MaterialId("m".into()), kind: MediaKind::Video, path: "/tmp/clip.mov".into(), width: 1080, height: 1920, duration: Micros(10_000_000), has_audio: true, matte: Some("/tmp/matte".into()), reverse_path: None, freeze: None, complement_frame: None, smart_complement_frame: None, enhance: None });
         let mut fx = BTreeMap::new();
         fx.insert("intensity".to_string(), 0.5);
         p.materials.effects.push(Effect { id: MaterialId("fx".into()), category: EffectCategory::Filter, name: "Film".into(), params: fx, builtin: None, resource: Some("/bundle".into()), library: None, text_style: None });
@@ -1576,6 +1593,39 @@ mod tests {
         assert_eq!(pos[1].0, 1_000_000);
         // Scale relative to the sticker's own (0.5 in the draft); rotation as it is.
         assert!((t.scale.keys[1].value.x - 1.0).abs() < 1e-9 && (t.rotation.keys[1].value - 40.0).abs() < 1e-9, "{:?} {:?}", t.scale.keys, t.rotation.keys);
+    }
+
+    #[test]
+    fn clean_up_goes_both_ways() {
+        let enhanced = |p: &Project| {
+            let v = segment(p, "v");
+            p.materials.media.iter().find(|m| m.id == v.material).unwrap().enhance.clone()
+        };
+        // The app's own clip, switched on part by part.
+        let mut doc = to_app_project(&project(), &mut |_| None);
+        let clip = clip_mut(&mut doc, "v");
+        clip.as_object_mut().unwrap().remove("engine");
+        assert_eq!(enhanced(&import_v1_json(&doc).unwrap().project), None);
+        let clip = clip_mut(&mut doc, "v");
+        clip["enhance"] = json!({"stabilize": {"level": "most_stable"}, "denoise": {"strength": 40}, "deflicker": true, "motionBlur": null});
+        let on = Enhance { stabilize: Some(StabilizeLevel::MostStable), denoise: Some(0.4), deflicker: true, motion_blur: None };
+        assert_eq!(enhanced(&import_v1_json(&doc).unwrap().project), Some(on.clone()));
+        // Everything off is none at all.
+        clip_mut(&mut doc, "v")["enhance"] = json!({"stabilize": null, "denoise": null, "deflicker": false, "motionBlur": null});
+        assert_eq!(enhanced(&import_v1_json(&doc).unwrap().project), None);
+        // A project's own: shown, kept, and changed in the app.
+        let mut p = project();
+        p.materials.media[0].enhance = Some(on.clone());
+        let doc = to_app_project(&p, &mut |_| None);
+        let shown = doc["timeline"]["clips"].as_array().unwrap().iter().find(|c| c["clipId"] == "v").unwrap().clone();
+        assert_eq!(shown["enhance"], json!({"stabilize": {"level": "most_stable"}, "denoise": {"strength": 40.0}, "deflicker": true, "motionBlur": null}));
+        assert_eq!(enhanced(&import_v1_json(&doc).unwrap().project), Some(on));
+        let mut changed = doc.clone();
+        clip_mut(&mut changed, "v")["enhance"] = json!({"stabilize": null, "denoise": null, "deflicker": false, "motionBlur": {"amount": 70}});
+        assert_eq!(enhanced(&import_v1_json(&changed).unwrap().project), Some(Enhance { motion_blur: Some(0.7), ..Default::default() }));
+        let mut off = doc.clone();
+        clip_mut(&mut off, "v")["enhance"] = Value::Null;
+        assert_eq!(enhanced(&import_v1_json(&off).unwrap().project), None);
     }
 
     #[test]

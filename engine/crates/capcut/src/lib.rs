@@ -685,6 +685,7 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         // Smooth slow-mo and Optical flow (`video_algorithm`).
                         complement_frame: complement_frame(m),
                         smart_complement_frame: smart_complement_frame(m),
+                        enhance: None,
                     });
                     if let Some(source) = m.get("freeze").map(|fr| s(fr, "source_material_id")).filter(|id| !id.is_empty()) {
                         freeze_sources.push((MaterialId(s(m, "id")), MaterialId(source)));
@@ -704,7 +705,7 @@ fn import_materials(mats: &Value, out: &mut Materials, report: &mut ImportReport
                         reverse_path: None,
                         freeze: None,
                         complement_frame: None,
-                        smart_complement_frame: None,
+                        smart_complement_frame: None, enhance: None,
                     });
                     true
                 }

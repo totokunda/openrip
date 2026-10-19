@@ -73,7 +73,7 @@ fn project(materials: Materials, attachments: Vec<MaterialId>, volume: Animated<
     install();
     let mut p = Project::new("p", "tools", Canvas { width: 16, height: 16 }, FrameRate::new(30, 1));
     p.materials = materials;
-    p.materials.media.push(Media { id: "m".into(), kind: MediaKind::Audio, path: "synth:tones".into(), width: 0, height: 0, duration: Micros(60_000_000), has_audio: true, matte: None, reverse_path: None, freeze: None, complement_frame: None, smart_complement_frame: None });
+    p.materials.media.push(Media { id: "m".into(), kind: MediaKind::Audio, path: "synth:tones".into(), width: 0, height: 0, duration: Micros(60_000_000), has_audio: true, matte: None, reverse_path: None, freeze: None, complement_frame: None, smart_complement_frame: None, enhance: None });
     let seg = Segment {
         id: "s".into(),
         material: "m".into(),

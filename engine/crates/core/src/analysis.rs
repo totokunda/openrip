@@ -70,6 +70,22 @@ pub fn detect_scenes(path: &Path, start: Micros, duration: Option<Micros>, optio
     Ok(openrip_playback::scan_scenes(path, start, duration, options.sensitivity, options.min_scene, &mut |d, t| control.report(d, t))?)
 }
 
+/// Track the camera and each frame's brightness in `path`'s video over `duration` from `start`
+/// (media time; to its end for `None`), for Stabilize and Remove flickers. The result is kept
+/// by the engine (in memory and in its cache folder) for every preview and export to use, so
+/// a range already tracked returns at once.
+pub fn analyse_motion(path: &Path, start: Micros, duration: Option<Micros>, control: &AnalysisControl) -> Result<()> {
+    openrip_playback::enhance::analyse(path, start, duration, &mut |d, t| control.report(d, t))?;
+    Ok(())
+}
+
+/// Whether the engine has tracked `path` over `duration` from `start` (see [`analyse_motion`]).
+pub fn motion_ready(path: &Path, start: Micros, duration: Option<Micros>) -> bool {
+    let Some(known) = openrip_playback::enhance::analysis(&path.to_string_lossy()) else { return false };
+    let end = duration.map_or(known.range.1, |d| start.0 + d.0);
+    known.covers(start, Micros(end))
+}
+
 /// Frames sampled across a range for the colour tools.
 const COLOR_FRAMES: usize = 12;
 

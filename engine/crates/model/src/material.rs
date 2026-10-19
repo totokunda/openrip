@@ -215,6 +215,59 @@ pub struct Media {
     /// Optical flow in Video › Basic (CapCut's `video_algorithm.smart_complement_frame`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub smart_complement_frame: Option<SmartComplementFrame>,
+    /// Video › Basic's Stabilize, Reduce image noise, Remove flickers and Enhance motion ›
+    /// Motion blur: classic (not learned) clean-up the engine draws live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enhance: Option<Enhance>,
+}
+
+/// How far Stabilize smooths the camera's path, which is also how much of the picture it
+/// crops (zooms in) to hide the borders the correction exposes. CapCut's Level choice.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StabilizeLevel {
+    /// Corrects the least, so it crops the least.
+    MinimalCut,
+    #[default]
+    Recommended,
+    /// Smooths the most, cropping the most.
+    MostStable,
+}
+
+/// A video clip's clean-up, each part off when `None` / `false`. Strengths and amounts are
+/// 0–1.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Enhance {
+    /// The camera's shake smoothed away (global motion tracked once per source file, then
+    /// each frame moved, turned and zoomed to the smoothed path).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stabilize: Option<StabilizeLevel>,
+    /// Reduce image noise: motion-adaptive temporal averaging, then an edge-preserving
+    /// spatial filter, by this strength.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denoise: Option<f32>,
+    /// Remove flickers: each frame's brightness brought to a moving average of its neighbours'.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub deflicker: bool,
+    /// Motion blur: neighbouring frames blended in, by this amount.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_blur: Option<f32>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+impl Enhance {
+    /// Nothing switched on.
+    pub fn is_off(&self) -> bool {
+        self.stabilize.is_none() && self.denoise.is_none() && !self.deflicker && self.motion_blur.is_none()
+    }
+
+    /// Whether drawing needs the clip's motion analysis (Stabilize and Remove flickers).
+    pub fn needs_analysis(&self) -> bool {
+        self.stabilize.is_some() || self.deflicker
+    }
 }
 
 /// How Smooth slow-mo makes the frames in between (CapCut's `complement_frame_config.mode`:

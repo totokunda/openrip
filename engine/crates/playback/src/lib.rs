@@ -18,6 +18,7 @@ pub mod animation;
 pub mod caption;
 pub mod colour;
 mod crop;
+pub mod enhance;
 mod gif;
 pub mod input;
 pub mod mask;

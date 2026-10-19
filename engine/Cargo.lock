@@ -1619,6 +1619,7 @@ dependencies = [
  "openrip-audio",
  "openrip-media",
  "openrip-model",
+ "openrip-motion",
  "openrip-platform",
  "openrip-render",
  "png",

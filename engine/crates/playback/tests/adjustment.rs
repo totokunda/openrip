@@ -21,7 +21,7 @@ fn still(name: &str, rgb: [u8; 3]) -> PathBuf {
 }
 
 fn photo(id: &str, path: &Path) -> Media {
-    Media { id: MaterialId(id.into()), kind: MediaKind::Photo, path: path.to_string_lossy().into_owned(), width: W, height: H, duration: Micros(0), has_audio: false, matte: None, freeze: None, reverse_path: None, complement_frame: None, smart_complement_frame: None }
+    Media { id: MaterialId(id.into()), kind: MediaKind::Photo, path: path.to_string_lossy().into_owned(), width: W, height: H, duration: Micros(0), has_audio: false, matte: None, freeze: None, reverse_path: None, complement_frame: None, smart_complement_frame: None, enhance: None }
 }
 
 /// A segment from `start` for `length` microseconds, at `scale`, with the materials attached.

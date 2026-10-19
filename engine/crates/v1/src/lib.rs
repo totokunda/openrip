@@ -267,7 +267,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
             reverse_path: None,
             freeze: None,
             complement_frame: None,
-            smart_complement_frame: None,
+            smart_complement_frame: None, enhance: None,
         });
     }
 
@@ -466,6 +466,7 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
                     // Smooth slow-mo and Optical flow, as the draft set them.
                     asset.complement_frame = asset.complement_frame.take().or(m.complement_frame);
                     asset.smart_complement_frame = asset.smart_complement_frame.take().or(m.smart_complement_frame);
+                    asset.enhance = asset.enhance.take().or(m.enhance);
                 }
                 None => materials.media.push(m),
             },
@@ -538,7 +539,7 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
             materials.speeds.push(sp);
         }
     }
-    if ty == "video" && seg.source.is_some() && (differs("smoothSlowMo") || differs("opticalFlow")) {
+    if ty == "video" && seg.source.is_some() && (differs("smoothSlowMo") || differs("opticalFlow") || differs("enhance")) {
         let media = seg.material.clone();
         if let Some(mid) = app_video_algorithm(&seg.id, clip, &media, materials) {
             seg.material = mid;
@@ -1101,18 +1102,34 @@ fn app_complement(clip: &Value) -> (Option<ComplementFrame>, Option<SmartComplem
     (smooth.map(|mode| ComplementFrame { mode }), flow)
 }
 
-/// A video clip whose Smooth slow-mo or Optical flow is set: its own copy of the media `of`
+/// A video clip's clean-up (`enhance: { stabilize: { level } | null, denoise: { strength } | null,
+/// deflicker: bool, motionBlur: { amount } | null }`, strength and amount 0–100), as the model's;
+/// `None` when nothing is on.
+fn app_enhance(clip: &Value) -> Option<Enhance> {
+    let e = clip.get("enhance").filter(|v| v.is_object())?;
+    let level = e.get("stabilize").filter(|v| v.is_object()).map(|v| match s(v, "level").as_str() {
+        "minimal_cut" => StabilizeLevel::MinimalCut,
+        "most_stable" => StabilizeLevel::MostStable,
+        _ => StabilizeLevel::Recommended,
+    });
+    let part = |key: &str, field: &str| e.get(key).filter(|v| v.is_object()).map(|v| (f(v, field, 50.0) / 100.0).clamp(0.0, 1.0) as f32);
+    let out = Enhance { stabilize: level, denoise: part("denoise", "strength"), deflicker: b(e, "deflicker"), motion_blur: part("motionBlur", "amount") };
+    (!out.is_off()).then_some(out)
+}
+
+/// A video clip whose Smooth slow-mo, Optical flow or clean-up is set: its own copy of the media `of`
 /// (as CapCut gives every clip its own video material), with the clip's flags. `None` when the
 /// clip sets neither and the media has neither, so it plays the media as it is.
 fn app_video_algorithm(id: &str, clip: &Value, of: &MaterialId, materials: &mut Materials) -> Option<MaterialId> {
     let (smooth, flow) = app_complement(clip);
     let media = materials.media.iter().find(|m| &m.id == of)?.clone();
-    if smooth.is_none() && flow.is_none() && media.complement_frame.is_none() && media.smart_complement_frame.is_none() {
+    let enhance = app_enhance(clip);
+    if smooth.is_none() && flow.is_none() && enhance.is_none() && media.complement_frame.is_none() && media.smart_complement_frame.is_none() && media.enhance.is_none() {
         return None;
     }
     let mid = MaterialId(format!("{id}-video"));
     materials.media.retain(|m| m.id != mid);
-    materials.media.push(Media { id: mid.clone(), complement_frame: smooth, smart_complement_frame: flow, ..media });
+    materials.media.push(Media { id: mid.clone(), complement_frame: smooth, smart_complement_frame: flow, enhance, ..media });
     Some(mid)
 }
 
@@ -1136,7 +1153,7 @@ fn app_freeze(id: &str, clip: &Value, materials: &mut Materials) -> Option<Mater
         reverse_path: None,
         freeze: Some(Freeze { video: asset.path.clone(), at: Micros::from_secs_f64(f(fr, "at", 0.0).max(0.0)) }),
         complement_frame: None,
-        smart_complement_frame: None,
+        smart_complement_frame: None, enhance: None,
     });
     Some(mid)
 }

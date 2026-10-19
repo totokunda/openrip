@@ -811,7 +811,7 @@ mod tests {
             reverse_path: None,
             freeze: None,
             complement_frame: None,
-            smart_complement_frame: None,
+            smart_complement_frame: None, enhance: None,
         })
     }
 

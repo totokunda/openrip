@@ -42,7 +42,7 @@ use openrip_audio::AudioError;
 use openrip_export::ExportError;
 use openrip_playback::PreviewError;
 
-pub use analysis::{auto_adjust, color_stats, detect_scenes, AnalysisControl, AutoAdjust, ColorStats, CutKind, Look, MatchOn, Moments, SceneCut, SceneOptions, Sliders};
+pub use analysis::{analyse_motion, motion_ready, auto_adjust, color_stats, detect_scenes, AnalysisControl, AutoAdjust, ColorStats, CutKind, Look, MatchOn, Moments, SceneCut, SceneOptions, Sliders};
 pub use audio::{measure_loudness, set_audio_input, Level, Loudness, Recorder, Recording, ToneInput};
 pub use capcut::{capcut_to_app, AppProjectFromDraft};
 pub use effects::{effect_catalog, EffectPreviews};
