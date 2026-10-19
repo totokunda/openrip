@@ -260,7 +260,7 @@ export function initEnginePreview() {
     });
   watch(useClipStore.subscribe as any, (s: any) => [s.clips, s.timelines, s.assets]);
   watch(useControlsStore.subscribe as any, (s: any) => [s.fps]);
-  watch(useViewportStore.subscribe as any, (s: any) => [s.aspectRatio, s.tool === "mask"]);
+  watch(useViewportStore.subscribe as any, (s: any) => [s.aspectRatio, s.canvasSize, s.tool === "mask"]);
   useFilterLibrary.subscribe((s, p) => {
     if (s.preview !== p.preview && useEnginePreviewStore.getState().enabled) scheduleSync(0);
   });

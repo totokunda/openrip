@@ -9,6 +9,7 @@ import { timecode } from "@/components/preview/PlayerBar";
 import { usePreference } from "@/lib/preferences";
 import { revealPathInFolder } from "@app/preload";
 import { refreshProjects } from "@/lib/project-actions";
+import { ratioLabel } from "@/lib/project-canvas";
 import GlobalEdits, { useProjectInspectorTab } from "./project/GlobalEdits";
 
 /**
@@ -20,6 +21,7 @@ import GlobalEdits, { useProjectInspectorTab } from "./project/GlobalEdits";
 const EmptyPropertiesPanel: React.FC = () => {
   const project = useProjectsStore((s) => s.getActiveProject());
   const aspect = useViewportStore((s) => s.aspectRatio);
+  const canvasSize = useViewportStore((s) => s.canvasSize);
   const fps = useControlsStore((s) => s.fps);
   const clipDuration = useClipStore((s) => s.clipDuration);
   const clipCount = useClipStore((s) => s.clips.length);
@@ -51,12 +53,15 @@ const EmptyPropertiesPanel: React.FC = () => {
           "–"
         ),
       ],
-      ["Imported media:", "Linked where it is"],
+      ["Imported media:", "Stay in original location"],
+      ["Arrange layers:", "Turned on"],
+      ["Proxy:", "Turned off"],
       ["Media used:", String(mediaCount)],
     ],
     [
-      ["Aspect ratio:", aspect.id === "custom" ? `${aspect.width}:${aspect.height}` : aspect.id],
-      ["Resolution:", canvas ?? "–"],
+      ["Aspect ratio:", ratioLabel(aspect)],
+      ["Resolution:", canvasSize ? `${canvasSize.width} × ${canvasSize.height}` : "Adapted"],
+      ["Canvas:", canvas ?? "–"],
       ["Frame rate:", `${fps.toFixed(2)}fps`],
       ["Length:", timecode(clipDuration, fps, timeCodeStyle)],
       ["Clips:", String(clipCount)],

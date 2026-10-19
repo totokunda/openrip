@@ -21,6 +21,10 @@ type Doc = {
   assets: Record<string, Asset>;
   clipDuration: number;
   aspectRatio: { width: number; height: number; id: string };
+  /** Project settings' Custom resolution, or null (Adapted). */
+  canvasSize: { width: number; height: number } | null;
+  /** The frame rate: a change rescales the clips, which are in the document too. */
+  fps: number;
   markers: Marker[];
   magnet: boolean;
   guides: Guide[];
@@ -61,6 +65,8 @@ const readDoc = (): Doc => {
     assets: c.assets,
     clipDuration: c.clipDuration,
     aspectRatio: useViewportStore.getState().aspectRatio,
+    canvasSize: useViewportStore.getState().canvasSize,
+    fps: useControlsStore.getState().fps,
     markers: c.markers,
     magnet: c.magnet,
     guides: c.guides,
@@ -76,6 +82,8 @@ const sameDoc = (a: Doc, b: Doc) =>
   _.isEqual(a.clips, b.clips) &&
   _.isEqual(a.timelines, b.timelines) &&
   _.isEqual(a.aspectRatio, b.aspectRatio) &&
+  _.isEqual(a.canvasSize, b.canvasSize) &&
+  a.fps === b.fps &&
   _.isEqual(a.markers, b.markers) &&
   _.isEqual(a.guides, b.guides) &&
   a.magnet === b.magnet;
@@ -135,6 +143,8 @@ const onChange = () => {
     next.clips === present.clips &&
     next.timelines === present.timelines &&
     next.aspectRatio === present.aspectRatio &&
+    next.canvasSize === present.canvasSize &&
+    next.fps === present.fps &&
     next.markers === present.markers &&
     next.guides === present.guides &&
     next.magnet === present.magnet;
@@ -168,9 +178,10 @@ const subscribe = () => {
     }
   });
   useViewportStore.subscribe((s, p) => {
-    if (s.aspectRatio !== p.aspectRatio) onChange();
+    if (s.aspectRatio !== p.aspectRatio || s.canvasSize !== p.canvasSize) onChange();
   });
   useControlsStore.subscribe((s, p) => {
+    if (s.fps !== p.fps) onChange();
     if (s.selectedClipIds === p.selectedClipIds || selectionQueued) return;
     selectionQueued = true;
     queueMicrotask(() => {
@@ -192,7 +203,7 @@ export const isRestoredAspect = (aspectRatio: unknown) => aspectRatio != null &&
 
 /** Put a state back into the stores, with its selection where its clips are still there. */
 const restore = (entry: Entry) => {
-  const { clips, timelines, clipDuration, aspectRatio, markers, magnet, guides } = entry.doc;
+  const { clips, timelines, clipDuration, aspectRatio, canvasSize, fps, markers, magnet, guides } = entry.doc;
   const clipStore = useClipStore.getState();
   // Assets are the media's metadata: the newest of each, for the clips that use them.
   const assets = pruneAssetsForClips({ ...entry.doc.assets, ...clipStore.assets }, clips);
@@ -202,11 +213,26 @@ const restore = (entry: Entry) => {
   const maskKept = !!maskId && clips.some((c) => ((c as any).masks ?? []).some((m: any) => m?.id === maskId));
   restoring = true;
   try {
+    // The frame rate goes back with its clips: the timeline's frame counts scale with it, as
+    // when it was changed (setFpsWithRescale).
+    const controls = useControlsStore.getState();
+    if (fps !== controls.fps && fps > 0) {
+      const k = fps / Math.max(1, controls.fps);
+      const total = Math.max(0, Math.round(controls.totalTimelineFrames * k));
+      useControlsStore.setState({
+        fps,
+        totalTimelineFrames: total,
+        timelineDuration: [Math.round(controls.timelineDuration[0] * k), Math.round(controls.timelineDuration[1] * k)],
+        focusFrame: Math.max(0, Math.min(Math.max(0, total - 1), Math.round(controls.focusFrame * k))),
+      });
+    }
     clipStore._updateZoomLevel(clips, clipDuration);
     useClipStore.setState({ clips, timelines, assets, clipDuration, markers, magnet, guides, mainPreview: null });
     if (aspectRatio !== useViewportStore.getState().aspectRatio) {
       restoredAspect = aspectRatio;
-      useViewportStore.setState({ aspectRatio, shouldUpdateViewport: true });
+      useViewportStore.setState({ aspectRatio, canvasSize, shouldUpdateViewport: true });
+    } else if (canvasSize !== useViewportStore.getState().canvasSize) {
+      useViewportStore.setState({ canvasSize });
     }
     useControlsStore.setState({ selectedClipIds: selection, ...(maskKept ? {} : { selectedMaskId: null }) });
   } finally {

@@ -23,6 +23,14 @@ interface ViewportState {
     height: number;
     id: string;
   }) => void;
+  /**
+   * The canvas in pixels when the project's Resolution is Custom (Project settings); null is
+   * Adapted, the engine's own size for the aspect ratio. Only honoured while it has the aspect
+   * ratio's shape.
+   */
+  canvasSize: { width: number; height: number } | null;
+  /** The canvas as Project settings sets it: the aspect ratio and its size together, as one change. */
+  setCanvas: (ratio: { width: number; height: number; id: string }, size: { width: number; height: number } | null) => void;
   isAspectEditing: boolean;
   setAspectEditing: (editing: boolean) => void;
   setTool: (tool: ViewTool) => void;
@@ -58,7 +66,17 @@ export const useViewportStore = create<ViewportState>((set, get) => ({
   setContentBounds: (bounds) => set({ contentBounds: bounds }),
   aspectRatio: { width: 16, height: 9, id: "16:9" },
   setAspectRatio: (ratio) => {
-    set({ aspectRatio: ratio, shouldUpdateViewport: true });
+    // A custom size holds only while the ratio is its own.
+    const size = get().canvasSize;
+    const keep = size && Math.abs(size.width / size.height / (ratio.width / ratio.height) - 1) < 0.01;
+    set({ aspectRatio: ratio, shouldUpdateViewport: true, ...(keep ? {} : { canvasSize: null }) });
+  },
+  canvasSize: null,
+  setCanvas: (ratio, size) => {
+    const now = get().aspectRatio;
+    // The same ratio keeps its object, so a change of size alone doesn't look like a new canvas.
+    const same = now.width === ratio.width && now.height === ratio.height && now.id === ratio.id;
+    set({ aspectRatio: same ? now : ratio, canvasSize: size, shouldUpdateViewport: true });
   },
   isAspectEditing: false,
   setAspectEditing: (editing) => set({ isAspectEditing: editing }),

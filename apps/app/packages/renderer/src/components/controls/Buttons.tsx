@@ -17,7 +17,7 @@ import { MAX_DURATION } from "@/lib/settings";
 import { LuSquareSplitVertical, LuCrop, LuUndo2, LuRedo2 } from "react-icons/lu";
 import { getMediaInfoCached } from "@/lib/media/utils";
 import { PiSplitHorizontal } from "react-icons/pi";
-import { MediaDialog } from "@/components/dialogs/MediaDialog";
+import { CropDialog } from "@/components/dialogs/CropDialog";
 import { useState } from "react";
 import { undo, redo, useHistoryStore } from "@/lib/history";
 import { mainTrackOf } from "@/lib/timeline-edit";
@@ -380,32 +380,10 @@ const CropButton = () => {
     !selectedClip ||
     (selectedClip.type !== "video" && selectedClip.type !== "image");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [focusFrame, setFocusFrame] = useState(0);
 
   const handleOpen = () => {
     if (disabled) return;
     setIsDialogOpen(true);
-  };
-
-  const { setClipTransform } = useClipStore();
-
-  const handleConfirm = (data: {
-    rotation: number;
-    aspectRatio: string;
-    crop?: { x: number; y: number; width: number; height: number };
-    transformWidth?: number;
-    transformHeight?: number;
-    transformX?: number;
-    transformY?: number;
-  }) => {
-    if (!selectedClip) return;
-    setClipTransform(selectedClip.clipId, {
-      crop: data.crop,
-      width: data.transformWidth,
-      height: data.transformHeight,
-      x: data.transformX,
-      y: data.transformY,
-    }, true);
   };
 
   return (
@@ -419,13 +397,7 @@ const CropButton = () => {
       >
         <LuCrop className=" text-brand-light h-4 w-4" />
       </div>
-      <MediaDialog
-        isOpen={isDialogOpen}
-        onClose={() => setIsDialogOpen(false)}
-        onConfirm={handleConfirm}
-        focusFrame={focusFrame}
-        setFocusFrame={setFocusFrame}
-      />
+      <CropDialog open={isDialogOpen} onOpenChange={setIsDialogOpen} clip={selectedClip ?? null} />
     </>
   );
 };

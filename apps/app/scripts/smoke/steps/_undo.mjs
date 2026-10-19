@@ -11,6 +11,8 @@ export const docOf = (p) =>
     clips: p.timeline.clips,
     markers: p.timeline.markers ?? [],
     aspect: p.settings.aspectRatio,
+    canvas: p.settings.engineCanvas ?? null,
+    fps: p.settings.fps,
     magnet: p.settings.mainTrackMagnet,
     assets: Object.keys(p.assets).sort(),
   });

@@ -161,13 +161,22 @@ export function Choice<T extends string | number>({
   width = 268,
   testId,
   disabled,
+  menuWidth,
+  footer,
+  side,
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  options: { value: T; label: string; /** Greyed out and not chosen. */ disabled?: boolean; /** Drawn at the end of the row (a ratio's shape). */ end?: React.ReactNode; /** A line under it. */ separatorAfter?: boolean }[];
   onChange: (v: T) => void;
   width?: number;
   testId?: string;
   disabled?: boolean;
+  /** The menu's own width, when it isn't the button's. */
+  menuWidth?: number;
+  /** Words at the foot of the menu. */
+  footer?: React.ReactNode;
+  /** Which side of the button the menu opens on. */
+  side?: "top" | "bottom";
 }) {
   const current = options.find((o) => o.value === value);
   return (
@@ -183,22 +192,28 @@ export function Choice<T extends string | number>({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
+        side={side}
         sideOffset={4}
-        style={{ width }}
+        style={{ width: menuWidth ?? width }}
         className="dark z-[130] bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] p-1"
       >
         {options.map((o) => (
-          <DropdownMenuItem
-            key={String(o.value)}
-            data-testid={testId ? `${testId}-option` : undefined}
-            data-value={String(o.value)}
-            onSelect={() => onChange(o.value)}
-            className="dark h-8 text-[13px] text-brand-light gap-2 px-2 rounded-[4px] cursor-pointer focus:bg-brand-hover"
-          >
-            <span className="w-4 flex justify-center text-brand-accent">{o.value === value && <LuCheck className="w-3.5 h-3.5" />}</span>
-            <span>{o.label}</span>
-          </DropdownMenuItem>
+          <React.Fragment key={String(o.value)}>
+            <DropdownMenuItem
+              data-testid={testId ? `${testId}-option` : undefined}
+              data-value={String(o.value)}
+              disabled={o.disabled}
+              onSelect={() => onChange(o.value)}
+              className="dark h-8 text-[13px] text-brand-light gap-2 px-2 rounded-[4px] cursor-pointer focus:bg-brand-hover data-[disabled]:opacity-40"
+            >
+              <span className="w-4 flex justify-center text-brand-accent">{o.value === value && <LuCheck className="w-3.5 h-3.5" />}</span>
+              <span>{o.label}</span>
+              {o.end != null && <span className="ml-auto flex items-center justify-center text-brand-light/60">{o.end}</span>}
+            </DropdownMenuItem>
+            {o.separatorAfter && <div className="h-px bg-[#434343] mx-1 my-1" />}
+          </React.Fragment>
         ))}
+        {footer != null && <div className="px-2 pt-1.5 pb-1 text-[11px] leading-[14px] text-[#7a7a7a]">{footer}</div>}
       </DropdownMenuContent>
     </DropdownMenu>
   );

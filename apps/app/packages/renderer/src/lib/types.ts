@@ -71,11 +71,13 @@ export interface ClipTransform {
   rotation: number;
   cornerRadius: number;
   opacity: number;
+  /** The part of the picture shown (lib/crop.ts); `rotation` turns the picture inside it, degrees clockwise. */
   crop?: {
     x: number;
     y: number;
     width: number;
     height: number;
+    rotation?: number;
   };
 }
 
@@ -1246,13 +1248,14 @@ function encodeTransform(t: ClipTransform | undefined): string {
   ].join(",");
 }
 
-function encodeCrop(c: { x: number; y: number; width: number; height: number } | undefined): string {
+function encodeCrop(c: { x: number; y: number; width: number; height: number; rotation?: number } | undefined): string {
   if (!c) return "";
   return [
     n(c.x),
     n(c.y),
     n(c.width),
     n(c.height),
+    n(c.rotation),
   ].join(",");
 }
 

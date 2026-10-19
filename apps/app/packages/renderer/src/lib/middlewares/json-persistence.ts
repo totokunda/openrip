@@ -125,6 +125,12 @@ const tickToFrameForJson = (tick: unknown, fps: number): number => {
   }
 };
 
+/** A saved custom canvas size, or null. */
+const validCanvas = (c: unknown): { width: number; height: number } | null => {
+  const { width, height } = (c ?? {}) as { width?: number; height?: number };
+  return Number.isFinite(width) && Number.isFinite(height) && width! > 0 && height! > 0 ? { width: width!, height: height! } : null;
+};
+
 type ProjectJsonSnapshot = {
   version: string;
   meta: {
@@ -138,6 +144,8 @@ type ProjectJsonSnapshot = {
     fps: number;
     defaultClipLength: number;
     aspectRatio?: { width: number; height: number; id: string };
+    /** The canvas in pixels when Project settings' Resolution is Custom (the engine draws at it while it has the aspect ratio's shape). */
+    engineCanvas?: { width: number; height: number };
     /** The main track magnet (CapCut's maintrack_adsorb). */
     mainTrackMagnet?: boolean;
     /** The player's guides (lib/guides.ts). */
@@ -367,6 +375,7 @@ const buildProjectJsonSnapshot = (
       settings: {
         fps,
         aspectRatio: viewportState?.aspectRatio,
+        ...(viewportState?.canvasSize ? { engineCanvas: viewportState.canvasSize } : {}),
         defaultClipLength: controlsState.defaultClipLength,
         mainTrackMagnet: clipState.magnet,
         guides: clipState.guides ?? [],
@@ -856,6 +865,7 @@ const hydrateStoresFromProjectJson = async (
       if (useViewportStore && typeof useViewportStore.setState === "function" && Object.keys(doc.editorState ?? {}).length > 0) {
         useViewportStore.setState({
           aspectRatio: doc.settings?.aspectRatio,
+          canvasSize: validCanvas(doc.settings?.engineCanvas),
           // The freehand draw tool is gone (CapCut has none): a project left on it opens on select.
           tool: doc.editorState?.tool === "draw" ? "pointer" : doc.editorState?.tool,
           shape: doc.editorState?.shape,
@@ -868,7 +878,7 @@ const hydrateStoresFromProjectJson = async (
       } else if (useViewportStore && typeof useViewportStore.setState === "function" && doc.settings?.aspectRatio) {
         // A project made outside the editor (an imported CapCut draft) has no editor state
         // yet: take its canvas and fit the view to it.
-        useViewportStore.setState({ aspectRatio: doc.settings.aspectRatio, shouldUpdateViewport: true } as any);
+        useViewportStore.setState({ aspectRatio: doc.settings.aspectRatio, canvasSize: validCanvas(doc.settings?.engineCanvas), shouldUpdateViewport: true } as any);
       } else {
         console.warn(
           "jsonPersistence: viewport store not ready for JSON snapshot; JSON autosave will rely on project-store changes only until it is available",
@@ -1042,7 +1052,8 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
     if (useViewportStore && typeof useViewportStore.subscribe === "function") {
       useViewportStore.subscribe((state, prev) => {
         if (
-          !_.isEqual(state?.aspectRatio, prev?.aspectRatio) || 
+          !_.isEqual(state?.aspectRatio, prev?.aspectRatio) ||
+          !_.isEqual(state?.canvasSize, prev?.canvasSize) ||
           !_.isEqual(state?.scale, prev?.scale) ||
           !_.isEqual(state?.position, prev?.position) ||
           !_.isEqual(state?.tool, prev?.tool) ||
@@ -1064,6 +1075,7 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
       useControlsStore.subscribe((state, prev) => {
         if (
           state?.fps !== prev?.fps ||
+          state?.defaultClipLength !== prev?.defaultClipLength ||
           state?.timelineDuration !== prev?.timelineDuration ||
           state?.zoomLevel !== prev?.zoomLevel ||
           state?.focusFrame !== prev?.focusFrame ||
