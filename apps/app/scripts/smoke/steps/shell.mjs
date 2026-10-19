@@ -96,6 +96,10 @@ export default async (ctx) => {
   check("ratio menu lists the sizes", (await win.getByRole("menuitem").count()) >= 8);
   await win.keyboard.press("Escape");
 
+  // The frame before the layouts: a step run earlier in the session can leave the picture dark
+  // (canvastools' rectangle and brush masks intersect to nothing), so "still draws" means a
+  // drawn frame as bright as this one, not a bright frame.
+  const before = await engineFrame(win);
   // The layouts, and back to Default.
   for (const id of ["media", "properties", "vertical", "default"]) {
     await win.locator("[data-testid=layout-menu]").click();
@@ -118,7 +122,7 @@ export default async (ctx) => {
   ctx.panelWidth = await width();
   // The frame for the panel's new width is rendered and handed over asynchronously (it can be
   // slow on a busy machine), so wait, up to 6 s, for a drawn frame rather than read once.
-  const drawn = (f) => f.w > 16 && f.light > 0.05;
+  const drawn = (f) => f.w > 16 && (f.light > 0.05 || f.light >= before.light - 0.01);
   const t0 = Date.now();
   let frame = await engineFrame(win);
   while (!drawn(frame) && Date.now() - t0 < 6000) {
@@ -126,6 +130,6 @@ export default async (ctx) => {
     frame = await engineFrame(win);
   }
   const { count: _unused, ...seen } = frame;
-  check("the engine still draws after the layouts", drawn(frame), `${JSON.stringify(seen)} after ${Date.now() - t0} ms`);
+  check("the engine still draws after the layouts", drawn(frame), `${JSON.stringify(seen)} after ${Date.now() - t0} ms (light before ${before.light.toFixed(3)})`);
   return report();
 };
