@@ -8,7 +8,7 @@
 - **Parity before redesign.** First rewrite the current editor in Rust with the same features, then make it fast, then make it look and work like CapCut.
 - **CapCut is the reference.** Every benchmark and every visual test is run against CapCut on the same machine, media and edit, following [docs/parity](docs/parity/README.md). A number without a CapCut column is incomplete.
 - **CapCut projects open in OpenRip.** The engine's data model mirrors CapCut's draft model (tracks → segments → materials, microsecond time, per-property keyframes), so users can bring their projects with them.
-- **No AI, no cloud.** Everything runs locally with classic media processing. No model downloads, no inference, no accounts.
+- **Local first, no cloud.** Everything runs on the machine, with no accounts. Classic media processing by default; since 2026-10-19 local models are allowed where they do a job well, starting with auto captions and transcripts (a Whisper-class model run locally). AI-assisted editing comes later, after CapCut parity and real-project testing.
 - **Small steps.** Each milestone ends with something that runs and can be measured.
 
 ---

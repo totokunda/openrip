@@ -618,7 +618,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.8 Left panel: Stickers | 0 | 1 | 2 |
 | 6.9 Left panel: Effects | 0 | 0 | 4 |
 | 6.10 Left panel: Transitions | 0 | 1 | 2 |
-| 6.11 Left panel: Captions | 0 | 0 | 3 |
+| 6.11 Left panel: Captions | 0 | 0 | 5 |
 | 6.12 Left panel: Filters | 2 | 0 | 2 |
 | 6.13 Left panel: Adjustment | 0 | 2 | 1 |
 | 6.14 Left panel: Templates | 0 | 0 | 1 |
@@ -638,8 +638,8 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.28 Context menus | 5 | 3 | 13 |
 | 6.29 Export dialog | 5 | 2 | 9 |
 | 6.30 Other dialogs | 2 | 0 | 4 |
-| 6.31 Classic-algorithm features brought into scope | 1 | 10 | 0 |
-| **Total (348 in-scope features)** | **107** | **84** | **157** |
+| 6.31 Classic-algorithm features brought into scope | 1 | 10 | 1 |
+| **Total (351 in-scope features)** | **107** | **84** | **160** |
 
 The counts above are as written. A re-audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows (32.0% strict, 47.8% with partly as half); with the text, inspector and audio branches then in progress, 146 / 86 / 105 (43.3% / 56.1%). §6.31's 11 rows were added after it.
 
@@ -784,7 +784,7 @@ Screenshots are in `05-left-media/` unless a path says otherwise.
 | Yours › Favorites | `013-yours-favorites-empty.png`, `014-favorites-type-filter.png` | missing |
 | Yours › My presets (saved clip presets) | `015-my-presets-library.png` | missing |
 
-Out of scope: Import › From library (stock), Generate (AI image, AI video, AI dialogue scene: `15-left-ai-and-other/009-media-generate-default.png`–`15-left-ai-and-other/034-dialogue-react-tab.png`), Spaces and Brand assets (`017-spaces-default.png`–`020-spaces-asset-context.png`, `016-brand-assets-empty.png`), Library stock categories and the Commercial filter (`023-library-default.png`, `031-library-filter-menu.png`–`034-library-search-orientation-menu.png`), Dreamina (`15-left-ai-and-other/035-dreamina-default.png`), Transcript menu items (Split scenes is in scope: §6.31), the "AI clipper" bottom bar, the empty state's Generate and AI avatars tiles.
+Out of scope: Import › From library (stock), Generate (AI image, AI video, AI dialogue scene: `15-left-ai-and-other/009-media-generate-default.png`–`15-left-ai-and-other/034-dialogue-react-tab.png`), Spaces and Brand assets (`017-spaces-default.png`–`020-spaces-asset-context.png`, `016-brand-assets-empty.png`), Library stock categories and the Commercial filter (`023-library-default.png`, `031-library-filter-menu.png`–`034-library-search-orientation-menu.png`), Dreamina (`15-left-ai-and-other/035-dreamina-default.png`), the media card's Transcript is in scope since 2026-10-19 with a local model (§6.31), as is Split scenes, the "AI clipper" bottom bar, the empty state's Generate and AI avatars tiles.
 
 ### 6.6 Left panel: Audio
 
@@ -859,8 +859,10 @@ Screenshots are in `11-left-captions/` unless a path says otherwise.
 | Add captions › Import file (SRT, LRC, ASS) | `11-left-captions/005-add-captions.png`, `31-dialogs/013-import-captions-file-dialog.png` | missing |
 | Imported subtitle file card, "+ Import file" | `007-srt-imported.png` | missing |
 | Caption style templates (OpenRip's own) | `006-caption-templates.png` | missing |
+| Auto captions with a local speech model: spoken language, word timing for word-by-word styles, highlight keywords, filler words (in scope since 2026-10-19) | `001-auto-captions-default.png`–`003-bilingual-language-menu.png` | missing |
+| Auto lyrics with the same model | `004-auto-lyrics.png` | missing |
 
-Out of scope: Auto captions (spoken language, bilingual, highlight keywords, AI emojis, filler words: `001-auto-captions-default.png`–`003-bilingual-language-menu.png`), Auto lyrics (`004-auto-lyrics.png`), AI packaging, AI emojis (`15-left-ai-and-other/040-captions-ai-emojis.png`).
+Out of scope for now (AI features come after parity): bilingual captions and AI emojis within Auto captions, AI packaging, AI emojis (`15-left-ai-and-other/040-captions-ai-emojis.png`).
 
 ### 6.12 Left panel: Filters
 
@@ -1203,7 +1205,7 @@ Video clip menu (`30-timeline-toolbar/001-video-context-menu.png` to `012-video-
 | Transition › Delete | `013-transition-context-menu.png` | missing (no transition clips) |
 | Split at playhead from the menu | – (CapCut keeps it in the toolbar) | has |
 
-Out of scope: EditPilot (every menu's first item), Transcript, Generate captions, Isolate voice and its submenu, Remove background, Enhance voice, Enhance quality, Adjust color › Color correction, Camera tracking, AI movement, Image to video, AI avatars, Text to speech, AI packaging.
+Out of scope for now: EditPilot (every menu's first item), Generate captions (the clip menu's route to Auto captions, which is in scope above), Isolate voice and its submenu, Remove background, Enhance voice, Enhance quality, Adjust color › Color correction, Camera tracking, AI movement, Image to video, AI avatars, Text to speech, AI packaging.
 
 ### 6.29 Export dialog
 
@@ -1263,6 +1265,7 @@ CapCut's versions of these are listed under AI or left out above; each has a cla
 | Adjust ▸ Auto adjust: levels, white balance and contrast set from the clip's own statistics | `25-inspector-adjustment-layer/001-basic-top.png`, `30-timeline-toolbar/008-video-context-adjust-color.png` | partly (on the Adjust tab and the clip menu; it also lists the values it set) |
 | Adjust ▸ Color match: a clip graded to match a reference frame's colour statistics | `25-inspector-adjustment-layer/001-basic-top.png`, `30-timeline-toolbar/008-video-context-adjust-color.png` | partly (the reference is picked from a dropdown, not by clicking a clip) |
 | Smart suggestions ▸ Make colors consistent: every clip matched to one reference | `17-inspector-project/011-project-smart-suggestions.png` | has (Project tab ▸ Global edits; one undo step) |
+| Transcript: the clip's words from a local speech model, editing the video by its text (in scope since 2026-10-19) | `05-left-media/006-media-item-context-menu.png` | missing |
 | Text ▸ Effects with OpenRip's own styles (CapCut's content stays out) | `21-inspector-text/019-effects-grid.png` | partly (the engine draws the styles; no tab on main) |
 
 ## 7. Gaps in the captures (recapture list)
