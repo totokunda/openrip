@@ -183,6 +183,29 @@ pub fn import_draft_json(doc: &Value, name_hint: &str) -> Result<Imported, Impor
 
     import_materials(&doc["materials"], &mut project.materials, &mut report);
 
+    // A compound clip (CapCut's "combination"): its draft is a draft inside the draft, with
+    // tracks and materials of its own. Its materials join the project's and its tracks become
+    // a `Compound` the segment that points at it plays.
+    for m in arr(&doc["materials"], "drafts").iter().filter(|m| s(m, "type") == "combination") {
+        let Some(inner) = m.get("draft").filter(|d| d.is_object()) else { continue };
+        let Ok(sub) = import_draft_json(inner, "") else { continue };
+        let id = MaterialId(s(m, "id"));
+        project.materials.foreign.retain(|f| f.id != id);
+        project.materials.absorb(sub.project.materials);
+        project.materials.compounds.push(Compound { id, name: s(m, "name"), tracks: sub.project.tracks });
+        if let Some(n) = report.foreign.get_mut("drafts") {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                report.foreign.remove("drafts");
+            }
+        }
+        bump(&mut report.mapped, "drafts (compound clips)".to_string());
+        report.warnings.extend(sub.report.warnings);
+        for (k, v) in sub.report.foreign {
+            *report.foreign.entry(k).or_insert(0) += v;
+        }
+    }
+
     // A subtitle template's segment points at the template, which wraps one text (and the
     // text's caption animation): the segment draws that text.
     let templates: BTreeMap<String, (MaterialId, Vec<MaterialId>)> = arr(&doc["materials"], "text_templates")
@@ -1311,6 +1334,33 @@ mod tests {
                 }]}
             ]
         })
+    }
+
+    #[test]
+    fn a_combination_becomes_a_compound_with_its_own_tracks_and_materials() {
+        let inner = json!({
+            "id": "INNER", "canvas_config": {"width": 1080, "height": 1920}, "fps": 30.0,
+            "materials": {"videos": [{"id": "IV", "type": "video", "path": "/nope/inner.mp4", "width": 1080, "height": 1920, "duration": 3_000_000}]},
+            "tracks": [{"id": "IT", "type": "video", "attribute": 0, "segments": [{
+                "id": "ISEG", "material_id": "IV", "speed": 1.0, "visible": true, "render_index": 0,
+                "source_timerange": {"start": 0, "duration": 3_000_000}, "target_timerange": {"start": 0, "duration": 3_000_000}}]}]
+        });
+        let doc = json!({
+            "id": "P", "name": "Outer", "canvas_config": {"width": 1080, "height": 1920}, "fps": 30.0,
+            "materials": {"drafts": [{"id": "COMB", "type": "combination", "name": "Compound clip1", "draft": inner}]},
+            "tracks": [{"id": "T", "type": "video", "attribute": 0, "segments": [{
+                "id": "SEG", "material_id": "COMB", "speed": 1.0, "visible": true, "render_index": 0,
+                "source_timerange": {"start": 0, "duration": 3_000_000}, "target_timerange": {"start": 1_000_000, "duration": 3_000_000}}]}]
+        });
+        let Imported { project, report } = import_draft_json(&doc, "").unwrap();
+        let c = project.materials.compounds.iter().find(|c| c.id.0 == "COMB").unwrap();
+        assert_eq!((c.name.as_str(), c.tracks.len(), c.tracks[0].segments[0].id.as_str()), ("Compound clip1", 1, "ISEG"));
+        // The content's media joined the project's, and the compound isn't a foreign material any more.
+        assert!(project.materials.media.iter().any(|m| m.id.0 == "IV"));
+        assert!(project.materials.foreign.iter().all(|f| f.id.0 != "COMB") && report.foreign.get("drafts").is_none());
+        assert_eq!(report.mapped.get("drafts (compound clips)"), Some(&1));
+        assert!(report.problems.is_empty(), "{:?}", report.problems);
+        assert_eq!(report.missing_media, vec!["/nope/inner.mp4".to_string()]);
     }
 
     #[test]

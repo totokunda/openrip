@@ -380,11 +380,22 @@ pub fn relaid_texts(old: &Project, new: &Project) -> Vec<String> {
 
 /// Everything a segment uses: its own material and its attachments.
 fn segment_materials(project: &Project, seg: &Segment) -> Vec<Value> {
-    std::iter::once(&seg.material)
-        .chain(seg.attachments.iter())
-        .filter_map(|id| project.materials.get(id))
-        .filter_map(|m| serde_json::to_value(m.to_owned_material()).ok())
-        .collect()
+    let mut ids: Vec<&MaterialId> = std::iter::once(&seg.material).chain(seg.attachments.iter()).collect();
+    // A compound's content has materials of its own (and compounds of its own): all go with it.
+    let mut i = 0;
+    while i < ids.len() {
+        if let Some(c) = project.materials.compounds.iter().find(|c| c.id == *ids[i]) {
+            for s in c.tracks.iter().flat_map(|t| &t.segments) {
+                for id in std::iter::once(&s.material).chain(s.attachments.iter()) {
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    ids.iter().filter_map(|id| project.materials.get(id)).filter_map(|m| serde_json::to_value(m.to_owned_material()).ok()).collect()
 }
 
 /// `project` as the app's project document, without the app's own `meta` (the app gives it

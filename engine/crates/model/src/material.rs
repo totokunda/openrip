@@ -148,6 +148,111 @@ impl Materials {
         None
     }
 
+    /// Take every material of `other` this doesn't have already (by id): a compound's content
+    /// brings its own materials into the project's pool.
+    pub fn absorb(&mut self, other: Materials) {
+        for m in other.media {
+            if !self.contains(&m.id) {
+                self.media.push(m);
+            }
+        }
+        for m in other.texts {
+            if !self.contains(&m.id) {
+                self.texts.push(m);
+            }
+        }
+        for m in other.shapes {
+            if !self.contains(&m.id) {
+                self.shapes.push(m);
+            }
+        }
+        for m in other.masks {
+            if !self.contains(&m.id) {
+                self.masks.push(m);
+            }
+        }
+        for m in other.speeds {
+            if !self.contains(&m.id) {
+                self.speeds.push(m);
+            }
+        }
+        for m in other.canvas_fills {
+            if !self.contains(&m.id) {
+                self.canvas_fills.push(m);
+            }
+        }
+        for m in other.audio_fades {
+            if !self.contains(&m.id) {
+                self.audio_fades.push(m);
+            }
+        }
+        for m in other.transitions {
+            if !self.contains(&m.id) {
+                self.transitions.push(m);
+            }
+        }
+        for m in other.effects {
+            if !self.contains(&m.id) {
+                self.effects.push(m);
+            }
+        }
+        for m in other.hsl {
+            if !self.contains(&m.id) {
+                self.hsl.push(m);
+            }
+        }
+        for m in other.curves {
+            if !self.contains(&m.id) {
+                self.curves.push(m);
+            }
+        }
+        for m in other.color_wheels {
+            if !self.contains(&m.id) {
+                self.color_wheels.push(m);
+            }
+        }
+        for m in other.animations {
+            if !self.contains(&m.id) {
+                self.animations.push(m);
+            }
+        }
+        for m in other.loudness {
+            if !self.contains(&m.id) {
+                self.loudness.push(m);
+            }
+        }
+        for m in other.stickers {
+            if !self.contains(&m.id) {
+                self.stickers.push(m);
+            }
+        }
+        for m in other.chromas {
+            if !self.contains(&m.id) {
+                self.chromas.push(m);
+            }
+        }
+        for m in other.channels {
+            if !self.contains(&m.id) {
+                self.channels.push(m);
+            }
+        }
+        for m in other.beats {
+            if !self.contains(&m.id) {
+                self.beats.push(m);
+            }
+        }
+        for m in other.compounds {
+            if !self.contains(&m.id) {
+                self.compounds.push(m);
+            }
+        }
+        for m in other.foreign {
+            if !self.contains(&m.id) {
+                self.foreign.push(m);
+            }
+        }
+    }
+
     pub fn contains(&self, id: &MaterialId) -> bool {
         self.get(id).is_some()
     }
