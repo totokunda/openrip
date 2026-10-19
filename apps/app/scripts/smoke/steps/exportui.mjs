@@ -118,13 +118,17 @@ export default async (ctx) => {
   check("the video rows: Resolution, Bit rate, Codec, Format, Frame rate, Color space (Rec. 709 SDR)", (await Promise.all(["export-resolution", "export-bitrate", "export-codec", "export-format", "export-fps"].map((i) => T(i).count()))).every((n) => n === 1) && /Rec\. 709 SDR/.test(await T("export-colorspace").innerText()));
   const foot = await estimate();
   check(`the footer: ${foot.text}`, /^Duration: \d+s \| Size: about [\d.]+ (MB|KB|GB)$/.test(foot.text));
-  await win.evaluate(() => {
-    window.__editCover = 0;
-    window.addEventListener("openrip:edit-cover", () => window.__editCover++);
-  });
   await shot("x01-settings");
+  // Edit cover opens the cover editor (lib/cover.ts); cancelling it comes back to Export.
   await T("export-edit-cover").click();
-  check("Edit cover tells the cover editor to open", (await win.evaluate(() => window.__editCover)) === 1);
+  await win.locator("[data-testid=cover-dialog]").waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
+  check("Edit cover opens the cover editor", await win.locator("[data-testid=cover-dialog]").isVisible());
+  await win.locator("[data-testid=cover-cancel]").click().catch(() => {});
+  await win.waitForTimeout(400);
+  if (!(await T("export-cover").isVisible().catch(() => false))) {
+    await win.locator("[data-testid=export]").click();
+    await T("export-cover").waitFor({ state: "visible", timeout: 5000 });
+  }
 
   // ---- every menu ----------------------------------------------------------------------------
   const res = await options("export-resolution", "x02-resolution-menu");
