@@ -1,5 +1,5 @@
-// Stickers ▸ Shapes, as CapCut's (after import timeline): the tab's column (Stickers, Shapes;
-// no Draw), the library's eight tiles in CapCut's order; a click on a tile only previews the
+// Stickers ▸ Shapes, as CapCut's (after import timeline): the tab's column (the sticker
+// categories, Shapes; no Draw), the library's eight tiles in CapCut's order; a click on a tile only previews the
 // shape in the player (the saved project is unchanged); each shape added by the tile's "+" at the
 // playhead with CapCut's look (saved fields, the engine's frame, ⌘Z / ⇧⌘Z); a tile dragged
 // onto the timeline (at that time) and onto the player (at the playhead, where it was let go);
@@ -21,10 +21,10 @@ export default async (ctx) => {
   ctx.map ??= await rulerMap(win);
   await seek(win, ctx.map, 1);
 
-  // The Stickers tab's column: Stickers and Shapes (CapCut's without Yours and GIPHY).
+  // The Stickers tab's column: Favorites, the sticker categories, Shapes (CapCut's without GIPHY).
   await win.locator("[data-testid=assets-tab-stickers]").click();
   const column = await win.evaluate(() => [...document.querySelectorAll("[data-testid^=assets-section-]")].map((b) => b.innerText.trim()));
-  check("the column is Stickers, Shapes", JSON.stringify(column) === JSON.stringify(["Stickers", "Shapes"]), JSON.stringify(column));
+  check("the column is Favorites, the sticker categories, Shapes (no Draw)", column[0] === "Favorites" && column.includes("Trending") && column[column.length - 1] === "Shapes" && !column.includes("Draw"), JSON.stringify(column));
   await win.locator("[data-testid=assets-section-shapes]").click();
   await win.waitForTimeout(300);
   const tiles = await win.evaluate(() =>

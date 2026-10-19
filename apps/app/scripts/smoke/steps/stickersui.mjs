@@ -265,8 +265,9 @@ const run = async (ctx, server) => {
   await win.getByRole("option", { name: "Flat" }).click();
   await win.locator('[data-testid="assets-section-cat:Smileys"]').click();
   await win.waitForTimeout(700);
-  const remote = win.locator("[data-testid=sticker-tile][data-ready='0']").first();
-  const remoteId = await remote.getAttribute("data-sticker");
+  const remoteId = await win.locator("[data-testid=sticker-tile][data-ready='0']").first().getAttribute("data-sticker");
+  // By its id: the tile no longer matches data-ready='0' once it has downloaded.
+  const remote = win.locator(`[data-sticker="${remoteId}"]`);
   check("a sticker not on this machine shows the download mark", (await remote.locator("[data-testid=sticker-download]").count()) === 1);
   const hits0 = server.hits.length;
   await remote.locator("[data-testid=sticker-download]").click();
@@ -291,8 +292,8 @@ const run = async (ctx, server) => {
   await win.getByRole("option", { name: "Recommended" }).click();
   await win.locator('[data-testid="assets-section-cat:Animated"]').click();
   await win.waitForTimeout(700);
-  const remoteAnim = win.locator("[data-testid=sticker-tile][data-ready='0'][data-animated='1']").first();
-  const remoteAnimId = await remoteAnim.getAttribute("data-sticker");
+  const remoteAnimId = await win.locator("[data-testid=sticker-tile][data-ready='0'][data-animated='1']").first().getAttribute("data-sticker");
+  const remoteAnim = win.locator(`[data-sticker="${remoteAnimId}"]`);
   await seek(win, ctx.map, 6);
   await remoteAnim.hover();
   await remoteAnim.locator("[data-testid=sticker-download]").click();
