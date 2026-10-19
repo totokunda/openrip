@@ -2,7 +2,6 @@ import React from "react";
 import { LuCheck, LuChevronDown } from "react-icons/lu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox, Toggle } from "@/components/properties/controls";
-import { CAPTION_STYLES, useCaptionsStore } from "@/lib/caption-actions";
 import {
   LANGUAGES,
   cancelAutoCaptions,
@@ -20,14 +19,14 @@ import {
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
 import { cn } from "@/lib/utils";
-import CaptionStyleTile from "./CaptionStyleTile";
 
 /**
  * Auto captions and Auto lyrics, in CapCut's layout (docs/plan/capcut-ui-spec.md §6.11,
- * `11-left-captions/001`–`004`): the spoken language (a menu, Auto detect first), the caption
- * style, the keyword and filler-word switches, and at the foot "Delete current captions" and
- * Generate (which becomes a progress bar and Cancel while it works). The recognition is local:
- * the Whisper model it uses is listed here, and downloaded the first time (lib/autocaptions.ts).
+ * `11-left-captions/001`–`004`): the spoken language (a menu, Auto detect first), the keyword and
+ * filler-word switches, and at the foot "Delete current captions" and Generate (which becomes a
+ * progress bar and Cancel while it works). The captions' style is chosen under Templates, as in
+ * CapCut, whose footer generates too. The recognition is local: the Whisper model it uses is
+ * listed here, and downloaded the first time (lib/autocaptions.ts).
  */
 
 const mb = (bytes: number) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`);
@@ -85,10 +84,58 @@ const Menu: React.FC<{ value: string; options: { value: string; label: string; n
   );
 };
 
+/**
+ * The panel's foot, shared with the Templates page: "Delete current captions" and Generate,
+ * which becomes the progress and Cancel while the model downloads or listens.
+ */
+export const GenerateFooter: React.FC<{ kind: AutoKind; label?: string }> = ({ kind, label: buttonLabel = "Generate" }) => {
+  const s = useAutoCaptions();
+  const busy = s.phase !== "idle";
+  const noEngine = !!s.status && !s.status.available;
+  const pct = Math.round(s.progress * 100);
+  const label = s.phase === "downloading" ? `Downloading the model ${pct}%` : `Generating ${pct}%`;
+  return (
+    <div className="shrink-0 h-[52px] px-3 border-t border-brand-divider flex flex-row items-center justify-between gap-3">
+      {busy ? (
+        <>
+          <div className="flex flex-col gap-1 flex-1 min-w-0" data-testid="auto-progress" data-phase={s.phase} data-progress={s.progress.toFixed(3)}>
+            <span className="text-[12px] text-brand-lighter">{label}</span>
+            <div className="h-1.5 rounded-full bg-[#3a3a3a] overflow-hidden">
+              <div className="h-full bg-brand-accent" style={{ width: `${Math.max(3, pct)}%` }} />
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid="auto-cancel"
+            onClick={cancelAutoCaptions}
+            className="h-7 px-4 rounded-[4px] bg-brand-button hover:bg-[#5a5a5a] text-[13px] font-semibold text-brand-lighter"
+          >
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          <label className="flex flex-row items-center gap-2 text-[13px] font-semibold text-brand-lighter cursor-pointer">
+            <Checkbox checked={s.deleteCurrent} onChange={(v) => setAutoCaptions({ deleteCurrent: v })} label="Delete current captions" />
+            Delete current captions
+          </label>
+          <button
+            type="button"
+            data-testid="auto-generate"
+            disabled={noEngine}
+            onClick={() => void generateCaptions(kind)}
+            className="h-7 px-5 rounded-[4px] bg-brand-accent hover:brightness-110 text-[13px] font-semibold text-white disabled:opacity-50"
+          >
+            {buttonLabel}
+          </button>
+        </>
+      )}
+    </div>
+  );
+};
+
 const AutoCaptionsMenu: React.FC<{ kind: AutoKind }> = ({ kind }) => {
   const s = useAutoCaptions();
-  const styleId = useCaptionsStore((st) => st.styleId);
-  const setStyle = useCaptionsStore((st) => st.setStyle);
   const focus = useAutoCaptionsFocus((f) => f.tick);
   // The selected clip decides what's listened to (re-read when the selection or the clips change).
   useControlsStore((c) => c.selectedClipIds);
@@ -103,9 +150,6 @@ const AutoCaptionsMenu: React.FC<{ kind: AutoKind }> = ({ kind }) => {
   const model = status?.models.find((m) => m.id === modelId);
   const busy = s.phase !== "idle";
   const noEngine = !!status && !status.available;
-  const stylesShown = kind === "lyrics" ? CAPTION_STYLES.filter((c) => c.kind) : CAPTION_STYLES;
-  const pct = Math.round(s.progress * 100);
-  const label = s.phase === "downloading" ? `Downloading the model ${pct}%` : `Generating ${pct}%`;
 
   return (
     <div className="h-full flex flex-col" data-testid={kind === "lyrics" ? "auto-lyrics" : "auto-captions"}>
@@ -119,28 +163,6 @@ const AutoCaptionsMenu: React.FC<{ kind: AutoKind }> = ({ kind }) => {
               options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))}
               onChange={(language) => setAutoCaptions({ language })}
             />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <span className="text-[13px] font-semibold text-brand-lighter">Caption style</span>
-            <div className="flex flex-row gap-2 overflow-x-auto pb-1 custom-scrollbar" data-testid="auto-style-strip">
-              {stylesShown.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  data-testid={`auto-style-${c.id}`}
-                  aria-pressed={styleId === c.id}
-                  title={c.name}
-                  onClick={() => setStyle(c.id)}
-                  className={cn(
-                    "w-[74px] h-[56px] shrink-0 rounded-[6px] bg-brand-background-light flex items-center justify-center overflow-hidden px-1 transition-colors",
-                    styleId === c.id ? "outline outline-[1.5px] outline-brand-accent" : "hover:bg-brand-button",
-                  )}
-                >
-                  <CaptionStyleTile style={c} size={14} fit={62} />
-                </button>
-              ))}
-            </div>
           </div>
 
           <Row label="Auto highlight keywords" testId="auto-keywords-row">
@@ -206,42 +228,7 @@ const AutoCaptionsMenu: React.FC<{ kind: AutoKind }> = ({ kind }) => {
         </div>
       </div>
 
-      <div className="shrink-0 h-[52px] px-3 border-t border-brand-divider flex flex-row items-center justify-between gap-3">
-        {busy ? (
-          <>
-            <div className="flex flex-col gap-1 flex-1 min-w-0" data-testid="auto-progress" data-phase={s.phase} data-progress={s.progress.toFixed(3)}>
-              <span className="text-[12px] text-brand-lighter">{label}</span>
-              <div className="h-1.5 rounded-full bg-[#3a3a3a] overflow-hidden">
-                <div className="h-full bg-brand-accent" style={{ width: `${Math.max(3, pct)}%` }} />
-              </div>
-            </div>
-            <button
-              type="button"
-              data-testid="auto-cancel"
-              onClick={cancelAutoCaptions}
-              className="h-7 px-4 rounded-[4px] bg-brand-button hover:bg-[#5a5a5a] text-[13px] font-semibold text-brand-lighter"
-            >
-              Cancel
-            </button>
-          </>
-        ) : (
-          <>
-            <label className="flex flex-row items-center gap-2 text-[13px] font-semibold text-brand-lighter cursor-pointer">
-              <Checkbox checked={s.deleteCurrent} onChange={(v) => setAutoCaptions({ deleteCurrent: v })} label="Delete current captions" />
-              Delete current captions
-            </label>
-            <button
-              type="button"
-              data-testid="auto-generate"
-              disabled={noEngine}
-              onClick={() => void generateCaptions(kind)}
-              className="h-7 px-5 rounded-[4px] bg-brand-accent hover:brightness-110 text-[13px] font-semibold text-white disabled:opacity-50"
-            >
-              Generate
-            </button>
-          </>
-        )}
-      </div>
+      <GenerateFooter kind={kind} />
     </div>
   );
 };

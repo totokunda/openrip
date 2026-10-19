@@ -1,21 +1,28 @@
 import React from "react";
-import { LuPlus } from "react-icons/lu";
+import { LuPlus, LuSearch, LuX } from "react-icons/lu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { CAPTION_STYLES, applyCaptionStyle, captionStyle, exportCaptions, importCaptionFile, pickAndImportCaptions, useCaptionsStore } from "@/lib/caption-actions";
 import { cn } from "@/lib/utils";
-import AutoCaptionsMenu from "./AutoCaptionsMenu";
+import AutoCaptionsMenu, { GenerateFooter } from "./AutoCaptionsMenu";
 import CaptionStyleTile from "./CaptionStyleTile";
 import { CAPTION_KINDS } from "@/lib/caption-presets";
 
 /**
  * The Captions tab, in CapCut's layout (docs/plan/capcut-ui-spec.md §6.11): "add" is Add
  * captions (a subtitle file, .srt or .vtt, read onto its own captions track in the chosen
- * style; the files brought in so far; the timeline's texts written out as .srt), "templates"
- * the caption styles (OpenRip's own looks, with the word-by-word ones), "auto" and "lyrics" the
- * speech-to-captions panels (AutoCaptionsMenu: a local Whisper model).
+ * style; the files brought in so far; the timeline's texts written out as .srt), "templates:…"
+ * the caption styles (OpenRip's own looks, with the word-by-word ones) a category at a time,
+ * "auto" and "lyrics" the speech-to-captions panels (AutoCaptionsMenu: a local Whisper model).
  */
+
+/** The column's Templates group, as CapCut's: a section per kind of caption style. */
+export const captionTemplateSections = [{ kind: undefined, label: "Basic" }, ...CAPTION_KINDS].map((g) => ({
+  id: `templates:${g.kind ?? "basic"}`,
+  label: g.label,
+  under: "Templates",
+}));
 
 /** The accent "+" in a circle, as CapCut's import buttons have it. */
 const PlusDot: React.FC<{ size?: number }> = ({ size = 18 }) => (
@@ -32,9 +39,6 @@ const CaptionsMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
   const message = useCaptionsStore((s) => s.message);
   const styleId = useCaptionsStore((s) => s.styleId);
   const setStyle = useCaptionsStore((s) => s.setStyle);
-  const lastSelected = useControlsStore((s) => s.selectedClipIds[s.selectedClipIds.length - 1]);
-  const selected = useClipStore((s) => s.getClipById(lastSelected));
-  const selectedText = selected?.type === "text" ? selected : null;
   const [busy, setBusy] = React.useState(false);
   const run = async (task: () => Promise<unknown>) => {
     setBusy(true);
@@ -53,45 +57,7 @@ const CaptionsMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
 
   if (part === "auto" || part === "lyrics") return <AutoCaptionsMenu kind={part === "lyrics" ? "lyrics" : "captions"} />;
 
-  if (part === "templates") {
-    return (
-      <ScrollArea className="h-full">
-        <div className="flex flex-col gap-3 p-3 pb-8" data-testid="caption-templates">
-          <p className="text-[12px] leading-snug text-[#949494] text-left">
-            {selectedText ? "Applies to every caption on the selected caption's track, and to captions you import next." : "Captions you import get this style. Select a caption to restyle its whole track."}
-          </p>
-          {[{ kind: undefined, label: "Basic" }, ...CAPTION_KINDS].map((group) => (
-          <React.Fragment key={group.label}>
-          <h3 className="text-[12px] font-semibold text-brand-light">{group.label}</h3>
-          <div className="grid gap-x-4 gap-y-[24px]" style={{ gridTemplateColumns: "repeat(auto-fill, 86px)" }}>
-            {CAPTION_STYLES.filter((c) => c.kind === group.kind).map((s) => (
-              <div key={s.id} className="flex flex-col gap-1.5 w-[86px] min-w-0">
-                <button
-                  type="button"
-                  data-testid={`caption-style-${s.id}`}
-                  aria-pressed={styleId === s.id}
-                  title={s.name}
-                  onClick={() => {
-                    setStyle(s.id);
-                    if (selectedText?.timelineId) applyCaptionStyle(selectedText.timelineId, s.id);
-                  }}
-                  className={cn(
-                    "w-[86px] h-[86px] rounded-[6px] bg-brand-background-light flex items-center justify-center overflow-hidden px-1.5 transition-colors",
-                    styleId === s.id ? "outline outline-[1.5px] outline-brand-accent" : "hover:bg-brand-button",
-                  )}
-                >
-                  <CaptionStyleTile style={s} />
-                </button>
-                <span className="text-[12px] leading-none text-[#949494] truncate text-left">{s.name}</span>
-              </div>
-            ))}
-          </div>
-          </React.Fragment>
-          ))}
-        </div>
-      </ScrollArea>
-    );
-  }
+  if (part === "templates" || part.startsWith("templates:")) return <CaptionTemplates category={part.slice("templates:".length) || "basic"} />;
 
   return (
     <ScrollArea className="h-full">
@@ -187,6 +153,86 @@ const CaptionsMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
         </div>
       </div>
     </ScrollArea>
+  );
+};
+
+/**
+ * Templates, as CapCut's caption templates: a search over every style, the category's styles as
+ * square tiles (the name on hover), and the same foot as Auto captions, so a style can be picked
+ * and the captions generated in it from here. A click on a tile also restyles the selected
+ * caption's whole track.
+ */
+const CaptionTemplates: React.FC<{ category: string }> = ({ category }) => {
+  const styleId = useCaptionsStore((s) => s.styleId);
+  const setStyle = useCaptionsStore((s) => s.setStyle);
+  const lastSelected = useControlsStore((s) => s.selectedClipIds[s.selectedClipIds.length - 1]);
+  const selected = useClipStore((s) => s.getClipById(lastSelected));
+  const selectedText = selected?.type === "text" ? selected : null;
+  const [query, setQuery] = React.useState("");
+  const q = query.trim().toLowerCase();
+  const group = captionTemplateSections.find((g) => g.id === `templates:${category}`) ?? captionTemplateSections[0];
+  const shown = q ? CAPTION_STYLES.filter((c) => c.name.toLowerCase().includes(q)) : CAPTION_STYLES.filter((c) => (c.kind ?? "basic") === category);
+  return (
+    <div className="h-full flex flex-col" data-testid="caption-templates">
+      <div className="px-3.5 pt-3 pb-3 shrink-0">
+        <label className="h-[26px] flex flex-row items-center gap-1.5 px-2.5 rounded-[4px] bg-brand border border-transparent focus-within:border-[#515151]">
+          <LuSearch className="w-3.5 h-3.5 text-[#949494] shrink-0" />
+          <input
+            data-testid="caption-templates-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search caption styles"
+            className="flex-1 min-w-0 bg-transparent text-[12px] text-brand-lighter placeholder:text-[#6c6c6c] outline-none"
+          />
+          {query && (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setQuery("")}
+              className="w-3.5 h-3.5 rounded-full bg-[#6c6c6c] text-brand flex items-center justify-center hover:bg-[#8a8a8a]"
+            >
+              <LuX className="w-2.5 h-2.5" />
+            </button>
+          )}
+        </label>
+      </div>
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="flex flex-col pl-3.5 pr-3 pb-6 text-left">
+          <h3 className="text-[12.5px] text-brand-light leading-none mb-3" data-testid="caption-templates-heading">
+            {q ? "Results" : group.label}
+          </h3>
+          {shown.length === 0 ? (
+            <p className="text-[12px] text-[#6c6c6c] leading-snug py-6">No caption styles found.</p>
+          ) : (
+            <div className="grid gap-x-4 gap-y-4" style={{ gridTemplateColumns: "repeat(auto-fill, 86px)" }}>
+              {shown.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  data-testid={`caption-style-${c.id}`}
+                  aria-pressed={styleId === c.id}
+                  title={c.name}
+                  onClick={() => {
+                    setStyle(c.id);
+                    if (selectedText?.timelineId) applyCaptionStyle(selectedText.timelineId, c.id);
+                  }}
+                  className={cn(
+                    "w-[86px] h-[86px] rounded-[6px] bg-brand-background-light flex items-center justify-center overflow-hidden px-1.5 transition-colors",
+                    styleId === c.id ? "outline outline-[1.5px] outline-brand-accent" : "hover:bg-brand-button",
+                  )}
+                >
+                  <CaptionStyleTile style={c} />
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="mt-4 text-[12px] leading-snug text-[#949494]">
+            {selectedText ? "A click restyles every caption on the selected caption's track." : "Generate captions in this style, or select a caption to restyle its track."}
+          </p>
+        </div>
+      </ScrollArea>
+      <GenerateFooter kind="captions" label="Generate captions" />
+    </div>
   );
 };
 

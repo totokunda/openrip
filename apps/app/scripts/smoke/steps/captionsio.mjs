@@ -50,7 +50,7 @@ export default async (ctx) => {
   // A template on the selected caption's track: every caption gets it.
   await select(ctx, await doc(), got[0].clipId, 0.5);
   await win.locator("[data-testid=assets-tab-captions]").click();
-  await (await sectionButton(win, "templates")).click();
+  await (await sectionButton(win, "templates:basic")).click();
   await win.waitForTimeout(300);
   await shot("cio3-templates");
   const f1 = (await engineFrame(win)).sum;

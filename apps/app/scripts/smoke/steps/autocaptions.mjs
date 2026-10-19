@@ -51,6 +51,17 @@ export default async (ctx) => {
 
 const run = async (ctx, stop) => {
   const { app, win, udDir, shot, outDir, fs } = ctx;
+  // The caption styles are under Templates, a category at a time (as CapCut's): find the tile in its category.
+  const TEMPLATE_SECTIONS = ["templates:basic", "templates:highlight", "templates:karaoke", "templates:pop", "templates:boxed"];
+  const styleTile = async (id) => {
+    for (const section of TEMPLATE_SECTIONS) {
+      await (await sectionButton(win, section)).click();
+      await win.waitForTimeout(150);
+      if (await win.locator(`[data-testid=caption-style-${id}]`).count()) return win.locator(`[data-testid=caption-style-${id}]`);
+    }
+    throw new Error(`no caption style ${id}`);
+  };
+  const pickStyle = async (id) => (await styleTile(id)).click();
   const { check, report } = checks();
   const modelDir = path.join(outDir, "speech-models");
   fs.rmSync(modelDir, { recursive: true, force: true });
@@ -96,8 +107,9 @@ const run = async (ctx, stop) => {
   // The panel, as CapCut's Auto captions.
   await win.locator("[data-testid=assets-tab-captions]").click();
   await win.waitForTimeout(500);
-  const labels = await win.locator("[data-testid^=assets-section-]").allInnerTexts();
+  const labels = await win.locator("nav[aria-label=Sections] button").allInnerTexts();
   check(`the Captions column: ${labels.join(" / ")}`, labels.join("|") === "Auto captions|Templates|Auto lyrics|Add captions");
+  check("Auto captions has no style row: the styles are under Templates, as in CapCut", (await win.locator("[data-testid=auto-style-strip]").count()) === 0);
   check("opens on Auto captions", (await win.locator("[data-testid=auto-captions]").count()) === 1);
   const text = await win.locator("[data-testid=auto-captions]").innerText();
   check("Spoken language, Auto detect, keywords, filler words, Delete current captions, Generate", /Spoken language/.test(text) && /Auto detect/.test(text) && /Auto highlight keywords/.test(text) && /Identify filler words/.test(text) && /Delete current captions/.test(text) && /Generate/.test(text));
@@ -116,7 +128,9 @@ const run = async (ctx, stop) => {
   check(`the model list: ${models.map((m) => m.replace(/\s+/g, " ")).join("; ")}`, models.length === 10 && models.some((m) => /Large v3 Turbo/.test(m)) && models.some((m) => /Tiny \(English\)/.test(m)) && models.every((m) => /MB|GB/.test(m)));
   await shot("ac3-model-menu");
   await win.locator("[data-testid=auto-model-menu-tiny]").click();
-  await win.locator("[data-testid=auto-style-highlight-yellow]").click();
+  await pickStyle("highlight-yellow");
+  await (await sectionButton(win, "auto")).click();
+  await win.waitForTimeout(300);
   await win.locator("[role=switch][aria-label='Auto highlight keywords']").click();
   await win.waitForTimeout(200);
   check("the model says it isn't downloaded yet", /downloaded once/.test(await win.locator("[data-testid=auto-model]").innerText()) && (await win.locator("[data-testid=auto-model-download]").count()) === 1);
@@ -189,11 +203,18 @@ const run = async (ctx, stop) => {
   // The other word-by-word styles, from the Templates tab on the selected caption's track.
   await select(ctx, await doc(), first.clipId, cs + (+first.endTick / 1e6 - cs) * 0.75);
   await win.locator("[data-testid=assets-tab-captions]").click();
-  await (await sectionButton(win, "templates")).click();
+  await (await sectionButton(win, "templates:basic")).click();
   await win.waitForTimeout(400);
   await shot("ac7-templates");
-  const groups = await win.locator("[data-testid=caption-templates] h3").allInnerTexts();
-  check(`Templates: ${groups.join(", ")}; ${await win.locator("[data-testid^=caption-style-]").count()} styles`, groups.join("|") === "Basic|Word highlight|Karaoke fill|Word pop|Boxed word" && (await win.locator("[data-testid^=caption-style-]").count()) >= 48);
+  const groups = (await win.locator("nav[aria-label=Sections] button").allInnerTexts()).slice(2, 7);
+  let styleCount = 0;
+  for (const section of TEMPLATE_SECTIONS) {
+    await (await sectionButton(win, section)).click();
+    await win.waitForTimeout(150);
+    styleCount += await win.locator("[data-testid^=caption-style-]").count();
+  }
+  await (await sectionButton(win, "templates:basic")).click();
+  check(`Templates: ${groups.join(", ")}; ${styleCount} styles, a category at a time in a grid with the Generate foot`, groups.join("|") === "Basic|Word highlight|Karaoke fill|Word pop|Boxed word" && styleCount >= 48 && (await win.locator("[data-testid=caption-templates] [data-testid=auto-generate]").count()) === 1);
   const early = cs + (words[0].start + words[0].end) / 2;
   const late = cs + (words[words.length - 1].start + words[words.length - 1].end) / 2;
   const grabAt = async (s) => {
@@ -204,7 +225,8 @@ const run = async (ctx, stop) => {
   // A template goes on the selected caption's whole track; a click on the ruler (a seek) drops the selection, so each one selects a caption first.
   const template = async (id) => {
     await select(ctx, await doc(), first.clipId, cs + (+first.endTick / 1e6 - cs) * 0.9);
-    await settled(win, () => win.locator(`[data-testid=caption-style-${id}]`).click());
+    const tile = await styleTile(id);
+    await settled(win, () => tile.click());
   };
   const frameAt = async (s, test) => {
     await seek(win, ctx.map, s);
@@ -246,9 +268,8 @@ const run = async (ctx, stop) => {
   const plain = await autoClips();
   check("a plain template on the track: whole text, the words kept", plain.every((c) => c.captionStyle === "none" && c.captionWords?.length), JSON.stringify(plain.map((c) => c.captionStyle)));
 
-  // Generate again replaces the track the last one made (back to the yellow highlight).
-  await (await sectionButton(win, "auto")).click();
-  await win.locator("[data-testid=auto-style-highlight-yellow]").click();
+  // Generate again replaces the track the last one made (back to the yellow highlight), from the Templates foot.
+  await pickStyle("highlight-yellow");
   const before = await autoClips();
   await settled(win, async () => {
     await win.locator("[data-testid=auto-generate]").click();
@@ -272,7 +293,8 @@ const run = async (ctx, stop) => {
   await win.locator("[role=checkbox][aria-label='Delete current captions']").click();
 
   // The clip menu's Generate captions (a video clip), routing to the panel with the clip selected.
-  await (await sectionButton(win, "templates")).click();
+  // From Add captions (Templates has a Generate captions button of its own).
+  await (await sectionButton(win, "add")).click();
   const d = await doc();
   const v = d.timeline.clips.find((c) => c.type === "video");
   const [vx, vy] = await bar(ctx, d, v.clipId, +v.startTick / 1e6 + videoSecs * 0.8);
@@ -300,7 +322,7 @@ const run = async (ctx, stop) => {
   // Auto lyrics: the same panel, word-by-word styles only.
   await (await sectionButton(win, "lyrics")).click();
   await win.waitForTimeout(400);
-  check("Auto lyrics is the same panel with the word-by-word styles", (await win.locator("[data-testid=auto-lyrics]").count()) === 1 && (await win.locator("button[data-testid^=auto-style-]").count()) === 40, `${await win.locator("[data-testid=auto-lyrics]").count()} panel, ${await win.locator("button[data-testid^=auto-style-]").count()} styles`);
+  check("Auto lyrics is the same panel, its style from Templates", (await win.locator("[data-testid=auto-lyrics]").count()) === 1 && (await win.locator("[data-testid=auto-style-strip]").count()) === 0);
   await shot("ac13-auto-lyrics");
 
   // Delete the model: its file goes and the panel offers the download again.
