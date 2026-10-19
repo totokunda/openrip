@@ -66,6 +66,8 @@ export type { RecordSource, RecordSources, RecordKind, SavedRecording, SavedTake
 // The Stickers tab's downloads and cache
 export { stickersCached, stickerDownload, stickerStore } from "./stickers.js";
 export type { StickerFile } from "./stickers.js";
+// Media > Yours > My presets (the main process's ClipPresetsModule)
+export { clipPresetsRead, clipPresetsWrite } from "./presets.js";
 // The Audio tab's Music and Sound effects libraries (Openverse)
 export { musicSearch, musicState, musicDownload, musicFavorite } from "./music.js";
 export type { MusicKind, MusicLicense, MusicTrack, MusicSearch, MusicSearchResult, MusicFile } from "./music.js";

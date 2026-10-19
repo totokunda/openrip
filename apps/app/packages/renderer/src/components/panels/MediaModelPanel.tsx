@@ -35,6 +35,7 @@ import AudioMenu, { audioSections } from "../menus/AudioMenu";
 import PendingMenu, { type Pending } from "../menus/PendingMenu";
 import StockLibraryMenu, { stockSections } from "../menus/StockLibraryMenu";
 import CreditsView from "../menus/CreditsView";
+import PresetsMenu from "../menus/PresetsMenu";
 import TemplatesMenu, { templateSections } from "../menus/TemplatesMenu";
 import CaptionsMenu, { captionTemplateSections } from "../menus/CaptionsMenu";
 import { useAutoCaptionsFocus } from "@/lib/autocaptions";
@@ -73,6 +74,9 @@ const TABS: { section: SidebarSection; title: string; icon: IconType }[] = [
 const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; under?: string }[]>> = {
   media: [
     { id: "local", label: "Media", under: "Import" },
+    // CapCut's Yours: the starred stock media and the clip presets saved from the timeline.
+    { id: "yours:favorites", label: "Favorites", under: "Yours" },
+    { id: "yours:presets", label: "My presets", under: "Yours" },
     // CapCut's stock library, from openly licensed sources (StockLibraryMenu).
     ...stockSections(),
   ],
@@ -298,6 +302,8 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   const content = () => {
     switch (section) {
       case "media":
+        if (sub === "yours:presets") return <PresetsMenu />;
+        if (sub === "yours:favorites") return <StockLibraryMenu category="favorites" />;
         return sub === "library:credits" ? <CreditsView /> : sub.startsWith("library:") ? <StockLibraryMenu category={sub.slice(8)} /> : <MediaMenu />;
       case "filters":
         return <FilterMenu part={sub} />;

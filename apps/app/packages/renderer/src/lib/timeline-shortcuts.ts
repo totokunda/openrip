@@ -37,6 +37,7 @@ export function toggleZoomToFit() {
     zoomTimelineTo(c.minZoomLevel);
   }
 }
+import { copySelectedAttributes, pasteSelectedAttributes } from "./clip-presets";
 
 /**
  * Zoom the timeline to `level` (1 shows the whole project, 10 a few frames), keeping the
@@ -259,6 +260,9 @@ const RUN: Record<string, () => void> = {
     const v = visualTarget();
     if (v) useClipStore.getState().updateClip(v.clipId, rotate90(v, 1));
   },
+  // Copy and paste attributes (lib/clip-presets.ts): the last selected clip's, onto the selected ones.
+  copyAttributes: () => void copySelectedAttributes(),
+  pasteAttributes: () => void pasteSelectedAttributes(),
   // The player.
   fullScreenPreview: () => {
     const c = useControlsStore.getState();

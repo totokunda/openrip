@@ -20,6 +20,7 @@ import { capCutImportModule } from "./modules/CapCutImportModule.js";
 import { appMenu } from "./modules/AppMenu.js";
 import { stickerLibraryModule } from "./modules/StickerLibraryModule.js";
 import { musicLibraryModule } from "./modules/MusicLibraryModule.js";
+import { clipPresetsModule } from "./modules/ClipPresetsModule.js";
 import { stockLibraryModule } from "./modules/StockLibraryModule.js";
 import { app } from "electron";
 
@@ -50,6 +51,8 @@ export async function initApp(initConfig: AppInitConfig) {
     .init(stickerLibraryModule())
     // The Audio tab's Music and Sound effects (Openverse) and their cache
     .init(musicLibraryModule())
+    // Media > Yours > My presets: the saved clip presets
+    .init(clipPresetsModule())
     // The Media tab's stock Library: searches of openly licensed sources and the downloads
     .init(stockLibraryModule())
     .init(appMenu())

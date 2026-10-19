@@ -57,6 +57,7 @@ import BeatMarkers from "./BeatMarkers";
 import { projectBeatPoints, soundMenuItems } from "@/lib/audio-tools";
 import { analysisMenuItems } from "@/lib/analysis";
 import { enhanceMenuItems, withEnhance } from "@/lib/enhance";
+import { attributeMenuItems } from "@/lib/clip-presets";
 import { captionMenuItems } from "@/lib/autocaptions";
 import { useViewportStore } from "@/lib/viewport";
 import { useContextMenuStore, ContextMenuItem } from "@/lib/context-menu";
@@ -1328,6 +1329,10 @@ const TimelineClip: React.FC<
           ],
         });
       }
+      // Copy/paste attributes and Save preset (lib/clip-presets.ts).
+      const attributeItems = attributeMenuItems(clip, targetIds);
+      // Save preset after Group, as CapCut orders them.
+      otherCommands.push(attributeItems.preset);
 
       useContextMenuStore.getState().openMenu({
         position: { x: e.evt.clientX, y: e.evt.clientY },
@@ -1344,6 +1349,7 @@ const TimelineClip: React.FC<
               { id: "copy", label: "Copy", action: "copy", shortcut: "⌘C" },
               { id: "cut", label: "Cut", action: "cut", shortcut: "⌘X" },
               { id: "paste", label: "Paste", action: "paste", shortcut: "⌘V" },
+              attributeItems.attributes,
               {
                 id: "delete",
                 label: "Delete",
