@@ -1,4 +1,4 @@
-import { ZoomLevel } from "./types";
+import type { ZoomLevel } from "./types.ts";
 
 interface ZoomLevelConfig {
   minorTickInterval: number;

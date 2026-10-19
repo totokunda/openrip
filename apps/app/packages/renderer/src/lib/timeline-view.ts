@@ -60,10 +60,16 @@ export const trackDy = (t: Track | undefined) => ((t?.timelineY ?? 0) >= trackVi
 /** The top of a track's band in the stage. */
 export const trackTop = (t: Track) => (t.timelineY ?? 0) + TRACK_TOP + trackDy(t);
 
-/** Which track a point of the stage (y from its top) is over, on the band or its gap below. */
-export const trackAt = <T extends Track>(tracks: T[], y: number): T | undefined =>
-  tracks.find((t) => {
+/**
+ * Which track a point of the stage (y from its top) is over, on the band or its gap below. The
+ * pinned tracks come first, and the overlay tracks scrolled under them aren't there.
+ */
+export const trackAt = <T extends Track>(tracks: T[], y: number): T | undefined => {
+  const hit = (t: T) => {
     const dy = trackDy(t);
     return y - dy >= (t.timelineY ?? 0) + TRACK_TOP && y - dy <= (t.timelineY ?? 0) + (t.timelineHeight ?? 0) + 24;
-  });
-
+  };
+  const pinned = trackView.pinned ? tracks.filter((t) => (t.timelineY ?? 0) >= trackView.from) : [];
+  const over = trackView.pinned ? tracks.filter((t) => (t.timelineY ?? 0) < trackView.from && y <= trackView.overBottom) : tracks;
+  return pinned.find(hit) ?? over.find(hit);
+};

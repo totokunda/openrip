@@ -19,6 +19,9 @@ const CASES = [
   ["handle", {}, "import timeline newtext tlhandle"],
   ["keys", {}, "import timeline newtext tlkeys"],
   ["tools", {}, "import timeline newtext tltools"],
+  ["pinned", {}, "import timeline newtext tlpinned"],
+  ["linkage", {}, "import timeline newtext tllinkage"],
+  ["menus", {}, "import timeline newtext clipmenus"],
   ["undo", {}, "import timeline newtext undo"],
   ["capcut", { CAPCUT_DRAFT: TL_DRAFT }, "capcut tlcapcut"],
 ];

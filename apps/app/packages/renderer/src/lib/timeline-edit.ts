@@ -4,7 +4,7 @@
 // edits and the timeline's components use them while a drag is under way.
 // See docs/plan/app-engine-integration.md.
 import type { Asset, AnyClipProps, GroupClipProps, Marker, TimelineProps } from "./types";
-import { carriedClips } from "./linkage";
+import { carriedClips } from "./linkage.ts";
 
 const startOf = (c: AnyClipProps) => c.startFrame ?? 0;
 const endOf = (c: AnyClipProps) => c.endFrame ?? 0;

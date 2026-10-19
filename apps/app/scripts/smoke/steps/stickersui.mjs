@@ -16,7 +16,7 @@ import zlib from "node:zlib";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { drag, engineFrame, openEditor, previewRect, rulerMap, seek, settled, tab, timelineRect, sectionButton } from "./_preview.mjs";
-import { checks, clipsWhere, savedProject, select } from "./_anim.mjs";
+import { bar as barOf, checks, clipsWhere, savedProject, select } from "./_anim.mjs";
 import { press, state, undoCase } from "./_undo.mjs";
 import { exporter, ffmpeg } from "./_audio.mjs";
 
@@ -196,6 +196,29 @@ const run = async (ctx, server) => {
     return pixelOf(buf, 8, 4);
   })() : [0, 0, 0];
   check("its bar is the sticker colour", Math.abs(bar[0] - 0xc0) < 24 && Math.abs(bar[1] - 0x8a) < 24 && Math.abs(bar[2] - 0x3e) < 24, JSON.stringify(bar));
+
+  // ---- Its clip menu: Mirror (after Save preset, as CapCut orders it) and Range ----------------------------------
+  {
+    await seek(win, ctx.map, 1.5);
+    await select(ctx, await doc(), added.clipId, 3.5);
+    const [bx, by] = await barOf(ctx, await doc(), added.clipId, 3.5);
+    const before = (await engineFrame(win, "r + g + b > 60")).sum;
+    await undoCase(ctx, check, "sticker menu: Mirror", async () => {
+      await win.mouse.click(bx, by, { button: "right" });
+      await win.waitForTimeout(400);
+      await settled(win, () => win.getByText("Mirror", { exact: true }).click());
+    });
+    d = await doc();
+    const flipped = clipsWhere(d, (c) => c.type === "sticker")[0].flip;
+    check("Mirror flips the sticker (saved), and the engine draws it mirrored", flipped?.horizontal === true && (await engineFrame(win, "r + g + b > 60")).sum !== before, JSON.stringify(flipped));
+    await win.mouse.click(bx, by, { button: "right" });
+    await win.waitForTimeout(400);
+    const items = await win.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.innerText.trim()).filter((t) => t === "Range" || t === "Mirror" || t === "Export selected clips" || t === "Render" || t === "Deactivate clip"));
+    check("the sticker's menu has Mirror, Deactivate clip and Range, no Export or Render", ["Mirror", "Deactivate clip", "Range"].every((n) => items.includes(n)) && !items.includes("Render") && !items.includes("Export selected clips"), JSON.stringify(items));
+    await win.keyboard.press("Escape");
+    await win.mouse.click(bx, by + 60).catch(() => {});
+    await select(ctx, await doc(), added.clipId, 3.5);
+  }
 
   // ---- Its inspector: Stickers, Animation, Tracking ---------------------------------------------------------
   const sel = async () => select(ctx, await doc(), added.clipId, 3.5);

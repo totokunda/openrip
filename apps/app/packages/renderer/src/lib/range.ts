@@ -2,7 +2,7 @@
 // In (I) and Out (O) set its ends at the playhead, Select by clip (⇧X) makes it the span of the
 // selected clips, Deselect clears it. Export range writes what's inside it
 // (lib/engine-preview.ts `trimmedToRange`).
-import type { AnyClipProps } from "./types";
+import type { AnyClipProps } from "./types.ts";
 
 export type Range = { start: number; end: number };
 

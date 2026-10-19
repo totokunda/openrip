@@ -432,6 +432,10 @@ export function parseBitrate(value: string | number): number {
   return Math.round(n * (m[2].toLowerCase() === "m" ? 1e6 : m[2].toLowerCase() === "k" ? 1e3 : 1));
 }
 
+/** A snapshot clip's times are µs ticks (strings); the project's frame rate turns them to frames and back. */
+const tickOf = (frame: number, fps: number) => String(Math.round((frame * 1e6) / fps));
+const frameOfTick = (tick: unknown, fps: number) => Math.round((Number(tick) * fps) / 1e6);
+
 /**
  * The snapshot with only some clips in it, moved to the start: what exporting the selected clips
  * writes (their own span, their effects and animations, their sound). Clips of the same groups
@@ -444,11 +448,12 @@ function soloClips<T>(snapshot: T, clipIds: string[]): T {
   if (picked.length === 0) return snapshot;
   const groups = new Set(picked.map((c) => c.groupId).filter(Boolean));
   const keep = all.filter((c) => picked.includes(c) || (c.groupId && groups.has(c.groupId)));
-  const from = Math.min(...keep.map((c) => c.startFrame));
-  const moved = keep.map((c) => ({ ...c, startFrame: c.startFrame - from, endFrame: c.endFrame - from }));
+  const from = Math.min(...keep.map((c) => Number(c.startTick)));
+  const moved = keep.map((c) => ({ ...c, startTick: String(Number(c.startTick) - from), endTick: String(Number(c.endTick) - from) }));
   const ids = new Set(moved.map((c) => c.timelineId));
   const tracks = (Array.isArray(timeline.tracks) ? timeline.tracks : []).filter((t: any) => ids.has(t.timelineId));
-  return { ...(snapshot as any), timeline: { ...timeline, tracks, clips: moved, markers: [] }, editorState: { ...(snapshot as any).editorState, duration: Math.max(...moved.map((c) => c.endFrame)) } };
+  const fps = useControlsStore.getState().fps || 30;
+  return { ...(snapshot as any), timeline: { ...timeline, tracks, clips: moved, markers: [] }, editorState: { ...(snapshot as any).editorState, duration: Math.max(...moved.map((c) => frameOfTick(c.endTick, fps))) } };
 }
 
 /**
@@ -459,12 +464,27 @@ function soloClips<T>(snapshot: T, clipIds: string[]): T {
 function trimmedToRange<T>(snapshot: T, range: { start: number; end: number }): T {
   const timeline = (snapshot as any)?.timeline;
   const all: any[] = Array.isArray(timeline?.clips) ? timeline.clips : [];
-  const moved = clipsWithinRange(all, range.start, range.end);
+  const fps = useControlsStore.getState().fps || 30;
+  // Frames in, cut, ticks out; a clip the cut can't read stays whole, moved.
+  const inFrames = all.map((c) => ({ ...c, startFrame: frameOfTick(c.startTick, fps), endFrame: frameOfTick(c.endTick, fps), trimStart: frameOfTick(c.trimStartTick, fps), trimEnd: frameOfTick(c.trimEndTick, fps) }));
+  const cut = inFrames.flatMap((c) => {
+    try {
+      return clipsWithinRange([c], range.start, range.end);
+    } catch {
+      return c.endFrame > range.start && c.startFrame < range.end ? [{ ...c, startFrame: c.startFrame - range.start, endFrame: c.endFrame - range.start }] : [];
+    }
+  });
+  const moved = cut.map(({ startFrame, endFrame, trimStart, trimEnd, ...c }: any) => ({
+    ...c,
+    startTick: tickOf(startFrame, fps),
+    endTick: tickOf(endFrame, fps),
+    trimStartTick: tickOf(trimStart ?? 0, fps),
+    trimEndTick: tickOf(trimEnd ?? 0, fps),
+  }));
   if (moved.length === 0) return snapshot;
   const ids = new Set(moved.map((c) => c.timelineId));
   const tracks = (Array.isArray(timeline.tracks) ? timeline.tracks : []).filter((t: any) => ids.has(t.timelineId));
-  const markers = (Array.isArray(timeline.markers) ? timeline.markers : []).filter((m: any) => m.frame >= range.start && m.frame < range.end).map((m: any) => ({ ...m, frame: m.frame - range.start }));
-  return { ...(snapshot as any), timeline: { ...timeline, tracks, clips: moved, markers }, editorState: { ...(snapshot as any).editorState, duration: range.end - range.start } };
+  return { ...(snapshot as any), timeline: { ...timeline, tracks, clips: moved, markers: [] }, editorState: { ...(snapshot as any).editorState, duration: range.end - range.start } };
 }
 
 /** The open project as the engine reads it (originals in place of proxies), for tools that ask the engine about it (Auto captions' timeline mix); null with no project. */

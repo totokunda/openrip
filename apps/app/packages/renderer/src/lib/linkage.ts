@@ -3,7 +3,7 @@
 // gap closed), besides the clips linked to it by `linkId` (a video and its extracted audio).
 // The kinds are the dialog's boxes; the ones switched off are saved in the preferences
 // (`linkageOff`). Plain functions of the clips and tracks, used by timeline-edit and the store.
-import type { Asset, AnyClipProps, TimelineProps } from "./types";
+import type { Asset, AnyClipProps, TimelineProps } from "./types.ts";
 
 export type LinkKind = "text" | "effects" | "stickers" | "filters" | "adjust" | "overlay" | "audio" | "soundEffects";
 

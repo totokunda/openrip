@@ -1237,18 +1237,6 @@ const TimelineClip: React.FC<
 
       const otherCommands: ContextMenuItem[] = [];
 
-      // Export selected clips: the selected video, photo and audio clips, as one file.
-      const exportable = targetIds.filter((id) => {
-        const c = clipsState.getClipById(id);
-        return c?.type === "video" || c?.type === "image" || (c?.type === "audio" && !!c.assetId);
-      });
-      if (exportable.length > 0) {
-        otherCommands.push({
-          id: "export",
-          label: "Export selected clips",
-          action: "export",
-        });
-      }
       // check if any of the selected clips are groups if so, we cannot group it
       const isAnyGroup = (controls.selectedClipIds || []).some((clipId) => {
         const clip = clipsState.getClipById(clipId);
@@ -1426,8 +1414,14 @@ const TimelineClip: React.FC<
       ];
       // Copy/paste attributes and Save preset (lib/clip-presets.ts).
       const attributeItems = attributeMenuItems(clip, targetIds);
-      // Save preset after Group, as CapCut orders them.
+      // Save preset after Group, as CapCut orders them, then Export selected clips: the selected
+      // video, photo and audio clips as one file.
       otherCommands.push(attributeItems.preset);
+      const exportable = targetIds.filter((id) => {
+        const c = clipsState.getClipById(id);
+        return c?.type === "video" || c?.type === "image" || (c?.type === "audio" && !!c.assetId);
+      });
+      if (exportable.length > 0) otherCommands.push({ id: "export", label: "Export selected clips", action: "export" });
 
       useContextMenuStore.getState().openMenu({
         position: { x: e.evt.clientX, y: e.evt.clientY },

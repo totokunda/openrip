@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useContextMenuStore, type ContextMenuItem } from "@/lib/context-menu";
 import { LuCheck, LuChevronRight } from "react-icons/lu";
@@ -34,6 +34,16 @@ const MenuRow: React.FC<{
 }> = ({ item, ticked, onSelect, open, setOpen }) => {
   const sub = item.children?.length ? item.children : null;
   const subTicked = !!sub?.some((c) => c.checked !== undefined);
+  // A submenu that would run off the window's bottom (or right) edge is moved back inside it.
+  const subRef = useRef<HTMLDivElement | null>(null);
+  const [subFit, setSubFit] = useState<{ up: number; left: boolean }>({ up: 0, left: false });
+  useLayoutEffect(() => {
+    const el = subRef.current;
+    if (!open || !el) return;
+    const win = el.ownerDocument.defaultView ?? window;
+    const r = el.getBoundingClientRect();
+    setSubFit({ up: Math.max(0, r.bottom - (win.innerHeight - 10)), left: r.right > win.innerWidth });
+  }, [open]);
   return (
     <div className="relative" onMouseEnter={() => setOpen(sub && !item.disabled ? item.id : null)}>
       <button
@@ -62,7 +72,11 @@ const MenuRow: React.FC<{
         {sub ? <LuChevronRight className="w-3.5 h-3.5 text-[#cacaca]" /> : item.shortcut && <Key text={item.shortcut} />}
       </button>
       {sub && open && (
-        <div className="absolute left-full -top-1 ml-1 w-max min-w-[160px] p-1 rounded-[8px] border-[0.5px] border-black bg-brand-header shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)]">
+        <div
+          ref={subRef}
+          style={subFit.up ? { transform: `translateY(-${subFit.up}px)` } : undefined}
+          className={cn("absolute -top-1 w-max min-w-[160px] p-1 rounded-[8px] border-[0.5px] border-black bg-brand-header shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)]", subFit.left ? "right-full mr-1" : "left-full ml-1")}
+        >
           {sub.map((c) => (
             <MenuRow key={c.id} item={c} ticked={subTicked} onSelect={onSelect} open={false} setOpen={() => {}} />
           ))}

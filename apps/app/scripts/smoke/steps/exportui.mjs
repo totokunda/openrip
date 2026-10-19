@@ -8,7 +8,7 @@
 // choices; then real exports read back with ffprobe: a 720p 30 fps H.264 MP4 with sound, a
 // custom bit rate, an audio-only MP3 (and WAV, AAC, FLAC), a GIF, an SRT and a TXT, all four
 // kinds in one run with its progress and finished screens, a cancelled run leaving nothing,
-// and the clip menu's Export as Video through the same dialog for one clip. Shots are named
+// and the clip menu's Export selected clips through the same dialog for one clip. Shots are named
 // after the CapCut references (x01 ↔ 31-dialogs/016, x02 ↔ 017 … x11 ↔ 026).
 import { execFileSync, spawnSync } from "node:child_process";
 import path from "node:path";
@@ -373,10 +373,10 @@ export default async (ctx) => {
   const [bx, by] = await bar(ctx, now, video.clipId);
   await win.mouse.click(bx, by, { button: "right" });
   await win.waitForTimeout(500);
-  await win.getByText("Export as Video", { exact: true }).click();
+  await win.getByText("Export selected clips", { exact: true }).click();
   await dialog.waitFor({ state: "visible" });
   await win.waitForTimeout(500);
-  check("Export as Video opens the same dialog for the clip (no Captions section, 'Selected clip')", (await T("export-section-captions").count()) === 0 && /Selected clip/.test(await T("export-settings").innerText()) && (await T("export-section-video").count()) === 1);
+  check("Export selected clips opens the same dialog for the clip (no Captions section, 'Selected clip')", (await T("export-section-captions").count()) === 0 && /Selected clip/.test(await T("export-settings").innerText()) && (await T("export-section-video").count()) === 1);
   await shot("x14-clip-export");
   await setCheck("video", true);
   await choose("export-resolution", "720P");
