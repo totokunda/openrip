@@ -313,6 +313,10 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
 
     for clip in clips_json.iter().copied() {
         let ty = s(clip, "type");
+        // Deactivate clip: it stays on the timeline but isn't drawn, heard or exported.
+        if b(clip, "deactivated") {
+            continue;
+        }
         match ty.as_str() {
             "model" => {
                 bump(&mut report.dropped, "model (AI generation clip)");
@@ -1939,6 +1943,16 @@ mod tests {
                 ]
             }
         })
+    }
+
+    /// Deactivate clip: the clip is on the timeline file but the engine leaves it out.
+    #[test]
+    fn a_deactivated_clip_is_left_out() {
+        let mut d = doc();
+        d["timeline"]["clips"][1]["deactivated"] = json!(true);
+        let Imported { project, .. } = import_v1_json(&d).unwrap();
+        assert!(edit::find_segment(&project, "v1").is_some());
+        assert!(edit::find_segment(&project, "v2").is_none());
     }
 
     #[test]

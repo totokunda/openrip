@@ -419,6 +419,7 @@ const Preview: React.FC<PreviewProps> = () => {
   const filterClips = useCallback(
     (clips: AnyClipProps[], audio: boolean = false) => {
       const filteredClips = clips.filter((clip: AnyClipProps) => {
+        if (clip.deactivated) return false;
         if (clip.groupId) {
           const clipGroup = clips.find((c) => c.clipId === clip.groupId);
           // If the clip is in a group, we check the group's timeline state

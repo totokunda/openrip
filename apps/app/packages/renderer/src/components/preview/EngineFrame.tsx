@@ -33,7 +33,10 @@ function frameCanvas(): HTMLCanvasElement {
 const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: number }> = ({ rectWidth, rectHeight, scale }) => {
   const draws = useEngineDraws();
   const version = useEnginePreviewStore((s) => s.version);
-  const focusFrame = useControlsStore((s) => s.focusFrame);
+  // The preview axis shows the frame under the timeline's mouse in place of the playhead's.
+  const hoverFrame = useControlsStore((s) => s.hoverFrame);
+  const playhead = useControlsStore((s) => s.focusFrame);
+  const focusFrame = hoverFrame ?? playhead;
   const fps = useControlsStore((s) => s.fps);
   const isPlaying = useControlsStore((s) => s.isPlaying);
   // False while the playhead is dragged: quick frames then, the exact one on release.
@@ -77,10 +80,10 @@ const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: numb
   // Paused: ask for the frame at the playhead. Playing, the engine sends frames by itself.
   useEffect(() => {
     if (!draws || !fps || isPlaying || size.width < 2 || size.height < 2) return;
-    void engineRender((focusFrame / fps) * 1e6, size.width, size.height, !accurate).then((r) => {
+    void engineRender((focusFrame / fps) * 1e6, size.width, size.height, !accurate || hoverFrame != null).then((r) => {
       if (!r.ok && !r.superseded) console.warn("[engine] render failed:", r.error);
     });
-  }, [draws, version, focusFrame, fps, size, isPlaying, accurate]);
+  }, [draws, version, focusFrame, fps, size, isPlaying, accurate, hoverFrame]);
 
   if (!draws) return null;
   return <KonvaImage ref={nodeRef} image={canvas} x={0} y={0} width={rectWidth} height={rectHeight} listening={false} />;

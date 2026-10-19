@@ -43,6 +43,7 @@ import { useViewportStore } from "@/lib/viewport";
 import { insertionFrame, mainTrackOf, mainTrackPreview } from "@/lib/timeline-edit";
 import { MarkerEditor, MarkerFlags } from "./Markers";
 import { RULER_HEIGHT, TIME_ZERO_X } from "@/lib/timeline-geometry";
+import { bladeFrame, frameAtStageX, stageXOfFrame } from "@/lib/timeline-tools";
 import { applyTransition, cutsOn, useTransitionDropStore } from "@/lib/transitions";
 import type { TransitionDrag } from "../menus/TransitionMenu";
 import { addLibraryShape, type ShapeDrag } from "../menus/ShapesMenu";
@@ -1317,10 +1318,23 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     [controlStore.timelineDuration],
   );
 
+  // The blade's cut line and the preview axis follow the mouse.
+  const [bladeX, setBladeX] = useState<number | null>(null);
+  const { timelineTool, previewAxis, isPlaying: playing } = controlStore;
   const handleStageMouseMove = useCallback(
     (e: any) => {
-      if (!isRulerDragging) return;
       const stage = e?.target?.getStage?.();
+      const hover = stage?.getPointerPosition();
+      if (hover && !isRulerDragging) {
+        const frame = frameAtStageX(hover.x, dimensions.stageWidth);
+        if (timelineTool === "split" && hover.y > RULER_HEIGHT && hover.x >= TIME_ZERO_X) {
+          setBladeX(stageXOfFrame(bladeFrame(frame, dimensions.stageWidth), dimensions.stageWidth));
+        } else setBladeX(null);
+        if (previewAxis && !playing && hover.x >= TIME_ZERO_X) {
+          useControlsStore.getState().setHoverFrame(Math.max(0, Math.min(useClipStore.getState().clipDuration, frame)));
+        }
+      }
+      if (!isRulerDragging) return;
       if (!stage) return;
       const pos = stage.getPointerPosition();
       if (!pos) return;
@@ -1341,12 +1355,18 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       }
       panStateRef.current.lastX = pos.x;
     },
-    [isRulerDragging, controlStore.timelineDuration, dimensions.stageWidth],
+    [isRulerDragging, controlStore.timelineDuration, dimensions.stageWidth, timelineTool, previewAxis, playing],
   );
 
   const endRulerDrag = useCallback(() => {
     if (isRulerDragging) setIsRulerDragging(false);
   }, [isRulerDragging]);
+  // The mouse left the timeline: no cut line, and the player goes back to the playhead's frame.
+  const leaveStage = useCallback(() => {
+    endRulerDrag();
+    setBladeX(null);
+    useControlsStore.getState().setHoverFrame(null);
+  }, [endRulerDrag]);
 
   const hasClips = useMemo(() => clips.length > 0, [clips]);
 
@@ -1422,7 +1442,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                   onMouseDown={handleStageMouseDown}
                   onMouseMove={handleStageMouseMove}
                   onMouseUp={endRulerDrag}
-                  onMouseLeave={endRulerDrag}
+                  onMouseLeave={leaveStage}
                   style={{ cursor: isRulerDragging ? "grabbing" : "default" }}
                 >
                   <Layer
@@ -1498,6 +1518,9 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                   </Layer>
                   {/* Snap guideline overlay */}
                   <Layer listening={false}>
+                    {bladeX != null && (
+                      <Line points={[bladeX, RULER_HEIGHT, bladeX, dimensions.stageHeight]} stroke={"#ae81ce"} strokeWidth={1.5} dash={[5, 3]} />
+                    )}
                     {typeof snapGuideX === "number" && (
                       <Line
                         points={[

@@ -20,6 +20,21 @@ import { runCommand } from "./commands";
 import { useSidebarStore } from "./sidebar";
 import { useShellStore } from "./shell";
 
+/** The zoom level before Zoom to fit, which a second press goes back to. */
+let beforeFit: number | null = null;
+
+/** Zoom to fit (Shift+Z): the whole timeline in view; pressed again, back to the zoom it was. */
+export function toggleZoomToFit() {
+  const c = useControlsStore.getState();
+  if (c.zoomLevel === c.minZoomLevel && beforeFit != null && beforeFit !== c.minZoomLevel) {
+    zoomTimelineTo(beforeFit);
+    beforeFit = null;
+  } else {
+    if (c.zoomLevel !== c.minZoomLevel) beforeFit = c.zoomLevel;
+    zoomTimelineTo(c.minZoomLevel);
+  }
+}
+
 /**
  * Zoom the timeline to `level` (1 shows the whole project, 10 a few frames), keeping the
  * playhead where it is on screen.
@@ -78,7 +93,7 @@ export function deleteToPlayhead(side: "left" | "right") {
 }
 
 /** Select what's left or right of the playhead: the clips that start before it, or end after it. */
-const selectBeside = (side: "left" | "right") => {
+export const selectBeside = (side: "left" | "right") => {
   const controls = useControlsStore.getState();
   const clips = useClipStore.getState();
   const f = controls.focusFrame;
@@ -135,7 +150,7 @@ const RUN: Record<string, () => void> = {
   },
   zoomIn: () => zoomTimelineTo(useControlsStore.getState().zoomLevel + 1),
   zoomOut: () => zoomTimelineTo(useControlsStore.getState().zoomLevel - 1),
-  zoomToFit: () => zoomTimelineTo(useControlsStore.getState().minZoomLevel),
+  zoomToFit: () => toggleZoomToFit(),
   keyframePanel: () => useKeyframeGraphStore.getState().toggle(),
   prevFrame: () => seekTo(useControlsStore.getState().focusFrame - 1),
   nextFrame: () => seekTo(useControlsStore.getState().focusFrame + 1),
@@ -161,6 +176,20 @@ const RUN: Record<string, () => void> = {
   linkage: () => {
     const c = useControlsStore.getState();
     c.setLinkage(!c.linkage);
+  },
+  selectMode: () => useControlsStore.getState().setTimelineTool("select"),
+  splitMode: () => useControlsStore.getState().setTimelineTool("split"),
+  previewAxis: () => {
+    const c = useControlsStore.getState();
+    c.setPreviewAxis(!c.previewAxis);
+  },
+  // V is the pointer tool, and with the pointer tool already in use and clips selected,
+  // CapCut's Deactivate clip.
+  activateClip: () => {
+    const viewport = useViewportStore.getState();
+    const selected = useControlsStore.getState().selectedClipIds;
+    if (viewport.tool === "pointer" && selected.length > 0) useClipStore.getState().setClipsDeactivated(selected);
+    else viewport.setTool("pointer");
   },
   selectLeft: () => selectBeside("left"),
   selectRight: () => selectBeside("right"),

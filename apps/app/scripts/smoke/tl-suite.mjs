@@ -18,6 +18,7 @@ const CASES = [
   ["tracks", {}, "import timeline newtext tltracks"],
   ["handle", {}, "import timeline newtext tlhandle"],
   ["keys", {}, "import timeline newtext tlkeys"],
+  ["tools", {}, "import timeline newtext tltools"],
   ["undo", {}, "import timeline newtext undo"],
   ["capcut", { CAPCUT_DRAFT: TL_DRAFT }, "capcut tlcapcut"],
 ];

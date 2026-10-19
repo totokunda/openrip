@@ -15,6 +15,7 @@ import {
 } from "@/lib/assetControl";
 import { canDeleteTrack } from "./TrackControls";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
+import { gapAt, trackGaps } from "@/lib/timeline-edit";
 
 // One function, so the memoised clips keep their props when no selection is passed.
 const NEVER_SELECTED = (_clipId: string) => false;
@@ -184,6 +185,43 @@ const Timeline: React.FC<
             position: { x: e.evt.clientX, y: e.evt.clientY },
             target: { type: "timeline", timelineId },
             groups: [
+              // CapCut's empty-space menu: the gap under the mouse, every gap on the track, and
+              // the track's clips.
+              {
+                id: "gaps",
+                items: [
+                  {
+                    id: "close-gap",
+                    label: "Close gap",
+                    action: "custom",
+                    disabled: !!track?.locked || !gapAt(store.clips, timelineId, frame),
+                    run: () => void useClipStore.getState().closeGap(timelineId, frame),
+                  },
+                  {
+                    id: "close-all-gaps",
+                    label: "Close all gaps",
+                    action: "custom",
+                    disabled: !!track?.locked || trackGaps(store.clips, timelineId).length === 0,
+                    run: () => void useClipStore.getState().closeGap(timelineId, null),
+                  },
+                ],
+              },
+              {
+                id: "select",
+                items: [
+                  {
+                    id: "select-track",
+                    label: "Select",
+                    action: "custom",
+                    disabled: !!track?.locked || !store.clips.some((c) => c.timelineId === timelineId && !c.hidden),
+                    // Every clip on the track.
+                    run: () =>
+                      useControlsStore.getState().setSelectedClipIds(
+                        useClipStore.getState().clips.filter((c) => c.timelineId === timelineId && !c.hidden).map((c) => c.clipId),
+                      ),
+                  },
+                ],
+              },
               {
                 id: "edit",
                 items: [

@@ -90,6 +90,25 @@ import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 import { useIsMissing } from "@/lib/media/missing";
 import { canReplaceClip, replaceClip, revealClipFile } from "@/lib/replace-clip";
+import { bladeCut, bladeFrame, frameAtStageX } from "@/lib/timeline-tools";
+
+/** The diagonal stripes a deactivated clip is drawn with. */
+let hatch: HTMLCanvasElement | null = null;
+const hatchPattern = () => {
+  if (hatch) return hatch;
+  hatch = document.createElement("canvas");
+  hatch.width = hatch.height = 8;
+  const ctx = hatch.getContext("2d");
+  if (ctx) {
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-2, 10);
+    ctx.lineTo(10, -2);
+    ctx.stroke();
+  }
+  return hatch;
+};
 
 /**
  * text rx/RxText
@@ -127,6 +146,7 @@ const TimelineClip: React.FC<
   // Select only what we need to avoid unnecessary rerenders
   const ctrlTimelineDuration = useControlsStore((s) => s.timelineDuration);
   const ctrlSelectedClipIds = useControlsStore((s) => s.selectedClipIds);
+  const blade = useControlsStore((s) => s.timelineTool === "split");
   const ctrlToggleClipSelection = useControlsStore(
     (s) => s.toggleClipSelection,
   );
@@ -1131,6 +1151,12 @@ const TimelineClip: React.FC<
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       const isShiftClick = e.evt?.shiftKey || false;
       if (locked) return;
+      // The Split blade (B): a click cuts the clip under the mouse, at its frame.
+      if (!assetMode && useControlsStore.getState().timelineTool === "split") {
+        const x = e.target.getStage()?.getPointerPosition()?.x;
+        if (x != null) bladeCut(currentClipId, bladeFrame(frameAtStageX(x, timelineWidth), timelineWidth));
+        return;
+      }
       if (assetMode) {
         setSelectedAssetClipId(currentClipId);
       } else {
@@ -1143,6 +1169,7 @@ const TimelineClip: React.FC<
       ctrlToggleClipSelection,
       setSelectedAssetClipId,
       locked,
+      timelineWidth,
     ],
   );
 
@@ -1276,6 +1303,16 @@ const TimelineClip: React.FC<
           : { id: "link", label: "Link", action: "link", disabled: targetIds.length < 2 || isGroup },
       );
 
+      // CapCut's Deactivate clip (V): greyed and left out of the picture, the sound and the export.
+      const allOff = targetIds.every((id) => !!clipsState.getClipById(id)?.deactivated);
+      clipActions.push({
+        id: "deactivate",
+        label: allOff ? "Activate clip" : "Deactivate clip",
+        action: "custom",
+        shortcut: "V",
+        disabled: isGroup,
+        run: () => useClipStore.getState().setClipsDeactivated(targetIds),
+      });
       // More clip actions ▸ Replace clip, Trim clip (not here yet), Open file location.
       if (targetIds.length === 1 && canReplaceClip(clip)) {
         clipActions.push({
@@ -1671,7 +1708,7 @@ const TimelineClip: React.FC<
     <Group ref={rootGroupRef}>
       <Group
         onClick={handleClick}
-        draggable={!assetMode && resizeSide === null && !locked}
+        draggable={!assetMode && resizeSide === null && !locked && !blade}
         onDragEnd={handleDragEnd}
         onDragMove={handleDragMove}
         onDragStart={handleDragStart}
@@ -2138,6 +2175,28 @@ const TimelineClip: React.FC<
       {/* The selected clip's keyframes (not while it's dragged or trimmed). */}
       {isSelected && !assetMode && !isDragging && !resizeSide && !showMaskKeyframes && currentClip?.keyframes && (
         <ClipKeyframes clip={currentClip} x={clipPosition.x} y={clipPosition.y} width={clipWidth} height={timelineHeight} />
+      )}
+      {/* Deactivated (V): greyed and hatched. */}
+      {!assetMode && currentClip?.deactivated && (
+        <Group listening={false}>
+          <Rect
+            x={clipPosition.x}
+            y={clipPosition.y}
+            width={clipWidth}
+            height={timelineHeight}
+            cornerRadius={safeCornerRadius}
+            fill={"rgba(30, 30, 32, 0.72)"}
+          />
+          <Rect
+            x={clipPosition.x}
+            y={clipPosition.y}
+            width={clipWidth}
+            height={timelineHeight}
+            cornerRadius={safeCornerRadius}
+            fillPatternImage={hatchPattern() as any}
+            fillPatternRepeat={"repeat"}
+          />
+        </Group>
       )}
       <Rect
         ref={rectRefRight}

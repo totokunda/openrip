@@ -31,6 +31,7 @@ import {
   isClipLocked,
   linkedClips,
   packMainTrack,
+  closeGaps,
   insertionFrame as mainInsertionFrame,
   MARKER_COLORS,
 } from "./timeline-edit";
@@ -108,6 +109,14 @@ interface ClipStore {
   /** Link clips (a video and audio), or unlink the links the given clips are in. */
   linkClips: (clipIds: string[]) => void;
   unlinkClips: (clipIds: string[]) => void;
+  /**
+   * Deactivate clips (CapCut's V): they stay on the timeline, greyed and hatched, but aren't
+   * drawn, heard or exported. With `on` omitted, a selection that isn't all deactivated gets
+   * deactivated, else activated. Clips on a locked track stay as they are.
+   */
+  setClipsDeactivated: (clipIds: string[], on?: boolean) => void;
+  /** Close the gap at `frame` on a track, or (frame null) every gap on it; the clips after it move back. */
+  closeGap: (timelineId: string, frame: number | null) => boolean;
   mergeClips: (clipIds: string[]) => void;
   clipboard: AnyClipProps[];
   copyClips: (clipIds: string[]) => void;
@@ -2127,6 +2136,21 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       const ids = new Set(clips.map((c) => c.clipId));
       return { clips: state.clips.map((c) => (ids.has(c.clipId) ? ({ ...c, linkId } as AnyClipProps) : c)) };
     }),
+  setClipsDeactivated: (clipIds, on) =>
+    set((state) => {
+      const picked = state.clips.filter((c) => clipIds.includes(c.clipId) && !c.hidden && c.type !== "group" && !isClipLocked(state.clips, state.timelines, c, false));
+      if (picked.length === 0) return {};
+      const value = on ?? !picked.every((c) => c.deactivated);
+      const ids = new Set(picked.map((c) => c.clipId));
+      return { clips: state.clips.map((c) => (ids.has(c.clipId) && !!c.deactivated !== value ? ({ ...c, deactivated: value || undefined } as AnyClipProps) : c)) };
+    }),
+  closeGap: (timelineId, frame) => {
+    const state = get();
+    const next = closeGaps(state.clips, state.timelines, timelineId, frame, linkage());
+    if (next === state.clips) return false;
+    set({ clips: resolveOverlaps(next), clipDuration: calculateTotalClipDuration(next) });
+    return true;
+  },
   unlinkClips: (clipIds) =>
     set((state) => {
       const links = new Set(state.clips.filter((c) => clipIds.includes(c.clipId) && c.linkId).map((c) => c.linkId));

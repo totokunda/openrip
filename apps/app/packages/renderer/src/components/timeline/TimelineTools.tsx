@@ -4,15 +4,15 @@
 // the toolbar's other buttons, its tooltip naming its shortcut, so any toolbar can place them.
 import React from "react";
 import { TbArrowBarToLeft, TbArrowBarToRight, TbArrowsHorizontal, TbSeparatorVertical, TbSnowflake, TbTransform } from "react-icons/tb";
-import { LuCheck, LuFlipHorizontal2, LuHistory, LuLink, LuMagnet, LuRotateCw, LuShield } from "react-icons/lu";
+import { LuCheck, LuFlipHorizontal2, LuHistory, LuLink, LuMagnet, LuMousePointer2, LuRotateCw, LuScissors, LuScan, LuShield } from "react-icons/lu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { freezeAtPlayhead, freezeTarget, reverseTarget, toggleReverse } from "@/lib/timeline-motion";
 import { rotate90, toggleFlip } from "@/lib/transform-presets";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
-import { addMarkerAtPlayhead, deleteToPlayhead, zoomTimelineTo } from "@/lib/timeline-shortcuts";
+import { addMarkerAtPlayhead, deleteToPlayhead, selectBeside, toggleZoomToFit } from "@/lib/timeline-shortcuts";
 import { mainTrackOf } from "@/lib/timeline-edit";
-import { useShortcutTitle } from "@/lib/keymap";
+import { keyLabels, useKeymapStore, useShortcutTitle } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
 
 const buttonClass = (disabled: boolean) =>
@@ -120,13 +120,87 @@ export const LinkageToggle = () => {
 
 export const ZoomToFitButton = () => {
   const disabled = useClipStore((s) => s.clips.length === 0);
+  // On while the whole timeline is in view.
+  const fitted = useControlsStore((c) => c.zoomLevel === c.minZoomLevel);
   return (
-    <div
-      title={useShortcutTitle("Zoom timeline to fit", "zoomToFit")}
-      className={cn("flex shrink-0 items-center justify-center h-6 w-6 rounded-[5px] text-brand-light/60 hover:text-brand-light hover:bg-brand-light/10 cursor-pointer", disabled && "opacity-30 cursor-not-allowed")}
-      onClick={() => !disabled && zoomTimelineTo(useControlsStore.getState().minZoomLevel)}
-    >
-      <TbArrowsHorizontal className="h-4 w-4" />
+    <Toggle title={useShortcutTitle("Zoom timeline to fit", "zoomToFit")} on={fitted && !disabled} disabled={disabled} onClick={toggleZoomToFit}>
+      <TbArrowsHorizontal data-testid="tool-zoomfit" className="h-4 w-4" />
+    </Toggle>
+  );
+};
+
+const menuContent = "dark bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] p-1";
+const menuRow = "dark h-9 text-[13px] text-brand-light gap-x-2.5 px-3 rounded-[4px] cursor-pointer focus:bg-brand-hover";
+const menuKey = "ml-auto text-[12px] text-[#8a8a8a]";
+
+/**
+ * CapCut's selection tool (▾): Select (A) and the Split blade (B) are the timeline's tools, the
+ * button showing the one in use; Select leftward ([) and Select rightward (]) select every clip
+ * before or after the playhead.
+ */
+export const SelectionToolMenu = () => {
+  const tool = useControlsStore((c) => c.timelineTool);
+  const setTool = useControlsStore((c) => c.setTimelineTool);
+  const key = (id: string) => useKeymapStore.getState().bindings[id]?.[0];
+  const hint = (id: string) => {
+    const c = key(id);
+    return c ? keyLabels(c).join("") : "";
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        title="Selection tool"
+        data-testid="tool-selection"
+        data-tool={tool}
+        className="relative h-7 w-7 flex items-center justify-center text-brand-light opacity-80 hover:opacity-100 outline-none"
+      >
+        {tool === "split" ? <LuScissors className="h-4 w-4 text-brand-accent" /> : <LuMousePointer2 className="h-4 w-4" />}
+        <span className="absolute right-[3px] bottom-[3px] w-0 h-0 border-l-[4px] border-l-transparent border-b-[4px] border-b-brand-light" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className={cn(menuContent, "w-[190px]")}>
+        <DropdownMenuItem data-testid="sel-select" className={cn(menuRow, tool === "select" && "bg-brand-hover")} onClick={() => setTool("select")}>
+          <LuMousePointer2 className="w-4 h-4 text-[#cbcbcb]" /> Select <span className={menuKey}>{hint("selectMode")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem data-testid="sel-split" className={cn(menuRow, tool === "split" && "bg-brand-hover")} onClick={() => setTool("split")}>
+          <LuScissors className="w-4 h-4 text-[#cbcbcb]" /> Split <span className={menuKey}>{hint("splitMode")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem data-testid="sel-left" className={menuRow} onClick={() => selectBeside("left")}>
+          <TbArrowBarToLeft className="w-4 h-4 text-[#cbcbcb]" /> Select leftward <span className={menuKey}>{hint("selectLeft")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem data-testid="sel-right" className={menuRow} onClick={() => selectBeside("right")}>
+          <TbArrowBarToRight className="w-4 h-4 text-[#cbcbcb]" /> Select rightward <span className={menuKey}>{hint("selectRight")}</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
+/**
+ * CapCut's preview axis: a toggle with a menu. On, the player shows the frame under the mouse
+ * while it's over the timeline and goes back to the playhead's frame when it leaves. The menu's
+ * video-only choice is what it does; the sound isn't scrubbed.
+ */
+export const PreviewAxisToggle = () => {
+  const on = useControlsStore((c) => c.previewAxis);
+  const setOn = useControlsStore((c) => c.setPreviewAxis);
+  return (
+    <div className="flex items-center">
+      <Toggle title={useShortcutTitle("Preview axis", "previewAxis")} on={on} onClick={() => setOn(!on)}>
+        <LuScan data-testid="tool-previewaxis" className="h-3.5 w-3.5" />
+      </Toggle>
+      <DropdownMenu>
+        <DropdownMenuTrigger data-testid="tool-previewaxis-menu" title="Preview axis options" className="h-[23px] w-3 flex items-center justify-center text-brand-light/70 hover:text-brand-light outline-none">
+          <span className="w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px] border-t-current" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className={cn(menuContent, "w-[200px]")}>
+          <DropdownMenuItem data-testid="axis-audio" disabled className={menuRow}>
+            <span className="w-3.5" /> Preview video and audio
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="axis-video" className={menuRow} onClick={() => setOn(true)}>
+            <LuCheck className="w-3.5 h-3.5 text-brand-accent" /> Preview video only
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 };

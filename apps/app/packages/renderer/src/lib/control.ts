@@ -120,6 +120,18 @@ interface ControlStore {
    */
   linkage: boolean;
   setLinkage: (on: boolean) => void;
+  /** The timeline's tool: Select (A) or the Split blade (B), which cuts the clip it's clicked on. */
+  timelineTool: "select" | "split";
+  setTimelineTool: (tool: "select" | "split") => void;
+  /**
+   * CapCut's preview axis: with it on, the player shows the frame under the mouse while it's
+   * over the timeline, and goes back to the playhead's frame when it leaves.
+   */
+  previewAxis: boolean;
+  setPreviewAxis: (on: boolean) => void;
+  /** The frame the preview axis shows (null: the playhead's). */
+  hoverFrame: number | null;
+  setHoverFrame: (frame: number | null) => void;
   /** The marker last clicked on the ruler (Delete removes it). */
   selectedMarkerId: string | null;
   setSelectedMarkerId: (id: string | null) => void;
@@ -384,6 +396,12 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
   setSnapping: (on) => set({ snapping: on }),
   linkage: true,
   setLinkage: (on) => set({ linkage: on }),
+  timelineTool: "select",
+  setTimelineTool: (tool) => set({ timelineTool: tool }),
+  previewAxis: false,
+  setPreviewAxis: (on) => set(on ? { previewAxis: true } : { previewAxis: false, hoverFrame: null }),
+  hoverFrame: null,
+  setHoverFrame: (frame) => set({ hoverFrame: frame }),
   selectedMarkerId: null,
   setSelectedMarkerId: (id) => set({ selectedMarkerId: id }),
   selectedTransitionId: null,

@@ -100,6 +100,49 @@ export function packMainTrack(
   });
 }
 
+/** The gaps on a track: where each runs from and to (from 0 to the first clip counts), in time order. */
+export function trackGaps(clips: AnyClipProps[], timelineId: string): { from: number; to: number }[] {
+  const gaps: { from: number; to: number }[] = [];
+  let cursor = 0;
+  const order = clips.filter((c) => c.timelineId === timelineId && !c.hidden).sort((a, b) => startOf(a) - startOf(b) || endOf(a) - endOf(b));
+  for (const c of order) {
+    if (startOf(c) > cursor) gaps.push({ from: cursor, to: startOf(c) });
+    cursor = Math.max(cursor, endOf(c));
+  }
+  return gaps;
+}
+
+/** The gap on a track that `frame` is in, if it's in one. */
+export const gapAt = (clips: AnyClipProps[], timelineId: string, frame: number) =>
+  trackGaps(clips, timelineId).find((g) => frame >= g.from && frame < g.to);
+
+/**
+ * CapCut's Close gap (the gap at `frame`) and Close all gaps (`frame` null) on a track: the
+ * clips after a gap move back by its length. A group's children and (with linkage on,
+ * `linked`) the clips linked to a moved one go with it, unless their track is locked. A locked
+ * track stays as it is. Returns `clips` itself when nothing moves.
+ */
+export function closeGaps(clips: AnyClipProps[], timelines: TimelineProps[], timelineId: string, frame: number | null, linked = true): AnyClipProps[] {
+  if (isTrackLocked(timelines, timelineId)) return clips;
+  const gaps = trackGaps(clips, timelineId).filter((g) => frame == null || (frame >= g.from && frame < g.to));
+  if (gaps.length === 0) return clips;
+  const shiftOf = (start: number) => gaps.filter((g) => g.to <= start).reduce((n, g) => n + (g.to - g.from), 0);
+  const moves = new Map<string, number>();
+  for (const c of clips.filter((c) => c.timelineId === timelineId && !c.hidden)) {
+    const d = shiftOf(startOf(c));
+    if (!d) continue;
+    moves.set(c.clipId, d);
+    if (c.type === "group") for (const id of ((c as GroupClipProps).children ?? []).flat()) moves.set(id, d);
+    for (const p of linked ? linkedClips(clips, c) : []) {
+      if (p.timelineId !== timelineId && !p.hidden && !isTrackLocked(timelines, p.timelineId)) moves.set(p.clipId, d);
+    }
+  }
+  return clips.map((c) => {
+    const d = moves.get(c.clipId);
+    return d ? ({ ...c, startFrame: startOf(c) - d, endFrame: endOf(c) - d } as AnyClipProps) : c;
+  });
+}
+
 /**
  * Where a clip dropped at `frame` goes on the main track: before the clip under it when it's
  * in that clip's first half, else after it (the start of the next clip, or the track's end).

@@ -30,6 +30,8 @@ import {
   ToolbarDivider,
   TransformToolsMenu,
   ZoomToFitButton,
+  SelectionToolMenu,
+  PreviewAxisToggle,
 } from "@/components/timeline/TimelineTools";
 import { VoiceoverButton, VoiceoverPanel } from "@/components/voiceover/VoiceoverPanel";
 import { BeatButton } from "@/components/timeline/BeatTools";
@@ -454,6 +456,7 @@ const Controls = () => {
         {/* CapCut's order, left to right; Undo and Redo name themselves. Split stays
             right after Redo. */}
         <div className="flex items-center gap-x-2 [&>div]:h-7 [&>div]:w-7 [&>div]:py-0">
+          <SelectionToolMenu />
           <UndoButton />
           <RedoButton />
           <Tool title="Split" id="split"><SplitButton /></Tool>
@@ -472,6 +475,7 @@ const Controls = () => {
           <MagnetToggle />
           <SnappingToggle />
           <LinkageToggle />
+          <PreviewAxisToggle />
           <ToolbarDivider />
           <ZoomToFitButton />
           <TimelineZoom />

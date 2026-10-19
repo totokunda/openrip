@@ -212,6 +212,11 @@ export interface ClipProps {
    * move, trim, split and delete together until unlinked.
    */
   linkId?: string;
+  /**
+   * CapCut's Deactivate clip: the clip stays on the timeline, greyed and hatched, but isn't
+   * drawn, heard or exported (the engine leaves it out). Toggles back.
+   */
+  deactivated?: boolean;
   /** The Tracking tab's settings (lib/tracking.ts); the keys a track wrote are in `keyframes`. */
   tracking?: TrackingSettings;
 }
