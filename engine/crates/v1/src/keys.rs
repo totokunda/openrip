@@ -179,6 +179,12 @@ fn resolve(name: &str, clip: &Value, seg: &Segment, materials: &Materials, world
                 _ => return None,
             }
         }
+        // OpenRip's own effects: a bar's strength and parameters (`intensity`, `fx:<param>`) and
+        // those of the effects on a clip (`fx:<instance>:<param>`), all 0–100.
+        n if (n == "intensity" && ty == "filter" || n.starts_with("fx:")) && crate::fx::key_target(n, seg, materials).is_some() => {
+            let (id, param) = crate::fx::key_target(n, seg, materials)?;
+            prop(Target::Params(id, vec![param]), 1, 0.01)
+        }
         // A filter bar's strength, or a sticker bar's opacity (0–100).
         "intensity" if ty == "filter" => {
             if materials.stickers.iter().any(|st| st.id == seg.material) {

@@ -188,3 +188,27 @@ fn an_effect_on_one_clip_leaves_what_is_beside_it_alone() {
         assert!((255 - s[i] as i32 - o[i] as i32).abs() <= 2);
     }
 }
+
+/// Every effect at its defaults on the sample picture, side by side, into the raw RGBA file
+/// named by OPENRIP_FX_SHEET (width x height in the file's name's sibling .txt): for looking.
+#[test]
+#[ignore]
+fn contact_sheet() {
+    let Some(c) = gpu() else { return };
+    let Ok(path) = std::env::var("OPENRIP_FX_SHEET") else { return };
+    let time: f32 = std::env::var("OPENRIP_FX_TIME").ok().and_then(|t| t.parse().ok()).unwrap_or(0.4);
+    let scene = openrip_render::sample_scene(W, H);
+    let cols = 10u32;
+    let rows = (FX.len() as u32).div_ceil(cols);
+    let mut sheet = vec![0u8; (cols * W * rows * H * 4) as usize];
+    for (i, def) in FX.iter().enumerate() {
+        let img = render(&c, &scene, Some(pass(def, def.intensity.max(0.8), defaults(def), time, 0.5)));
+        let (cx, cy) = (i as u32 % cols, i as u32 / cols);
+        for y in 0..H {
+            let dst = (((cy * H + y) * cols * W + cx * W) * 4) as usize;
+            sheet[dst..dst + (W * 4) as usize].copy_from_slice(&img.data[(y * W * 4) as usize..((y + 1) * W * 4) as usize]);
+        }
+    }
+    std::fs::write(&path, &sheet).unwrap();
+    std::fs::write(format!("{path}.txt"), format!("{} {}", cols * W, rows * H)).unwrap();
+}

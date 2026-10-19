@@ -1158,3 +1158,49 @@ pub fn auto_adjust(job: u32, path: String, start_us: i64, duration_us: Option<i6
     let matched = matched.map(match_on);
     AsyncTask::new(AutoAdjustTask { job, control, path, start: Micros(start_us), duration: duration_us.map(Micros), matched })
 }
+
+// ---- Video effects ----
+
+/// OpenRip's own video effects as JSON: `{ categories, effects: [{ id, name, category,
+/// intensity, params: [{ id, name, default }] }] }`, values 0–100.
+#[napi]
+pub fn effect_catalog() -> String {
+    openrip_core::effect_catalog().to_string()
+}
+
+fn effect_previews_service() -> &'static openrip_core::EffectPreviews {
+    static P: openrip_core::EffectPreviews = openrip_core::EffectPreviews::new();
+    &P
+}
+
+pub struct EffectPreviewTask {
+    id: String,
+    intensity: Option<f64>,
+    params: Vec<f64>,
+    times: Vec<f64>,
+    duration: f64,
+    width: u32,
+    height: u32,
+}
+
+impl Task for EffectPreviewTask {
+    type Output = Vec<(u32, u32, Vec<u8>)>;
+    type JsValue = Vec<Image>;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let frames = effect_previews_service().frames(&self.id, self.intensity, &self.params, &self.times, self.duration, self.width, self.height).map_err(err)?;
+        Ok(frames.into_iter().map(|i| (i.width, i.height, i.data)).collect())
+    }
+
+    fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<Vec<Image>> {
+        Ok(out.into_iter().map(|(width, height, data)| Image { width, height, data: Buffer::from(data) }).collect())
+    }
+}
+
+/// Frames of effect `id` on a sample picture, `width` x `height`, at `times` seconds into an
+/// effect `duration` seconds long, drawn by the engine's renderer (so they match the player
+/// and an export). `intensity` and `params` are 0-1; the catalog's defaults where missing.
+#[napi]
+pub fn effect_previews(id: String, intensity: Option<f64>, params: Vec<f64>, times: Vec<f64>, duration: f64, width: u32, height: u32) -> AsyncTask<EffectPreviewTask> {
+    AsyncTask::new(EffectPreviewTask { id, intensity, params, times, duration, width, height })
+}

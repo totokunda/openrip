@@ -39,3 +39,45 @@ impl Compositor {
         scratch.push(tmp);
     }
 }
+
+/// A made-up picture for showing what an effect does where there's no clip to show it on (the
+/// Effects tab's tiles): a warm sky with a low sun, hills, a chequered floor and a figure in
+/// front, so there are colours, soft gradients, hard edges and bright parts to work on.
+pub fn sample_scene(w: u32, h: u32) -> crate::RgbaImage {
+    let mut data = Vec::with_capacity((w * h * 4) as usize);
+    let (wf, hf) = (w as f32, h as f32);
+    let mix = |a: [f32; 3], b: [f32; 3], t: f32| [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t.clamp(0.0, 1.0));
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) = (x as f32 / wf, y as f32 / hf);
+            // Sky: deep blue at the top to orange at the horizon.
+            let mut c = mix([0.12, 0.2, 0.5], [1.0, 0.62, 0.3], v / 0.62);
+            // The sun.
+            let (dx, dy) = ((u - 0.68) * wf / hf, v - 0.5);
+            let sun = (dx * dx + dy * dy).sqrt();
+            c = mix(c, [1.0, 0.97, 0.8], 1.0 - (sun / 0.09).powi(4));
+            c = mix(c, [1.0, 0.8, 0.5], (0.5 - sun).max(0.0) * 0.5);
+            // Two ranges of hills.
+            let far = 0.6 + 0.05 * (u * 9.0).sin() + 0.03 * (u * 23.0).sin();
+            let near = 0.7 + 0.06 * (u * 5.0 + 1.0).sin();
+            if v > far {
+                c = [0.35, 0.2, 0.38];
+            }
+            if v > near {
+                c = [0.13, 0.12, 0.2];
+            }
+            // A chequered floor at the bottom.
+            if v > 0.84 {
+                let (cx, cy) = (((u - 0.5) * (1.0 + (v - 0.84) * 6.0) * 14.0).floor(), ((v - 0.84) * 20.0).floor());
+                c = if (cx + cy) as i32 % 2 == 0 { [0.85, 0.82, 0.78] } else { [0.18, 0.17, 0.2] };
+            }
+            // A figure: head and body.
+            let (hx, hy) = ((u - 0.3) * wf / hf, v - 0.42);
+            if hx * hx + hy * hy < 0.0036 || ((u - 0.3).abs() * wf / hf < 0.09 && v > 0.47 && v < 0.84) {
+                c = [0.9, 0.25, 0.2];
+            }
+            data.extend_from_slice(&[(c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, 255]);
+        }
+    }
+    crate::RgbaImage { width: w, height: h, data }
+}

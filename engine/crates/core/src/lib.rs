@@ -9,6 +9,7 @@
 //!   project (the app's own format) as a [`Project`].
 //! - [`Session`]: one open project for preview: render frames into surfaces the platform
 //!   shows, play with the audio clock, swap in edits.
+//! - [`effect_catalog`] and [`EffectPreviews`]: OpenRip's own video effects and frames of them.
 //! - [`Thumbnails`]: timeline thumbnails, waveforms and beats, cached on disk.
 //! - [`measure_loudness`] and [`Recorder`]: a clip's loudness for loudness normalisation, and
 //!   voiceover recording from the microphone (behind the audio input seam).
@@ -25,6 +26,7 @@
 mod analysis;
 mod audio;
 mod capcut;
+mod effects;
 mod export;
 mod fonts;
 mod project;
@@ -39,6 +41,7 @@ use openrip_playback::PreviewError;
 pub use analysis::{auto_adjust, color_stats, detect_scenes, AnalysisControl, AutoAdjust, ColorStats, CutKind, Look, MatchOn, Moments, SceneCut, SceneOptions, Sliders};
 pub use audio::{measure_loudness, set_audio_input, Level, Loudness, Recorder, Recording, ToneInput};
 pub use capcut::{capcut_to_app, AppProjectFromDraft};
+pub use effects::{effect_catalog, EffectPreviews};
 pub use export::{codec_named, export_audio, export_gif, export_project, Codec, ExportControl, ExportOptions, ExportProgress, ExportResult};
 pub use fonts::{font_face, font_families, register_fonts, FontFace, FontFamily};
 pub use openrip_model::{Micros, Project};

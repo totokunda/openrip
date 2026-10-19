@@ -33,6 +33,7 @@ mod app;
 mod audio;
 mod color;
 mod compositing;
+mod fx;
 mod keys;
 mod text;
 pub use app::{relaid_texts, to_app_project};
@@ -336,6 +337,8 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
                     "video" | "image" => TrackKind::Video,
                     "audio" => TrackKind::Audio,
                     "text" => TrackKind::Text,
+                    // An effect bar is on an effect track, as CapCut's.
+                    "filter" if !s(clip, "effectId").is_empty() => TrackKind::Effect,
                     "filter" => TrackKind::Filter,
                     _ => TrackKind::Graphic,
                 };
@@ -344,7 +347,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
         };
         if let Some((seg, wanted)) = converted {
             // A filter track holding a draft's effects or stickers takes their kind.
-            if let Some(t) = tracks.iter_mut().find(|t| t.id == s(clip, "timelineId") && t.kind != wanted && t.segments.is_empty() && clip.get("engine").is_some()) {
+            if let Some(t) = tracks.iter_mut().find(|t| t.id == s(clip, "timelineId") && t.kind != wanted && t.segments.is_empty() && (clip.get("engine").is_some() || !s(clip, "effectId").is_empty())) {
                 t.kind = wanted;
             }
             if let Some((group_track, rank, count)) = grouped.get(&s(clip, "clipId")) {
@@ -610,6 +613,11 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
             materials.transitions.push(t);
         }
     }
+    // OpenRip's own effects on the clip come on top of the draft's.
+    if matches!(ty, "video" | "image") {
+        let id = seg.id.clone();
+        fx::attach(&id, clip, materials, &mut seg.attachments);
+    }
     if changed("transform") {
         apply_moves(&mut seg, base.get("transform"), clip.get("transform"), world, ty == "text");
     }
@@ -871,6 +879,13 @@ fn convert_clip(
             }
             mid
         }
+        // One of OpenRip's own effects on a bar.
+        "filter" if fx::bar(&id, clip).is_some() => {
+            let e = fx::bar(&id, clip).unwrap();
+            let mid = e.id.clone();
+            materials.effects.push(e);
+            mid
+        }
         "filter" => {
             let mid = MaterialId(format!("{id}-filter"));
             let resource = [s(clip, "fullPath"), s(clip, "smallPath")].into_iter().find(|p| !p.is_empty());
@@ -945,6 +960,7 @@ fn convert_clip(
             materials.transitions.push(t);
         }
         attach_adjustments(&id, clip, materials, &mut attachments);
+        fx::attach(&id, clip, materials, &mut attachments);
         for m in convert_masks(&id, clip, clock.fps.as_f64(), report) {
             attachments.push(m.id.clone());
             materials.masks.push(m);

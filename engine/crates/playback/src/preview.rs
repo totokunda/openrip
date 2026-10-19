@@ -184,6 +184,9 @@ enum Pixels {
     End,
     /// The transition's groups put together.
     Mix(openrip_render::Mix),
+    /// One of OpenRip's own video effects over everything below it (an effect bar), or over
+    /// the clip's group (an effect on the clip).
+    Effect(openrip_render::EffectPass),
     /// A main-track clip's own picture covering the canvas and blurred (its canvas fill), the
     /// blur's taps this many output pixels apart.
     Backdrop(Backdrop, f32),
@@ -552,7 +555,7 @@ impl PreviewEngine {
             .project
             .tracks
             .iter()
-            .filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text | TrackKind::Sticker | TrackKind::Filter | TrackKind::Graphic) && !tr.hidden)
+            .filter(|tr| matches!(tr.kind, TrackKind::Video | TrackKind::Text | TrackKind::Sticker | TrackKind::Filter | TrackKind::Effect | TrackKind::Graphic) && !tr.hidden)
             .flat_map(|tr| tr.segments.iter().filter(|s| s.visible && s.target.contains(t)).cloned())
             .collect();
         active.sort_by_key(|s| s.render_index);
@@ -677,7 +680,7 @@ impl PreviewEngine {
                         };
                         out.push((clip.clone(), Pixels::Begin(backdrop)));
                         let at = out.len();
-                        self.draw(clip, t, w, h, &mut out, &mut report);
+                        self.draw_with_effects(clip, t, w, h, &mut out, &mut report);
                         if let Some(fill) = fill {
                             self.insert_fill(clip, &fill, at, w, h, &mut out, &mut report);
                         }
@@ -686,7 +689,7 @@ impl PreviewEngine {
                     out.push((seg.clone(), Pixels::Mix(mix_pixels(&m, w, h))));
                 }
                 _ => {
-                    self.draw(&seg, t, w, h, &mut out, &mut report);
+                    self.draw_with_effects(&seg, t, w, h, &mut out, &mut report);
                     // A main-track clip's canvas fill, under everything: a colour is the
                     // frame's background; a blur or an image goes first.
                     match self.fill_of(&seg) {
@@ -734,6 +737,39 @@ impl PreviewEngine {
                 report.missing.push((path, why));
             }
         }
+    }
+
+    /// OpenRip's effect `effect` on `seg` at clip-local time `local`, with its keyframed values.
+    fn effect_pass(seg: &Segment, effect: &openrip_model::Effect, local: Micros) -> Option<openrip_render::EffectPass> {
+        let now = seg.effect_at(effect, local);
+        let (def, intensity, params) = openrip_model::fx::values(&now)?;
+        let duration = seg.target.duration.0.max(1) as f64;
+        Some(openrip_render::EffectPass { kind: def.kind, intensity, params, time: (local.0 as f64 / 1e6) as f32, progress: (local.0 as f64 / duration).clamp(0.0, 1.0) as f32, seed: 0.0 })
+    }
+
+    /// Draw a clip, with the effects on it (its attachments that are OpenRip's own effects):
+    /// the clip drawn into a group of its own, the effects over the group, and the group put
+    /// back where it was.
+    fn draw_with_effects(&mut self, seg: &Segment, t: Micros, w: u32, h: u32, out: &mut Vec<(Segment, Pixels)>, report: &mut FrameReport) {
+        let local = seg.local_time(t);
+        let passes: Vec<_> = seg
+            .attachments
+            .iter()
+            .filter_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id && e.builtin.as_deref().is_some_and(|b| b.starts_with(openrip_model::fx::BUILTIN_PREFIX))))
+            .filter_map(|e| Self::effect_pass(seg, e, local))
+            .filter(|p| p.intensity > 0.0)
+            .collect();
+        if passes.is_empty() || !matches!(self.project.tracks.iter().find(|tr| tr.segments.iter().any(|s| s.id == seg.id)).map(|tr| tr.kind), Some(TrackKind::Video | TrackKind::Text | TrackKind::Graphic | TrackKind::Sticker)) {
+            return self.draw(seg, t, w, h, out, report);
+        }
+        // The group's own markers carry another id, so a canvas fill still finds the clip.
+        let marker = Segment { id: format!("{}#fx", seg.id), ..seg.clone() };
+        out.push((marker.clone(), Pixels::Begin(None)));
+        self.draw(seg, t, w, h, out, report);
+        out.extend(passes.into_iter().map(|p| (marker.clone(), Pixels::Effect(p))));
+        out.push((marker.clone(), Pixels::End));
+        let still = crate::transition::Shot::STILL;
+        out.push((marker, Pixels::Mix(mix_pixels(&crate::transition::Mix { outgoing: Some(still), incoming: None, mask: crate::transition::Mask::All }, w, h))));
     }
 
     /// The canvas fill of a clip on the main track (the lowest video track), unless it's
@@ -1340,6 +1376,12 @@ impl PreviewEngine {
             let at = [cx - (center[0] - first.width as f64 / 2.0), cy - (center[1] - first.height as f64 / 2.0)];
             return Ok(Some(Pixels::Shape(layers, at)));
         }
+        // An effect bar: one of OpenRip's own effects over everything below it, for as long as
+        // the bar lasts.
+        if let Some(effect) = self.project.materials.effects.iter().find(|e| e.id == seg.material && e.builtin.as_deref().is_some_and(|b| b.starts_with(openrip_model::fx::BUILTIN_PREFIX))) {
+            let local = seg.local_time(t);
+            return Ok(Self::effect_pass(seg, effect, local).map(Pixels::Effect));
+        }
         // A filter track's segment: CapCut's lookup table from the filter's bundle.
         if let Some(effect) = self.project.materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter).cloned() {
             let strength = seg.effect_at(&effect, seg.local_time(t)).params.get("intensity").copied().unwrap_or(1.0) as f32;
@@ -1845,8 +1887,9 @@ impl PreviewEngine {
                     Pixels::Begin(colour) => Layer::pass(Source::BeginGroup(*colour)),
                     Pixels::End => Layer::pass(Source::EndGroup),
                     Pixels::Mix(m) => Layer::pass(Source::Mix(*m)),
+                    Pixels::Effect(e) => Layer::pass(Source::Effect(*e)),
                 };
-                if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_) | Pixels::Begin(_) | Pixels::End | Pixels::Mix(_)) {
+                if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_) | Pixels::Begin(_) | Pixels::End | Pixels::Mix(_) | Pixels::Effect(_)) {
                     layer.opacity *= seg.opacity.sample(local);
                 }
                 if let Some(m) = motion {

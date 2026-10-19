@@ -30,7 +30,7 @@ mod upload;
 pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
 pub use blend::BlendMode;
 pub use grade::{CurvePoint, Curves, Hsl};
-pub use effects::EffectPass;
+pub use effects::{sample_scene, EffectPass};
 pub use flow::{work_factor, FlowField, Picture, Tween, TweenMode, WORK_SIDE};
 pub use interop::Surface;
 pub use upload::Uploader;
