@@ -237,17 +237,28 @@ const AudioMenu: React.FC<{ section: AudioSection; onOpen?: (section: AudioSecti
               />
             )
           ))}
-        {section === "files" && (
-          <>
+        {section === "files" &&
+          (files.length === 0 ? (
             <Empty
               icon={LuMusic}
-              title={files.length ? "Your audio files" : "No imported audio yet"}
+              title="No imported audio yet"
               body="Audio files you import from the computer are kept in this project and listed here."
               action={{ label: importing ? "Importing…" : "Import audio", onClick: run("audio"), testId: "audio-import" }}
             />
-            {files.length > 0 && rows(files, LuMusic)}
-          </>
-        )}
+          ) : (
+            <>
+              <Heading
+                end={
+                  <button type="button" data-testid="audio-import" onClick={run("audio")} className="h-6 px-2.5 rounded-[4px] bg-brand-background-light text-[12px] text-brand-light hover:bg-brand-button">
+                    {importing ? "Importing…" : "Import audio"}
+                  </button>
+                }
+              >
+                Your audio files
+              </Heading>
+              {rows(files, LuMusic)}
+            </>
+          ))}
       </div>
     </ScrollArea>
   );

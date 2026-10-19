@@ -1,11 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useDndMonitor } from "@dnd-kit/core";
 import { LuAudioLines, LuDownload, LuLoaderCircle, LuMusic, LuPause, LuPlus, LuSearch, LuStar, LuTriangleAlert, LuWifiOff, LuX } from "react-icons/lu";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import Draggable from "@/components/dnd/Draggable";
 import { cn } from "@/lib/utils";
-import { addTrackAtPlayhead, fetchPage, trackItem, useMusicLibrary, type LibraryPage, type MusicCategory, type MusicKind, type MusicTrack } from "@/lib/music-library";
+import { getMediaInfo } from "@/lib/media/utils";
+import type { MediaInfo } from "@/lib/types";
+import { addTrackAtPlayhead, fetchPage, fileUrl, trackItem, useMusicLibrary, type LibraryPage, type MusicCategory, type MusicKind, type MusicTrack } from "@/lib/music-library";
 import { licenseLabel, needsCredit } from "@/lib/music-credits";
+
+/** The media info of downloaded tracks, kept so a row mounted again can be dragged at once. */
+const infoCache = new Map<string, MediaInfo>();
 
 const timeOf = (s: number) => {
   const t = Math.max(0, Math.round(s));
@@ -32,31 +38,55 @@ export const TrackRow: React.FC<{ track: MusicTrack; added: boolean }> = ({ trac
   const playing = useMusicLibrary((s) => s.previewId === track.id && s.playing);
   const { preview, download, toggleFavorite } = useMusicLibrary.getState();
   const [coverFailed, setCoverFailed] = useState(false);
+  // What the timeline needs to take a drop (the file's length), read once it's on this machine.
+  const [info, setInfo] = useState<MediaInfo | null>(() => (path ? (infoCache.get(path) ?? null) : null));
+  useEffect(() => {
+    if (!path || infoCache.has(path)) return;
+    let live = true;
+    void getMediaInfo(fileUrl(path))
+      .then((i) => {
+        if (!i) return;
+        infoCache.set(path, i);
+        if (live) setInfo(i);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [path]);
   const own = (e: React.PointerEvent | React.MouseEvent) => e.stopPropagation();
+  // A draggable row starts its drag as the pointer goes down, which swallows the click: a press
+  // that ends without a move is the click (as the Stickers tiles do it). A row that isn't
+  // draggable yet takes the plain click. Either way, one preview per press.
+  const lastPreview = useRef(0);
+  const press = () => {
+    if (Date.now() - lastPreview.current < 400) return;
+    lastPreview.current = Date.now();
+    preview(track);
+  };
+  useDndMonitor({
+    onDragEnd: (e) => {
+      if (e.active.id === `music-${track.id}` && Math.hypot(e.delta.x, e.delta.y) <= 3) press();
+    },
+  });
   const add = async () => {
     const ok = await addTrackAtPlayhead(track);
     if (!ok) toast.error("Couldn't download that track", { position: "bottom-right", description: useMusicLibrary.getState().failed[track.id] || undefined });
   };
   const round = "h-4 w-4 shrink-0 rounded-full flex items-center justify-center transition-colors";
-  return (
-    <Draggable id={`music-${track.id}`} data={path ? trackItem(track, path) : { type: "music-pending" }} disabled={!path}>
+  const body = (
       <div
         data-testid="music-row"
         data-id={track.id}
         data-title={track.title}
         data-license={track.license}
         data-cached={cached ? "1" : "0"}
+        data-draggable={path && info ? "1" : "0"}
         data-playing={playing ? "1" : "0"}
         title={`${track.title} by ${track.author}. ${licenceTitle(track)}`}
         role="button"
         tabIndex={0}
-        onClick={() => preview(track)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            preview(track);
-          }
-        }}
+        onClick={press}
         className={cn("group h-12 w-full rounded-[6px] bg-brand-background-light flex flex-row items-center gap-2.5 px-2 cursor-pointer hover:bg-[#404040]", previewing && "ring-[0.5px] ring-brand-accent/70")}
       >
         <div className="relative h-8 w-8 shrink-0 rounded-[4px] bg-[#1d1d1d] flex items-center justify-center text-[#949494] overflow-hidden">
@@ -130,7 +160,14 @@ export const TrackRow: React.FC<{ track: MusicTrack; added: boolean }> = ({ trac
           </button>
         )}
       </div>
+  );
+  // Only a downloaded track drags (the others have no file to drop yet).
+  return path && info ? (
+    <Draggable id={`music-${track.id}`} data={trackItem(track, path, info)}>
+      {body}
     </Draggable>
+  ) : (
+    body
   );
 };
 

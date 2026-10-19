@@ -48,7 +48,7 @@ export const AudioCredits: React.FC = () => {
           </li>
         ))}
       </ul>
-      <textarea data-testid="audio-credits-text" readOnly value={text} rows={Math.min(8, text.split("\n").length)} onFocus={(e) => e.currentTarget.select()} className="mt-2 w-full resize-none rounded-[6px] bg-[#1c1c1c] px-3 py-2 text-[11px] leading-snug text-[#a8a8a8] outline-none" />
+      <textarea data-testid="audio-credits-text" readOnly value={text} rows={6} onFocus={(e) => e.currentTarget.select()} className="mt-2 w-full resize-none rounded-[6px] bg-[#1c1c1c] px-3 py-2 text-[11px] leading-snug text-[#a8a8a8] outline-none" />
     </div>
   );
 };

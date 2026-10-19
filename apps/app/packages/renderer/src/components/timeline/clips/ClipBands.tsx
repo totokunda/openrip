@@ -95,7 +95,7 @@ export const SoundClipFace: React.FC<FaceProps> = ({ clip, timelineId, width, he
           snap={snap}
         />
       )}
-      <ClipChips texts={[nameOf(asset?.path).replace(/\.[^.]+$/, "")]} fill={colors.chip} maxWidth={width} clipId={clip.clipId} />
+      <ClipChips texts={[asset?.credit?.title ?? nameOf(asset?.path).replace(/\.[^.]+$/, "")]} fill={colors.chip} maxWidth={width} clipId={clip.clipId} />
     </>
   );
 };

@@ -4,9 +4,8 @@
 //   export is the plain one plus itself a second later); the Extract audio card imports
 //   another video (a 660 Hz tone), listed too;
 // - Voiceovers, empty, says how to record one and opens the Voiceover panel;
-// - Music and Sound effects say they're coming, with nothing posing as content, and import an
-//   audio file (an 880 Hz tone): listed under "Your audio files", its + puts it at the playhead
-//   and the export has it there;
+// - Yours ▸ Imported imports an audio file (an 880 Hz tone): listed there, its + puts it at the
+//   playhead and the export has it there (the Music and Sound effects libraries are `musiclib`);
 // - with several clips with sound, the Voice changer's Apply to all puts a pick on each.
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -17,7 +16,7 @@ import { audioSub } from "./audioui.mjs";
 
 const rows = (win, section) => win.locator(`[data-testid=audio-section-${section}] [data-testid=audio-row]`).evaluateAll((els) => els.map((e) => e.getAttribute("data-name")));
 const open = async (win, section) => {
-  await win.locator(`[data-testid=assets-section-${section}]`).click();
+  await win.locator(`[data-testid="assets-section-${section}"]`).click();
   await win.waitForTimeout(1200);
 };
 /** The next file pickers answer with `files`. */
@@ -78,19 +77,19 @@ export default async (ctx) => {
   check("its button opens the Voiceover panel", await win.locator("[data-testid=voiceover-panel]").isVisible());
   await win.locator("[data-testid=voiceover-close]").click();
 
-  // ---- Music and Sound effects ----
-  await open(win, "music");
-  const music = await win.locator("[data-testid=audio-section-music]").innerText();
-  check(`Music says it's coming, with no items (${(await rows(win, "music")).length} rows)`, /music library is coming/.test(music) && (await rows(win, "music")).length === 0);
-  await shot("al-3-music");
+  // ---- Yours ▸ Imported ----
+  await open(win, "files");
+  const empty2 = await win.locator("[data-testid=audio-section-files]").innerText();
+  check(`Imported says there's nothing yet, with no items (${(await rows(win, "files")).length} rows)`, /No imported audio yet/.test(empty2) && (await rows(win, "files")).length === 0);
+  await shot("al-3-imported");
   const tone = path.join(outDir, "al-tone-880.wav");
   execFileSync(ffmpeg, ["-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=880:duration=2", "-ac", "2", tone]);
   await pickReturns(app, [tone]);
-  await win.locator("[data-testid=audio-section-music] [data-testid=audio-import]").click();
+  await win.locator("[data-testid=audio-section-files] [data-testid=audio-import]").click();
   let mine = [];
-  for (let i = 0; i < 30 && !(mine = await rows(win, "music")).includes("al-tone-880.wav"); i++) await win.waitForTimeout(500);
-  check(`Import audio lists the file under "Your audio files" (${mine.join(", ")})`, mine.includes("al-tone-880.wav"));
-  await shot("al-4-music-imported");
+  for (let i = 0; i < 30 && !(mine = await rows(win, "files")).includes("al-tone-880.wav"); i++) await win.waitForTimeout(500);
+  check(`Import audio lists the file (${mine.join(", ")})`, mine.includes("al-tone-880.wav"));
+  await shot("al-4-imported-file");
   await seek(win, ctx.map, 6);
   await settled(win, () => win.locator('[data-testid=audio-row][data-name="al-tone-880.wav"] [data-testid=audio-row-add]').click());
   const placed = (await savedProject(win, ctx.udDir)).timeline.clips.filter((c) => c.type === "audio").map((c) => +c.startTick / 1e6);
@@ -98,9 +97,9 @@ export default async (ctx) => {
   const withTone = side(pcm(await exportAs("al-music"), begin + 6.2, 1), 0);
   const ratio = band(withTone, 870, 890) / Math.max(1e-12, band(withTone, 1000, 1020));
   check(`the export has the file's 880 Hz tone at 6 s (×${ratio.toFixed(0)} against 1010 Hz)`, ratio > 20);
-  await open(win, "sounds");
-  const sfx = await win.locator("[data-testid=audio-section-sounds]").innerText();
-  check("Sound effects says it's coming, and lists the imported file", /Sound effects are coming/.test(sfx) && (await rows(win, "sounds")).includes("al-tone-880.wav"));
+  // Music and Sound effects are libraries now: `musiclib`.
+  await open(win, "music:Trending");
+  check("Music ▸ Trending is the library's list, not an import (the search field is there)", (await win.locator("[data-testid=music-search]").count()) === 1);
 
   // Voice changer's Apply to all, now that several clips have sound: one pick sets them all.
   const doc2 = await savedProject(win, ctx.udDir);

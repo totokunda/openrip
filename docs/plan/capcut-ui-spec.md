@@ -793,9 +793,9 @@ Screenshots are in `06-left-audio/` unless a path says otherwise.
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
 | Import › Extract audio from a video file | `06-left-audio/028-audio-import-extract.png` | partly (Detach audio on the timeline only) |
-| Audio list rows: cover, title, artist · duration, preview on click, favourite, add | `025-music-item-hover.png`, `026-music-item-context.png` | missing |
-| Library pattern for local or openly licensed music and sound-effect packs (categories, search) | `001-audio-default.png`, `027-sounds-trending.png` | missing |
-| Yours › Favorites | `029-audio-yours.png` | missing |
+| Audio list rows: cover, title, artist · duration, preview on click, favourite, add | `025-music-item-hover.png`, `026-music-item-context.png` | has (cover or note, title, artist · duration, licence chip, click to preview, star, download arrow with spinner turning into "+"; a downloaded row drags onto the timeline; no right-click menu) |
+| Library pattern for local or openly licensed music and sound-effect packs (categories, search) | `001-audio-default.png`, `027-sounds-trending.png` | has (Music and Sound effects from Openverse: CC0, Public Domain, CC BY; categories under each heading, search; [music-library.md](../parity/music-library.md)) |
+| Yours › Favorites | `029-audio-yours.png` | has (Music / Sound effects chips; favourites are kept whole and downloaded, so they work offline) |
 
 Out of scope: CapCut Music and Sound effects content, TikTok sounds, Brand music, AI music (`15-left-ai-and-other/036-ai-music-default.png`, `15-left-ai-and-other/037-ai-music-history.png`), Copyright check (`030-copyright-check-view.png`).
 

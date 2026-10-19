@@ -5,8 +5,10 @@
 import { create } from "zustand";
 import { musicDownload, musicFavorite, musicSearch, musicState, type MusicKind, type MusicSearchResult, type MusicTrack } from "@app/preload";
 import { addSoundAtPlayhead } from "./audio-tools";
+import { convertUserDataPath } from "./media/utils";
 import { creditOf } from "./music-credits";
 import type { MediaItem } from "@/components/media/Item";
+import type { MediaInfo } from "./types";
 
 export type { MusicKind, MusicTrack };
 
@@ -143,8 +145,12 @@ export const useMusicLibrary = create<Library>((set, get) => ({
     a.onended = () => set({ playing: false });
     a.onpause = () => set({ playing: false });
     a.onplaying = () => set({ playing: true });
-    a.onerror = () => set({ playing: false, previewId: null, failed: { ...get().failed, [t.id]: "Couldn't play it" } });
-    a.src = file ? new URL(`file://${file.split("/").map(encodeURIComponent).join("/")}`).href : t.url;
+    a.onerror = () => {
+      console.warn("[music-library] can't play", a.src, a.error?.message);
+      set({ playing: false, previewId: null, failed: { ...get().failed, [t.id]: "Couldn't play it" } });
+    };
+    // A downloaded track plays from the user data (the app:// protocol serves local files).
+    a.src = file ? convertUserDataPath(fileUrl(file)) : t.url;
     set({ previewId: t.id, playing: false });
     void a.play().catch(() => undefined);
   },
@@ -155,9 +161,9 @@ export const useMusicLibrary = create<Library>((set, get) => ({
 }));
 
 /** A track as an audio MediaItem, which the timeline's drop takes like a media card; needs the file downloaded. */
-export const trackItem = (t: MusicTrack, path: string): MediaItem => {
+export const trackItem = (t: MusicTrack, path: string, mediaInfo: MediaInfo): MediaItem => {
   const url = fileUrl(path);
-  return { name: t.title, type: "audio", absPath: url, assetUrl: url, credit: creditOf(t) };
+  return { name: t.title, type: "audio", absPath: url, assetUrl: url, mediaInfo, credit: creditOf(t) };
 };
 
 export const fileUrl = (path: string): string => new URL(`file://${path.split("/").map(encodeURIComponent).join("/")}`).href;
@@ -181,3 +187,4 @@ export const fetchPage = async (kind: MusicKind, q: string, page: number, browse
   if (!r.ok) return { kind: "error", message: r.error, offline: r.offline, rateLimited: r.rateLimited };
   return { kind: "ok", data: { tracks: r.tracks, page, pageCount: r.pageCount, total: r.total, stale: r.stale } };
 };
+
