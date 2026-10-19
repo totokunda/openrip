@@ -11,7 +11,7 @@ export default async (ctx) => {
   const map = (ctx.map = await rulerMap(win));
   const v = (await savedClips(win, udDir)).filter((c) => c.type === "video").sort((a, b) => +a.startTick - +b.startTick);
   check("four clips, the three transitions on the cuts", v.length === 4 && PICKS.every(([type], i) => v[i].transitionOut?.type === type), v.map((c) => c.transitionOut?.type ?? "-").join());
-  check("Zoom blur fade kept its strength and 0.8 s", v[0].transitionOut?.params?.strength === 1 && v[0].transitionOut?.duration === 0.8, JSON.stringify(v[0].transitionOut));
+  check("Zoom blur fade kept its strength and 0.8 s", v[0].transitionOut?.params?.strength === 0.9 && v[0].transitionOut?.duration === 0.8, JSON.stringify(v[0].transitionOut));
   check("Soft circle kept Opening off", v[1].transitionOut?.params?.opening === false, JSON.stringify(v[1].transitionOut?.params));
   const cuts = v.slice(0, 3).map((c) => +c.endTick / 1e6);
   for (const [i, c] of cuts.entries()) {

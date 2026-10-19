@@ -59,6 +59,9 @@ export default async (ctx) => {
   await left("transitions");
   const tnote = (await win.locator("[data-testid=assets-content]").innerText()).replace(/\s+/g, " ");
   check("Transitions tab: a lone clip has no cut, the tab says so", /between two clips/.test(tnote), tnote.slice(0, 80));
+  // White Flash is under Light.
+  await win.locator("[data-testid=assets-section-Light]").click().catch(() => {});
+  await win.waitForTimeout(300);
   await win.locator("[data-testid=transition-white_flash]").hover();
   await win.waitForTimeout(300);
   check("Transitions tab: its cards' + is off", await win.locator("[data-testid=transition-add-white_flash]").isDisabled());
