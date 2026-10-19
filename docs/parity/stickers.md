@@ -35,3 +35,43 @@ When it's readable again: `openrip-dev export-parity <draft F> <its export> --fr
   - setting the opacity to 30% fades the sticker.
 - **Round trip:** the draft with visible stickers comes back exactly (138.1 dB).
 - **Cover parity:** no draft has a visible sticker at its first frame, so no cover changed.
+
+## OpenRip's own sticker library (Stickers tab)
+
+CapCut's stickers are content OpenRip can't ship. The Stickers tab is a library of openly licensed sets in CapCut's layout. A sticker clip (`type: "sticker"` in the app, a `Sticker` material on a `sticker` track in the engine) is modelled the way CapCut's are: a picture or an animation on a track of its own, with a transform, an Animation tab (In, Out, Loop) and keyframes.
+
+### Sources and licences
+
+Each set's licence and credit are in the manifest and in the app's third-party notices (`scripts/third-party-notices.mjs` reads them). The manifest is made from the sources' repositories, pinned to the commits it read, by `scripts/build-sticker-manifest.mjs`.
+
+| Set | Files | Licence | Items |
+|---|---|---|---|
+| Fluent Emoji 3D (github.com/microsoft/fluentui-emoji) | PNG | MIT (the repo's LICENSE) | 1,595 |
+| Fluent Emoji Color | SVG | MIT | 1,595 |
+| Fluent Emoji Flat | SVG | MIT | 1,595 |
+| Noto Emoji 2D (github.com/googlefonts/noto-emoji) | 512 px PNG | Apache-2.0 (README: "most image resources are under the Apache licence"; `2D/svg/LICENSE` is Apache-2.0) | 1,595 |
+| Animated Noto Emoji (googlefonts.github.io/noto-emoji-animation) | 512 px animated WebP | CC BY 4.0 (credit: "Animated Noto Emoji" by Google LLC) | 595 |
+
+- **Skin tones:** Fluent's default skin tone only. Noto's pictures are matched to Fluent's names through the emoji's codepoints, since Noto has no names.
+- **Animated Noto licence not checked against its repository:** `googlefonts/noto-emoji-animation` isn't public, so CC BY 4.0 is as the project gave it. The animations are shown as published, unchanged, and credited in the notices.
+- **Left out:**
+  - **OpenMoji (CC BY-SA 4.0):** a video with its stickers in it would arguably be an adaptation, so its share-alike term could reach the videos people make with it.
+  - **Noto Emoji 3D:** the repo has no licence file of its own for it.
+  - **Lottie versions of the animated emoji:** no permissive pure-Rust Lottie renderer fits the engine's portable crates; the WebP versions are the same animations.
+
+### Delivery
+
+- **Starter set:** 98 stickers (91 Fluent 3D, 7 animated Noto) in `packages/renderer/public/stickers/starter/` (5.7 MB), the only pictures in the repository.
+- **The rest:** downloaded the first time a sticker is used, from the sources' raw files (`raw.githubusercontent.com`, `fonts.gstatic.com`) into `<userData>/stickers/<id>.<ext>`, by the main process (`StickerLibraryModule.ts`). A starter sticker is copied there the same way. The engine draws a clip from that file. The tile's picture is the file when it's cached, else the source's own URL.
+- **Manifest:** `packages/renderer/public/stickers/manifest.json`, 950 KB, rows of id, name, keywords, categories, set, file under the set's base URL, thumbnail, trending rank, starter flag; the sets carry their base URL and licence.
+
+### Engine
+
+- **Formats:** `playback/src/sticker_decode.rs` decodes by content, not extension: PNG and APNG (frames composed by their offsets, disposal and blend), GIF, WebP still and animated (`image-webp`), and SVG (`resvg`, drawn at 512 px on the longer side). Everything is pure Rust.
+- **Size:** a sticker draws at the size its material says (`Sticker.width` × `height`, else the picture's), on a canvas 1080 wide at scale 1, as CapCut's do. The importer (`v1`) turns the app's box into a scale of that size, so a box of any size and shape is drawn at it.
+- **Animation and keyframes:** a sticker takes the Animation tab's In, Out and Loop and position, scale, rotation and opacity keys as a text does. An animation loops by its own frame times from the clip's start.
+- **Tests:** `playback/tests/stickers.rs` (a still at its transform, an animated PNG changing frame over time and looping, an SVG with its transparency) and `v1`'s `a_sticker_clip_becomes_a_sticker_on_a_sticker_track`.
+
+### Checks
+
+Harness step `stickersui` (after `import timeline`; see the smoke README): browsing, search and the style filter; a click previewing; "+" adding a starter sticker with the engine's frame changing and its bar in the sticker colour; the inspector's tabs; an In animation and a keyframe; an animated sticker changing frame between two times; on-demand downloads from a local fixture server (the spinner, an SVG, an animated WebP); favourites; drags onto the timeline and the player; undo and redo of each edit; a restart; an export.

@@ -820,8 +820,8 @@ Screenshots are in `08-left-stickers/` unless a path says otherwise.
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
 | Shapes: square, circle, triangle, parallelogram, trapezoid, line, arrow, custom pen shape | `08-left-stickers/002-shapes-library.png` | partly (rectangle, ellipse, polygon, line, star via the canvas tool bar) |
-| Sticker library for openly licensed PNG/GIF/APNG stickers | `001-stickers-default.png` | missing (the engine draws stickers from imported CapCut drafts only) |
-| Yours › Favorites | `001-stickers-default.png` | missing |
+| Sticker library for openly licensed PNG/GIF/APNG stickers | `001-stickers-default.png` | has (Fluent Emoji, Noto Emoji and the animated Noto emoji; [stickers.md](../parity/stickers.md)): categories, search, a style filter, click to preview, "+", drag onto the timeline or the player, a download mark and spinner on tiles not on the machine |
+| Yours › Favorites | `001-stickers-default.png` | has (Favorites at the top of the column, a star on each tile) |
 
 Out of scope: CapCut sticker content, AI generated stickers (`15-left-ai-and-other/041-stickers-ai-generated.png`), GIPHY (`003-giphy-library.png`).
 
@@ -1054,8 +1054,8 @@ Screenshots are in `22-inspector-sticker/` unless a path says otherwise.
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Transform (scale, locked uniform scale, position, rotate, align) | `22-inspector-sticker/001-sticker-transform.png` | has (as an image clip) |
-| Animation › In, Out, Loop with duration | `002-sticker-animation.png` | missing |
+| Transform (scale, locked uniform scale, position, rotate, align) | `22-inspector-sticker/001-sticker-transform.png` | has (a sticker clip's Stickers tab: Transform, keyframeable) |
+| Animation › In, Out, Loop with duration | `002-sticker-animation.png` | has (the clip moves the engine draws; CapCut's animation content is out of scope) |
 
 Out of scope: CapCut animation content (Tracking is in §6.31).
 
