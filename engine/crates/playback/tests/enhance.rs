@@ -177,3 +177,25 @@ fn motion_blur_blends_the_frames_around() {
     eprintln!("motion blur: {to_mean:.1} dB from the three-frame average, {to_frame:.1} dB from the frame");
     assert!(to_mean > 35.0 && to_mean > to_frame + 8.0);
 }
+
+/// Tracking stays right on a noisy, flickering picture: most frame-to-frame motions are within
+/// a pixel of the truth.
+#[test]
+fn tracking_survives_noise_and_flicker() {
+    let x = "400+0.3*n+5*sin(n*2.3)+3*sin(n*5.1+1)";
+    let y = "200+0.15*n+4*sin(n*1.7+2)+2.5*sin(n*4.3)";
+    let Some(path) = clip("enhance-hard.mp4", x, y, ",noise=alls=16:allf=t,eq=brightness='0.06*sin(n*2.1)+0.04*sin(n*3.9)':eval=frame") else { return };
+    analysed(&path);
+    let a = enhance::analysis(path.to_str().unwrap()).unwrap();
+    // ffmpeg's crop window sits on whole pixels.
+    let truth = |n: f64| ((400.0 + 0.3 * n + 5.0 * (n * 2.3).sin() + 3.0 * (n * 5.1 + 1.0).sin()).round(), (200.0 + 0.15 * n + 4.0 * (n * 1.7 + 2.0).sin() + 2.5 * (n * 4.3).sin()).round());
+    let k = a.size.0 as f64 / W as f64;
+    let good = (0..a.motions.len())
+        .filter(|&n| {
+            let (p, q) = (truth(n as f64), truth(n as f64 + 1.0));
+            (a.motions[n].tx - -(q.0 - p.0) * k).abs() < 0.7 && (a.motions[n].ty - -(q.1 - p.1) * k).abs() < 0.7
+        })
+        .count();
+    eprintln!("tracked right: {good} of {}", a.motions.len());
+    assert!(good as f64 > 0.9 * a.motions.len() as f64, "{good} of {}", a.motions.len());
+}

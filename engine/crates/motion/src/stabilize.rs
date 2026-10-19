@@ -54,6 +54,18 @@ impl Level {
     }
 }
 
+/// A frame as the tracker sees it: its brightness and contrast evened out (a flickering
+/// picture changes brightness between frames, which breaks the tracker's brightness constancy)
+/// and a little blur so sensor noise isn't mistaken for texture.
+fn prepared(g: &Gray) -> Gray {
+    let n = g.data.len().max(1) as f32;
+    let mean = g.data.iter().sum::<f32>() / n;
+    let sd = (g.data.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / n).sqrt().max(0.02);
+    let mut out = Gray { width: g.width, height: g.height, data: g.data.iter().map(|v| 0.5 + (v - mean) / sd * 0.2).collect() };
+    out = out.blur(0.9);
+    out
+}
+
 /// Follows the camera from frame to frame.
 pub struct CameraTracker {
     previous: Pyramid,
@@ -65,7 +77,7 @@ impl CameraTracker {
     /// Starts on the first frame.
     pub fn new(first: Gray) -> CameraTracker {
         CameraTracker {
-            previous: Pyramid::new(first, 4),
+            previous: Pyramid::new(prepared(&first), 4),
             klt: Klt { radius: 6, iterations: 20, ..Klt::default() },
             corners: CornerOptions { max_corners: 260, ..Default::default() },
         }
@@ -76,13 +88,14 @@ impl CameraTracker {
     /// don't agree (a blank or blurred frame, a cut).
     pub fn step(&mut self, next: Gray) -> Option<Similarity> {
         let (w, h) = (next.width as f64, next.height as f64);
-        let next = Pyramid::new(next, 4);
-        let result = self.motion_to(&next, w, h);
+        let next = Pyramid::new(prepared(&next), 4);
+        // Strict first; if the matches don't agree (noise, blur), once more with more slack.
+        let result = self.motion_to(&next, w, h, 1.0, 1.5, 3).or_else(|| self.motion_to(&next, w, h, 2.5, 3.0, 6));
         self.previous = next;
         result
     }
 
-    fn motion_to(&self, next: &Pyramid, w: f64, h: f64) -> Option<Similarity> {
+    fn motion_to(&self, next: &Pyramid, w: f64, h: f64, back_check: f64, threshold: f64, ratio: usize) -> Option<Similarity> {
         let base = &self.previous.levels[0];
         let spacing = (w.min(h) / 28.0).max(6.0) as f32;
         let corners = good_features(&base.image, &base.gx, &base.gy, [0.0, 0.0, w as f32, h as f32], |_, _| true, &CornerOptions { min_distance: spacing, ..self.corners });
@@ -96,7 +109,7 @@ impl CameraTracker {
         let (mut src, mut dst) = (Vec::new(), Vec::new());
         for i in 0..from.len() {
             let (Some(f), Some(b)) = (forward[i], back[i]) else { continue };
-            if ((b.point[0] - from[i][0]) as f64).hypot((b.point[1] - from[i][1]) as f64) <= 1.0 {
+            if ((b.point[0] - from[i][0]) as f64).hypot((b.point[1] - from[i][1]) as f64) <= back_check {
                 src.push([from[i][0] as f64 - w / 2.0, from[i][1] as f64 - h / 2.0]);
                 dst.push([f.point[0] as f64 - w / 2.0, f.point[1] as f64 - h / 2.0]);
             }
@@ -104,10 +117,10 @@ impl CameraTracker {
         if src.len() < 8 {
             return None;
         }
-        let (fit, inliers) = ransac_similarity(&src, &dst, &Ransac { threshold: 1.5, iterations: 150, ..Ransac::default() })?;
+        let (fit, inliers) = ransac_similarity(&src, &dst, &Ransac { threshold, iterations: 150, ..Ransac::default() })?;
         let n = inliers.iter().filter(|&&b| b).count();
         // Few agreeing matches, or an absurd scale: not a camera move.
-        (n >= 8 && n * 3 >= src.len() && (0.8..1.25).contains(&fit.scale())).then_some(fit)
+        (n >= 8 && n * ratio >= src.len() && (0.8..1.25).contains(&fit.scale())).then_some(fit)
     }
 }
 

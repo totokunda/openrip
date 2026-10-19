@@ -89,6 +89,10 @@ export type EngineAddon = {
   colorStats(job: number, path: string, startUs: number, durationUs: number | null, look: Look | null): Promise<ColorStats>;
   /** Auto adjust: the Basic sliders (panel scale) from a range's statistics, through a match. */
   autoAdjust(job: number, path: string, startUs: number, durationUs: number | null, matched: MatchOn | null): Promise<AutoAdjustValues>;
+  /** Stabilize and Remove flickers: track a file's camera motion and frame brightness (media µs), kept by the engine for preview and export. */
+  analyseMotion(job: number, path: string, startUs: number, durationUs: number | null): Promise<void>;
+  /** Whether a range has been tracked (in this run or an earlier one). */
+  motionReady(path: string, startUs: number, durationUs: number | null): boolean;
   analysisProgress(job: number): { done: number; total: number } | null;
   cancelAnalysis(job: number): void;
   registerFonts(faces: { family: string; weight: number; italic: boolean; path: string; unicodeRange?: string }[]): void;
@@ -430,7 +434,7 @@ export class EngineModule implements AppModule {
     const settings = getSettingsModule();
     addon?.setHardwareDecoding?.(settings.getPreferences().hardwareDecoding);
     settings.on("preferences-changed", (p: Preferences) => addon?.setHardwareDecoding?.(p.hardwareDecoding));
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:waveform", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still", "engine:detect-scenes", "engine:color-stats", "engine:auto-adjust", "engine:analysis-progress", "engine:analysis-cancel"]) {
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:waveform", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still", "engine:detect-scenes", "engine:color-stats", "engine:auto-adjust", "engine:analyse-motion", "engine:motion-ready", "engine:analysis-progress", "engine:analysis-cancel"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -537,6 +541,10 @@ export class EngineModule implements AppModule {
     ipcMain.handle("engine:auto-adjust", (_event, job: number, path: string, startSec: number, durationSec: number | null, matched: MatchOn | null) =>
       analysis("auto adjust", (e) => e.autoAdjust(job, fileOf(path), us(startSec) ?? 0, us(durationSec), matched ?? null)),
     );
+    ipcMain.handle("engine:analyse-motion", (_event, job: number, path: string, startSec: number, durationSec: number | null) =>
+      analysis("motion tracking", (e) => e.analyseMotion(job, fileOf(path), us(startSec) ?? 0, us(durationSec))),
+    );
+    ipcMain.handle("engine:motion-ready", (_event, path: string, startSec: number, durationSec: number | null) => addon?.motionReady(fileOf(path), us(startSec) ?? 0, us(durationSec)) ?? false);
     ipcMain.handle("engine:analysis-progress", (_event, job: number) => addon?.analysisProgress(job) ?? null);
     ipcMain.handle("engine:analysis-cancel", (_event, job: number) => addon?.cancelAnalysis(job));
     ipcMain.handle("engine:loudness", async (_event, path: string, startSec: number, durationSec: number | null) => {

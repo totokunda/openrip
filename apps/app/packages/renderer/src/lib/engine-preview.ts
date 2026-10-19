@@ -24,6 +24,7 @@ import { useClipStore } from "./clip";
 import { useControlsStore, setPlaybackDriver } from "./control";
 import { useViewportStore } from "./viewport";
 import { useMaskStore } from "./mask";
+import { useMotionStore } from "./analysis";
 import { useProjectsStore } from "./projects";
 import { getActiveProjectJsonSnapshot } from "./middlewares/json-persistence";
 import { withoutHistory } from "./history";
@@ -328,6 +329,8 @@ export function initEnginePreview() {
     if (s.preview !== p.preview && useEnginePreviewStore.getState().enabled) scheduleSync(0);
   });
   watch(useMaskStore.subscribe as any, (s: any) => [s.tool]);
+  // Stabilize and Remove flickers draw once the engine has tracked the clip.
+  watch(useMotionStore.subscribe as any, (s: any) => [s.version]);
   watch(useProjectsStore.subscribe as any, (s: any) => [s.activeProjectId, (s as any).projectsLoaded]);
 
   // Playback by the engine: its sound, and its clock moving the playhead. Each run has a

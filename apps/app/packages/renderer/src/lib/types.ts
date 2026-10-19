@@ -418,6 +418,22 @@ export type SpeedProps = {
    * up to `fps` by motion interpolation whatever its speed.
    */
   opticalFlow?: { fps: number } | null;
+  /**
+   * Video › Basic's Stabilize, Reduce image noise and Remove flickers, and Enhance motion ›
+   * Motion blur: classic clean-up the engine draws (lib/enhance.ts). Null (or absent) is all off.
+   */
+  enhance?: EnhanceSettings | null;
+};
+
+/** How far Stabilize smooths the camera's path; the further, the more it crops. */
+export type StabilizeLevel = "minimal_cut" | "recommended" | "most_stable";
+
+/** A video clip's clean-up; strength and amount 0–100. */
+export type EnhanceSettings = {
+  stabilize?: { level: StabilizeLevel } | null;
+  denoise?: { strength: number } | null;
+  deflicker?: boolean;
+  motionBlur?: { amount: number } | null;
 };
 
 /**

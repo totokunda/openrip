@@ -6,7 +6,9 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import {
+  engineAnalyseMotion,
   engineAnalysisProgress,
+  engineMotionReady,
   engineAutoAdjust,
   engineCancelAnalysis,
   engineColorStats,
@@ -36,7 +38,7 @@ import type { AnyClipProps, ColorMoments, VideoClipProps } from "./types";
 import type { ContextMenuItem } from "./context-menu";
 import { useInspectorStore } from "./inspector";
 
-export type AnalysisKind = "scenes" | "auto" | "match" | "consistent";
+export type AnalysisKind = "scenes" | "auto" | "match" | "consistent" | "motion";
 
 /** The analysis running: what, on which clip, and how far (0–1). */
 export type RunningAnalysis = { kind: AnalysisKind; clipId: string | null; progress: number };
@@ -163,6 +165,32 @@ export const splitScenes = (clipId: string) =>
     useControlsStore.getState().setSelectedClipIds(parts);
     return parts.length;
   });
+
+/**
+ * Stabilize and Remove flickers need the engine to track the clip's media first (camera motion
+ * and the brightness of each frame): once per file and range, kept by the engine and saved in
+ * its cache, so this returns at once when it has the range. True when it has it now.
+ */
+export const trackMotion = async (clipId: string): Promise<boolean | null> => {
+  const src = sourceOf(useClipStore.getState().getClipById(clipId));
+  if (!src) return false;
+  if (await engineMotionReady(src.path, src.start, src.duration)) return true;
+  return exclusive("motion", clipId, async () => {
+    const done = await call(0, 1, (job) => engineAnalyseMotion(job, src.path, src.start, src.duration));
+    // The preview asks for fresh frames now the engine can use it.
+    if (done !== null) useMotionStore.setState((s) => ({ version: s.version + 1 }));
+    return done !== null;
+  });
+};
+
+/** What a clip's tracking is about: its media and the range of it played (a key to notice it change). */
+export const motionRangeKey = (clip: AnyClipProps | undefined) => {
+  const src = sourceOf(clip);
+  return src ? `${src.path}|${src.start.toFixed(3)}|${src.duration?.toFixed(3) ?? "-"}` : "";
+};
+
+/** Bumped whenever the engine finishes tracking a clip, so the preview redraws with it. */
+export const useMotionStore = create<{ version: number }>(() => ({ version: 0 }));
 
 /** Auto adjust on: the engine's slider values for the clip at `intensity`, one step. */
 export const autoAdjust = (clipId: string, intensity?: number) =>

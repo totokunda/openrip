@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { cancelAnalysis, useAnalysisStore, type AnalysisKind } from "@/lib/analysis";
 
-const LABEL: Record<AnalysisKind, string> = { scenes: "Splitting scenes", auto: "Auto adjust", match: "Color match", consistent: "Matching colors" };
+const LABEL: Record<AnalysisKind, string> = { scenes: "Splitting scenes", auto: "Auto adjust", match: "Color match", consistent: "Matching colors", motion: "Analysing motion" };
 
 /**
  * CapCut's processing pill, in the middle of the timeline while the engine reads a clip

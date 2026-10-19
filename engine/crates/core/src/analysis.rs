@@ -79,6 +79,11 @@ pub fn analyse_motion(path: &Path, start: Micros, duration: Option<Micros>, cont
     Ok(())
 }
 
+/// Keep tracked motion in `dir` across runs (next to the thumbnails, which are keyed the same).
+pub fn set_motion_cache_dir(dir: std::path::PathBuf) {
+    openrip_playback::enhance::set_cache_dir(dir);
+}
+
 /// Whether the engine has tracked `path` over `duration` from `start` (see [`analyse_motion`]).
 pub fn motion_ready(path: &Path, start: Micros, duration: Option<Micros>) -> bool {
     let Some(known) = openrip_playback::enhance::analysis(&path.to_string_lossy()) else { return false };

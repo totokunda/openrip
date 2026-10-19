@@ -349,6 +349,8 @@ fn thumbnails_service() -> &'static Thumbnails {
 /// Keep exact thumbnails in `dir` across runs (e.g. under the app's cache folder).
 #[napi]
 pub fn set_thumbnail_cache_dir(dir: String) {
+    // Tracked motion (Stabilize, Remove flickers) is kept beside them.
+    openrip_core::set_motion_cache_dir(dir.clone().into());
     thumbnails_service().set_cache_dir(dir.into());
 }
 
@@ -976,6 +978,49 @@ pub fn detect_scenes(job: u32, path: String, start_us: i64, duration_us: Option<
         options.sensitivity = s.clamp(0.0, 1.0) as f32;
     }
     AsyncTask::new(ScenesTask { job, control, path, start: Micros(start_us), duration: duration_us.map(Micros), options })
+}
+
+pub struct MotionTask {
+    job: u32,
+    control: Control,
+    path: String,
+    start: Micros,
+    duration: Option<Micros>,
+}
+
+impl Task for MotionTask {
+    type Output = ();
+    type JsValue = ();
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        openrip_core::analyse_motion(Path::new(&self.path), self.start, self.duration, &self.control).map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, _out: Self::Output) -> Result<()> {
+        Ok(())
+    }
+
+    fn finally(self, _env: Env) -> Result<()> {
+        end_job(self.job, &self.control);
+        Ok(())
+    }
+}
+
+/// Track the camera and the frames' brightness in the video at `path` over `durationUs` from
+/// `startUs` of its media (to its end for `null`), on a worker thread, for Stabilize and
+/// Remove flickers. The engine keeps the result for every preview and export; a range already
+/// tracked returns at once. Progress and cancel by `job`.
+#[napi]
+pub fn analyse_motion(job: u32, path: String, start_us: i64, duration_us: Option<i64>) -> AsyncTask<MotionTask> {
+    let control = start_job(job);
+    AsyncTask::new(MotionTask { job, control, path, start: Micros(start_us), duration: duration_us.map(Micros) })
+}
+
+/// Whether the video at `path` has been tracked over `durationUs` from `startUs` (see
+/// `analyseMotion`), in this run or an earlier one.
+#[napi]
+pub fn motion_ready(path: String, start_us: i64, duration_us: Option<i64>) -> bool {
+    openrip_core::motion_ready(Path::new(&path), Micros(start_us), duration_us.map(Micros))
 }
 
 #[napi(object)]

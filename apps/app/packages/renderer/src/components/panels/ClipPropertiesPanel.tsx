@@ -37,6 +37,7 @@ import { useInspectorStore } from '@/lib/inspector'
 import TrackingProperties from '../properties/TrackingProperties'
 import TemplateProperties from '../properties/TemplateProperties'
 import OpticalFlowProperties from '../properties/OpticalFlowProperties'
+import { DeflickerProperties, DenoiseProperties, MotionBlurProperties, StabilizeProperties } from '../properties/EnhanceProperties'
 
 /**
  * The inspector for the selected clip (the last one selected), grouped as CapCut groups it:
@@ -129,7 +130,17 @@ const ClipPropertiesPanel: React.FC = () => {
             id: 'video',
             label: 'Video',
             sections: [
-              { id: 'basic', label: 'Basic', content: type === 'video' ? stack(<VideoBasicProperties key="basic" clipId={clipId} />, <OpticalFlowProperties key="optical-flow" clipId={clipId} />) : <VideoBasicProperties clipId={clipId} /> },
+              { id: 'basic', label: 'Basic', content: type === 'video' ? stack(
+                <VideoBasicProperties key="basic" clipId={clipId} />,
+                // CapCut's order: Stabilize, Reduce image noise, Optical flow, then Remove flickers
+                // (its Enhance quality and the AI tools between are not offered); Motion blur,
+                // which CapCut keeps in the clip menu's Enhance motion, goes last.
+                <StabilizeProperties key="stabilize" clipId={clipId} />,
+                <DenoiseProperties key="denoise" clipId={clipId} />,
+                <OpticalFlowProperties key="optical-flow" clipId={clipId} />,
+                <DeflickerProperties key="deflicker" clipId={clipId} />,
+                <MotionBlurProperties key="motion-blur" clipId={clipId} />,
+              ) : <VideoBasicProperties clipId={clipId} /> },
               { id: 'removebg', label: 'Remove BG', content: <ChromaKeyProperties clipId={clipId} /> },
               { id: 'mask', label: 'Mask', content: <MaskPropertiesPanel clipId={clipId} /> },
             ],

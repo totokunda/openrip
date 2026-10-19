@@ -56,6 +56,7 @@ import { freezeTarget } from "@/lib/timeline-motion";
 import BeatMarkers from "./BeatMarkers";
 import { projectBeatPoints, soundMenuItems } from "@/lib/audio-tools";
 import { analysisMenuItems } from "@/lib/analysis";
+import { enhanceMenuItems, withEnhance } from "@/lib/enhance";
 import { captionMenuItems } from "@/lib/autocaptions";
 import { useViewportStore } from "@/lib/viewport";
 import { useContextMenuStore, ContextMenuItem } from "@/lib/context-menu";
@@ -1277,8 +1278,9 @@ const TimelineClip: React.FC<
 
       const clipActions: ContextMenuItem[] = [
         ...editTools,
-        // Split scenes and Adjust color ▸ (lib/analysis.ts).
-        ...analysisMenuItems(clip, targetIds.length),
+        // Split scenes, Enhance visuals, Adjust color ▸ (lib/analysis.ts) and Enhance motion
+        // (lib/enhance.ts), in CapCut's order.
+        ...withEnhance(analysisMenuItems(clip, targetIds.length), enhanceMenuItems(targetIds)),
         // Generate captions: the Auto captions panel for this clip (lib/autocaptions.ts).
         ...captionMenuItems(clip, targetIds.length),
         {

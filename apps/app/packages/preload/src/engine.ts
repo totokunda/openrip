@@ -98,6 +98,20 @@ export function engineAutoAdjust(job: number, path: string, startSec: number, du
   return ipcRenderer.invoke("engine:auto-adjust", job, path, startSec, durationSec, matched);
 }
 
+/**
+ * Stabilize and Remove flickers: track the camera and the frames' brightness in the video `path`
+ * over `durationSec` from `startSec` of its media (to its end for null). The engine keeps the
+ * result (and saves it) for the preview and every export; a range it has already is answered at once.
+ */
+export function engineAnalyseMotion(job: number, path: string, startSec: number, durationSec: number | null): Promise<EngineAnalysis<void>> {
+  return ipcRenderer.invoke("engine:analyse-motion", job, path, startSec, durationSec);
+}
+
+/** Whether the engine already has `path`'s motion over that range, from this run or an earlier one. */
+export function engineMotionReady(path: string, startSec: number, durationSec: number | null): Promise<boolean> {
+  return ipcRenderer.invoke("engine:motion-ready", path, startSec, durationSec);
+}
+
 /** A running analysis's progress in frames; null when it isn't running. */
 export function engineAnalysisProgress(job: number): Promise<{ done: number; total: number } | null> {
   return ipcRenderer.invoke("engine:analysis-progress", job);
