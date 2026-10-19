@@ -783,8 +783,9 @@ Screenshots are in `05-left-media/` unless a path says otherwise.
 | Subprojects library (compound clips you can reuse) | `012-subprojects-empty.png` | missing |
 | Yours › Favorites | `013-yours-favorites-empty.png`, `014-favorites-type-filter.png` | missing |
 | Yours › My presets (saved clip presets) | `015-my-presets-library.png` | missing |
+| Library: stock videos and photos (categories, search, Videos / Photos, tiles with length, hover and player preview, "+", drag, favourites, download spinner, credits) from key-free openly licensed sources (Openverse CC0/PDM/CC BY, Wikimedia Commons CC0/PD/CC BY, NASA) | `023-library-default.png`, `031-library-filter-menu.png` | has (no Commercial filter, everything listed is free to use; CC BY credits are in Library > Credits) |
 
-Out of scope: Import › From library (stock), Generate (AI image, AI video, AI dialogue scene: `15-left-ai-and-other/009-media-generate-default.png`–`15-left-ai-and-other/034-dialogue-react-tab.png`), Spaces and Brand assets (`017-spaces-default.png`–`020-spaces-asset-context.png`, `016-brand-assets-empty.png`), Library stock categories and the Commercial filter (`023-library-default.png`, `031-library-filter-menu.png`–`034-library-search-orientation-menu.png`), Dreamina (`15-left-ai-and-other/035-dreamina-default.png`), the media card's Transcript is in scope since 2026-10-19 with a local model (§6.31), as is Split scenes, the "AI clipper" bottom bar, the empty state's Generate and AI avatars tiles.
+Out of scope: Import › From library (stock), Generate (AI image, AI video, AI dialogue scene: `15-left-ai-and-other/009-media-generate-default.png`–`15-left-ai-and-other/034-dialogue-react-tab.png`), Spaces and Brand assets (`017-spaces-default.png`–`020-spaces-asset-context.png`, `016-brand-assets-empty.png`), the Library's Commercial filter (`031-library-filter-menu.png`–`034-library-search-orientation-menu.png`), Dreamina (`15-left-ai-and-other/035-dreamina-default.png`), the media card's Transcript is in scope since 2026-10-19 with a local model (§6.31), as is Split scenes, the "AI clipper" bottom bar, the empty state's Generate and AI avatars tiles.
 
 ### 6.6 Left panel: Audio
 
@@ -895,7 +896,7 @@ Screenshots are in `14-left-templates/` unless a path says otherwise.
 
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
-| Local project templates (save a project as a template, start from one) | `14-left-templates/001-editor-templates-default.png` | missing |
+| Local project templates (save a project as a template, start from one) | `14-left-templates/001-editor-templates-default.png` | has (the editor tab lists them as tall cards; a click previews, "Use" lays the clips in at the playhead as one undo step, "New" starts a project) |
 
 Out of scope: the template store (content, use counts, "Featured"), the AI avatar tab (`15-left-ai-and-other/042-ai-avatar-library.png`–`15-left-ai-and-other/046-video-translator.png`).
 
