@@ -10,6 +10,7 @@ import { clearKeyframes, editProperty, hasKeyframes, keyframeAt, localFrame, nex
 import { assetOfClip, mediaSecondsOf, setNormalize, soundSeparated } from "@/lib/audio-tools";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { ClipLicense } from "@/components/dialogs/AudioCredits";
 
 /**
  * The Audio tab's Basic sub-tab, as CapCut's (docs/plan/capcut-ui-spec.md §6.19,
@@ -302,6 +303,12 @@ const AudioProperties: React.FC<AudioPropertiesProps> = ({ clipId }) => {
       >
         <FillSelect value={channel} disabled={channel === "none"} onChange={(v) => updateClip(clipId, setChannelFill(clip, v))} />
       </AudioSection>
+      {/* A library track (Music, Sound effects) keeps its licence, author and source. */}
+      {assetOfClip(clip)?.credit && (
+        <AudioSection title="License" collapsible={false} testId="audio-section-license">
+          <ClipLicense credit={assetOfClip(clip)!.credit!} />
+        </AudioSection>
+      )}
     </div>
   );
 };

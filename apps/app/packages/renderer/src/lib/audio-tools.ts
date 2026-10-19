@@ -4,7 +4,7 @@
 // (lib/audio.ts, lib/audio-effects.ts, lib/beats.ts) through the clip store's `updateClip`, so a
 // store's clip is never written to in place and each action is one undo step.
 import { engineBeats, engineLoudness } from "@app/preload";
-import type { AnyClipProps, Asset, AudioClipProps } from "./types";
+import type { AnyClipProps, Asset, AssetCredit, AudioClipProps } from "./types";
 import type { ContextMenuItem } from "./context-menu";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
@@ -161,8 +161,8 @@ export const soundMenuItems = (clip: AnyClipProps | undefined): ContextMenuItem[
  * library item: its file (`url`, e.g. a video's with `#audio` for its sound alone) and length.
  * Selects the new clip.
  */
-export const addSoundAtPlayhead = (url: string, durationSec: number): AudioClipProps => {
-  const clip = placeVoiceover(useClipStore.getState(), { path: url, durationSec }, url, useControlsStore.getState().focusFrame, fps());
+export const addSoundAtPlayhead = (url: string, durationSec: number, credit?: AssetCredit): AudioClipProps => {
+  const clip = placeVoiceover(useClipStore.getState(), { path: url, durationSec, credit }, url, useControlsStore.getState().focusFrame, fps());
   useControlsStore.getState().setSelectedClipIds([clip.clipId]);
   return clip;
 };

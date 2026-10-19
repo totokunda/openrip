@@ -286,6 +286,25 @@ export type Guide = {
 /** Visual media clips (video or image) that can carry masks. */
 export type MediaClipProps = VideoClipProps | ImageClipProps;
 
+/**
+ * Where a library track (Audio tab: Music, Sound effects) came from, kept on its asset in the
+ * project: what a CC BY credit needs (title, author, licence, link) and the track's page.
+ */
+export type AssetCredit = {
+  /** The library's id for the track. */
+  id: string;
+  kind: "music" | "sfx";
+  title: string;
+  author: string;
+  authorUrl?: string;
+  license: "cc0" | "pdm" | "by";
+  licenseVersion?: string;
+  licenseUrl: string;
+  sourceUrl: string;
+  /** "freesound", "jamendo"… */
+  source: string;
+};
+
 export type Asset = {
   id: string;
   type: 'video' | 'image' | 'audio';
@@ -294,6 +313,8 @@ export type Asset = {
   height?: number;
   duration: number;
   thumbnail?: string;
+  /** Set on a library track's asset. */
+  credit?: AssetCredit;
 }
 
 /** The way a slide, push or wipe goes. */

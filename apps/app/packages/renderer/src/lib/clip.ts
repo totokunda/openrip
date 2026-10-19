@@ -962,6 +962,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       duration: duration,
       width: height === undefined ? undefined : width,
       height: height === undefined ? undefined : height,
+      ...(asset.credit ? { credit: asset.credit } : {}),
     };
 
     const newAssets: Record<string, Asset> = {

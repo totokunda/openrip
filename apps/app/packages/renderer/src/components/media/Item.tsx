@@ -34,7 +34,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
-import { ClipType, MediaInfo } from "@/lib/types";
+import { AssetCredit, ClipType, MediaInfo } from "@/lib/types";
 import {
   generateAudioWaveformCanvas,
   generatePosterCanvas,
@@ -103,6 +103,8 @@ export type MediaItem = {
   hasProxy?: boolean;
   /** The proxy is a playable copy of a format this app can't decode (ProRes): keep it. */
   isPlayableCopy?: boolean;
+  /** A library track's credit (Audio tab), kept on the asset the drop makes. */
+  credit?: AssetCredit;
 };
 
 interface ItemProps {

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { IconType } from "react-icons";
-import { LuFilm, LuMic, LuMusic, LuPlus, LuAudioLines } from "react-icons/lu";
+import { LuFilm, LuMic, LuMusic, LuPlus } from "react-icons/lu";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { importMediaPaths, listConvertedMedia, pickMediaPaths, voiceoverList } from "@app/preload";
@@ -13,6 +13,8 @@ import { bumpMediaLibraryVersion, useMediaLibraryVersion } from "@/lib/media/lib
 import { getMediaInfo } from "@/lib/media/utils";
 import { AUDIO_EXTS, VIDEO_EXTS } from "@/lib/settings";
 import { addSoundAtPlayhead } from "@/lib/audio-tools";
+import { MUSIC_CATEGORIES, SFX_CATEGORIES, librarySection, parseLibrarySection } from "@/lib/music-library";
+import { MusicFavorites, MusicLibraryView } from "./MusicLibraryView";
 import { useVoiceoverPanel } from "@/components/voiceover/VoiceoverPanel";
 
 /**
@@ -20,13 +22,26 @@ import { useVoiceoverPanel } from "@/components/voiceover/VoiceoverPanel";
  * - Extracted: the sound of each video in the project, with CapCut's "Extract audio" card to
  *   bring in another video for its sound;
  * - Voiceovers: the takes recorded for the project (the timeline's microphone);
- * - Music and Sound effects: libraries OpenRip doesn't have yet. They say so, with nothing
- *   posing as content, and import audio files from the computer meanwhile; those are listed.
+ * - Yours: Favorites (library tracks starred, kept whole so they work offline) and the audio
+ *   files imported from the computer;
+ * - Music and Sound effects: libraries of openly licensed tracks (Openverse: CC0, Public Domain,
+ *   CC BY), by category, with search (MusicLibraryView.tsx, lib/music-library.ts).
  * Each sound is a CapCut audio row: "+" puts it on a new audio track at the playhead, and it
  * drags onto the timeline like a media card.
  */
 
-export type AudioSection = "extracted" | "voiceovers" | "music" | "sounds";
+/** A section's id: "extracted", "voiceovers", "favorites", "files", `music:<category>` or `sfx:<category>`. */
+export type AudioSection = string;
+
+/** The column beside the Audio tab, as CapCut's: Extracted, Voiceovers, Yours, then the libraries' categories. */
+export const audioSections = () => [
+  { id: "extracted", label: "Extracted" },
+  { id: "voiceovers", label: "Voiceovers" },
+  { id: "favorites", label: "Favorites", under: "Yours" },
+  { id: "files", label: "Imported", under: "Yours" },
+  ...MUSIC_CATEGORIES.map((c) => ({ id: librarySection("music", c), label: c.label, under: "Music" })),
+  ...SFX_CATEGORIES.map((c) => ({ id: librarySection("sfx", c), label: c.label, under: "Sound effects" })),
+];
 
 /** A sound listed here: what the timeline needs to add it, and what the row shows. */
 type Sound = { key: string; name: string; detail: string; url: string; seconds: number; item: MediaItem };
@@ -145,10 +160,11 @@ const Heading: React.FC<{ children: React.ReactNode; end?: React.ReactNode }> = 
   </div>
 );
 
-const AudioMenu: React.FC<{ section: AudioSection }> = ({ section }) => {
+const AudioMenu: React.FC<{ section: AudioSection; onOpen?: (section: AudioSection) => void }> = ({ section, onOpen }) => {
   const { data, isLoading } = useProjectSounds();
   const assets = useClipStore((s) => s.assets);
   const onTimeline = useMemo(() => new Set(Object.values(assets).map((a) => a?.path)), [assets]);
+  const credited = useMemo(() => new Set(Object.values(assets).flatMap((a) => (a?.credit ? [a.credit.id] : []))), [assets]);
   const openVoiceover = useVoiceoverPanel((s) => s.setOpen);
   const [importing, setImporting] = useState(false);
   const run = (kind: "video" | "audio") => async () => {
@@ -167,17 +183,10 @@ const AudioMenu: React.FC<{ section: AudioSection }> = ({ section }) => {
     </div>
   );
   const files = data?.files ?? [];
-  const library = (title: string, body: string) => (
-    <>
-      <Empty icon={section === "music" ? LuMusic : LuAudioLines} title={title} body={body} action={{ label: importing ? "Importing…" : "Import audio", onClick: run("audio"), testId: "audio-import" }} />
-      {files.length > 0 && (
-        <>
-          <Heading>Your audio files</Heading>
-          {rows(files, LuMusic)}
-        </>
-      )}
-    </>
-  );
+  const lib = parseLibrarySection(section);
+
+  if (lib) return <div data-testid={`audio-section-${section}`} className="h-full"><MusicLibraryView kind={lib.kind} category={lib.category} onTimeline={credited} /></div>;
+  if (section === "favorites") return <div data-testid="audio-section-favorites" className="h-full"><MusicFavorites onTimeline={credited} onGoTo={(kind) => onOpen?.(librarySection(kind, (kind === "music" ? MUSIC_CATEGORIES : SFX_CATEGORIES)[0]))} /></div>;
 
   return (
     <ScrollArea className="h-full">
@@ -228,8 +237,17 @@ const AudioMenu: React.FC<{ section: AudioSection }> = ({ section }) => {
               />
             )
           ))}
-        {section === "music" && library("A music library is coming", "Openly licensed tracks will live here. Until then, import your own audio files.")}
-        {section === "sounds" && library("Sound effects are coming", "A library of openly licensed sound effects will live here. Until then, import your own audio files.")}
+        {section === "files" && (
+          <>
+            <Empty
+              icon={LuMusic}
+              title={files.length ? "Your audio files" : "No imported audio yet"}
+              body="Audio files you import from the computer are kept in this project and listed here."
+              action={{ label: importing ? "Importing…" : "Import audio", onClick: run("audio"), testId: "audio-import" }}
+            />
+            {files.length > 0 && rows(files, LuMusic)}
+          </>
+        )}
       </div>
     </ScrollArea>
   );

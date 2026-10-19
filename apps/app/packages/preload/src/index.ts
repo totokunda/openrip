@@ -59,6 +59,9 @@ export type { VoiceoverStatus, VoiceoverStart, VoiceoverStop, VoiceoverLevel, Vo
 // The Stickers tab's downloads and cache
 export { stickersCached, stickerDownload, stickerStore } from "./stickers.js";
 export type { StickerFile } from "./stickers.js";
+// The Audio tab's Music and Sound effects libraries (Openverse)
+export { musicSearch, musicState, musicDownload, musicFavorite } from "./music.js";
+export type { MusicKind, MusicLicense, MusicTrack, MusicSearch, MusicSearchResult, MusicFile } from "./music.js";
 // Auto captions: local speech recognition and its models (the main process's SpeechModule)
 export { speechStatus, speechDownload, speechDownloadCancel, speechDelete, speechTranscribe, speechProgress, speechCancel } from "./speech.js";
 export type { SpeechModelState, SpeechStatus, SpeechAsk, SpeechCaption, SpeechResult, SpeechAnswer } from "./speech.js";

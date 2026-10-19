@@ -18,6 +18,7 @@ import { speechModule } from "./modules/SpeechModule.js";
 import { capCutImportModule } from "./modules/CapCutImportModule.js";
 import { appMenu } from "./modules/AppMenu.js";
 import { stickerLibraryModule } from "./modules/StickerLibraryModule.js";
+import { musicLibraryModule } from "./modules/MusicLibraryModule.js";
 import { app } from "electron";
 
 export async function initApp(initConfig: AppInitConfig) {
@@ -41,6 +42,8 @@ export async function initApp(initConfig: AppInitConfig) {
     .init(capCutImportModule())
     // The Stickers tab's downloads and cache
     .init(stickerLibraryModule())
+    // The Audio tab's Music and Sound effects (Openverse) and their cache
+    .init(musicLibraryModule())
     .init(appMenu())
     .init(appDirProtocol())
     .init(

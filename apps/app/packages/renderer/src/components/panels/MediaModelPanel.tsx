@@ -31,7 +31,7 @@ import TextMenu from "../menus/TextMenu";
 import TransitionMenu from "../menus/TransitionMenu";
 import ShapesMenu from "../menus/ShapesMenu";
 import StickersMenu, { stickerSections } from "../menus/StickersMenu";
-import AudioMenu, { type AudioSection } from "../menus/AudioMenu";
+import AudioMenu, { audioSections } from "../menus/AudioMenu";
 import PendingMenu, { type Pending } from "../menus/PendingMenu";
 import CaptionsMenu from "../menus/CaptionsMenu";
 import { useAutoCaptionsFocus } from "@/lib/autocaptions";
@@ -72,12 +72,8 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
     { id: "local", label: "Media", under: "Import" },
     { id: "library", label: "Library" },
   ],
-  audio: [
-    { id: "extracted", label: "Extracted" },
-    { id: "voiceovers", label: "Voiceovers" },
-    { id: "music", label: "Music" },
-    { id: "sounds", label: "Sound effects" },
-  ],
+  // Extracted, Voiceovers, Yours (Favorites, Imported), then the Music and Sound effects categories.
+  audio: audioSections(),
   // CapCut's Text column: Add text, its presets by category, Local captions (the file import).
   text: [
     { id: "add", label: "Add text" },
@@ -239,7 +235,7 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
       case "stickers":
         return sub === "shapes" ? <ShapesMenu /> : <StickersMenu part={sub} />;
       case "audio":
-        return <AudioMenu section={sub as AudioSection} />;
+        return <AudioMenu section={sub} onOpen={(v) => setPicked((p) => ({ ...p, audio: v }))} />;
       default:
         return <PendingMenu section={section as Pending} />;
     }

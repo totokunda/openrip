@@ -10,7 +10,7 @@
 // - Fill channel: one side on both, or (OpenRip's own) both mixed to mono.
 // - Voiceover: the recording the main process made (preload `voiceoverStop`) as an asset and an
 //   audio clip on a new track at the playhead, as CapCut puts a voiceover.
-import type { AnyClipProps, Asset, AudioClipProps, ChannelFill, ClipLoudness, TimelineProps, VideoClipProps } from "./types";
+import type { AnyClipProps, Asset, AssetCredit, AudioClipProps, ChannelFill, ClipLoudness, TimelineProps, VideoClipProps } from "./types";
 import { preferences } from "./preferences";
 
 /** CapCut's loudness target, LUFS. */
@@ -90,7 +90,7 @@ export const CHANNEL_FILLS: { id: ChannelFill; name: string }[] = [
 export const setChannelFill = (clip: AnyClipProps, fill: ChannelFill): Partial<AnyClipProps> => (hasSound(clip) ? ({ channel: fill } as Partial<AnyClipProps>) : {});
 
 /** A finished voiceover (preload `voiceoverStop`): the file and its length. */
-export type Voiceover = { path: string; durationSec: number };
+export type Voiceover = { path: string; durationSec: number; /** A library track's credit, kept on its asset. */ credit?: AssetCredit };
 
 /** A voiceover's audio clip: on `timelineId` from frame `startFrame`, as long as the recording. */
 export const voiceoverClip = (v: Voiceover, assetId: string, timelineId: string, startFrame: number, fps: number, clipId: string): AudioClipProps => ({
@@ -118,7 +118,7 @@ export type VoiceoverStore = {
  * from timeline frame `frame`. Returns the clip.
  */
 export const placeVoiceover = (store: VoiceoverStore, v: Voiceover, url: string, frame: number, fps: number, newId: () => string = () => crypto.randomUUID()): AudioClipProps => {
-  const asset = store.addAsset({ path: url, type: "audio", duration: v.durationSec });
+  const asset = store.addAsset({ path: url, type: "audio", duration: v.durationSec, ...(v.credit ? { credit: v.credit } : {}) });
   const timelineId = newId();
   store.addTimeline({ timelineId, type: "audio", timelineHeight: 54 });
   const clip = voiceoverClip(v, asset.id, timelineId, Math.max(0, Math.round(frame)), fps, newId());

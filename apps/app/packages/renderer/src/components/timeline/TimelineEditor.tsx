@@ -1090,7 +1090,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       let asset: Asset | null = null
 
       if (data.type === 'audio' || data.type === 'video' || data.type === 'image') {
-        asset = addAsset({ path: (data as MediaItem)?.assetUrl });
+        asset = addAsset({ path: (data as MediaItem)?.assetUrl, credit: (data as MediaItem)?.credit });
       }
 
       // @ts-ignore
