@@ -35,13 +35,15 @@ export default async (ctx) => {
   await win.keyboard.press("Escape");
   await win.waitForTimeout(200);
 
-  // Stickers ▸ Shapes: a rectangle at the playhead.
+  // Stickers ▸ Shapes: a rectangle at the playhead (the tile's +).
   const before = await savedProject(win, udDir);
   const shapes0 = clipsWhere(before, (c) => c.type === "shape").length;
   await win.locator("[data-testid=assets-tab-stickers]").click();
   check("no Draw section in the Stickers tab", (await win.locator("[data-testid=assets-section-draw]").count()) === 0);
   await win.locator("[data-testid=assets-section-shapes]").click();
-  await settled(win, () => win.locator("[data-testid=shape-rectangle]").click());
+  await win.mouse.move(5, 5);
+  await win.locator("[data-testid=shape-rectangle]").hover();
+  await settled(win, () => win.locator("[data-testid=shape-add-rectangle]").click());
   let doc = await savedProject(win, udDir);
   const known = new Set(clipsWhere(before, (c) => c.type === "shape").map((c) => c.clipId));
   const rects = clipsWhere(doc, (c) => c.type === "shape" && c.shapeType === "rectangle" && !known.has(c.clipId));

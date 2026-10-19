@@ -1,10 +1,12 @@
 // Stickers ▸ Shapes, as CapCut's (after import timeline): the tab's column (Stickers, Shapes;
-// no Draw), the library's eight tiles in CapCut's order; each shape added by a click at the
+// no Draw), the library's eight tiles in CapCut's order; a click on a tile only previews the
+// shape in the player (the saved project is unchanged); each shape added by the tile's "+" at the
 // playhead with CapCut's look (saved fields, the engine's frame, ⌘Z / ⇧⌘Z); a tile dragged
 // onto the timeline (at that time) and onto the player (at the playhead, where it was let go);
 // the shape's inspector (CapCut's groups; Stroke, Shadow, a dashed style and an arrow cap
 // changing the frame, each undone and redone); and S with a number key dragging out a
-// triangle.
+// triangle; and a drag with the S tool starting over a shape or the video drawing a shape without
+// selecting the clip under it.
 import { drag, engineFrame, previewRect, rulerMap, seek, settled, tab, timelineRect } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject, select } from "./_anim.mjs";
 import { press, state, undoCase } from "./_undo.mjs";
@@ -26,7 +28,7 @@ export default async (ctx) => {
   await win.locator("[data-testid=assets-section-shapes]").click();
   await win.waitForTimeout(300);
   const tiles = await win.evaluate(() =>
-    [...document.querySelectorAll("[data-testid=shapes-library] [data-testid^=shape-]")].map((t) => {
+    [...document.querySelectorAll("[data-testid=shapes-library] [data-testid^=shape-]:not([data-testid^=shape-add-])")].map((t) => {
       const r = t.getBoundingClientRect();
       return { id: t.getAttribute("data-testid").slice(6), w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.x), y: Math.round(r.y), bg: getComputedStyle(t).backgroundColor };
     }),
@@ -36,12 +38,30 @@ export default async (ctx) => {
   check("rows are 30 px apart", tiles[3] && tiles[3].y - tiles[0].y === 116, `${tiles[3]?.y - tiles[0].y}`);
   await shot("sh1-library");
 
-  // Each shape: a click adds it at the playhead, three seconds long, CapCut's look.
+  // A click on a tile only previews the shape: nothing is added, the project stays as it was.
   const before = await doc();
+  const countBefore = JSON.stringify(before.timeline.clips.map((c) => c.clipId));
+  await win.locator("[data-testid=shape-rectangle]").click();
+  await win.waitForTimeout(600);
+  const ringed = await win.locator("[data-testid=shape-rectangle]").evaluate((t) => t.className.includes("ring-brand-accent"));
+  check("a click on a tile previews it (the tile is marked)", ringed);
+  check("and adds nothing", JSON.stringify((await doc()).timeline.clips.map((c) => c.clipId)) === countBefore);
+  await shot("sh1b-preview");
+  await win.locator("[data-testid=shape-ellipse]").click();
+  await win.waitForTimeout(300);
+  check("another tile takes the preview", !(await win.locator("[data-testid=shape-rectangle]").evaluate((t) => t.className.includes("ring-brand-accent"))));
+  check("still nothing added", JSON.stringify((await doc()).timeline.clips.map((c) => c.clipId)) === countBefore);
+
+  // Each shape: its "+" (shown on hover) adds it at the playhead, three seconds long, CapCut's look.
+  const addTile = async (id) => {
+    await win.mouse.move(5, 5); // off the tiles, so the hover starts over
+    await win.locator(`[data-testid=shape-${id}]`).hover();
+    await win.locator(`[data-testid=shape-add-${id}]`).click();
+  };
   const canvas = { w: WORLD_H * (before.settings.aspectRatio.width / before.settings.aspectRatio.height), h: WORLD_H };
   const k = Math.min(canvas.w, canvas.h) / 1080;
   for (const id of ORDER.slice(0, 7)) {
-    const res = await undoCase(ctx, check, `add ${id}`, () => settled(win, () => win.locator(`[data-testid=shape-${id}]`).click()));
+    const res = await undoCase(ctx, check, `add ${id}`, () => settled(win, () => addTile(id)));
     const added = clipsWhere({ timeline: { clips: JSON.parse(res.after.doc).clips } }, (c) => c.type === "shape" && c.shapeType === id)[0];
     if (added) {
       const t = added.transform;
@@ -117,7 +137,7 @@ export default async (ctx) => {
   // A line's inspector: no Fill, its caps; an arrow at its end.
   await win.locator("[data-testid=assets-tab-stickers]").click();
   await win.locator("[data-testid=assets-section-shapes]").click();
-  await settled(win, () => win.locator("[data-testid=shape-line]").click());
+  await settled(win, () => addTile("line"));
   await win.waitForTimeout(500);
   const lineGroups = await win.evaluate(() => [...document.querySelectorAll("[data-testid^=shape-group-]")].map((g) => g.getAttribute("data-testid").slice(12)));
   check("a line has no Fill or Corner radius", JSON.stringify(lineGroups) === JSON.stringify(["transform", "stroke", "shadow"]), JSON.stringify(lineGroups));
@@ -143,5 +163,45 @@ export default async (ctx) => {
   check("the drag makes a triangle", clipsWhere(d, (c) => c.shapeType === "triangle").length === tri0 + 1);
   check("the engine draws the shapes", (await engineFrame(win)).w > 16);
   await shot("sh7-s-tool");
+
+  // Tool-blind selection: a drag with the S tool that starts over the video or a shape draws a
+  // shape, and the clip under the drag is not selected.
+  const shapeGroups = () => win.locator("[data-testid=shape-group-transform]").count();
+  const under = clipsWhere(d, (c) => c.clipId === onPlayer.clipId)[0].transform;
+  const video = clipsWhere(d, (c) => c.type === "video")[0];
+  await select(ctx, d, video.clipId);
+  check("the video is selected (no shape inspector)", (await shapeGroups()) === 0);
+  // The canvas on screen: as tall as the player's stage, centred in it (measured now, as the
+  // panels' layout has moved; and before a tool is picked); the dropped rectangle sticks out at
+  // its right, so aim inside it.
+  const stage = await previewRect(win);
+  const cvw = stage.h * (canvas.w / canvas.h);
+  const cv = { x: stage.x + (stage.w - cvw) / 2, y: stage.y, w: cvw, h: stage.h };
+  const ux = cv.x + cv.w * ((under.x + Math.min(under.x + under.width, canvas.w - 4)) / 2 / canvas.w);
+  const uy = cv.y + cv.h * ((under.y + under.height / 2) / canvas.h);
+  const rect0 = clipsWhere(d, (c) => c.shapeType === "rectangle").length;
+  await win.evaluate(() => document.activeElement?.blur?.());
+  await win.keyboard.press("s");
+  await win.keyboard.press("1");
+  await win.waitForTimeout(200);
+  await settled(win, () => drag(win, ux - 4, uy - 6, ux - 24, uy + 14));
+  await shot("sh8-s-over-shape");
+  await win.keyboard.press("v");
+  d = await doc();
+  check("S-drag starting over a shape draws a new shape", clipsWhere(d, (c) => c.shapeType === "rectangle").length === rect0 + 1);
+  check("and the shape under the drag is not selected", (await shapeGroups()) === 0, `${await shapeGroups()}`);
+  // The other way: a shape selected, the drag over the video alone.
+  await select(ctx, d, onPlayer.clipId);
+  check("the shape is selected", (await shapeGroups()) > 0);
+  await win.evaluate(() => document.activeElement?.blur?.());
+  await win.keyboard.press("s");
+  await win.keyboard.press("1");
+  await win.waitForTimeout(200);
+  await settled(win, () => drag(win, cv.x + cv.w * 0.1, cv.y + cv.h * 0.75, cv.x + cv.w * 0.25, cv.y + cv.h * 0.9));
+  await win.keyboard.press("v");
+  d = await doc();
+  check("S-drag over the video draws a shape", clipsWhere(d, (c) => c.shapeType === "rectangle").length === rect0 + 2);
+  const tabsNow = await win.evaluate(() => [...document.querySelectorAll("[data-testid=inspector] [role=tab]")].map((t) => t.innerText.trim()));
+  check("and the video under the drag is not selected (no Video tab)", !tabsNow.includes("Video"), JSON.stringify(tabsNow));
   return report();
 };
