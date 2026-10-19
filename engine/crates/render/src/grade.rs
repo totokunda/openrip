@@ -236,6 +236,7 @@ pub(crate) struct GradeFx {
     clarity_add: wgpu::RenderPipeline,
     clarity_final: wgpu::RenderPipeline,
     vignette: wgpu::RenderPipeline,
+    particles: wgpu::RenderPipeline,
     /// Curve tables by key, with the frame they were last used in.
     tables: Mutex<HashMap<u64, (wgpu::Texture, u64)>>,
 }
@@ -276,6 +277,7 @@ impl GradeFx {
             clarity_add: pipeline(&finish, "fs_clarity_add", LEVEL),
             clarity_final: pipeline(&finish, "fs_clarity_final", crate::CANVAS),
             vignette: pipeline(&finish, "fs_vignette", crate::CANVAS),
+            particles: pipeline(&finish, "fs_particles", crate::CANVAS),
             tables: Default::default(),
         }
     }
@@ -347,6 +349,15 @@ impl Compositor {
     pub(crate) fn vignette_pass(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, dst: &wgpu::Texture, intensity: f32) {
         let params = [src.width() as f32, src.height() as f32, 0.0, 0.0, intensity.clamp(-1.0, 1.0), vignette_param(intensity), 0.0, 0.0];
         self.canvas_pass(enc, &self.grade.vignette, src, src, dst, &params);
+    }
+
+    /// The Particles slider: film grain on `src` into `dst` (same size), `amount` 0..1, the
+    /// pattern from `seed` (a different one each frame). A grain is about a thousandth of the
+    /// picture's height across, at least a pixel, so a preview and a full-size export look alike.
+    pub(crate) fn particles_pass(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, dst: &wgpu::Texture, amount: f32, seed: f32) {
+        let cell = (src.height() as f32 / 900.0).max(1.0).round();
+        let params = [src.width() as f32, src.height() as f32, 0.0, 0.0, amount.clamp(0.0, 1.0), seed, cell, 0.0];
+        self.canvas_pass(enc, &self.grade.particles, src, src, dst, &params);
     }
 
     /// The curves' tables on the GPU (1024 × 4, R32Float), made the first time they're drawn.

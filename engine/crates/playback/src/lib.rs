@@ -23,6 +23,7 @@ mod gif;
 pub mod input;
 pub mod mask;
 pub mod output;
+pub mod pattern;
 pub mod pipeline;
 mod player;
 pub mod preview;

@@ -20,11 +20,14 @@ struct FX {
     size: vec2<f32>,
     // 1 on the frame's canvas (always opaque), 0 in a clip's own group.
     opaque: f32,
-    pad: f32,
+    // 1 when the effect is limited to a mask (the bar's Mask tab): `mask` holds its coverage.
+    masked: f32,
 }
 
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var<uniform> F: FX;
+// The mask's coverage in the red channel (stretched over the picture), when `F.masked` is 1.
+@group(0) @binding(2) var mask: texture_2d<f32>;
 
 const PI: f32 = 3.14159265;
 const TAU: f32 = 6.28318531;
@@ -917,6 +920,22 @@ fn run(uv: vec2<f32>, pos: vec2<f32>, c: vec4<f32>) -> vec4<f32> {
     }
 }
 
+fn mask_texel(q: vec2<i32>) -> f32 {
+    let d = vec2<i32>(textureDimensions(mask));
+    return textureLoad(mask, clamp(q, vec2<i32>(0), d - vec2<i32>(1)), 0).r;
+}
+
+// The mask bilinearly, stretched over the picture.
+fn mask_coverage(pos: vec2<f32>) -> f32 {
+    let p = pos * vec2<f32>(textureDimensions(mask)) / F.size - vec2<f32>(0.5);
+    let i = floor(p);
+    let f = p - i;
+    let a = vec2<i32>(i);
+    let top = mix(mask_texel(a), mask_texel(a + vec2<i32>(1, 0)), f.x);
+    let bottom = mix(mask_texel(a + vec2<i32>(0, 1)), mask_texel(a + vec2<i32>(1, 1)), f.x);
+    return mix(top, bottom, f.y);
+}
+
 @fragment
 fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let p = floor(frag.xy);
@@ -930,6 +949,10 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     o = vec4<f32>(min(o.rgb, vec3<f32>(o.a)), o.a);
     if (F.opaque > 0.5) {
         o = vec4<f32>(o.rgb, 1.0);
+    }
+    // Limited to a mask: the effect inside it, the picture as it was outside, soft at the edge.
+    if (F.masked > 0.5) {
+        o = mix(c, o, mask_coverage(frag.xy));
     }
     return o;
 }

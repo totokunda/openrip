@@ -22,7 +22,10 @@ pub struct Wheel {
 }
 
 /// CapCut's primary colour wheels (lift / gamma / gain / offset), applied before the
-/// Adjust sliders. `intensity` 0 turns them off.
+/// Adjust sliders. `intensity` 0 turns them off. With `log` the same four wheels are the
+/// Log wheels: `lift` is the Shadow wheel, `gamma` the Middle tone, `gain` the Highlight
+/// and `offset` the Offset, each shifting the picture in log space (OpenRip's own maths,
+/// `log_wheels` in adjust.wgsl) instead of lift, gamma and gain on the encoded values.
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct Wheels {
     pub lift: Wheel,
@@ -30,11 +33,54 @@ pub struct Wheels {
     pub gain: Wheel,
     pub offset: Wheel,
     pub intensity: f32,
+    pub log: bool,
 }
 
 impl Wheels {
     fn is_identity(&self) -> bool {
-        self.intensity.abs() <= 1e-5 || *self == Wheels { intensity: self.intensity, ..Default::default() }
+        self.intensity.abs() <= 1e-5 || *self == Wheels { intensity: self.intensity, log: self.log, ..Default::default() }
+    }
+}
+
+/// How far a Log wheel's full value shifts a value's log encoding (0 to 1 across the range).
+pub const LOG_WHEEL_REACH: f32 = 0.25;
+
+/// A value 0..1 in the log encoding the Log wheels work in: `log2(1 + 63 c) / 6`.
+pub fn log_encode(c: f32) -> f32 {
+    (1.0 + 63.0 * c.clamp(0.0, 1.0)).log2() / 6.0
+}
+
+/// The inverse of `log_encode`.
+pub fn log_decode(x: f32) -> f32 {
+    ((6.0 * x.clamp(0.0, 1.0)).exp2() - 1.0) / 63.0
+}
+
+/// How much of each Log wheel (shadow, middle, highlight) reaches a value `c` (0..1, as
+/// shown): the shadow wheel the darks, the highlight wheel the lights, the middle tone what's
+/// between, crossing smoothly at a half.
+pub fn log_weights(c: f32) -> [f32; 3] {
+    let smooth = |a: f32, b: f32| {
+        let t = ((c - a) / (b - a)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    let (s, h) = (1.0 - smooth(0.0, 0.5), smooth(0.5, 1.0));
+    [s, (1.0 - s - h).max(0.0), h]
+}
+
+impl Wheels {
+    /// One straight colour (0..1) through the Log wheels, mixed in by the intensity: the CPU
+    /// twin of `log_wheels` in adjust.wgsl.
+    pub fn apply_log(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let channel = |w: &Wheel, i: usize| [w.red, w.green, w.blue][i].clamp(-1.0, 1.0) + w.luma.clamp(-1.0, 1.0);
+        let mut out = rgb;
+        for i in 0..3 {
+            let x = log_encode(rgb[i]);
+            let [ws, wm, wh] = log_weights(rgb[i]);
+            let shift = ws * channel(&self.lift, i) + wm * channel(&self.gamma, i) + wh * channel(&self.gain, i) + channel(&self.offset, i);
+            out[i] = log_decode(x + shift * LOG_WHEEL_REACH);
+        }
+        let k = self.intensity.clamp(0.0, 1.0);
+        [0, 1, 2].map(|i| rgb[i] + (out[i] - rgb[i]) * k)
     }
 }
 
@@ -65,6 +111,10 @@ pub struct Adjust {
     /// clarity 0..1, vignette -1..1 (below 0 it lightens the edges).
     pub clarity: f32,
     pub vignette: f32,
+    /// The Particles slider (0..1): film grain over the picture, its pattern made from `grain_seed`
+    /// (the frame it's on, so it moves from frame to frame as film's does).
+    pub particles: f32,
+    pub grain_seed: f32,
 }
 
 /// CapCut's exposure lookup tables (17 grids of 17x17, side by side: 289x17), its fade table
@@ -82,9 +132,9 @@ impl Adjust {
         self.sliders_identity() && self.colour_identity() && self.finish_identity()
     }
 
-    /// Whether clarity and the vignette leave the picture as it is.
+    /// Whether clarity, the grain and the vignette leave the picture as it is.
     pub(crate) fn finish_identity(&self) -> bool {
-        self.clarity.abs() <= 1e-5 && self.vignette.abs() <= 1e-5
+        self.clarity.abs() <= 1e-5 && self.vignette.abs() <= 1e-5 && self.particles.abs() <= 1e-5
     }
 
     /// Whether the HSL and curves pass leaves the picture as it is.
@@ -139,6 +189,15 @@ impl Adjust {
             p.w_offset = [c(w.offset.red), c(w.offset.green), c(w.offset.blue), c(w.offset.saturation)];
             p.w_sat = [c(w.lift.saturation) * 0.5, gamma_s(w.gamma.saturation), gain(w.gain.saturation, 2.0), 1.0];
             p.w_on = [c(w.intensity), 1.0, 0.0, 0.0];
+            if w.log {
+                // The Log wheels: Shadow, Middle tone, Highlight and Offset as they are (R, G, B, luma).
+                let v = |w: &Wheel| [c(w.red), c(w.green), c(w.blue), c(w.luma)];
+                p.w_lift = v(&w.lift);
+                p.w_gamma = v(&w.gamma);
+                p.w_gain = v(&w.gain);
+                p.w_offset = v(&w.offset);
+                p.w_on[2] = 1.0;
+            }
         }
         p.on2 = [on(self.highlights), on(self.shadows), on(self.blacks).max(on(self.whites)), on(self.exposure) * has_lut as u8 as f32];
         p.fade = [self.fade.clamp(0.0, 1.0), on(self.fade) * has_fade as u8 as f32, 0.0, 0.0];

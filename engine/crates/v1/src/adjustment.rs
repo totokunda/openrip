@@ -45,6 +45,33 @@ mod tests {
         assert!(seg.effect_at(e, Micros(0)).params["intensity"].abs() < 1e-9);
     }
 
+    /// An effect bar's masks (its Mask tab) become masks on its segment, drawn inside which the
+    /// effect shows; the Log wheels, Particles and a canvas pattern come through as well.
+    #[test]
+    fn effect_bar_masks_log_wheels_particles_and_canvas_patterns_import() {
+        let mask = json!({"id": "m1", "tool": "shape", "featherAmount": 0, "transform": {"x": 0, "y": 0, "width": 1066.6666666666667, "height": 600, "scaleX": 1, "scaleY": 1},
+            "keyframes": {"0": {"shapeBounds": {"x": 0, "y": 0, "width": 400, "height": 300, "shapeType": "rectangle"}}}});
+        let bar = import_v1_json(&doc(json!({"adjustment": false, "effectId": "invert", "masks": [mask]}))).unwrap().project;
+        let seg = bar.tracks.iter().flat_map(|t| &t.segments).find(|s| s.id == "adj").unwrap();
+        assert_eq!(seg.attachments.iter().filter(|a| bar.materials.masks.iter().any(|m| &m.id == *a)).count(), 1);
+        let track = bar.tracks.iter().find(|t| t.segments.iter().any(|s| s.id == "adj")).unwrap();
+        assert_eq!(track.kind, TrackKind::Effect);
+
+        // The Log wheels: their own values, the shared strength.
+        let color = json!({"wheels": {"mode": "log", "intensity": 60, "lift": {"red": 0.9}, "log": {"lift": {"luma": 0.5}, "offset": {"red": 0.25}}}, "adjust": {"particles": 40}});
+        let layer = import_v1_json(&doc(json!({"color": color}))).unwrap().project;
+        let w = layer.materials.color_wheels.iter().find(|w| w.id == crate::color::wheels_id("adj")).unwrap();
+        assert!(w.log && (w.intensity - 0.6).abs() < 1e-9);
+        assert_eq!((w.lift.luma, w.lift.red, w.offset.red), (0.5, 0.0, 0.25));
+        // Particles is a slider on CapCut's 0 to 100 scale.
+        let e = layer.materials.effects.iter().find(|e| e.id == slider_id("adj", "particles")).unwrap();
+        assert!((e.params["intensity"] - 0.4).abs() < 1e-9);
+        // Primary mode ignores the log values.
+        let primary = import_v1_json(&doc(json!({"color": {"wheels": {"lift": {"red": 0.9}, "log": {"lift": {"luma": 0.5}}}}}))).unwrap().project;
+        let w = primary.materials.color_wheels.iter().find(|w| w.id == crate::color::wheels_id("adj")).unwrap();
+        assert!(!w.log && w.lift.red == 0.9 && w.lift.luma == 0.0);
+    }
+
     /// A filter clip that isn't an adjustment layer stays a filter bar.
     #[test]
     fn other_filter_bars_stay_filters() {

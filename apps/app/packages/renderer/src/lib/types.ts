@@ -452,7 +452,8 @@ export type EnhanceSettings = {
 
 /**
  * CapCut's Adjust › Basic sliders (the engine draws all of them): on CapCut's scale, −50…50,
- * except sharpen, clarity, vignette and fade, 0…100 (a vignette below 0 lightens the edges).
+ * except sharpen, clarity, particles, vignette and fade, 0…100 (a vignette below 0 lightens the
+ * edges; particles is film grain).
  * 0 is off.
  */
 export type AdjustSlider =
@@ -468,6 +469,7 @@ export type AdjustSlider =
   | "blacks"
   | "sharpen"
   | "clarity"
+  | "particles"
   | "vignette"
   | "fade";
 
@@ -495,7 +497,8 @@ export type ClipLut = { path: string; name?: string; intensity?: number };
  * - `curves`: points per channel, sorted or not, the ends included (a curve needs two); the
  *   engine draws the smooth curve CapCut draws through them;
  * - `wheels`: the primary wheels (lift, gamma, gain, offset) and their strength, 0–100
- *   (100 when missing);
+ *   (100 when missing); `mode` "log" draws the Log wheels instead (`log`: lift is Shadow, gamma
+ *   Middle tone, gain Highlight, and Offset), each mode keeping its own values;
  * - `lut`: a LUT, drawn first;
  * - `auto`: Auto adjust's record of the slider values it put into `adjust` (lib/color-tools.ts);
  * - `match`: Color match, a table the engine makes from both clips' statistics, drawn before
@@ -508,7 +511,15 @@ export type ClipColor = {
   adjust?: Partial<Record<AdjustSlider, number>>;
   hsl?: Partial<Record<HslRange, HslShift>>;
   curves?: Partial<Record<CurveChannel, CurvePointXY[]>>;
-  wheels?: { lift?: ColorWheel; gamma?: ColorWheel; gain?: ColorWheel; offset?: ColorWheel; intensity?: number };
+  wheels?: {
+    lift?: ColorWheel;
+    gamma?: ColorWheel;
+    gain?: ColorWheel;
+    offset?: ColorWheel;
+    intensity?: number;
+    mode?: "primary" | "log";
+    log?: { lift?: ColorWheel; gamma?: ColorWheel; gain?: ColorWheel; offset?: ColorWheel };
+  };
   lut?: ClipLut | null;
   auto?: ClipAutoAdjust | null;
   match?: ClipColorMatch | null;
@@ -571,10 +582,11 @@ export type ClipChromaKey = { color: string } & Record<ChromaSlider, number>;
 /**
  * What fills the canvas around a clip on the main track (CapCut's Canvas): a colour
  * (#rrggbb), the clip itself blurred (`blur`, CapCut's levels 0.0625, 0.375, 0.75, 1), or an
- * image (`image`, a path or file URL) covering the canvas. Ignored on other tracks, as in
+ * image (`image`, a path or file URL) covering the canvas, or one of OpenRip's own tiled
+ * patterns (`pattern`, an id in lib/canvas-patterns.ts). Ignored on other tracks, as in
  * CapCut.
  */
-export type ClipCanvas = { type: "color" | "blur" | "image"; color?: string; blur?: number; image?: string };
+export type ClipCanvas = { type: "color" | "blur" | "image" | "pattern"; color?: string; blur?: number; image?: string; pattern?: string };
 
 /** Mirrored on screen, about the clip's middle (CapCut's Mirror). */
 export type ClipFlip = { horizontal?: boolean; vertical?: boolean };

@@ -932,7 +932,7 @@ impl Compositor {
     }
 
     /// Apply a clip's colour grade to `src` in CapCut's order: HSL and curves, the Adjust
-    /// pass, Sharpen, clarity, then the vignette, each only when set. Returns the result (a
+    /// pass, Sharpen, clarity, the grain, then the vignette, each only when set. Returns the result (a
     /// pooled texture, or `src` itself if nothing changed it) and the intermediates to
     /// recycle.
     fn grade(&self, enc: &mut wgpu::CommandEncoder, src: &wgpu::Texture, adjust: &Adjust, luts: Option<&ExposureLuts>) -> (wgpu::Texture, Vec<wgpu::Texture>) {
@@ -957,6 +957,11 @@ impl Compositor {
         if adjust.clarity.abs() > 1e-5 {
             let next = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
             self.clarity_pass(enc, out.as_ref().unwrap_or(src), &next, adjust.clarity, &mut middle);
+            middle.extend(out.replace(next));
+        }
+        if adjust.particles.abs() > 1e-5 {
+            let next = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+            self.particles_pass(enc, out.as_ref().unwrap_or(src), &next, adjust.particles, adjust.grain_seed);
             middle.extend(out.replace(next));
         }
         if adjust.vignette.abs() > 1e-5 {
@@ -1394,7 +1399,7 @@ impl Compositor {
                 continue;
             }
             if let Source::Effect(pass) = layer.source {
-                self.effect_canvas(enc, canvas, place_pipeline, &pass, open.is_empty(), &mut scratch);
+                self.effect_canvas(enc, canvas, place_pipeline, &pass, open.is_empty(), &layer.mattes, &mut scratch);
                 continue;
             }
             if let Source::Blur(step) = layer.source {

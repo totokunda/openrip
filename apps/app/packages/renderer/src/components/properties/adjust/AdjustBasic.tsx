@@ -27,7 +27,7 @@ const GROUPS: { title: string; keys: AdjustSlider[] }[] = [
   { title: "Color", keys: ["temperature", "tint", "saturation"] },
   // The draft's "brightness" is CapCut's Brilliance, the seventh of its Lightness sliders.
   { title: "Lightness", keys: ["exposure", "contrast", "highlights", "shadows", "whites", "blacks", "brightness"] },
-  { title: "Effects", keys: ["sharpen", "clarity", "fade", "vignette"] },
+  { title: "Effects", keys: ["sharpen", "clarity", "particles", "fade", "vignette"] },
 ];
 const NAMES: Partial<Record<AdjustSlider, string>> = { temperature: "Temp", brightness: "Brilliance" };
 /** The colour sliders' gradient tracks, as CapCut paints them. */

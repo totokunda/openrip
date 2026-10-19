@@ -162,6 +162,29 @@ fn primary_wheels(orig: vec3<f32>) -> vec3<f32> {
     return clamp(mix(orig, c, A.w_on.x), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+// OpenRip's Log wheels: the picture in a log encoding (log2(1 + 63 c) / 6), each of the Shadow,
+// Middle tone and Highlight wheels shifting the values in its part of the range (the darks,
+// between, the lights, by the value as shown) and the Offset wheel all of them, a wheel's
+// colour (red, green, blue) and luma adding up, by at most a quarter of the range. Back from
+// the log encoding, mixed in by the intensity.
+fn log_encode(c: vec3<f32>) -> vec3<f32> {
+    return log2(vec3<f32>(1.0) + 63.0 * clamp(c, vec3<f32>(0.0), vec3<f32>(1.0))) / 6.0;
+}
+
+fn log_decode(x: vec3<f32>) -> vec3<f32> {
+    return (exp2(6.0 * clamp(x, vec3<f32>(0.0), vec3<f32>(1.0))) - vec3<f32>(1.0)) / 63.0;
+}
+
+fn log_wheels(orig: vec3<f32>) -> vec3<f32> {
+    let x = log_encode(orig);
+    let shadow = vec3<f32>(1.0) - smoothstep(vec3<f32>(0.0), vec3<f32>(0.5), orig);
+    let high = smoothstep(vec3<f32>(0.5), vec3<f32>(1.0), orig);
+    let mid = max(vec3<f32>(1.0) - shadow - high, vec3<f32>(0.0));
+    let shift = shadow * (A.w_lift.xyz + A.w_lift.w) + mid * (A.w_gamma.xyz + A.w_gamma.w) + high * (A.w_gain.xyz + A.w_gain.w) + (A.w_offset.xyz + A.w_offset.w);
+    let c = log_decode(x + shift * 0.25);
+    return clamp(mix(orig, c, A.w_on.x), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 @fragment
 fn fs_adjust(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let px = textureLoad(src, vec2<i32>(floor(pos.xy)), 0);
@@ -172,7 +195,11 @@ fn fs_adjust(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let zero = vec3<f32>(0.0);
     let one = vec3<f32>(1.0);
     if (A.w_on.y > 0.5) {
-        c = primary_wheels(c);
+        if (A.w_on.z > 0.5) {
+            c = log_wheels(c);
+        } else {
+            c = primary_wheels(c);
+        }
     }
     if (A.on1.z > 0.5) {
         // Brightness: y = 1 - (1 - x)^p, with a small offset when darkening.

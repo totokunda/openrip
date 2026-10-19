@@ -98,8 +98,8 @@ pub(crate) const ADJUST_KEYS: [&str; 8] = ["brightness", "contrast", "hue", "sat
 
 /// CapCut's Adjust sliders the engine draws (`PreviewEngine::adjust_of`), by the importer's
 /// names for them: all of its Adjust panel.
-pub(crate) const DRAWN_ADJUST: [&str; 14] =
-    ["brightness", "contrast", "saturation", "highlights", "shadows", "whites", "blacks", "temperature", "tint", "exposure", "sharpen", "clarity", "vignette", "fade"];
+pub(crate) const DRAWN_ADJUST: [&str; 15] =
+    ["brightness", "contrast", "saturation", "highlights", "shadows", "whites", "blacks", "temperature", "tint", "exposure", "sharpen", "clarity", "particles", "vignette", "fade"];
 
 /// CapCut's named HSL ranges, by its `hsl_color_type` 1–8.
 const HSL_RANGES: [&str; 8] = ["Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Purple", "Magenta"];
@@ -107,7 +107,7 @@ const HSL_RANGES: [&str; 8] = ["Red", "Orange", "Yellow", "Green", "Cyan", "Blue
 /// How CapCut shows an Adjust slider's value (−1…1 in the draft): times 50, or times 100 for
 /// the one-sided sliders (0…100).
 pub(crate) fn capcut_scale(name: &str) -> f64 {
-    if matches!(name, "sharpen" | "clarity" | "vignette" | "fade") { 100.0 } else { 50.0 }
+    if matches!(name, "sharpen" | "clarity" | "particles" | "vignette" | "fade") { 100.0 } else { 50.0 }
 }
 
 /// The animations and transitions the engine draws itself (`playback/src/animation.rs`,

@@ -5,7 +5,7 @@
 //!   engine's mode name ("screen", "color_burn", …); "normal" or none adds nothing.
 //! - `chroma` (videos, photos): `{color, intensity, shadow, edgeSmooth, spill}`, the colour
 //!   as `#rrggbb` and the sliders 0…100, a chroma key (CapCut's `chromas`, 0…1).
-//! - `canvas` (videos, photos): `{type: "color" | "blur" | "image", color, blur, image}`, a
+//! - `canvas` (videos, photos): `{type: "color" | "blur" | "image" | "pattern", color, blur, image, pattern}`, a
 //!   canvas fill (CapCut's `canvases`); the engine draws it for a clip on the main track.
 //!   `blur` is CapCut's level: 0.0625, 0.375, 0.75 or 1.
 //! - `flip` (videos, photos): `{horizontal, vertical}`, the transform's flips (CapCut's
@@ -79,6 +79,7 @@ pub(crate) fn set_canvas(clip: &str, value: Option<&Value>, materials: &mut Mate
         "color" => CanvasFillKind::Color { color: Rgba::from_hex(&s(v, "color")).unwrap_or(Rgba::BLACK) },
         "blur" => CanvasFillKind::Blur { amount: f(v, "blur", 0.375).clamp(0.0, 1.0) as f32 },
         "image" => CanvasFillKind::Image { path: crate::file_url_to_path(&s(v, "image")) },
+        "pattern" => CanvasFillKind::Pattern { id: s(v, "pattern") },
         _ => return,
     };
     materials.canvas_fills.push(CanvasFill { id: canvas_id(clip), fill });
@@ -118,6 +119,7 @@ pub(crate) fn emit(project: &Project, seg: &Segment, clip: &mut Map<String, Valu
             CanvasFillKind::Color { color } => json!({ "type": "color", "color": hex(*color) }),
             CanvasFillKind::Blur { amount } => json!({ "type": "blur", "blur": *amount as f64 }),
             CanvasFillKind::Image { path } => json!({ "type": "image", "image": path }),
+            CanvasFillKind::Pattern { id } => json!({ "type": "pattern", "pattern": id }),
         }),
     );
     clip.insert("flip".into(), json!({ "horizontal": seg.transform.flip_h, "vertical": seg.transform.flip_v }));

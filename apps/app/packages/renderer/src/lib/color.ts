@@ -34,6 +34,7 @@ export const ADJUST_SLIDERS: AdjustSliderInfo[] = [
   { key: "blacks", name: "Blacks", min: -50, max: 50, section: "lightness" },
   { key: "sharpen", name: "Sharpen", min: 0, max: 100, section: "effects" },
   { key: "clarity", name: "Clarity", min: 0, max: 100, section: "effects" },
+  { key: "particles", name: "Particles", min: 0, max: 100, section: "effects" },
   { key: "vignette", name: "Vignette", min: -100, max: 100, section: "effects" },
   { key: "fade", name: "Fade", min: 0, max: 100, section: "effects" },
 ];
@@ -93,10 +94,25 @@ export const setCurve = (clip: AnyClipProps, channel: CurveChannel, points: Curv
   return { color: { ...c, curves: { ...(c.curves ?? {}), [channel]: sorted } } } as Partial<AnyClipProps>;
 };
 
-/** A patch setting one wheel's values (CapCut's −1…1), or the wheels' strength (0–100). */
+/** The colour wheels' mode: Primary (the default) or Log. */
+export type WheelMode = "primary" | "log";
+export const wheelMode = (c: ClipColor): WheelMode => (c.wheels?.mode === "log" ? "log" : "primary");
+
+/** A wheel's values in the mode the panel is in (Log keeps its own set beside the primary one). */
+export const wheelOf = (c: ClipColor, wheel: WheelName): ColorWheel => (wheelMode(c) === "log" ? c.wheels?.log?.[wheel] : c.wheels?.[wheel]) ?? {};
+
+/** A patch setting one wheel's values (CapCut's −1…1) in the mode the panel is in. */
 export const setWheel = (clip: AnyClipProps, wheel: WheelName, value: ColorWheel): Partial<AnyClipProps> => {
   const c = colorOf(clip);
-  return { color: { ...c, wheels: { ...(c.wheels ?? {}), [wheel]: value } } } as Partial<AnyClipProps>;
+  const wheels = c.wheels ?? {};
+  if (wheelMode(c) === "log") return { color: { ...c, wheels: { ...wheels, log: { ...(wheels.log ?? {}), [wheel]: value } } } } as Partial<AnyClipProps>;
+  return { color: { ...c, wheels: { ...wheels, [wheel]: value } } } as Partial<AnyClipProps>;
+};
+
+/** A patch switching the wheels between Primary and Log (both keep their values). */
+export const setWheelMode = (clip: AnyClipProps, mode: WheelMode): Partial<AnyClipProps> => {
+  const c = colorOf(clip);
+  return { color: { ...c, wheels: { ...(c.wheels ?? {}), mode } } } as Partial<AnyClipProps>;
 };
 
 export const setWheelsIntensity = (clip: AnyClipProps, intensity: number): Partial<AnyClipProps> => {
@@ -117,7 +133,7 @@ export const isIdentityCurve = (points: CurvePointXY[] | undefined) => !points |
 export const isNeutralColor = (c: ClipColor | null | undefined): boolean => {
   if (!c) return true;
   const zero = (o: object | undefined) => !o || Object.values(o).every((v) => !v);
-  const wheelZero = WHEELS.every((w) => zero(c.wheels?.[w]));
+  const wheelZero = WHEELS.every((w) => zero(wheelOf(c, w)));
   return (
     zero(c.adjust) &&
     HSL_RANGES.every((r) => zero(c.hsl?.[r.key])) &&
@@ -190,7 +206,7 @@ const interpolate = (points: [number, number][], x: number) => {
 };
 
 /** CapCut's scale for a slider's draft value (times 50, or 100 for the one-sided ones). */
-const capcutScale = (key: AdjustSlider) => (["sharpen", "clarity", "vignette", "fade"].includes(key) ? 100 : 50);
+const capcutScale = (key: AdjustSlider) => (["sharpen", "clarity", "particles", "vignette", "fade"].includes(key) ? 100 : 50);
 
 /**
  * Move a clip's old sliders onto the CapCut-scale set: each one with a counterpart (contrast,

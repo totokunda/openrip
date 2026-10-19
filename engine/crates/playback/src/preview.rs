@@ -194,7 +194,7 @@ enum Pixels {
     Mix(openrip_render::Mix),
     /// One of OpenRip's own video effects over everything below it (an effect bar), or over
     /// the clip's group (an effect on the clip).
-    Effect(openrip_render::EffectPass),
+    Effect(openrip_render::EffectPass, Vec<Painted>),
     /// A main-track clip's own picture covering the canvas and blurred (its canvas fill), the
     /// blur's taps this many output pixels apart.
     Backdrop(Backdrop, f32),
@@ -853,7 +853,7 @@ impl PreviewEngine {
         let marker = Segment { id: format!("{}#fx", seg.id), ..seg.clone() };
         out.push((marker.clone(), Pixels::Begin(None)));
         self.draw(seg, t, w, h, out, report);
-        out.extend(passes.into_iter().map(|p| (marker.clone(), Pixels::Effect(p))));
+        out.extend(passes.into_iter().map(|p| (marker.clone(), Pixels::Effect(p, Vec::new()))));
         out.push((marker.clone(), Pixels::End));
         let still = crate::transition::Shot::STILL;
         out.push((marker, Pixels::Mix(mix_pixels(&crate::transition::Mix { outgoing: Some(still), incoming: None, mask: crate::transition::Mask::All }, w, h, None))));
@@ -892,6 +892,18 @@ impl PreviewEngine {
                 // Two rounds of the blur, each with half the variance.
                 let sigma = *amount as f64 * CANVAS_BLUR * w.min(h) as f64;
                 Pixels::Backdrop(source, (sigma / (BLUR_SIGMA_TAPS * std::f64::consts::SQRT_2)) as f32)
+            }
+            // One of OpenRip's own patterns, tiled over the canvas at its size (kept like a still).
+            CanvasFillKind::Pattern { id } => {
+                let name = format!("pattern:{id}:{w}x{h}");
+                let img = match self.still(&name) {
+                    Some(img) => img,
+                    None => match crate::pattern::fill(id, w, h) {
+                        Some(img) => self.keep_still(&name, img),
+                        None => return,
+                    },
+                };
+                Pixels::Cover(img, still_key(&name))
             }
             CanvasFillKind::Image { path } => {
                 if self.failed.contains_key(path) {
@@ -1102,18 +1114,22 @@ impl PreviewEngine {
                 Some("fade") => &mut a.fade,
                 Some("clarity") => &mut a.clarity,
                 Some("vignette") => &mut a.vignette,
+                Some("particles") => &mut a.particles,
                 _ => continue,
             };
             *slot = v;
             bundle = bundle.or(e.resource.as_deref());
         }
 
-        // Primary colour wheels (log wheels aren't drawn yet).
-        if let Some(w) = seg.attachments.iter().find_map(|id| self.project.materials.color_wheels.iter().find(|w| &w.id == id && !w.log)) {
+        // The primary colour wheels, or (a clip with only those) the Log wheels.
+        let wheels_of = |log: bool| seg.attachments.iter().find_map(|id| self.project.materials.color_wheels.iter().find(|w| &w.id == id && w.log == log));
+        if let Some(w) = wheels_of(false).or_else(|| wheels_of(true)) {
             let w = &seg.wheels_at(w, local);
             let wheel = |v: &openrip_model::WheelValue| openrip_render::Wheel { red: v.red as f32, green: v.green as f32, blue: v.blue as f32, luma: v.luma as f32, saturation: v.saturation as f32 };
-            a.wheels = openrip_render::Wheels { lift: wheel(&w.lift), gamma: wheel(&w.gamma), gain: wheel(&w.gain), offset: wheel(&w.offset), intensity: w.intensity as f32 };
+            a.wheels = openrip_render::Wheels { lift: wheel(&w.lift), gamma: wheel(&w.gamma), gain: wheel(&w.gain), offset: wheel(&w.offset), intensity: w.intensity as f32, log: w.log };
         }
+        // The grain's pattern changes with the frame (24 a second), the same in a preview and an export.
+        a.grain_seed = (local.0 / 41_667) as f32 % 997.0;
         a.hsl = crate::colour::hsl_of(&self.project, seg, local);
         a.curves = crate::colour::curves_of(&self.project, seg);
         if a.is_identity() {
@@ -1484,7 +1500,10 @@ impl PreviewEngine {
         // the bar lasts.
         if let Some(effect) = self.project.materials.effects.iter().find(|e| e.id == seg.material && e.builtin.as_deref().is_some_and(|b| b.starts_with(openrip_model::fx::BUILTIN_PREFIX))) {
             let local = seg.local_time(t);
-            return Ok(Self::effect_pass(seg, effect, local).map(Pixels::Effect));
+            // Limited to the bar's masks (its Mask tab), if it has any.
+            let Some(pass) = Self::effect_pass(seg, effect, local) else { return Ok(None) };
+            let mattes = self.masked(seg, (w, h), 0, local, local, None);
+            return Ok(Some(Pixels::Effect(pass, mattes)));
         }
         // A filter track's segment: CapCut's lookup table from the filter's bundle.
         if let Some(effect) = self.project.materials.effects.iter().find(|e| e.id == seg.material && e.category == EffectCategory::Filter).cloned() {
@@ -2036,7 +2055,7 @@ impl PreviewEngine {
                     Pixels::Begin(colour) => Layer::pass(Source::BeginGroup(*colour)),
                     Pixels::End => Layer::pass(Source::EndGroup),
                     Pixels::Mix(m) => Layer::pass(Source::Mix(*m)),
-                    Pixels::Effect(e) => Layer::pass(Source::Effect(*e)),
+                    Pixels::Effect(e, mattes) => Layer { mattes: painted(mattes), ..Layer::pass(Source::Effect(*e)) },
                     Pixels::Grade(mattes) => Layer {
                         mattes: painted(mattes),
                         adjust: self.adjust_of(seg, t),
@@ -2045,7 +2064,7 @@ impl PreviewEngine {
                         ..Layer::pass(Source::Grade)
                     },
                 };
-                if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_) | Pixels::Begin(_) | Pixels::End | Pixels::Mix(_) | Pixels::Effect(_) | Pixels::Grade(_)) {
+                if !matches!(p, Pixels::Wash(..) | Pixels::Cover(..) | Pixels::Blur(_) | Pixels::Begin(_) | Pixels::End | Pixels::Mix(_) | Pixels::Effect(..) | Pixels::Grade(_)) {
                     layer.opacity *= seg.opacity.sample(local);
                 }
                 if let Some(m) = motion {

@@ -3,7 +3,29 @@
 //! is `openrip_model::fx`; what a pass takes is just numbers, so the model and the renderer
 //! stay apart.
 
-use crate::{Compositor, Params, CANVAS};
+use std::borrow::Cow;
+
+use crate::{Compositor, Matte, Params, RgbaImage, CANVAS};
+
+/// Where all of an effect bar's masks cover: the one mask as it is, several multiplied (the
+/// red channels; masks of another size than the first are left out). Masks that keep the
+/// bar's own pixels both inside and outside change nothing and are left out too. `None`
+/// without any, so the effect is everywhere.
+fn combined_coverage<'a>(mattes: &'a [Matte]) -> Option<Cow<'a, RgbaImage>> {
+    let mut masks = mattes.iter().filter(|m| m.inside.is_some() || m.outside.is_some()).map(|m| m.mask);
+    let first = masks.next()?;
+    let rest: Vec<&RgbaImage> = masks.filter(|m| (m.width, m.height) == (first.width, first.height)).collect();
+    if rest.is_empty() {
+        return Some(Cow::Borrowed(first));
+    }
+    let mut out = first.clone();
+    for m in rest {
+        for (o, v) in out.data.chunks_exact_mut(4).zip(m.data.chunks_exact(4)) {
+            o[0] = ((o[0] as u32 * v[0] as u32 + 127) / 255) as u8;
+        }
+    }
+    Some(Cow::Owned(out))
+}
 
 /// One effect pass: which effect, its values now, and where it is in its run.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,15 +47,19 @@ pub struct EffectPass {
 impl Compositor {
     /// Apply `pass` to everything drawn so far: into a temporary, then back over the canvas
     /// (cleared first, so a group's transparent parts stay so).
-    pub(crate) fn effect_canvas(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, place_pipeline: &wgpu::RenderPipeline, pass: &EffectPass, opaque: bool, scratch: &mut Vec<wgpu::Texture>) {
+    /// With `mattes` (an effect bar's masks), only inside where they all cover.
+    pub(crate) fn effect_canvas(&self, enc: &mut wgpu::CommandEncoder, canvas: &wgpu::Texture, place_pipeline: &wgpu::RenderPipeline, pass: &EffectPass, opaque: bool, mattes: &[Matte], scratch: &mut Vec<wgpu::Texture>) {
         if pass.intensity <= 0.0 {
             return;
         }
         let (w, h) = (canvas.width(), canvas.height());
         let tmp = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
         let [a, b, c] = pass.params;
-        let values = [pass.kind as f32, pass.intensity.clamp(0.0, 1.0), a, b, c, pass.time, pass.progress, pass.seed, w as f32, h as f32, if opaque { 1.0 } else { 0.0 }, 0.0];
-        self.canvas_pass(enc, &self.fx, canvas, canvas, &tmp, &values);
+        let coverage = combined_coverage(mattes);
+        let mask = coverage.as_deref().map(|m| self.upload(enc, m, None, scratch));
+        let values = [pass.kind as f32, pass.intensity.clamp(0.0, 1.0), a, b, c, pass.time, pass.progress, pass.seed, w as f32, h as f32, if opaque { 1.0 } else { 0.0 }, mask.is_some() as u8 as f32];
+        self.canvas_pass(enc, &self.fx, canvas, mask.as_ref().unwrap_or(canvas), &tmp, &values);
+        scratch.extend(mask);
         let back = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0: [1.0, 0.0, 0.0, 0.0], inv1: [0.0, 1.0, 0.0, 0.0], misc: [1.0, 0.0, 0.0, 0.0] };
         self.pass(enc, place_pipeline, &tmp, canvas, back, Some(wgpu::Color::TRANSPARENT));
         scratch.push(tmp);

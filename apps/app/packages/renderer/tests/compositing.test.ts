@@ -127,3 +127,32 @@ test("a quarter turn keeps the centre; flips toggle", () => {
   assert.deepEqual(f.flip, { horizontal: true, vertical: false });
   assert.deepEqual((toggleFlip({ ...clip, ...f }, "horizontal") as any).flip, { horizontal: false, vertical: false });
 });
+
+test("canvas patterns are the engine's, and each draws both its colours", async () => {
+  const { CANVAS_PATTERNS, onShape } = await import("../src/lib/canvas-patterns.ts");
+  const ids = [...engine("playback/src/pattern.rs").matchAll(/Pattern \{ id: "(\w+)", back: \[([^\]]*)\], shape: \[([^\]]*)\] \}/g)];
+  assert.deepEqual(CANVAS_PATTERNS.map((p) => p.id), ids.map((m) => m[1]));
+  const hex = (list: string) => "#" + list.split(",").map((v) => Number(v.trim()).toString(16).padStart(2, "0")).join("");
+  assert.deepEqual(CANVAS_PATTERNS.map((p) => [p.back, p.shape]), ids.map((m) => [hex(m[2]), hex(m[3])]));
+  for (const p of CANVAS_PATTERNS) {
+    const hits = new Set<boolean>();
+    for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) hits.add(onShape(p.id, (x + 0.5) / 20, (y + 0.5) / 20));
+    assert.equal(hits.size, 2, p.id);
+  }
+});
+
+test("the colour wheels keep Primary and Log values apart", async () => {
+  const { setWheel, setWheelMode, wheelOf, wheelMode, isNeutralColor } = await import("../src/lib/color.ts");
+  let clip = video({ color: {} });
+  clip = { ...clip, ...setWheel(clip, "lift", { red: 0.5 }) };
+  clip = { ...clip, ...setWheelMode(clip, "log") };
+  assert.equal(wheelMode(clip.color), "log");
+  assert.deepEqual(wheelOf(clip.color, "lift"), {});
+  clip = { ...clip, ...setWheel(clip, "lift", { luma: 0.3 }) };
+  assert.deepEqual(clip.color.wheels.log.lift, { luma: 0.3 });
+  assert.deepEqual(clip.color.wheels.lift, { red: 0.5 });
+  clip = { ...clip, ...setWheelMode(clip, "primary") };
+  assert.deepEqual(wheelOf(clip.color, "lift"), { red: 0.5 });
+  assert.equal(isNeutralColor({ wheels: { mode: "log", lift: { red: 1 } } }), true);
+  assert.equal(isNeutralColor({ wheels: { mode: "log", log: { gain: { blue: 0.2 } } } }), false);
+});

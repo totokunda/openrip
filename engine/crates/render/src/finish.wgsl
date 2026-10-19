@@ -130,3 +130,31 @@ fn fs_vignette(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(c * px.a, px.a);
 }
+
+// The Particles slider: film grain. Each grain cell (a pixel or a few) gets a random value
+// from a hash of its place and the frame's seed (three taps averaged, so it is bell-shaped),
+// added to the picture as luminance noise with a little colour in it, most in the midtones
+// and fading in near-black and near-white as a film's does. Written for OpenRip.
+fn hash3(p: vec3<f32>) -> f32 {
+    var q = fract(p * vec3<f32>(0.1031, 0.1030, 0.0973));
+    q += dot(q, q.yzx + 33.33);
+    return fract((q.x + q.y) * q.z);
+}
+
+@fragment
+fn fs_particles(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let px = textureLoad(src, vec2<i32>(floor(pos.xy)), 0);
+    if (px.a <= 0.0) {
+        return px;
+    }
+    let c = px.rgb / px.a;
+    let cell = floor(pos.xy / P.k.z);
+    let seed = P.k.y;
+    let g = (hash3(vec3<f32>(cell, seed)) + hash3(vec3<f32>(cell + 17.0, seed + 3.0)) + hash3(vec3<f32>(cell + 41.0, seed + 7.0))) / 3.0 - 0.5;
+    let tint = vec3<f32>(hash3(vec3<f32>(cell + 5.0, seed + 11.0)), hash3(vec3<f32>(cell + 9.0, seed + 13.0)), hash3(vec3<f32>(cell + 23.0, seed + 19.0))) - 0.5;
+    let y = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let weight = 1.0 - pow(abs(2.0 * y - 1.0), 3.0) * 0.8;
+    let noise = (vec3<f32>(g) + tint * 0.25) * P.k.x * 0.5 * weight;
+    let out = clamp(c + noise, vec3<f32>(0.0), vec3<f32>(1.0));
+    return vec4<f32>(out * px.a, px.a);
+}

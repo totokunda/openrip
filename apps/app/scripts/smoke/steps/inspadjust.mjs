@@ -1,5 +1,5 @@
 // The Adjust tab (after import timeline; CLIP_NAME for a photo): a .cube LUT imported and its
-// intensity, each of the fourteen Basic sliders, an HSL range, the luma and red curves edited
+// intensity, each of the fifteen Basic sliders, an HSL range, the luma and red curves edited
 // on their graphs, a colour wheel's puck and luma, and the old sliders moved onto CapCut's;
 // each undone and redone with the engine's frame and the saved project compared (undoCase).
 // Exposure, an HSL saturation and the wheels' intensity keyed at two times (keyCase). The old
@@ -25,6 +25,7 @@ const SLIDERS = [
   ["Brilliance", 40],
   ["Sharpen", 90],
   ["Clarity", 90],
+  ["Particles", 60],
   ["Fade", 80],
   ["Vignette", 70],
 ];
@@ -66,10 +67,10 @@ export default async (ctx) => {
   check("the LUT is on the clip", lut?.path === cube && lut?.intensity === 50, JSON.stringify(lut));
   await run("LUT off", () => choose(win, "LUT", "None"));
 
-  // The fourteen sliders, in CapCut's order.
+  // The fifteen sliders, in CapCut's order.
   for (const [name, v] of SLIDERS) await run(`${name} ${v}`, () => typeIn(win, name, v));
   const adjust = (await savedClip(ctx, id)).color?.adjust ?? {};
-  check("all fourteen are saved on CapCut's scale", Object.keys(adjust).length === 14, JSON.stringify(adjust));
+  check("all fifteen are saved on CapCut's scale", Object.keys(adjust).length === 15, JSON.stringify(adjust));
   await shot("ia-1-sliders");
   await run("Adjust reset", () => click(win, "[aria-label='Reset Adjust']"));
   await keyCase(ctx, check, "exposure", { id, row: "Exposure", t1: 1, t2: 4, reopen: basic, undoCase, set1: () => typeIn(win, "Exposure", -30), set2: () => typeIn(win, "Exposure", 40) });

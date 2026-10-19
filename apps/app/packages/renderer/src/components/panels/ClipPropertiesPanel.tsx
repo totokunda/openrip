@@ -25,6 +25,7 @@ import { isCaption } from '@/lib/caption-edit'
 import LineProperties from '../properties/LineProperties'
 import { useDrawingStore } from '@/lib/drawing';
 import MaskPropertiesPanel from '../properties/mask/MaskPropertiesPanel';
+import EffectMaskProperties from '../properties/mask/EffectMaskProperties';
 import AnimationProperties, { KIND_LABEL, animationKinds } from '../properties/AnimationProperties'
 import SpeedProperties from '../properties/SpeedProperties'
 import FilterProperties from '../properties/FilterProperties'
@@ -241,7 +242,18 @@ const ClipPropertiesPanel: React.FC = () => {
         }
         // One of OpenRip's own video effects: CapCut's "Special effects" with its Details.
         if ((clip as any).effectId) {
-          return [{ id: 'filter', label: 'Special effects', sections: [{ id: 'basic', label: 'Basic', content: stack(<EffectProperties key="effect" clipId={clipId} />) }] }];
+          // Basic (its Details) and Mask (CapCut's `23-inspector-effect/002-fade-in-mask`): the effect
+          // is drawn only inside the bar's masks.
+          return [
+            {
+              id: 'filter',
+              label: 'Special effects',
+              sections: [
+                { id: 'basic', label: 'Basic', content: stack(<EffectProperties key="effect" clipId={clipId} />) },
+                { id: 'mask', label: 'Mask', content: <EffectMaskProperties clipId={clipId} /> },
+              ],
+            },
+          ];
         }
         return [
           {

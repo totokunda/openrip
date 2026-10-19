@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { CANVAS_PATTERNS, drawPattern, type CanvasPattern } from "@/lib/canvas-patterns";
 import {
   PiAlignBottom,
   PiAlignCenterHorizontal,
@@ -23,6 +24,7 @@ import {
   canvasBlur,
   canvasColor,
   canvasImage,
+  canvasPattern,
   fillsCanvas,
   setBlendMode,
   setCanvas,
@@ -274,8 +276,18 @@ const CANVAS_TYPES = [
   { value: "none", label: "None" },
   { value: "color", label: "Color" },
   { value: "blur", label: "Blur" },
+  { value: "pattern", label: "Pattern" },
   { value: "image", label: "Image" },
 ];
+
+/** One of OpenRip's own patterns drawn small (the same shapes the engine tiles over the canvas). */
+const PatternSwatch: React.FC<{ pattern: CanvasPattern }> = ({ pattern }) => {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (ref.current) drawPattern(ref.current, pattern, 2);
+  }, [pattern]);
+  return <canvas ref={ref} width={60} height={60} className="w-full h-full" />;
+};
 
 /** A 60×60 tile on the raised grey (CapCut's tile grid); selected, an accent outline. */
 const Tile: React.FC<{ selected?: boolean; onClick: () => void; title: string; children: React.ReactNode; testId?: string }> = ({ selected, onClick, title, children, testId }) => (
@@ -337,6 +349,7 @@ const CanvasSection: React.FC<{ clipId: string }> = ({ clipId }) => {
           if (v === "none") set(null);
           else if (v === "color") set(canvasColor(canvas?.color ?? "#000000"));
           else if (v === "blur") set(canvasBlur(canvas?.blur));
+          else if (v === "pattern") set(canvasPattern(canvas?.pattern ?? CANVAS_PATTERNS[0].id));
           // An image: the one it had, else one picked now.
           else if (canvas?.image) set(canvasImage(canvas.image));
           else void pickImage();
@@ -377,6 +390,15 @@ const CanvasSection: React.FC<{ clipId: string }> = ({ clipId }) => {
               ) : (
                 <span className="text-[11px] text-brand-light">{i + 1}</span>
               )}
+            </Tile>
+          ))}
+        </div>
+      )}
+      {canvas?.type === "pattern" && (
+        <div className="mt-3 flex flex-row flex-wrap gap-x-[18px] gap-y-3" data-testid="canvas-patterns">
+          {CANVAS_PATTERNS.map((p) => (
+            <Tile key={p.id} title={p.name} selected={canvas.pattern === p.id} onClick={() => set(canvasPattern(p.id))} testId={`canvas-pattern-${p.id}`}>
+              <PatternSwatch pattern={p} />
             </Tile>
           ))}
         </div>

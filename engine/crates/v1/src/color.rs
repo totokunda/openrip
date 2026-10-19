@@ -8,7 +8,8 @@
 //! - `hsl`: the eight named ranges' hue, saturation and lightness (−100…100), one HSL
 //!   material each.
 //! - `curves`: points (x, y in 0…1) per channel; the handles are CapCut's (below).
-//! - `wheels`: the primary wheels (CapCut's values, −1…1) and their strength in percent.
+//! - `wheels`: the primary wheels (CapCut's values, −1…1) or, with `mode: "log"`, the Log wheels
+//!   (`log`), and their strength in percent.
 //! - `lut`: a `.cube` file or a Hald image with its strength in percent, a filter on the clip.
 //! - `match`: Color match: the clip's and the reference's Oklab means and spreads
 //!   (`source`, `reference`: `{mean: [L, a, b], std: [L, a, b]}`) and `intensity` in percent;
@@ -26,7 +27,7 @@ use serde_json::{json, Value};
 use crate::f;
 
 /// The Basic sliders, by the app's names (the engine's too).
-pub(crate) const SLIDERS: [&str; 14] = ["exposure", "brightness", "contrast", "saturation", "temperature", "tint", "highlights", "shadows", "whites", "blacks", "sharpen", "clarity", "vignette", "fade"];
+pub(crate) const SLIDERS: [&str; 15] = ["exposure", "brightness", "contrast", "saturation", "temperature", "tint", "highlights", "shadows", "whites", "blacks", "sharpen", "clarity", "particles", "vignette", "fade"];
 
 /// CapCut's named HSL ranges, in its order (`hsl_color_type` 1–8).
 pub(crate) const HSL_RANGES: [&str; 8] = ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta"];
@@ -83,14 +84,19 @@ fn wheel(v: Option<&Value>) -> WheelValue {
     WheelValue { red: get("red"), green: get("green"), blue: get("blue"), luma: get("luma"), saturation: get("saturation") }
 }
 
+/// The wheels in the mode the panel is in: `mode` "log" draws the Log wheels (`log`: Shadow
+/// as `lift`, Middle tone as `gamma`, Highlight as `gain`, and Offset), else the primary ones.
+/// Each mode keeps its own values; the strength is shared.
 pub(crate) fn wheels(clip: &str, v: &Value) -> ColorWheels {
+    let log = v.get("mode").and_then(Value::as_str) == Some("log");
+    let v2 = if log { v.get("log").cloned().unwrap_or(Value::Null) } else { v.clone() };
     ColorWheels {
         id: wheels_id(clip),
-        log: false,
-        lift: wheel(v.get("lift")),
-        gamma: wheel(v.get("gamma")),
-        gain: wheel(v.get("gain")),
-        offset: wheel(v.get("offset")),
+        log,
+        lift: wheel(v2.get("lift")),
+        gamma: wheel(v2.get("gamma")),
+        gain: wheel(v2.get("gain")),
+        offset: wheel(v2.get("offset")),
         intensity: (f(v, "intensity", 100.0) / 100.0).clamp(0.0, 1.0),
     }
 }
@@ -203,7 +209,7 @@ pub(crate) fn attach(clip: &str, value: &Value, materials: &mut Materials, attac
     }
     if let Some(v) = c.get("wheels").filter(|v| v.is_object()) {
         let w = wheels(clip, v);
-        if w != (ColorWheels { id: w.id.clone(), log: false, lift: WheelValue::default(), gamma: WheelValue::default(), gain: WheelValue::default(), offset: WheelValue::default(), intensity: w.intensity }) {
+        if w != (ColorWheels { id: w.id.clone(), log: w.log, lift: WheelValue::default(), gamma: WheelValue::default(), gain: WheelValue::default(), offset: WheelValue::default(), intensity: w.intensity }) {
             add(AnyMaterial::ColorWheels(w), materials, attachments);
         }
     }

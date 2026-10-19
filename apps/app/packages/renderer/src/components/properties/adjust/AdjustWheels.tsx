@@ -2,11 +2,11 @@ import React, { useRef } from "react";
 import { LuRotateCcw } from "react-icons/lu";
 import { useClipStore } from "@/lib/clip";
 import { clearKeyframes } from "@/lib/keyframes";
-import { colorOf, setWheel, WheelName } from "@/lib/color";
+import { colorOf, setWheel, setWheelMode, wheelMode, wheelOf, WheelName } from "@/lib/color";
 import type { AnyClipProps, ColorWheel, ImageClipProps, VideoClipProps } from "@/lib/types";
 import Section from "../Section";
 import KeyframedSlider from "../KeyframedSlider";
-import { Subhead } from "../controls";
+import { InspectorSelect } from "../controls";
 
 /**
  * Adjust ▸ Color wheel, as CapCut lays it out (docs/plan/capcut-ui-spec.md §4.8c): the primary
@@ -14,15 +14,29 @@ import { Subhead } from "../controls";
  * (gamma), Highlights (gain) and Offset in a 2×2 grid. Each wheel is a hue ring with a puck
  * that sets its red, green and blue together (CapCut's values, −1…1, summing to nothing so
  * the puck tints without brightening), a grey arc on its right for luma, and R/G/B fields
- * under colour bars. Double-click a wheel to centre it. Log wheels aren't drawn as CapCut
- * draws them yet (docs/parity/colour.md), so only Primary is offered.
+ * under colour bars. Double-click a wheel to centre it. A dropdown above switches between Primary
+ * and Log (CapCut's `021-color-wheel-mode-dropdown`): Log's wheels are Shadow, Middle tone,
+ * Highlight and Offset, shifting the picture in log space (OpenRip's own maths, engine
+ * adjust.wgsl); each mode keeps its own values and they share the Intensity.
  */
 
-const WHEELS: { key: WheelName; name: string }[] = [
-  { key: "lift", name: "Shadows" },
-  { key: "gamma", name: "Middle grey" },
-  { key: "gain", name: "Highlights" },
-  { key: "offset", name: "Offset" },
+const WHEELS: Record<"primary" | "log", { key: WheelName; name: string }[]> = {
+  primary: [
+    { key: "lift", name: "Shadows" },
+    { key: "gamma", name: "Middle grey" },
+    { key: "gain", name: "Highlights" },
+    { key: "offset", name: "Offset" },
+  ],
+  log: [
+    { key: "lift", name: "Shadow" },
+    { key: "gamma", name: "Middle tone" },
+    { key: "gain", name: "Highlight" },
+    { key: "offset", name: "Offset" },
+  ],
+};
+const MODES = [
+  { value: "primary", label: "Primary" },
+  { value: "log", label: "Log" },
 ];
 
 // The puck's place ↔ the wheel's red, green and blue. The ring runs as CapCut's: red at the
@@ -142,20 +156,23 @@ const Wheel: React.FC<{ name: string; value: ColorWheel; onChange: (w: ColorWhee
 const AdjustWheels: React.FC<{ clipId: string }> = ({ clipId }) => {
   const clip = useClipStore((s) => s.getClipById(clipId)) as VideoClipProps | ImageClipProps | undefined;
   if (!clip) return null;
-  const wheels = colorOf(clip).wheels ?? {};
+  const color = colorOf(clip);
+  const mode = wheelMode(color);
   const now = () => useClipStore.getState().getClipById(clipId)!;
   const reset = () => {
     const c = now();
-    useClipStore.getState().updateClip(clipId, { keyframes: clearKeyframes(c.keyframes, "wheels:intensity"), color: { ...colorOf(c), wheels: {} } } as Partial<AnyClipProps>);
+    useClipStore.getState().updateClip(clipId, { keyframes: clearKeyframes(c.keyframes, "wheels:intensity"), color: { ...colorOf(c), wheels: { mode: wheelMode(colorOf(c)) } } } as Partial<AnyClipProps>);
   };
   return (
     <div className="min-w-0 divide-y divide-brand-divider">
       <Section title="Color wheel" onReset={reset} keyframes={{ clipId, properties: ["wheels:intensity"] }} testId="section-wheels">
-        <Subhead>Primary</Subhead>
-        <KeyframedSlider clipId={clipId} property="wheels:intensity" label="Intensity" min={0} max={100} />
-        <div className="mt-4 grid grid-cols-2 gap-y-5 justify-items-center">
-          {WHEELS.map((w) => (
-            <Wheel key={w.key} name={w.name} testId={`wheel-${w.key}`} value={wheels[w.key] ?? {}} onChange={(v) => useClipStore.getState().updateClip(clipId, setWheel(now(), w.key, v))} />
+        <InspectorSelect label="Color wheel mode" value={mode} onChange={(v) => useClipStore.getState().updateClip(clipId, setWheelMode(now(), v as "primary" | "log"))} options={MODES} />
+        <div className="mt-3">
+          <KeyframedSlider clipId={clipId} property="wheels:intensity" label="Intensity" min={0} max={100} />
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-y-5 justify-items-center" data-mode={mode}>
+          {WHEELS[mode].map((w) => (
+            <Wheel key={`${mode}-${w.key}`} name={w.name} testId={`wheel-${w.key}`} value={wheelOf(color, w.key)} onChange={(v) => useClipStore.getState().updateClip(clipId, setWheel(now(), w.key, v))} />
           ))}
         </div>
       </Section>

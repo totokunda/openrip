@@ -995,6 +995,8 @@ pub enum CanvasFillKind {
     Color { color: Rgba },
     Blur { amount: f32 },
     Image { path: String },
+    /// One of OpenRip's own tiled patterns, by id (the playback crate's `pattern`).
+    Pattern { id: String },
 }
 
 /// What fills the canvas behind a segment that doesn't cover it (CapCut's Canvas: a colour,
@@ -1004,6 +1006,7 @@ pub enum CanvasFillKind {
 /// - `Blur`: the clip's own picture covering the canvas, blurred by `amount` (CapCut's four
 ///   levels are 0.0625, 0.375, 0.75 and 1).
 /// - `Image`: a picture covering the canvas.
+/// - `Pattern`: one of OpenRip's own tiles repeated over the canvas.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CanvasFill {
     pub id: MaterialId,
@@ -1017,6 +1020,7 @@ impl CanvasFill {
             CanvasFillKind::Color { color } => color.r <= 0.0 && color.g <= 0.0 && color.b <= 0.0 || color.a <= 0.0,
             CanvasFillKind::Blur { amount } => *amount <= 0.0,
             CanvasFillKind::Image { path } => path.is_empty(),
+            CanvasFillKind::Pattern { id } => id.is_empty(),
         }
     }
 }

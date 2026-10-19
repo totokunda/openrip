@@ -220,8 +220,8 @@ const serializeMaskKeyframesForJson = (
 };
 
 const serializeMasksForJson = (clip: AnyClipProps): SerializedMaskForJson[] => {
-  // A video's or photo's, or an adjustment layer's.
-  if (clip.type !== "video" && clip.type !== "image" && !(clip.type === "filter" && (clip as any).adjustment)) return [];
+  // A video's or photo's, an adjustment layer's or an effect bar's.
+  if (clip.type !== "video" && clip.type !== "image" && !(clip.type === "filter" && ((clip as any).adjustment || (clip as any).effectId))) return [];
   const masks = (clip as any).masks as MaskClipProps[] | undefined;
   if (!Array.isArray(masks) || masks.length === 0) return [];
   return masks.map((m) => ({
@@ -786,7 +786,7 @@ export const clipsFromSnapshot = (doc: ProjectJsonSnapshot): AnyClipProps[] => {
       const mergedAny = merged as any;
 
       if (
-        (mergedAny.type === "video" || mergedAny.type === "image" || (mergedAny.type === "filter" && mergedAny.adjustment)) &&
+        (mergedAny.type === "video" || mergedAny.type === "image" || (mergedAny.type === "filter" && (mergedAny.adjustment || mergedAny.effectId))) &&
         Array.isArray((c as any).masks)
       ) {
         mergedAny.masks = (c as any).masks

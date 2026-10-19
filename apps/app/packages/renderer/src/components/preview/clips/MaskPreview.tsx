@@ -51,7 +51,8 @@ const MaskPreview: React.FC<MaskPreviewProps> = ({ clips, sortClips, filterClips
   const fps = useControlsStore((s) => s.fps);
   const selectedClipIds = useControlsStore((s) => s.selectedClipIds);
   const tool = useViewportStore((s) => s.tool);
-  const inspectorMask = useInspectorStore((s) => s.tab === "video" && s.sub.video === "mask");
+  // The Mask tab of a video or photo ("video"), an adjustment layer ("adjust") or an effect bar ("filter").
+  const inspectorMask = useInspectorStore((s) => (s.tab === "video" || s.tab === "adjust" || s.tab === "filter") && s.sub[s.tab] === "mask");
   const setIsOverMask = useMaskStore((s) => s.setIsOverMask);
   const isOverMask = useMaskStore((s) => s.isOverMask);
   const maskTool = useMaskStore((s) => s.tool);
@@ -64,7 +65,9 @@ const MaskPreview: React.FC<MaskPreviewProps> = ({ clips, sortClips, filterClips
     if (!editing) return [];
     const out: { clip: AnyClipProps; mask: MaskClipProps; shown?: ClipTransform }[] = [];
     for (const clip of sortClips(filterClips(clips))) {
-      if (clip.type !== "video" && clip.type !== "image") continue;
+      // Videos and photos, and the bars that carry masks: adjustment layers and effect bars.
+      const bar = clip.type === "filter" && ((clip as any).adjustment || (clip as any).effectId);
+      if (clip.type !== "video" && clip.type !== "image" && !bar) continue;
       if (!clipWithinFrame(clip, focusFrame)) continue;
       // From the inspector: the selected clip's masks only.
       if (tool !== "mask" && clip.clipId !== selectedClip) continue;

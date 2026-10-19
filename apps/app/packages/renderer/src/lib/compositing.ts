@@ -57,10 +57,11 @@ export const CHROMA_PROPERTIES = CHROMA_SLIDERS.map((s) => `chroma:${s.key}` as 
 /** CapCut's four canvas blur levels, from its panel. */
 export const CANVAS_BLURS = [0.0625, 0.375, 0.75, 1] as const;
 
-/** Canvas fills: none, a colour, the clip blurred, an image (CapCut's "Pattern" is an image). */
+/** Canvas fills: none, a colour, the clip blurred, an image, or one of OpenRip's own patterns. */
 export const canvasColor = (color: string): ClipCanvas => ({ type: "color", color });
 export const canvasBlur = (blur: number = CANVAS_BLURS[1]): ClipCanvas => ({ type: "blur", blur });
 export const canvasImage = (image: string): ClipCanvas => ({ type: "image", image });
+export const canvasPattern = (pattern: string): ClipCanvas => ({ type: "pattern", pattern });
 
 /** Whether the clip's canvas fill shows: only clips on the main track fill the canvas. */
 export const fillsCanvas = (clip: AnyClipProps, timelines: TimelineProps[]) =>

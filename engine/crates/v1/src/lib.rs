@@ -1043,6 +1043,13 @@ fn convert_clip(
         }
         color::attach(&id, clip.get("color").unwrap_or(&Value::Null), materials, &mut attachments);
     }
+    // An effect bar: its masks limit where the effect is drawn.
+    if ty == "filter" && !s(clip, "effectId").is_empty() {
+        for m in convert_masks(&id, clip, clock.fps.as_f64(), report) {
+            attachments.push(m.id.clone());
+            materials.masks.push(m);
+        }
+    }
     if matches!(ty, "video" | "image" | "text") {
         compositing::set_blend(&id, clip.get("blendMode"), materials, &mut attachments);
     }
