@@ -252,8 +252,8 @@ export const toggleMaskPose = (mask: MaskClipProps, f: number, fps: number): Mas
 /** The picture's box in the mask's units: the clip's box at its own scale. */
 export const pictureBox = (t: ClipTransform) => ({ w: (t.width || 0) * (t.scaleX || 1), h: (t.height || 0) * (t.scaleY || 1) });
 
-/** A text mask's words and style when it's new: CapCut's "Default text", a twelfth of the picture's height. */
-export const defaultText = (t: ClipTransform): MaskTextStyle => ({ content: "Default text", font: "", size: pictureBox(t).h / 12, align: "center" });
+/** A text mask's words and style when it's new: CapCut's "Default text", a sixteenth of the picture's height (its width about CapCut's on a 9:16 picture, 18-inspector-video/015). */
+export const defaultText = (t: ClipTransform): MaskTextStyle => ({ content: "Default text", font: "", size: pictureBox(t).h / 16, align: "center" });
 
 /**
  * A text's box (its block of lines) in world units: measured on a canvas when there's one,

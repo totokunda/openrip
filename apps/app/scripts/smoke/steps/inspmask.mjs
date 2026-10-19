@@ -73,6 +73,7 @@ export default async (ctx) => {
 
   const tiles = await win.locator("[data-testid=mask-panel] [data-testid^=mask-shape-]").evaluateAll((els) => els.map((e) => `${e.innerText.trim()}${e.disabled ? "" : "!"}`));
   check("the tiles in CapCut's order, greyed until there's a mask", tiles.join(",") === "Split,Filmstrip,Circle,Rectangle,Stars,Heart,Text,Brush,Pen", tiles.join(","));
+  await shot("im-0-empty");
 
   await run("Add mask", () => click(win, "[data-testid=mask-add]"));
   const [m0] = await masks();
