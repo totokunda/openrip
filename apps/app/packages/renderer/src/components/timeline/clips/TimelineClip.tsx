@@ -513,7 +513,7 @@ const TimelineClip: React.FC<
     } else if (clipType === "text") {
       generateTimelineThumbnailText(clipType, imageCanvas, groupRef);
     } else if (clipType === "filter") {
-      generateTimelineThumbnailFilter(clipType, imageCanvas, groupRef, (currentClip as FilterClipProps)?.draftKind);
+      generateTimelineThumbnailFilter(clipType, imageCanvas, groupRef, (currentClip as FilterClipProps)?.effectId ? "effect" : (currentClip as FilterClipProps)?.draftKind);
     } else if (clipType === "draw") {
       generateTimelineThumbnailDrawing(clipType, imageCanvas, clipRef);
     }

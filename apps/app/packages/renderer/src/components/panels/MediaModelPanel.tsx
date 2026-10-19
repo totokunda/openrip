@@ -24,6 +24,8 @@ import { projectBlink, transitionCategories } from "@/lib/transitions";
 import type { SidebarSection } from "@/lib/types";
 import MediaMenu from "@/components/menus/MediaMenu";
 import FilterMenu, { filterSections, useFilters } from "../menus/FilterMenu";
+import EffectsMenu, { effectSections } from "../menus/EffectsMenu";
+import { useEffectCatalog } from "@/lib/effects/catalog";
 import TextMenu from "../menus/TextMenu";
 import TransitionMenu from "../menus/TransitionMenu";
 import ShapesMenu from "../menus/ShapesMenu";
@@ -193,14 +195,17 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   // project has Blink's images).
   const blink = useClipStore((s) => projectBlink(s.clips));
   const filters = useFilters();
+  const effectCatalog = useEffectCatalog();
   const sections =
     section === "transitions"
       ? transitionCategories(blink).map((c) => ({ id: c, label: c, under: "Transitions" }))
       : section === "filters"
         ? filterSections(filters)
-        : SECTIONS[section];
+        : section === "effects"
+          ? effectSections(effectCatalog)
+          : SECTIONS[section];
   // Filters opens on All (Favorites is the first item, as CapCut's, but starts empty).
-  const sub = picked[section] ?? (section === "filters" ? "all" : sections?.[0]?.id) ?? "";
+  const sub = picked[section] ?? (section === "filters" || section === "effects" ? "all" : sections?.[0]?.id) ?? "";
 
   const content = () => {
     switch (section) {
@@ -208,6 +213,8 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
         return sub === "library" ? <PendingMenu section="library" /> : <MediaMenu />;
       case "filters":
         return <FilterMenu part={sub} />;
+      case "effects":
+        return <EffectsMenu part={sub} />;
       case "text":
         return <TextMenu part={sub} />;
       case "captions":

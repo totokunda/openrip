@@ -1,4 +1,6 @@
 import { getZoomLevelConfig } from "@/lib/zoom";
+import { addEffectBar, applyEffectToClip, takesEffects } from "@/lib/effects/library";
+import type { EffectDrag } from "../menus/EffectsMenu";
 import { useControlsStore } from "@/lib/control";
 import React, {
   useCallback,
@@ -391,6 +393,26 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     return best;
   };
 
+  // An effect tile from the Effects tab dropped on the timeline: onto a video or photo it goes
+  // on that clip, elsewhere it's an effect bar starting at the frame under the pointer.
+  const dropEffect = (event: { activatorEvent: Event | null; delta: { x: number; y: number } }, effectId: string) => {
+    const start = event.activatorEvent as PointerEvent | null;
+    const el = containerRef.current;
+    if (!start || !el || typeof start.clientX !== "number") return;
+    const r = el.getBoundingClientRect();
+    const cx = start.clientX + event.delta.x;
+    const cy = start.clientY + event.delta.y;
+    if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return;
+    const y = cy - r.top + clampedScroll;
+    const [vs, ve] = controlStore.timelineDuration;
+    const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
+    const frame = Math.max(0, Math.round(vs + (cx - r.left - TIME_ZERO_X) * perPx));
+    const track = timelines.find((t) => y >= (t.timelineY ?? 0) + 32 && y <= (t.timelineY ?? 0) + (t.timelineHeight ?? 0) + 24);
+    const onClip = track && clips.find((c) => c.timelineId === track.timelineId && takesEffects(c.type) && c.startFrame <= frame && frame < c.endFrame);
+    if (onClip) void applyEffectToClip(onClip.clipId, effectId);
+    else void addEffectBar(effectId, frame);
+  };
+
   // A shape tile from Stickers ▸ Shapes dropped on the timeline: the frame under the pointer
   // (null when it's let go elsewhere).
   const frameUnder = (event: { activatorEvent: Event | null; delta: { x: number; y: number } }): number | null => {
@@ -411,7 +433,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       const data = event.active?.data?.current as unknown as
         | MediaItem
         | undefined;
-      if (!data || (data as unknown as TransitionDrag).type === "transition" || (data as unknown as ShapeDrag).type === "shape-preset") return;
+      if (!data || (data as unknown as TransitionDrag).type === "transition" || (data as unknown as ShapeDrag).type === "shape-preset" || (data as unknown as EffectDrag).type === "effect-preset") return;
 
       setIsDragging(true);
 
@@ -501,6 +523,14 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         const target = Math.hypot(event.delta.x, event.delta.y) > 3 ? cutUnder(event) : null;
         useTransitionDropStore.getState().setTarget(null);
         if (target) applyTransition(target, drag.transition);
+        return;
+      }
+      // An effect goes onto the clip it's let go on, or in as a bar (the Effects tab handles a
+      // press without a move).
+      const effectDrag = data as unknown as EffectDrag;
+      if (effectDrag.type === "effect-preset") {
+        if (Math.hypot(event.delta.x, event.delta.y) > 3) dropEffect(event, effectDrag.effectId);
+        setIsDragging(false);
         return;
       }
       // A shape goes in at the time it's let go at, on a new track at the top (the Shapes

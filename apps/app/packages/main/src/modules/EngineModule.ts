@@ -92,6 +92,10 @@ export type EngineAddon = {
   registerFonts(faces: { family: string; weight: number; italic: boolean; path: string; unicodeRange?: string }[]): void;
   fontFamilies(): FontFamily[];
   /** Motion tracking: a region of a video followed through its frames (engine/crates/core/src/track.rs). */
+  /** OpenRip's own video effects (engine/crates/model/src/fx.rs) as JSON. */
+  effectCatalog?(): string;
+  /** Frames of an effect on a sample picture, drawn by the renderer (0–1 values). */
+  effectPreviews?(id: string, intensity: number | null, params: number[], times: number[], duration: number, width: number, height: number): Promise<{ width: number; height: number; data: Buffer }[]>;
   trackRegion(request: EngineTrackRequest): Promise<EngineTrackResult>;
   trackProgress(): { done: number; total: number };
   cancelTrack(): void;
@@ -428,6 +432,31 @@ export class EngineModule implements AppModule {
       } catch {}
     }
     ipcMain.handle("engine:info", () => info);
+
+    // The Effects tab: OpenRip's own video effects and frames of them drawn by the engine.
+    for (const channel of ["engine:effect-catalog", "engine:effect-previews"]) {
+      try {
+        ipcMain.removeHandler(channel);
+      } catch {}
+    }
+    ipcMain.handle("engine:effect-catalog", () => {
+      try {
+        return addon?.effectCatalog ? JSON.parse(addon.effectCatalog()) : null;
+      } catch (e) {
+        console.warn("[engine] effect catalog failed:", message(e));
+        return null;
+      }
+    });
+    ipcMain.handle("engine:effect-previews", async (_event, id: string, intensity: number | null, params: number[], times: number[], duration: number, width: number, height: number) => {
+      if (!addon?.effectPreviews) return [];
+      try {
+        const frames = await addon.effectPreviews(id, intensity, params, times, duration, width, height);
+        return frames.map((f) => ({ width: f.width, height: f.height, rgba: new Uint8Array(f.data) }));
+      } catch (e) {
+        console.warn("[engine] effect previews failed:", message(e));
+        return [];
+      }
+    });
 
     // Frames of a video for the app's own decoder when it can't read it (ProRes).
     ipcMain.handle("engine:thumbnails", async (_event, path: string, timesUs: number[], height: number, exact: boolean) => {

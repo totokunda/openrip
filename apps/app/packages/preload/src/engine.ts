@@ -303,3 +303,36 @@ try {
   // Not available (older Electron); the engine preview just won't show frames.
   console.warn("[engine] shared texture receiver unavailable:", e);
 }
+
+/** One of OpenRip's own video effects (engine/crates/model/src/fx.rs); values 0–100. */
+export type EngineEffect = {
+  id: string;
+  name: string;
+  category: string;
+  /** The strength a new one starts at. */
+  intensity: number;
+  /** Its own parameters besides the strength (up to three). */
+  params: { id: string; name: string; default: number }[];
+};
+
+/** The effects and their categories, in the order the Effects tab lists them; null without the engine. */
+export function engineEffectCatalog(): Promise<{ categories: string[]; effects: EngineEffect[] } | null> {
+  return ipcRenderer.invoke("engine:effect-catalog");
+}
+
+/**
+ * Frames of effect `id` on a sample picture drawn by the engine's renderer (so they match the
+ * player and an export): `width` × `height` RGBA at each of `times` seconds into an effect
+ * `duration` s long. `intensity` and `params` are 0–1 (the catalog's defaults where missing).
+ */
+export function engineEffectPreviews(
+  id: string,
+  intensity: number | null,
+  params: number[],
+  times: number[],
+  duration: number,
+  width: number,
+  height: number,
+): Promise<{ width: number; height: number; rgba: Uint8Array }[]> {
+  return ipcRenderer.invoke("engine:effect-previews", id, intensity, params, times, duration, width, height);
+}

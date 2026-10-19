@@ -146,6 +146,8 @@ export function createApplicatorFromClip(
 ): BaseClipApplicator | null {
   switch (clip.type) {
     case "filter": {
+      // An effect bar is drawn by the engine only.
+      if ((clip as FilterClipProps).effectId) return null;
       // Don't create filter applicator if haldClutInstance is not available
       if (!config.haldClutInstance) {
         console.warn(

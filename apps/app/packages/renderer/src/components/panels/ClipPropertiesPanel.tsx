@@ -28,6 +28,7 @@ import MaskPropertiesPanel from '../properties/mask/MaskPropertiesPanel';
 import AnimationProperties, { KIND_LABEL, animationKinds } from '../properties/AnimationProperties'
 import SpeedProperties from '../properties/SpeedProperties'
 import FilterProperties from '../properties/FilterProperties'
+import EffectProperties, { ClipEffectsProperties } from '../properties/EffectProperties'
 import ShapeProperties from '../properties/ShapeProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
 import { useInspectorStore } from '@/lib/inspector'
@@ -143,6 +144,7 @@ const ClipPropertiesPanel: React.FC = () => {
               { id: 'hsl', label: 'HSL', content: <AdjustHsl clipId={clipId} /> },
               { id: 'curves', label: 'Curves', content: <AdjustCurves clipId={clipId} /> },
               { id: 'wheels', label: 'Color wheel', content: <AdjustWheels clipId={clipId} /> },
+              { id: 'effects', label: 'Effects', content: <ClipEffectsProperties clipId={clipId} /> },
             ],
           },
         ];
@@ -174,6 +176,10 @@ const ClipPropertiesPanel: React.FC = () => {
           speed(false),
         ];
       case 'filter':
+        // One of OpenRip's own video effects: CapCut's "Special effects" with its Details.
+        if ((clip as any).effectId) {
+          return [{ id: 'filter', label: 'Special effects', sections: [{ id: 'basic', label: 'Basic', content: stack(<EffectProperties key="effect" clipId={clipId} />) }] }];
+        }
         return [
           {
             id: 'filter',

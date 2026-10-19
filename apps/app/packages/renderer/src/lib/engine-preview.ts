@@ -30,6 +30,8 @@ import { withoutHistory } from "./history";
 import { BASE_LONG_SIDE } from "./settings";
 import { registerBundledFonts } from "./fonts";
 import { useFilterLibrary } from "./filters/library";
+import { useEffectLibrary } from "./effects/library";
+import { defaultEffectParams, effectDef } from "./effects/catalog";
 
 type EnginePreviewState = {
   /** The user's setting. */
@@ -106,7 +108,7 @@ async function syncNow() {
   try {
     // The engine reads originals (ProRes included) where the app uses proxies or playable
     // copies.
-    const snapshot = withFilterPreview(withoutMasksWhileEditing(await withOriginalMedia(snap.snapshot)));
+    const snapshot = withEffectPreview(withFilterPreview(withoutMasksWhileEditing(await withOriginalMedia(snap.snapshot))));
     // Its text in the bundled fonts from the first frame.
     await registerBundledFonts();
     const r = await engineSyncProject(snap.projectId, snapshot);
@@ -229,6 +231,33 @@ function withFilterPreview<T>(snapshot: T): T {
   return { ...s, timeline: { ...s.timeline, tracks: [track, ...(s.timeline.tracks ?? [])], clips: [...s.timeline.clips, clip] } };
 }
 
+/**
+ * The effect picked in the Effects tab, on the engine's copy only, like the filter preview: an
+ * effect bar on a track of its own above the rest, over the whole timeline, at the effect's
+ * defaults. The project (and so the saved file and an export) never has it.
+ */
+function withEffectPreview<T>(snapshot: T): T {
+  const def = effectDef(useEffectLibrary.getState().preview ?? undefined);
+  const s = snapshot as any;
+  if (!def || !s?.timeline || !Array.isArray(s.timeline.clips)) return snapshot;
+  const end = Math.max(1, ...s.timeline.clips.map((c: any) => Number(c?.endTick) || 0));
+  const track = { type: "filter", timelineId: "effect-preview", timelineWidth: 0, timelineY: 0, timelineHeight: 40, timelinePadding: 0, muted: false, hidden: false };
+  const clip = {
+    type: "filter",
+    clipId: "effect-preview",
+    timelineId: "effect-preview",
+    startTick: "0",
+    endTick: String(end),
+    trimStartTick: "0",
+    trimEndTick: "0",
+    name: def.name,
+    effectId: def.id,
+    effectParams: defaultEffectParams(def),
+    intensity: def.intensity,
+  };
+  return { ...s, timeline: { ...s.timeline, tracks: [track, ...(s.timeline.tracks ?? [])], clips: [...s.timeline.clips, clip] } };
+}
+
 /** Sync soon; edits arriving within `ms` are sent together. */
 function scheduleSync(ms = 60) {
   if (syncTimer) clearTimeout(syncTimer);
@@ -262,6 +291,9 @@ export function initEnginePreview() {
   watch(useControlsStore.subscribe as any, (s: any) => [s.fps]);
   watch(useViewportStore.subscribe as any, (s: any) => [s.aspectRatio, s.canvasSize, s.tool === "mask"]);
   useFilterLibrary.subscribe((s, p) => {
+    if (s.preview !== p.preview && useEnginePreviewStore.getState().enabled) scheduleSync(0);
+  });
+  useEffectLibrary.subscribe((s, p) => {
     if (s.preview !== p.preview && useEnginePreviewStore.getState().enabled) scheduleSync(0);
   });
   watch(useMaskStore.subscribe as any, (s: any) => [s.tool]);

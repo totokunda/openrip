@@ -11,6 +11,7 @@
 // docs/parity/keyframes.md and docs/plan/app-engine-integration.md ("Keyframes").
 import type {
   AnyClipProps,
+  ClipEffect,
   ClipKeyframes,
   ClipTransform,
   DraftAdjustment,
@@ -502,6 +503,30 @@ const draftParts = (property: string): [string, string | undefined] => {
   return at < 0 ? [rest, undefined] : [rest.slice(0, at), rest.slice(at + 1)];
 };
 
+/**
+ * OpenRip's own video effects (lib/effects): `fx:<param>` on an effect bar (`effectParams`),
+ * `fx:<id>:<param>` on a clip's effect `id`, where `intensity` is the effect's strength.
+ */
+const effectParts = (property: string): [string | undefined, string] => {
+  const rest = property.slice("fx:".length);
+  const at = rest.indexOf(":");
+  return at < 0 ? [undefined, rest] : [rest.slice(0, at), rest.slice(at + 1)];
+};
+
+const effectValue = (c: any, property: string): number | undefined => {
+  const [id, param] = effectParts(property);
+  if (id === undefined) return c.effectParams?.[param];
+  const e = (c.effects as ClipEffect[] | undefined)?.find((x) => x.id === id);
+  return e ? (param === "intensity" ? (e.intensity ?? 100) : e.params?.[param]) : undefined;
+};
+
+const effectPatch = (c: any, property: string, value: number): Partial<AnyClipProps> => {
+  const [id, param] = effectParts(property);
+  if (id === undefined) return { effectParams: { ...(c.effectParams ?? {}), [param]: value } } as Partial<AnyClipProps>;
+  const list = (c.effects as ClipEffect[] | undefined) ?? [];
+  return { effects: list.map((e) => (e.id !== id ? e : param === "intensity" ? { ...e, intensity: value } : { ...e, params: { ...e.params, [param]: value } })) } as Partial<AnyClipProps>;
+};
+
 /** The property's own value on the clip (its field's), in keyframe units. */
 export const propertyValue = (clip: AnyClipProps, property: KeyframeProperty): KeyframeValue | undefined => {
   const c = clip as any;
@@ -528,6 +553,7 @@ export const propertyValue = (clip: AnyClipProps, property: KeyframeProperty): K
     case "glowRange":
       return c.glowRange ?? 20;
   }
+  if (property.startsWith("fx:")) return effectValue(c, property);
   if (property.startsWith("draft:")) {
     const [id, part] = draftParts(property);
     const entry = (c.draftAdjustments as DraftAdjustment[] | undefined)?.find((a) => a.id === id);
@@ -565,6 +591,7 @@ const fieldPatch = (clip: AnyClipProps, property: KeyframeProperty, value: Keyfr
     case "opacity":
       return t ? { transform: { ...t, opacity: Number(value) } } : {};
   }
+  if (property.startsWith("fx:")) return effectPatch(c, property, Number(value));
   if (property.startsWith("draft:")) {
     const [id, part] = draftParts(property);
     const list = (c.draftAdjustments as DraftAdjustment[] | undefined) ?? [];

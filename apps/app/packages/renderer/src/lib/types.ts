@@ -134,7 +134,9 @@ export type KeyframeProperty =
   | `hsl:${HslRange}:${HslPart}`
   | "wheels:intensity"
   | "lut:intensity"
-  | `chroma:${ChromaSlider}`;
+  | `chroma:${ChromaSlider}`
+  /** OpenRip's own video effects (lib/effects): an effect bar's parameter, or one on a clip (`fx:<id>:<param>`), 0–100. */
+  | `fx:${string}`;
 
 /** A keyframe's value: a number, one per component (position, scale), or a colour. */
 export type KeyframeValue = number | number[] | string;
@@ -513,8 +515,17 @@ export type ClipCanvas = { type: "color" | "blur" | "image"; color?: string; blu
 /** Mirrored on screen, about the clip's middle (CapCut's Mirror). */
 export type ClipFlip = { horizontal?: boolean; vertical?: boolean };
 
+/**
+ * One of OpenRip's own video effects on a video or photo (lib/effects, drawn by the engine):
+ * the catalog's `effectId`, its strength and its own parameters, all 0–100. `id` names this
+ * one on the clip (its keyframes are `fx:<id>:intensity` and `fx:<id>:<param>`).
+ */
+export type ClipEffect = { id: string; effectId: string; name: string; intensity: number; params: Record<string, number> };
+
 /** A video or photo's colour and compositing fields (all optional; missing is neutral). */
 export type ClipLook = {
+  /** OpenRip's own video effects on the clip, in order. */
+  effects?: ClipEffect[];
   color?: ClipColor | null;
   blendMode?: BlendModeId;
   chroma?: ClipChromaKey | null;
@@ -826,6 +837,13 @@ export type FilterClipProps = ClipProps & {
   examplePath?: string;
   exampleAssetUrl?: string;
   intensity?: number;
+  /**
+   * One of OpenRip's own video effects (lib/effects): the bar draws it over everything under it
+   * for its duration, with its parameters (0–100; keyframes `fx:<param>`). Then `intensity` is
+   * the effect's strength.
+   */
+  effectId?: string;
+  effectParams?: Record<string, number>;
   /**
    * A CapCut draft's bar ("filter", "effect", "sticker" or "adjustment"), and whether the
    * engine draws it (its filters so far, at `intensity`).
