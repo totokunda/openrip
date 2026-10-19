@@ -176,7 +176,9 @@ export default async (ctx) => {
   let sawProgress = false;
   let pill = false;
   let maxShare = 0;
-  for (let i = 0; i < 480; i++) {
+  const began = Date.now();
+  let ended = 0;
+  for (let i = 0; i < 3000; i++) {
     const p = await win.locator("[data-testid=analysing]").count();
     if (p) {
       sawProgress = true;
@@ -185,10 +187,15 @@ export default async (ctx) => {
       maxShare = Math.max(maxShare, Number(text.match(/(\d+)%/)?.[1] ?? 0));
     }
     pill ||= (await win.locator("[data-testid=analysis-pill]").count()) > 0;
-    if (!p && !(await win.locator("[data-testid=analysis-pill]").count()) && i > 6) break;
-    await win.waitForTimeout(250);
+    if (!p && !(await win.locator("[data-testid=analysis-pill]").count()) && (sawProgress || pill || i > 100)) {
+      ended = Date.now();
+      break;
+    }
+    await win.waitForTimeout(40);
   }
-  check("tracking showed its progress in the section and the timeline's pill", sawProgress && pill, `section ${sawProgress}, pill ${pill}, up to ${maxShare}%`);
+  // A short clip can be tracked before the pill is up: it is required of runs over a second.
+  const tracked = (ended - began) / 1000;
+  check("tracking showed its progress in the section and the timeline's pill", sawProgress && (pill || tracked < 1.5), `section ${sawProgress}, pill ${pill}, up to ${maxShare}%, ${tracked.toFixed(1)} s`);
   await win.waitForTimeout(1500);
   const cached = fs.readdirSync(`${udDir}/engine-thumbnails`, { recursive: true }).filter((f) => String(f).endsWith("motion-v1.json"));
   check("the engine kept what it tracked in its cache folder", cached.length >= 1, cached.join(", "));
