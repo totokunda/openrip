@@ -21,7 +21,7 @@ const launch = async () => {
     executablePath: process.env.EXE || require("electron"),
     args: [process.env.ENTRY ? appDir + "/packages/entry-point.mjs" : appDir, `--user-data-dir=${udDir}`],
     // The media root ignores --user-data-dir; without this, previews land in the real profile.
-    env: { ...process.env, APEX_USER_DATA_DIR: udDir },
+    env: { ...process.env, APEX_USER_DATA_DIR: udDir, ...(process.env.WALKTHROUGH ? {} : { OPENRIP_NO_WALKTHROUGH: "1" }) },
   });
   app.process().stderr.on("data", (d) => logs.push("[main:err] " + d.toString().trim()));
   const win = await app.firstWindow();

@@ -33,6 +33,7 @@ import { onCommand } from "@/lib/commands";
 import { CapCutImportDialog } from "../dialogs/CapCutImportDialog";
 import { createAndOpenProject, goHome, openProject } from "@/lib/project-actions";
 import { useShellStore } from "@/lib/shell";
+import { clockLabel, useAutosaveStore } from "@/lib/autosave";
 
 interface TopBarProps {
 
@@ -55,6 +56,9 @@ const TopBar: React.FC<TopBarProps> = () => {
 
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
+
+  // "Auto saved: hh:mm:ss", from the last save of the project's file.
+  const saved = useAutosaveStore();
 
   const clips = useClipStore((s) => s.clips);
   const timelines = useClipStore((s) => s.timelines);
@@ -210,6 +214,11 @@ const TopBar: React.FC<TopBarProps> = () => {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {saved.at != null && saved.projectId === Number(activeProjectId) && (
+          <span data-testid="autosave" className="ml-2 text-[11px] text-brand-light/45 whitespace-nowrap tabular-nums">
+            Auto saved: {clockLabel(saved.at)}
+          </span>
+        )}
       </div>
 
       {/* The project's name, in the middle; click to rename. */}

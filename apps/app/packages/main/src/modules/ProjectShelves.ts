@@ -245,6 +245,33 @@ const useTemplate = async (p: ShelfPaths, templateId: string, name: string, next
   return { id, name, fps: entry.fps ?? doc?.settings?.fps ?? 24, folderUuid: uuid, aspectRatio: doc?.settings?.aspectRatio };
 };
 
+// ---- duplicating -----------------------------------------------------------------------
+
+/**
+ * Copy a project as "<name> copy": its file, cover, mask data and its own copy of the media,
+ * under a new id and media folder, so the copy opens and changes independently.
+ */
+const duplicate = async (p: ShelfPaths, projectId: number, nextId: () => Promise<number>) => {
+  const raw = await fs.readFile(path.join(p.projectsDir, `project-${projectId}.json`), "utf8");
+  const doc = JSON.parse(raw);
+  const from: string | undefined = doc?.meta?.id;
+  const id = await nextId();
+  const uuid = randomUUID();
+  if (from) await copyMedia(mediaDir(p, from), mediaDir(p, uuid));
+  const masks = path.join(p.projectsDir, "local", "mask", `project-${projectId}`);
+  if (await exists(masks)) await fs.cp(masks, path.join(p.projectsDir, "local", "mask", `project-${id}`), { recursive: true });
+  let text = from ? retarget(raw, from, uuid) : raw;
+  text = text.split(`local/mask/project-${projectId}/`).join(`local/mask/project-${id}/`);
+  const name = `${doc?.meta?.name || "Project"} copy`;
+  const now = Date.now();
+  const next = JSON.parse(text);
+  next.meta = { ...(doc.meta ?? {}), id: uuid, name, createdAt: now, lastModified: now, projectId: id };
+  await fs.writeFile(path.join(p.projectsDir, `project-${id}.json`), JSON.stringify(next, null, 2), "utf8");
+  const cover = path.join(p.projectsDir, "covers", `project-${projectId}.jpg`);
+  if (await exists(cover)) await fs.copyFile(cover, path.join(p.projectsDir, "covers", `project-${id}.jpg`));
+  return { id, name, fps: doc?.settings?.fps ?? 24, folderUuid: uuid, aspectRatio: doc?.settings?.aspectRatio };
+};
+
 // ---- the media library ----------------------------------------------------------------
 
 const EXTS: Record<"video" | "image" | "audio", string[]> = {
@@ -391,5 +418,6 @@ export const registerShelves = (paths: () => ShelfPaths, nextProjectId: () => Pr
     if (await exists(from)) await fs.cp(from, mediaDir(p, target), { recursive: true, force: false, errorOnExist: false, verbatimSymlinks: true });
     return JSON.parse(retarget(raw, `tpl-${id}`, target));
   });
+  handle("projects:duplicate", (projectId: number) => duplicate(paths(), Number(projectId), nextProjectId));
   handle("library:list", () => listLibrary(paths()));
 };

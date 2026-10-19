@@ -35,6 +35,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   autoUpdate: true,
   shortcutPreset: 1,
   shortcutPresets: {},
+  walkthroughSeen: false,
 };
 
 /** CapCut's choices for the rows with a menu. */

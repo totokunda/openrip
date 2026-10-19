@@ -12,7 +12,8 @@ export function onMenuEdit(cb: (cmd: "undo" | "redo") => void): () => void {
 
 /**
  * Called with the menu bar's commands for the window: "about", "settings", "home",
- * "shortcuts", "notices", "layout:<id>" and "layout:reset". Returns an unsubscribe.
+ * "shortcuts", "notices", "walkthrough", "layout:<id>", "layout:reset", and the File and Edit
+ * items "new-project", "import", "export" and "split". Returns an unsubscribe.
  */
 export function onMenuCommand(cb: (cmd: string) => void): () => void {
   const listener = (_e: unknown, cmd: string) => cb(cmd);
@@ -20,7 +21,15 @@ export function onMenuCommand(cb: (cmd: string) => void): () => void {
   return () => ipcRenderer.off("menu:command", listener);
 }
 
-/** Tell the menu bar which screen shows and the keys Undo and Redo have (Electron accelerators). */
-export function setMenuState(state: { view?: "home" | "editor"; undo?: string; redo?: string }): void {
+/** Tell the menu bar which screen shows and the keys the items show (Electron accelerators). */
+export function setMenuState(state: {
+  view?: "home" | "editor";
+  undo?: string;
+  redo?: string;
+  newProject?: string;
+  importMedia?: string;
+  export?: string;
+  split?: string;
+}): void {
   ipcRenderer.send("menu:set-state", state);
 }

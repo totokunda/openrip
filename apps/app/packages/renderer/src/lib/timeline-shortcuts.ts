@@ -19,6 +19,9 @@ import { createAndOpenProject } from "./project-actions";
 import { runCommand } from "./commands";
 import { useSidebarStore } from "./sidebar";
 import { useShellStore } from "./shell";
+import { MARKER_COLORS } from "./timeline-edit";
+import { keyframeAt, keyframeableProperties, localFrame, setKeyframe, valueAt } from "./keyframes";
+import { shuttle, shuttleRate, stopShuttle } from "./shuttle";
 
 /** The zoom level before Zoom to fit, which a second press goes back to. */
 let beforeFit: number | null = null;
@@ -77,6 +80,50 @@ export function addMarkerAtPlayhead() {
   return id;
 }
 
+/**
+ * Add a marker at the playhead in the next colour of the cycle after the nearest marker before
+ * it (⌥M); a marker already there changes colour instead.
+ */
+export function addMarkerNewColor() {
+  const { markers, addMarker, updateMarker } = useClipStore.getState();
+  const frame = Math.max(0, Math.round(useControlsStore.getState().focusFrame));
+  const at = markers.find((m) => m.frame === frame);
+  const before = at ?? [...markers].reverse().find((m) => m.frame < frame) ?? markers[markers.length - 1];
+  const i = before ? MARKER_COLORS.findIndex((c) => c.toLowerCase() === before.color.toLowerCase()) : 0;
+  const color = MARKER_COLORS[(i + 1) % MARKER_COLORS.length];
+  const id = at ? at.id : addMarker(frame);
+  updateMarker(id, { color });
+  useControlsStore.getState().setSelectedMarkerId(id);
+  return id;
+}
+
+/** The transform's properties: what ⇧⌥K keys (an audio clip's volume, else all it can). */
+const MOVES = ["position", "scale", "rotation", "opacity"];
+
+/**
+ * Add keyframes at the playhead on the selected clip (⇧⌥K): its place, size, turn and opacity
+ * (its volume for audio), each with its value there. Keys already there stay; none is removed.
+ */
+export function addKeyframeAtPlayhead() {
+  const { selectedClipIds, focusFrame, fps, isPlaying, pause } = useControlsStore.getState();
+  const clips = useClipStore.getState();
+  const clip = clips.getClipById(selectedClipIds[selectedClipIds.length - 1] ?? "");
+  if (!clip || focusFrame < (clip.startFrame ?? 0) || focusFrame > (clip.endFrame ?? 0)) return false;
+  const all = keyframeableProperties(clip);
+  const moves = all.filter((p) => MOVES.includes(p));
+  const local = localFrame(clip, focusFrame);
+  let keyframes = clip.keyframes;
+  for (const p of moves.length ? moves : all) {
+    if (keyframeAt(keyframes, p, local)) continue;
+    const value = valueAt({ ...clip, keyframes }, p, focusFrame, fps);
+    if (value !== undefined) keyframes = setKeyframe(keyframes, p, local, value);
+  }
+  if (keyframes === clip.keyframes) return false;
+  if (isPlaying) pause();
+  clips.updateClip(clip.clipId, { keyframes });
+  return true;
+}
+
 /** Go to the previous or next marker. */
 export function goToMarker(forward: boolean) {
   const { markers } = useClipStore.getState();
@@ -127,7 +174,8 @@ const stepMany = () => Math.max(1, Math.round(preferences().stepFrames || 10));
 const RUN: Record<string, () => void> = {
   playPause: () => {
     const c = useControlsStore.getState();
-    if (c.isPlaying) c.pause();
+    if (shuttleRate() !== 0) stopShuttle();
+    else if (c.isPlaying) c.pause();
     else c.play();
   },
   // Split at the playhead, and across every track.
@@ -165,6 +213,11 @@ const RUN: Record<string, () => void> = {
   deleteLeft: () => void deleteToPlayhead("left"),
   deleteRight: () => void deleteToPlayhead("right"),
   addMarker: () => void addMarkerAtPlayhead(),
+  addMarkerColor: () => void addMarkerNewColor(),
+  addKeyframe: () => void addKeyframeAtPlayhead(),
+  shuttleLeft: () => shuttle(false),
+  shuttleRight: () => shuttle(true),
+  shuttleStop: () => stopShuttle(),
   snapping: () => {
     const c = useControlsStore.getState();
     c.setSnapping(!c.snapping);
@@ -246,7 +299,20 @@ export function handleTimelineKey(e: KeyboardEvent): boolean {
   const id = actionFor(e);
   const run = id ? RUN[id] : undefined;
   if (!run) return false;
+  // A held J or L is one press.
+  if (e.repeat && id?.startsWith("shuttle")) {
+    e.preventDefault();
+    return true;
+  }
   run();
   e.preventDefault();
+  return true;
+}
+
+/** Run an action by its id, as its key does (the menu bar's items). False when it isn't one. */
+export function runAction(id: string): boolean {
+  const run = RUN[id];
+  if (!run) return false;
+  run();
   return true;
 }

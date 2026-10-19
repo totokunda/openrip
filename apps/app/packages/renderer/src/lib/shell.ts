@@ -33,6 +33,9 @@ interface ShellState {
   /** The project's own settings (the inspector's Modify): its frame rate. */
   projectSettingsOpen: boolean;
   setProjectSettingsOpen: (open: boolean) => void;
+  /** The first-run walkthrough (components/dialogs/Walkthrough.tsx; Help ▸ Walkthrough). */
+  walkthroughOpen: boolean;
+  setWalkthroughOpen: (open: boolean) => void;
 }
 
 export const useShellStore = create<ShellState>((set) => ({
@@ -52,10 +55,12 @@ export const useShellStore = create<ShellState>((set) => ({
   setNoticesOpen: (noticesOpen) => set({ noticesOpen }),
   projectSettingsOpen: false,
   setProjectSettingsOpen: (projectSettingsOpen) => set({ projectSettingsOpen }),
+  walkthroughOpen: false,
+  setWalkthroughOpen: (walkthroughOpen) => set({ walkthroughOpen }),
 }));
 
 /** Whether one of the app's windows is open over the screen (the editor's keys wait). */
 export const appWindowOpen = () => {
   const s = useShellStore.getState();
-  return s.settingsOpen || s.shortcutsOpen || s.aboutOpen || s.noticesOpen || s.projectSettingsOpen;
+  return s.settingsOpen || s.shortcutsOpen || s.aboutOpen || s.noticesOpen || s.projectSettingsOpen || s.walkthroughOpen;
 };

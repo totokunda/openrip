@@ -44,6 +44,8 @@ export interface Preferences {
   /** The Shortcuts window: the preset in use (1–5) and each preset's changed bindings. */
   shortcutPreset: number;
   shortcutPresets: Record<string, Record<string, string[]>>;
+  /** The first-run walkthrough has been shown (or skipped); Help ▸ Walkthrough shows it again. */
+  walkthroughSeen: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -64,6 +66,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   autoUpdate: true,
   shortcutPreset: 1,
   shortcutPresets: {},
+  walkthroughSeen: false,
 };
 
 interface Settings {
@@ -147,7 +150,8 @@ export class SettingsModule extends EventEmitter implements AppModule {
 
   getPreferences(): Preferences {
     const saved = (this.store.get("preferences") as Partial<Preferences> | undefined) ?? {};
-    return { ...DEFAULT_PREFERENCES, ...saved };
+    // OPENRIP_NO_WALKTHROUGH: the automated tests' fresh profile counts the tour as seen.
+    return { ...DEFAULT_PREFERENCES, ...saved, ...(process.env.OPENRIP_NO_WALKTHROUGH ? { walkthroughSeen: true } : {}) };
   }
 
   /** Merge `patch` into the preferences, tell every window and the main process's modules. */

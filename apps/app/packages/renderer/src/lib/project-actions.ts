@@ -4,6 +4,7 @@ import {
   createProject,
   deleteProject,
   createProjectFromTemplate,
+  duplicateProject,
   saveProjectAsTemplate,
   restoreFromTrash,
   listProjects,
@@ -96,6 +97,16 @@ export const saveAsTemplate = async (project: ProjectSettings, name?: string) =>
   const res = await saveProjectAsTemplate(project.id, name?.trim() || project.name);
   if (!res?.success) throw new Error(res?.error || "The template couldn't be saved");
   return res.data!;
+};
+
+/** A copy of a project ("<name> copy"), added to the list; it is not opened. */
+export const duplicateProjectCopy = async (project: ProjectSettings) => {
+  const res = await duplicateProject<ProjectSettings>(project.id);
+  if (!res?.success || !res.data) throw new Error(res?.error || "The project couldn't be duplicated");
+  const created = { ...res.data, createdAt: Date.now(), lastModified: Date.now() };
+  if (!useProjectsStore.getState().projects.some((p) => p.id === created.id)) useProjectsStore.getState().addProject(created);
+  await refreshProjects();
+  return created;
 };
 
 /** A new project from a template, opened in the editor. */

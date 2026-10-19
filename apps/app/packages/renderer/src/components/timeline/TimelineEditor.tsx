@@ -2,6 +2,7 @@ import { getZoomLevelConfig } from "@/lib/zoom";
 import { addEffectBar, applyEffectToClip, takesEffects } from "@/lib/effects/library";
 import type { EffectDrag } from "../menus/EffectsMenu";
 import { useControlsStore } from "@/lib/control";
+import { zoomTimelineTo } from "@/lib/timeline-shortcuts";
 import React, {
   useCallback,
   useEffect,
@@ -340,6 +341,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     fractionalFrames: 0,
   });
   const wheelRemainderRef = useRef(0);
+  // ⌘ + scroll zooms: scrolled pixels not yet a zoom step.
+  const zoomWheelRef = useRef(0);
   // While media is dragged over the main track with the magnet on: the point it would go in at.
   const insertAtRef = useRef<number | null>(null);
   const timelinesLayerRef = useRef<Konva.Layer | null>(null);
@@ -1267,6 +1270,16 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
   const handleWheelScroll = useCallback(
     (e: React.WheelEvent<HTMLDivElement>) => {
       if (!dimensions.stageWidth) return;
+      // ⌘ + scroll (Ctrl elsewhere; a trackpad's pinch comes as the same): up zooms in.
+      if (e.metaKey || e.ctrlKey) {
+        zoomWheelRef.current += -e.deltaY;
+        const steps = Math.trunc(zoomWheelRef.current / 40);
+        if (steps !== 0) {
+          zoomWheelRef.current -= steps * 40;
+          zoomTimelineTo(useControlsStore.getState().zoomLevel + steps);
+        }
+        return;
+      }
       const absX = Math.abs(e.deltaX);
       const absY = Math.abs(e.deltaY);
       const isHorizontalIntent = absX >= absY || e.shiftKey;

@@ -1,6 +1,7 @@
 import type { StateCreator } from "zustand";
 import { useClipStore, resolveOverlapsTimelines } from "../clip";
 import { useControlsStore } from "../control";
+import { noteSaved } from "../autosave";
 import {
   saveProjectJson,
   loadProjectJson,
@@ -992,7 +993,8 @@ const scheduleJsonProjectSave = (getProjectState: () => JsonProjectSlice) => {
     const snapshotResult = buildProjectJsonSnapshot(latestState);
     if (!snapshotResult || snapshotResult.projectId == null) return;
     try {
-      await saveProjectJson(snapshotResult.projectId, snapshotResult.snapshot);
+      const res = await saveProjectJson(snapshotResult.projectId, snapshotResult.snapshot);
+      if ((res as any)?.success !== false) noteSaved(snapshotResult.projectId);
     } catch (err) {
       console.error("jsonPersistence: failed to save project JSON", err);
     }

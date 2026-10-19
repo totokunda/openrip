@@ -100,6 +100,11 @@ async function createProjectFromTemplate<T = any>(id: string, name: string): Pro
   return await ipcRenderer.invoke("templates:use", id, name);
 }
 
+/** A copy of a project, "<name> copy", with its own cover and media. */
+async function duplicateProject<T = any>(projectId: number | string): Promise<ConfigResponse<T>> {
+  return await ipcRenderer.invoke("projects:duplicate", projectId);
+}
+
 /** A template's project document for the open project (its media copied into the project's folder, its paths pointing there). */
 async function stageTemplate<T = any>(id: string, folderUuid: string): Promise<ConfigResponse<T>> {
   return await ipcRenderer.invoke("templates:stage", id, folderUuid);
@@ -133,6 +138,7 @@ export {
   deleteTemplate,
   createProjectFromTemplate,
   stageTemplate,
+  duplicateProject,
   listLibraryMedia,
   listProjects,
   createProject,

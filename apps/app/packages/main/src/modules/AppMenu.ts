@@ -3,6 +3,10 @@
  * More ▸ (the open-source notices), Quit; Help ▸ Shortcuts opens the Shortcuts window. Those
  * send `menu:command` to the window, which opens its own windows (`components/dialogs/AppDialogs.tsx`).
  *
+ * File ▸ New project, Import and Export and Edit ▸ Split are the same actions as their keys
+ * (the page carries them out: `menu:command`); the keys are shown on the items but not
+ * registered (`registerAccelerator: false`), since the page handles the key press itself.
+ *
  * Edit ▸ Undo and Redo undo the editor's own edits (`lib/history.ts` in the renderer), not only
  * the text in a focused field: they send `menu:edit` to the window; the page undoes a focused
  * field's typing itself and anything else through its history. The keyboard shortcuts reach
@@ -21,9 +25,26 @@ type MenuState = {
   /** Electron accelerators for Undo and Redo ("" for none). */
   undo: string;
   redo: string;
+  /** The keys shown on File ▸ New project, Import, Export and Edit ▸ Split. */
+  newProject: string;
+  importMedia: string;
+  export: string;
+  split: string;
 };
 
-let state: MenuState = { view: "home", undo: "CmdOrCtrl+Z", redo: "Shift+CmdOrCtrl+Z" };
+let state: MenuState = {
+  view: "home",
+  undo: "CmdOrCtrl+Z",
+  redo: "Shift+CmdOrCtrl+Z",
+  newProject: "CmdOrCtrl+N",
+  importMedia: "CmdOrCtrl+I",
+  export: "CmdOrCtrl+E",
+  split: "CmdOrCtrl+B",
+};
+
+/** An item that shows its key without taking the press (the page handles it). */
+const shown = (accelerator: string): Partial<MenuItemConstructorOptions> =>
+  accelerator ? { accelerator, registerAccelerator: false } : {};
 
 // A panel's own window sends it to the editor it belongs to (it has no page of its own).
 const target = (win?: Electron.BaseWindow) =>
@@ -39,6 +60,7 @@ const command = (cmd: string) => (_item: unknown, win?: Electron.BaseWindow) => 
 
 function template(): MenuItemConstructorOptions[] {
   const mac = process.platform === "darwin";
+  const editor = state.view === "editor";
   const layouts: MenuItemConstructorOptions[] = [
     { label: "Default", click: command("layout:default") },
     { label: "Media", click: command("layout:media") },
@@ -55,12 +77,22 @@ function template(): MenuItemConstructorOptions[] {
   ];
   return [
     ...(mac ? [{ label: "OpenRip", submenu: [...appItems, { label: "Quit", role: "quit" }] } as MenuItemConstructorOptions] : []),
-    mac ? { role: "fileMenu" } : { label: "File", submenu: [...appItems, { type: "separator" }, { role: "quit" }] },
+    {
+      label: "File",
+      submenu: [
+        { label: "New project", ...shown(state.newProject), click: command("new-project") },
+        { label: "Import", enabled: editor, ...shown(state.importMedia), click: command("import") },
+        { label: "Export", enabled: editor, ...shown(state.export), click: command("export") },
+        { type: "separator" },
+        ...(mac ? [{ role: "close" } as MenuItemConstructorOptions] : [...appItems, { type: "separator" } as MenuItemConstructorOptions, { role: "quit" } as MenuItemConstructorOptions]),
+      ],
+    },
     {
       label: "Edit",
       submenu: [
         { id: "undo", label: "Undo", ...(state.undo ? { accelerator: state.undo } : {}), click: sendEdit("undo") },
         { id: "redo", label: "Redo", ...(state.redo ? { accelerator: state.redo } : {}), click: sendEdit("redo") },
+        { label: "Split", enabled: editor, ...shown(state.split), click: command("split") },
         { type: "separator" },
         { role: "cut" },
         { role: "copy" },
@@ -72,7 +104,13 @@ function template(): MenuItemConstructorOptions[] {
     },
     { role: "viewMenu" },
     { role: "windowMenu" },
-    { role: "help", submenu: [{ label: "Shortcuts", click: command("shortcuts") }] },
+    {
+      role: "help",
+      submenu: [
+        { label: "Shortcuts", click: command("shortcuts") },
+        { label: "Walkthrough", enabled: editor, click: command("walkthrough") },
+      ],
+    },
   ];
 }
 

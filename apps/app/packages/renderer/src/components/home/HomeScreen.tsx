@@ -21,6 +21,7 @@ import {
   LuSettings,
   LuTrash2,
   LuUpload,
+  LuCopy,
 } from "react-icons/lu";
 import { toast } from "sonner";
 import { useProjectsStore, type ProjectSettings } from "@/lib/projects";
@@ -29,7 +30,7 @@ import { useControlsStore } from "@/lib/control";
 import { useShellStore } from "@/lib/shell";
 import { useSidebarStore } from "@/lib/sidebar";
 import { ASPECT_PRESETS, ratioBox } from "@/lib/aspect-presets";
-import { createAndOpenProject, deleteProjectAnywhere, openProject, refreshProjects, renameProject, restoreProjects, saveAsTemplate } from "@/lib/project-actions";
+import { createAndOpenProject, deleteProjectAnywhere, duplicateProjectCopy, openProject, refreshProjects, renameProject, restoreProjects, saveAsTemplate } from "@/lib/project-actions";
 import { TrashDialog } from "./TrashDialog";
 import { LibraryPage } from "./LibraryPage";
 import { TemplatesPage } from "./TemplatesPage";
@@ -138,15 +139,16 @@ const Cover: React.FC<{ project: ProjectSettings; frame: number; fit?: "cover" |
   );
 };
 
-/** A project's menu: open, rename, show its file, delete. */
+/** A project's menu: open, rename, duplicate, show its file, delete. */
 const ProjectMenu: React.FC<{
   project: ProjectSettings;
   onOpen: () => void;
   onRename: () => void;
+  onDuplicate: () => void;
   onDelete: () => void;
   onTemplate?: () => void;
   className?: string;
-}> = ({ project, onOpen, onRename, onDelete, onTemplate, className }) => (
+}> = ({ project, onOpen, onRename, onDuplicate, onDelete, onTemplate, className }) => (
   <DropdownMenu>
     <DropdownMenuTrigger
       aria-label={`More for ${project.name}`}
@@ -160,6 +162,9 @@ const ProjectMenu: React.FC<{
       </DropdownMenuItem>
       <DropdownMenuItem className={menuRow} onClick={onRename}>
         <LuPencil className="w-4 h-4" /> Rename
+      </DropdownMenuItem>
+      <DropdownMenuItem className={menuRow} data-testid="project-duplicate" onClick={onDuplicate}>
+        <LuCopy className="w-4 h-4" /> Duplicate
       </DropdownMenuItem>
       {project.filePath && (
         <DropdownMenuItem className={menuRow} onClick={() => void revealPathInFolder(project.filePath!)}>
@@ -222,11 +227,12 @@ interface CardProps {
   active: boolean;
   onOpen: () => void;
   onDelete: () => void;
+  onDuplicate: () => void;
   onTemplate: () => void;
 }
 
 /** A project in the grid: its cover in a square-ish box, its name and "size | length". */
-const ProjectCard: React.FC<CardProps> = ({ project, active, onOpen, onDelete, onTemplate }) => {
+const ProjectCard: React.FC<CardProps> = ({ project, active, onOpen, onDelete, onDuplicate, onTemplate }) => {
   const { renaming, start, field } = useRename(project);
   const length = useLength(project, active);
   return (
@@ -245,6 +251,7 @@ const ProjectCard: React.FC<CardProps> = ({ project, active, onOpen, onDelete, o
           onOpen={onOpen}
           onRename={start}
           onDelete={onDelete}
+          onDuplicate={onDuplicate}
           onTemplate={onTemplate}
           className="absolute top-1.5 right-1.5 bg-black/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 transition-opacity"
         />
@@ -266,7 +273,7 @@ const ProjectCard: React.FC<CardProps> = ({ project, active, onOpen, onDelete, o
 };
 
 /** A project as a row: cover, name, ratio, length, size, when it was edited, and its file. */
-const ProjectRow: React.FC<CardProps & { showPath?: boolean }> = ({ project, active, onOpen, onDelete, onTemplate, showPath }) => {
+const ProjectRow: React.FC<CardProps & { showPath?: boolean }> = ({ project, active, onOpen, onDelete, onDuplicate, onTemplate, showPath }) => {
   const { renaming, start, field } = useRename(project);
   const length = useLength(project, active);
   return (
@@ -298,7 +305,7 @@ const ProjectRow: React.FC<CardProps & { showPath?: boolean }> = ({ project, act
       <span className="tabular-nums text-brand-light/50">{lengthLabel(length)}</span>
       <span className="tabular-nums text-brand-light/50">{sizeLabel(project.sizeBytes)}</span>
       <span className="truncate text-brand-light/50 text-left">{editedLabel(project.lastModified)}</span>
-      <ProjectMenu project={project} onOpen={onOpen} onRename={start} onDelete={onDelete} onTemplate={onTemplate} className="hover:bg-brand-light/10" />
+      <ProjectMenu project={project} onOpen={onOpen} onRename={start} onDuplicate={onDuplicate} onDelete={onDelete} onTemplate={onTemplate} className="hover:bg-brand-light/10" />
     </div>
   );
 };
@@ -547,6 +554,15 @@ const HomeScreen: React.FC = () => {
     }
   };
 
+  const copyProject = async (project: ProjectSettings) => {
+    try {
+      const c = await duplicateProjectCopy(project);
+      toast(`Duplicated as “${c.name}”`);
+    } catch (e) {
+      toast.error((e as Error).message || "Couldn't duplicate the project");
+    }
+  };
+
   const makeTemplate = async (project: ProjectSettings) => {
     try {
       const t = await saveAsTemplate(project);
@@ -560,7 +576,7 @@ const HomeScreen: React.FC = () => {
     view === "grid" && !showPath ? (
       <div className="grid gap-x-[22px] gap-y-4" style={{ gridTemplateColumns: "repeat(auto-fill, 124px)" }}>
         {items.map((p) => (
-          <ProjectCard key={p.id} project={p} active={p.id === activeProjectId} onOpen={() => openProject(p.id)} onDelete={() => void moveToTrash(p)} onTemplate={() => void makeTemplate(p)} />
+          <ProjectCard key={p.id} project={p} active={p.id === activeProjectId} onOpen={() => openProject(p.id)} onDelete={() => void moveToTrash(p)} onDuplicate={() => void copyProject(p)} onTemplate={() => void makeTemplate(p)} />
         ))}
       </div>
     ) : (
@@ -575,7 +591,7 @@ const HomeScreen: React.FC = () => {
           <span />
         </div>
         {items.map((p) => (
-          <ProjectRow key={p.id} project={p} active={p.id === activeProjectId} showPath={showPath} onOpen={() => openProject(p.id)} onDelete={() => void moveToTrash(p)} onTemplate={() => void makeTemplate(p)} />
+          <ProjectRow key={p.id} project={p} active={p.id === activeProjectId} showPath={showPath} onOpen={() => openProject(p.id)} onDelete={() => void moveToTrash(p)} onDuplicate={() => void copyProject(p)} onTemplate={() => void makeTemplate(p)} />
         ))}
       </div>
     );

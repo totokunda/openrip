@@ -59,27 +59,27 @@ export const ACTIONS: ShortcutAction[] = [
   a("previewAxis", "timeline", []),
   a("zoomIn", "timeline", ["Mod+Equal", "Mod+Shift+Equal", "Mod+NumpadAdd"]),
   a("zoomOut", "timeline", ["Mod+Minus", "Mod+NumpadSubtract"]),
-  a("zoomScroll", "timeline", [], missing),
+  a("zoomScroll", "timeline", [], { fixed: true, show: ["Mod", "Scroll"] }),
   a("scrollUpDown", "timeline", [], { fixed: true, show: ["Scroll"] }),
   a("scrollLeftRight", "timeline", [], { fixed: true, show: ["Shift", "Scroll"] }),
   a("activateClip", "timeline", ["V"]),
   a("extractAudio", "timeline", ["Ctrl+Shift+S", "Mod+Shift+S"]),
   a("addMarker", "timeline", ["M"]),
-  a("addMarkerColor", "timeline", [], missing),
+  a("addMarkerColor", "timeline", ["Alt+M"]),
   a("nextMarker", "timeline", ["Shift+M", "Alt+ArrowRight"]),
   a("prevMarker", "timeline", ["Alt+Shift+M", "Alt+ArrowLeft"]),
   a("prevFrame", "timeline", ["ArrowLeft"]),
   a("nextFrame", "timeline", ["ArrowRight"]),
   a("firstFrame", "timeline", ["Home"]),
   a("lastFrame", "timeline", ["End"]),
-  a("shuttleLeft", "timeline", [], missing),
-  a("shuttleStop", "timeline", [], missing),
-  a("shuttleRight", "timeline", [], missing),
+  a("shuttleLeft", "timeline", ["J"]),
+  a("shuttleStop", "timeline", ["K"]),
+  a("shuttleRight", "timeline", ["L"]),
   a("deleteLeft", "timeline", ["Q"]),
   a("deleteRight", "timeline", ["W"]),
   a("keyframePanel", "timeline", ["Alt+K"]),
   a("addKeyframeOnPanel", "timeline", [], missing),
-  a("addKeyframe", "timeline", [], missing),
+  a("addKeyframe", "timeline", ["Alt+Shift+K"]),
   a("easeIn", "timeline", [], missing),
   a("easeOut", "timeline", [], missing),
   a("easing", "timeline", [], missing),
@@ -228,7 +228,7 @@ const build = (prefs: Preferences): KeymapState => {
 
 export const useKeymapStore = create<KeymapState>(() => build(preferences()));
 
-/** The Electron accelerator for a chord (the menu bar's Undo and Redo follow the bindings). */
+/** The Electron accelerator for a chord (the menu bar's items show the bindings' keys). */
 export const acceleratorOf = (chord: string | undefined): string => {
   if (!chord) return "";
   const parts = chord.split("+");
@@ -252,7 +252,8 @@ export function initKeymap() {
     const next = build(prefs);
     useKeymapStore.setState(next);
     try {
-      setMenuState({ undo: acceleratorOf(next.bindings.undo?.[0]), redo: acceleratorOf(next.bindings.redo?.[0]) });
+      const key = (id: string) => acceleratorOf(next.bindings[id]?.[0]);
+      setMenuState({ undo: key("undo"), redo: key("redo"), newProject: key("newProject"), importMedia: key("importMedia"), export: key("export"), split: key("split") });
     } catch {
       // no menu bar (tests)
     }

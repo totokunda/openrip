@@ -30,6 +30,7 @@ export interface Preferences {
   autoUpdate: boolean;
   shortcutPreset: number;
   shortcutPresets: Record<string, Record<string, string[]>>;
+  walkthroughSeen: boolean;
 }
 
 function getPreferences(): Promise<Preferences> {
