@@ -60,13 +60,16 @@ export default async (ctx) => {
   check("⇧Z zooms the timeline to fit", Math.abs(fit.pps - map.pps) < 1, `${fit.pps.toFixed(1)} px/s`);
   ctx.map = fit;
 
-  // ] at 5 s: only the video ends after it.
+  // ] at 5 s: only the video ends after it. (Linkage off for the probe: with it on, deleting the
+  // main track's clip takes the text over it along, which tllinkage covers.)
   await seek(win, fit, 5);
+  await key(win, "Backquote");
   await key(win, "]");
   await key(win, "Backspace");
   let left = (await doc(ctx)).timeline.clips.map((c) => c.type);
   check("] selects the clips ending after the playhead", left.join(",") === "text", left.join(","));
   await key(win, "Meta+z");
+  await key(win, "Backquote");
   await key(win, "Meta+a");
   await key(win, "Backspace");
   left = (await doc(ctx)).timeline.clips.map((c) => c.type);

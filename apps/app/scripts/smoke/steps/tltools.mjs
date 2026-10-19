@@ -73,6 +73,8 @@ export default async (ctx) => {
   let left = await live();
   check("Select leftward took the clips that start before the playhead", left.length === 1 && left[0].type === "video", left.map((c) => c.type).join(","));
   await key(win, "Meta+z");
+  // Linkage off for this probe: on, the text over the deleted video would go with it (tllinkage).
+  await key(win, "Backquote");
   await undoCase(ctx, check, "select rightward (]), Delete", async () => {
     await key(win, "BracketRight");
     await key(win, "Backspace");
@@ -80,6 +82,7 @@ export default async (ctx) => {
   left = await live();
   check("] took the clips that end after the playhead", left.length === 1 && left[0].type === "text", left.map((c) => c.type).join(","));
   await key(win, "Meta+z");
+  await key(win, "Backquote");
 
   // Preview axis: hover shows another frame, the playhead stays.
   d = await doc(ctx);

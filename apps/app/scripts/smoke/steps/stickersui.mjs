@@ -213,7 +213,7 @@ const run = async (ctx, server) => {
     check("Mirror flips the sticker (saved), and the engine draws it mirrored", flipped?.horizontal === true && (await engineFrame(win, "r + g + b > 60")).sum !== before, JSON.stringify(flipped));
     await win.mouse.click(bx, by, { button: "right" });
     await win.waitForTimeout(400);
-    const items = await win.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.innerText.trim()).filter((t) => t === "Range" || t === "Mirror" || t === "Export selected clips" || t === "Render" || t === "Deactivate clip"));
+    const items = await win.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.innerText.trim()).filter((t) => t === "Range" || t === "Mirror" || t === "Export selected clips" || t === "Render" || /^Deactivate clip/.test(t)).map((t) => t.replace(/\s+V$/, "")));
     check("the sticker's menu has Mirror, Deactivate clip and Range, no Export or Render", ["Mirror", "Deactivate clip", "Range"].every((n) => items.includes(n)) && !items.includes("Render") && !items.includes("Export selected clips"), JSON.stringify(items));
     await win.keyboard.press("Escape");
     await win.mouse.click(bx, by + 60).catch(() => {});
