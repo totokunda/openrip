@@ -61,14 +61,14 @@ const MenuRow: React.FC<{
           item.disabled && "text-[#525252] cursor-default! hover:bg-transparent",
         )}
       >
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-2 whitespace-nowrap">
           {ticked && <LuCheck className={cn("w-3.5 h-3.5 text-brand-accent", !item.checked && "invisible")} />}
           {item.label}
         </span>
         {sub ? <LuChevronRight className="w-3.5 h-3.5 text-[#cacaca]" /> : item.shortcut && <Key text={item.shortcut} />}
       </button>
       {sub && open && (
-        <div className="absolute left-full -top-1 ml-1 min-w-[160px] p-1 rounded-[8px] border-[0.5px] border-black bg-brand-header shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)]">
+        <div className="absolute left-full -top-1 ml-1 w-max min-w-[160px] p-1 rounded-[8px] border-[0.5px] border-black bg-brand-header shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)]">
           {sub.map((c) => (
             <MenuRow key={c.id} item={c} ticked={subTicked} onSelect={onSelect} open={false} setOpen={() => {}} />
           ))}
