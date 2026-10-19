@@ -178,7 +178,7 @@ fn an_effect_on_one_clip_leaves_what_is_beside_it_alone() {
         Layer::from_model(&half, [W, H], [0.0, 0.0], [1.0, 1.0], 0.0),
         Layer::pass(Source::Effect(pass(def, 1.0, [0.0; 3], 0.0, 0.0))),
         Layer::pass(Source::EndGroup),
-        Layer::pass(Source::Mix(Mix { outgoing: Some(still), incoming: None, mask: MixMask::All })),
+        Layer::pass(Source::Mix(Mix { outgoing: Some(still), incoming: None, mask: MixMask::All, fx: None })),
     ];
     let out = c.render(W, H, [0, 0, 0], &layers);
     // Right half: the canvas below, untouched. Left half: the clip, inverted.
