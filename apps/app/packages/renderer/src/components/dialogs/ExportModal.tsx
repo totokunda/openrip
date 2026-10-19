@@ -43,6 +43,7 @@ import {
 } from "@/lib/export-options";
 import { cancelExportRun, exportTargets, revealExported, runExport, useExportRun, type ExportSettings } from "@/lib/export-run";
 import { timelineCues } from "@/lib/caption-actions";
+import { openCoverEditor } from "@/lib/cover";
 
 /** One clip to export instead of the project: its id, what it is, and the name to propose. */
 export type ExportScope = { clipId: string; kind: "video" | "audio" | "image"; name: string };
@@ -202,7 +203,7 @@ const Cover: React.FC<{ cover?: string; version?: number; ratio: number }> = ({ 
       <button
         type="button"
         data-testid="export-edit-cover"
-        onClick={() => window.dispatchEvent(new CustomEvent("openrip:edit-cover"))}
+        onClick={() => openCoverEditor()}
         className="absolute left-1.5 top-1.5 h-[20px] px-1.5 rounded-[4px] bg-black/55 hover:bg-black/70 text-[12px] font-medium text-white flex items-center gap-1 cursor-pointer"
       >
         <LuPencil className="w-3 h-3" />
