@@ -4,7 +4,6 @@ import { LuSquareArrowDownLeft } from "react-icons/lu";
 import { PortalContainerContext } from "@/components/ui/portal-container";
 import { dockPanel, PANEL_TITLES, setPanelWindowsActive, usePanelWindowsStore, type PanelId, type PanelWindow } from "@/lib/panel-windows";
 import { useProjectsStore } from "@/lib/projects";
-import { useViewportStore } from "@/lib/viewport";
 import MediaModelPanel from "./MediaModelPanel";
 import PreviewPanel from "./PreviewPanel";
 import PropertiesPanel from "./PropertiesPanel";
@@ -21,27 +20,6 @@ const PANELS: Record<PanelId, React.FC<{ detached?: boolean }>> = {
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
 /**
- * The player moved into or out of its window: once the preview has measured its new size, the
- * frame fits it (as CapCut's player does), and the engine renders at that size.
- */
-function fitPlayerWhenSized() {
-  const before = useViewportStore.getState().viewportSize;
-  let done = false;
-  const fit = () => {
-    if (done) return;
-    done = true;
-    unsubscribe();
-    clearTimeout(timer);
-    useViewportStore.getState().zoomToFit();
-  };
-  const unsubscribe = useViewportStore.subscribe((s) => {
-    const v = s.viewportSize;
-    if (v.width > 0 && v.height > 0 && (v.width !== before.width || v.height !== before.height)) fit();
-  });
-  const timer = setTimeout(fit, 800);
-}
-
-/**
  * A panel in its own window: CapCut's dark window chrome (a 34 px strip on the window's
  * background with the window's buttons, its name in the middle and Dock back at the right),
  * the panel under it with the editor's 8 px gutter. Menus and popovers open in this window.
@@ -52,15 +30,7 @@ const DetachedPanel: React.FC<{ id: PanelId; pw: PanelWindow }> = ({ id, pw }) =
   useEffect(() => {
     pw.window.document.title = `${PANEL_TITLES[id]}${project ? ` — ${project}` : ""}`;
   }, [pw, id, project]);
-  // The player fits its window, and the editor again when it's docked.
-  useEffect(() => {
-    if (id !== "player") return;
-    fitPlayerWhenSized();
-    return () => {
-      // Docked (not just closed for Home, when it stays out).
-      if (!usePanelWindowsStore.getState().detached.includes("player")) fitPlayerWhenSized();
-    };
-  }, [id]);
+  // (The player's frame fits its new window by itself: lib/player-zoom.ts keeps it fitted.)
   return createPortal(
     <PortalContainerContext.Provider value={pw.window.document.body}>
       <div data-testid={`panel-window-${id}`} className="flex flex-col w-full h-full bg-brand-background-dark">
