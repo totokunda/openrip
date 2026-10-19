@@ -3,6 +3,9 @@
 import {
   createProject,
   deleteProject,
+  createProjectFromTemplate,
+  saveProjectAsTemplate,
+  restoreFromTrash,
   listProjects,
   loadProjectJson,
   saveProjectCover,
@@ -68,6 +71,42 @@ export const refreshProjects = async () => {
       return d ? { ...p, filePath: d.filePath, sizeBytes: d.sizeBytes, durationUs: d.durationUs, coverPath: p.coverPath ?? d.coverPath } : p;
     }),
   );
+};
+
+/** Add the projects on disk that the stores don't know yet (restored from the Trash, made from a template). */
+export const reloadProjects = async () => {
+  const res = await listProjects<ProjectSettings>();
+  if (!res?.success || !Array.isArray(res.data)) return;
+  const store = useProjectsStore.getState();
+  const known = new Set(store.projects.map((p) => p.id));
+  for (const d of res.data) if (!known.has(d.id)) store.addProject(d);
+  await refreshProjects();
+};
+
+/** Put projects back from the Trash, whole: file, cover, masks and media. */
+export const restoreProjects = async (ids: number[]) => {
+  const res = await restoreFromTrash(ids);
+  if (!res?.success) throw new Error(res?.error || "The project couldn't be restored");
+  await reloadProjects();
+};
+
+/** Save a project as a template (the home screen's Templates). Resolves to the saved template. */
+export const saveAsTemplate = async (project: ProjectSettings, name?: string) => {
+  const res = await saveProjectAsTemplate(project.id, name?.trim() || project.name);
+  if (!res?.success) throw new Error(res?.error || "The template couldn't be saved");
+  return res.data!;
+};
+
+/** A new project from a template, opened in the editor. */
+export const startFromTemplate = async (templateId: string, name: string) => {
+  const store = useProjectsStore.getState();
+  const res = await createProjectFromTemplate<ProjectSettings>(templateId, name || nextProjectName(store.projects));
+  if (!res?.success || !res.data) throw new Error(res?.error || "The project couldn't be created");
+  const created = { ...res.data, createdAt: Date.now(), lastModified: Date.now() };
+  if (!useProjectsStore.getState().projects.some((p) => p.id === created.id)) store.addProject(created);
+  await refreshProjects();
+  openProject(created.id);
+  return created;
 };
 
 /** Resolves once the project `id` is the one in the stores (after a switch has loaded it). */

@@ -29,7 +29,10 @@ import { useControlsStore } from "@/lib/control";
 import { useShellStore } from "@/lib/shell";
 import { useSidebarStore } from "@/lib/sidebar";
 import { ASPECT_PRESETS, ratioBox } from "@/lib/aspect-presets";
-import { createAndOpenProject, deleteProjectAnywhere, openProject, refreshProjects, renameProject } from "@/lib/project-actions";
+import { createAndOpenProject, deleteProjectAnywhere, openProject, refreshProjects, renameProject, restoreProjects, saveAsTemplate } from "@/lib/project-actions";
+import { TrashDialog } from "./TrashDialog";
+import { LibraryPage } from "./LibraryPage";
+import { TemplatesPage } from "./TemplatesPage";
 import { getAppInfo, revealPathInFolder } from "@app/preload";
 import { CapCutImportDialog } from "@/components/dialogs/CapCutImportDialog";
 import { useT } from "@/lib/i18n";
@@ -41,16 +44,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
 /**
@@ -151,8 +144,9 @@ const ProjectMenu: React.FC<{
   onOpen: () => void;
   onRename: () => void;
   onDelete: () => void;
+  onTemplate?: () => void;
   className?: string;
-}> = ({ project, onOpen, onRename, onDelete, className }) => (
+}> = ({ project, onOpen, onRename, onDelete, onTemplate, className }) => (
   <DropdownMenu>
     <DropdownMenuTrigger
       aria-label={`More for ${project.name}`}
@@ -172,8 +166,13 @@ const ProjectMenu: React.FC<{
           <LuFolderOpen className="w-4 h-4" /> Show the file
         </DropdownMenuItem>
       )}
+      {onTemplate && (
+        <DropdownMenuItem className={menuRow} data-testid="project-save-template" onClick={onTemplate}>
+          <LuLayoutTemplate className="w-4 h-4" /> Save as template
+        </DropdownMenuItem>
+      )}
       <DropdownMenuSeparator className="bg-brand-hover mx-1" />
-      <DropdownMenuItem className={cn(menuRow, "text-red-400 focus:text-red-300")} onClick={onDelete}>
+      <DropdownMenuItem className={cn(menuRow, "text-red-400 focus:text-red-300")} data-testid="project-delete" onClick={onDelete}>
         <LuTrash2 className="w-4 h-4" /> Delete
       </DropdownMenuItem>
     </DropdownMenuContent>
@@ -223,10 +222,11 @@ interface CardProps {
   active: boolean;
   onOpen: () => void;
   onDelete: () => void;
+  onTemplate: () => void;
 }
 
 /** A project in the grid: its cover in a square-ish box, its name and "size | length". */
-const ProjectCard: React.FC<CardProps> = ({ project, active, onOpen, onDelete }) => {
+const ProjectCard: React.FC<CardProps> = ({ project, active, onOpen, onDelete, onTemplate }) => {
   const { renaming, start, field } = useRename(project);
   const length = useLength(project, active);
   return (
@@ -245,6 +245,7 @@ const ProjectCard: React.FC<CardProps> = ({ project, active, onOpen, onDelete })
           onOpen={onOpen}
           onRename={start}
           onDelete={onDelete}
+          onTemplate={onTemplate}
           className="absolute top-1.5 right-1.5 bg-black/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 transition-opacity"
         />
       </div>
@@ -265,7 +266,7 @@ const ProjectCard: React.FC<CardProps> = ({ project, active, onOpen, onDelete })
 };
 
 /** A project as a row: cover, name, ratio, length, size, when it was edited, and its file. */
-const ProjectRow: React.FC<CardProps & { showPath?: boolean }> = ({ project, active, onOpen, onDelete, showPath }) => {
+const ProjectRow: React.FC<CardProps & { showPath?: boolean }> = ({ project, active, onOpen, onDelete, onTemplate, showPath }) => {
   const { renaming, start, field } = useRename(project);
   const length = useLength(project, active);
   return (
@@ -297,7 +298,7 @@ const ProjectRow: React.FC<CardProps & { showPath?: boolean }> = ({ project, act
       <span className="tabular-nums text-brand-light/50">{lengthLabel(length)}</span>
       <span className="tabular-nums text-brand-light/50">{sizeLabel(project.sizeBytes)}</span>
       <span className="truncate text-brand-light/50 text-left">{editedLabel(project.lastModified)}</span>
-      <ProjectMenu project={project} onOpen={onOpen} onRename={start} onDelete={onDelete} className="hover:bg-brand-light/10" />
+      <ProjectMenu project={project} onOpen={onOpen} onRename={start} onDelete={onDelete} onTemplate={onTemplate} className="hover:bg-brand-light/10" />
     </div>
   );
 };
@@ -486,10 +487,9 @@ const HomeScreen: React.FC = () => {
   const [creating, setCreating] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [capcutOpen, setCapcutOpen] = useState(false);
-  const [toDelete, setToDelete] = useState<ProjectSettings | null>(null);
+  const [trashOpen, setTrashOpen] = useState(false);
   // Scrolled past the banner: CapCut keeps a slimmer one pinned at the top.
   const [compact, setCompact] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const refreshed = useRef(false);
 
   // Lengths and sizes from the projects' files, once per visit.
@@ -535,17 +535,24 @@ const HomeScreen: React.FC = () => {
     }
   };
 
-  const confirmDelete = async () => {
-    if (!toDelete) return;
-    setDeleting(true);
+  // Deleting moves a project to the Trash (30 days, restorable); the toast can put it straight back.
+  const moveToTrash = async (project: ProjectSettings) => {
     try {
-      await deleteProjectAnywhere(toDelete);
-      toast(`Deleted “${toDelete.name}”`);
-      setToDelete(null);
+      await deleteProjectAnywhere(project);
+      toast(`Moved “${project.name}” to Trash`, {
+        action: { label: "Undo", onClick: () => void restoreProjects([project.id]).catch((e) => toast.error((e as Error).message)) },
+      });
     } catch (e) {
       toast.error((e as Error).message || "Couldn't delete the project");
-    } finally {
-      setDeleting(false);
+    }
+  };
+
+  const makeTemplate = async (project: ProjectSettings) => {
+    try {
+      const t = await saveAsTemplate(project);
+      toast(`Saved “${t.name}” as a template`, { action: { label: "View", onClick: () => setSection("templates") } });
+    } catch (e) {
+      toast.error((e as Error).message || "Couldn't save the template");
     }
   };
 
@@ -553,7 +560,7 @@ const HomeScreen: React.FC = () => {
     view === "grid" && !showPath ? (
       <div className="grid gap-x-[22px] gap-y-4" style={{ gridTemplateColumns: "repeat(auto-fill, 124px)" }}>
         {items.map((p) => (
-          <ProjectCard key={p.id} project={p} active={p.id === activeProjectId} onOpen={() => openProject(p.id)} onDelete={() => setToDelete(p)} />
+          <ProjectCard key={p.id} project={p} active={p.id === activeProjectId} onOpen={() => openProject(p.id)} onDelete={() => void moveToTrash(p)} onTemplate={() => void makeTemplate(p)} />
         ))}
       </div>
     ) : (
@@ -568,7 +575,7 @@ const HomeScreen: React.FC = () => {
           <span />
         </div>
         {items.map((p) => (
-          <ProjectRow key={p.id} project={p} active={p.id === activeProjectId} showPath={showPath} onOpen={() => openProject(p.id)} onDelete={() => setToDelete(p)} />
+          <ProjectRow key={p.id} project={p} active={p.id === activeProjectId} showPath={showPath} onOpen={() => openProject(p.id)} onDelete={() => void moveToTrash(p)} onTemplate={() => void makeTemplate(p)} />
         ))}
       </div>
     );
@@ -626,6 +633,11 @@ const HomeScreen: React.FC = () => {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      {section === "home" && (
+        <button type="button" data-testid="home-trash" onClick={() => setTrashOpen(true)} className={cn(tool, "px-2")}>
+          <LuTrash2 className="w-3.5 h-3.5" /> Trash
+        </button>
+      )}
     </div>
   );
 
@@ -728,7 +740,7 @@ const HomeScreen: React.FC = () => {
                     <QuickStart icon={LuFolderInput} title="CapCut project" note="Open a draft; it's only read, never changed" onClick={() => setCapcutOpen(true)} testId="home-open-capcut" />
                     <QuickStart icon={LuUpload} title="Import media" note="Start a new project from your files" onClick={() => void create("import", undefined, true)} testId="home-import" busy={creating === "import"} />
                     <SizeCard creating={creating} onCreate={(p) => void create(p.id, { width: p.width, height: p.height, id: p.id })} />
-                    <QuickStart icon={LuLibrary} title="Library" note="Every project and its file" onClick={() => setSection("library")} testId="home-library-card" />
+                    <QuickStart icon={LuLibrary} title="Library" note="Your media from every project" onClick={() => setSection("library")} testId="home-library-card" />
                   </div>
                 </section>
 
@@ -742,35 +754,9 @@ const HomeScreen: React.FC = () => {
               </>
             )}
 
-            {section === "templates" && (
-              <section data-testid="home-templates" className="flex flex-col items-center justify-center gap-3 py-28 text-center">
-                <LuLayoutTemplate className="w-7 h-7 text-brand-light/30" />
-                <h2 className="text-[15px] font-semibold text-brand-light/90">Templates are coming</h2>
-                <p className="text-[12px] text-brand-light/50 max-w-sm leading-relaxed">
-                  Openly licensed starting points will live here. For now, start from a blank project or open one of your CapCut drafts.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setSection("home")}
-                  className="mt-1 h-8 px-4 rounded-lg text-[12px] bg-brand-background hover:bg-brand text-brand-light/85 transition-colors"
-                >
-                  Back to Home
-                </button>
-              </section>
-            )}
+            {section === "templates" && <TemplatesPage />}
 
-            {section === "library" && (
-              <section data-testid="home-library" className="flex flex-col gap-4 pt-2">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex flex-col text-left">
-                    <h2 className="text-[15px] font-semibold text-brand-light">Library</h2>
-                    <p className="text-[12px] text-brand-light/45">Every project, with where its file is.</p>
-                  </div>
-                  {toolbar}
-                </div>
-                {shown.length === 0 ? empty : list(shown, true)}
-              </section>
-            )}
+            {section === "library" && <LibraryPage />}
             </div>
           </div>
         </main>
@@ -784,32 +770,7 @@ const HomeScreen: React.FC = () => {
           openProject(created.id);
         }}
       />
-      <AlertDialog open={!!toDelete} onOpenChange={(open) => !open && !deleting && setToDelete(null)}>
-        <AlertDialogContent className="dark bg-brand-background/95 backdrop-blur-md border border-brand-light/10">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-brand-light text-[15px]">Delete “{toDelete?.name}”?</AlertDialogTitle>
-            <AlertDialogDescription className="text-brand-light/70 text-[13px]">
-              The project and its edits are deleted. Your media files stay where they are.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting} className="dark border-brand-light/15 text-brand-light hover:bg-brand-light/10 text-[12px] font-medium px-5">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={deleting}
-              onClick={(e) => {
-                // Radix would close it before the delete finishes.
-                e.preventDefault();
-                void confirmDelete();
-              }}
-              className="bg-red-500/80 hover:bg-red-500/70 text-brand-light text-[12px] font-medium px-5"
-            >
-              {deleting ? "Deleting…" : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <TrashDialog open={trashOpen} onOpenChange={setTrashOpen} />
     </div>
   );
 };

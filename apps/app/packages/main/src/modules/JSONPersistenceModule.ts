@@ -6,6 +6,7 @@ import fs from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { getSettingsModule } from "./SettingsModule.js";
+import { moveToTrash, purgeTrash, registerShelves, trashedIds } from "./ProjectShelves.js";
 
 type JsonResponse<T> =
   | { success: true; data: T }
@@ -174,6 +175,8 @@ export async function createProject(
       maxId = id;
     }
   }
+  // A project in the Trash may come back: its number stays taken.
+  for (const id of await trashedIds(projectsDir)) if (id > maxId) maxId = id;
   const id = maxId > 0 ? maxId + 1 : 1;
 
   const now = Date.now();
@@ -289,6 +292,21 @@ export class JSONPersistenceModule implements AppModule {
       }
     }
 
+    // Deleted projects past their time go; the shelves (Trash, templates, library) answer IPC.
+    await purgeTrash({ projectsDir: rootDir, userDataDir: userData }).catch(() => {});
+    registerShelves(
+      () => ({ projectsDir: this.projectsDir, userDataDir: this.#userDataDir ?? path.dirname(this.projectsDir) }),
+      async () => {
+        const entries = await fs.readdir(this.projectsDir).catch(() => [] as string[]);
+        let max = 0;
+        for (const e of entries) {
+          const m = /^project-(\d+)\.json$/i.exec(e);
+          if (m) max = Math.max(max, Number(m[1]));
+        }
+        for (const id of await trashedIds(this.projectsDir)) max = Math.max(max, id);
+        return max + 1;
+      },
+    );
     this.registerHandlers();
   }
 
@@ -874,7 +892,7 @@ export class JSONPersistenceModule implements AppModule {
       }
     };
     for (const f of files) await move(path.join(from, f), path.join(to, f));
-    for (const sub of ["covers", "local"]) {
+    for (const sub of ["covers", "local", "trash", "templates"]) {
       const a = path.join(from, sub);
       const b = path.join(to, sub);
       const inside = await fs.readdir(a).catch(() => null);
@@ -1257,7 +1275,8 @@ export class JSONPersistenceModule implements AppModule {
       },
     );
 
-    // Delete a project's JSON file.
+    // Delete a project: it goes to the Trash (file, cover, masks and media folder), where it
+    // can be restored for 30 days. Nothing of the user's own files is touched.
     ipcMain.handle(
       "projects:delete-json",
       async (
@@ -1269,71 +1288,17 @@ export class JSONPersistenceModule implements AppModule {
           if (!Number.isInteger(id) || id <= 0) {
             return { success: false, error: "Invalid project id" };
           }
-
-          const filePath = this.getProjectPath(id);
-          // Best-effort: read the project JSON first so we can remove its media folder
-          // (keyed by meta.id / folderUuid) alongside the project file.
-          let folderUuid: string | null = null;
-          try {
-            const raw = await fs.readFile(filePath, "utf8");
-            const parsed = JSON.parse(raw);
-            const metaId = parsed?.meta?.id;
-            if (typeof metaId === "string" && metaId.trim().length > 0) {
-              folderUuid = metaId.trim();
-            }
-          } catch {
-            // ignore (missing/invalid JSON)
-          }
-
-          try {
-            await fs.unlink(filePath);
-          } catch (err: any) {
-            if (err && (err as any).code === "ENOENT") {
-              // File already removed – treat as success.
-              // Still attempt to clean up the media folder if we managed to read it earlier.
-              if (folderUuid) {
-                try {
-                  const safeFolderUuid = folderUuid.replace(/[^a-zA-Z0-9_-]/g, "_");
-                  if (safeFolderUuid.length > 0) {
-                    const userDataDir = (this.#userDataDir ?? path.dirname(this.projectsDir));
-                    const mediaDir = path.join(userDataDir, "media", safeFolderUuid);
-                    await fs.rm(mediaDir, { recursive: true, force: true });
-                  }
-                } catch {
-                  // ignore
-                }
-              }
-              return { success: true, data: { id } };
-            }
-            throw err;
-          }
-
-          // Best-effort: delete the project's media folder (<userData>/media/<folderUuid>).
-          if (folderUuid) {
-            try {
-              const safeFolderUuid = folderUuid.replace(/[^a-zA-Z0-9_-]/g, "_");
-              if (safeFolderUuid.length > 0) {
-                const userDataDir = (this.#userDataDir ?? path.dirname(this.projectsDir));
-                const mediaDir = path.join(userDataDir, "media", safeFolderUuid);
-                await fs.rm(mediaDir, { recursive: true, force: true });
-              }
-            } catch {
-              // ignore
-            }
-          }
-
+          await Promise.all([...projectWrites.values()]);
+          await moveToTrash(
+            { projectsDir: this.projectsDir, userDataDir: this.#userDataDir ?? path.dirname(this.projectsDir) },
+            id,
+          );
           return { success: true, data: { id } };
         } catch (error) {
-          console.error(
-            "JSONPersistenceModule: failed to delete JSON project",
-            error,
-          );
+          console.error("JSONPersistenceModule: failed to delete JSON project", error);
           return {
             success: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : "Failed to delete JSON project",
+            error: error instanceof Error ? error.message : "Failed to delete JSON project",
           };
         }
       },
