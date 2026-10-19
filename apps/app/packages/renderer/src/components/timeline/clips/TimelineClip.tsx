@@ -1680,6 +1680,12 @@ const TimelineClip: React.FC<
         }}
         onMouseOver={handleMouseOver}
         onMouseLeave={handleMouseLeave}
+        // A text template's group opens its words (the Text template tab) on a double click.
+        onDblClick={() => {
+          if (clipType !== "group" || !(currentClip as { template?: unknown }).template) return;
+          useControlsStore.getState().setSelectedClipIds([currentClipId]);
+          void import("@/lib/inspector").then((m) => m.useInspectorStore.getState().setTab("template"));
+        }}
       >
         <Group ref={groupRef} width={clipWidth} height={timelineHeight}>
           {clipType === "group" ? (

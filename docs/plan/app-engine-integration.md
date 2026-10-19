@@ -222,6 +222,25 @@ The panels are built (2026-10-18) on these fields and helpers, every control che
 - **Checked:** `tests/compositing.test.ts` (`node --test tests/*.test.ts`: the lists against the engine's, each helper, the keyframe properties), the v1 crate's tests (fields to materials both ways, keys, a converted clip's edits), the engine's (`render/tests/compositing.rs`, `playback/tests/compositing.rs`), and the harness step `compositing` (15 checks in the engine's frames).
 - **For the panels:** the chroma key's eyedropper should sample the clip's own pixels at the playhead; the Canvas section shows only for main-track clips (`fillsCanvas`); a clip's `canvas` stays when it leaves the main track and shows again when it comes back.
 
+## Text templates
+
+The Text tab's "Text template" section (`lib/text-templates.ts`, about 55 of our own designs in eight categories) holds
+templates as data: layers of text clips (our text styles, glow, strokes, gradients, In/Out/Loop animations) and shapes
+(the Shapes library's, and pen paths for drawn icons such as the heart and the bell), with keyframes for what moves.
+Nothing is new to the engine's drawing: a template is the clips the app already has.
+
+- **Model.** CapCut's template is one clip with fields to fill in. Ours is a group (the app's compound clip) of ordinary
+  clips, each layer on a track of its own, so every layer keeps its inspector, animations and keyframes, and Ungroup frees
+  them. The group carries `template: { id, name }`; selecting it (or double-clicking it on the timeline) opens a
+  "Text template" tab listing the template's texts as fields (`templateField` on each text names it), and each field's brush
+  selects that text for the whole Text tab.
+- **Insertion** (`lib/text-template-actions.ts`): a track per layer, the layers' clips, a track for the group and `groupClips`,
+  all one undo step. The block is laid out in 16:9 world units and scaled to the project's canvas; `place` puts it in the
+  middle or against an edge.
+- **Previews** are drawn by the engine: `engineProjectPreviews` (core `ProjectPreviews`, node `projectPreviews`) renders frames
+  of a small project given as JSON, optionally cropped, through the same preview renderer as the player and an export. A
+  tile shows one frame, plays 12 frames a second while hovered; a click plays the template over the player at its place.
+
 ## Text styles and captions
 
 Done (2026-10-18): the data model, the library files and the engine for the Text tab's Basic (spacing, gradient fill, outlines, glow) and Effects, the Add-text presets, and Captions ▸ Import and export. The panels are UI still to build on them ([text-styles.md](../parity/text-styles.md) has CapCut's side and the checks).

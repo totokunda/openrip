@@ -35,6 +35,7 @@ import PendingMenu, { type Pending } from "../menus/PendingMenu";
 import CaptionsMenu from "../menus/CaptionsMenu";
 import { useAutoCaptionsFocus } from "@/lib/autocaptions";
 import { PRESET_CATEGORIES } from "../menus/TextMenu";
+import { TEMPLATE_SECTIONS } from "../menus/TextTemplatesMenu";
 
 interface MediaModelPanelProps {
   id?: string;
@@ -80,6 +81,7 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
   text: [
     { id: "add", label: "Add text" },
     ...PRESET_CATEGORIES.map((c) => ({ id: `presets:${c}`, label: c, under: "Presets" })),
+    ...TEMPLATE_SECTIONS,
     { id: "captions", label: "Local captions" },
     { id: "animations", label: "Animations" },
   ],

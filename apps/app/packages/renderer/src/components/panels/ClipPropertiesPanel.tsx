@@ -34,6 +34,7 @@ import { TransformSection } from '../properties/VideoBasicProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
 import { useInspectorStore } from '@/lib/inspector'
 import TrackingProperties from '../properties/TrackingProperties'
+import TemplateProperties from '../properties/TemplateProperties'
 import OpticalFlowProperties from '../properties/OpticalFlowProperties'
 
 /**
@@ -200,6 +201,12 @@ const ClipPropertiesPanel: React.FC = () => {
       case 'draw':
         return [
           ...(selectedLineId ? [{ id: 'line', label: 'Line', sections: [{ id: 'line', label: 'Line', content: <LineProperties clipId={clipId} /> }] }] : []),
+          duration('Duration'),
+        ];
+      // A text template's group: its words as fields (lib/text-templates.ts).
+      case 'group':
+        return [
+          ...((clip as any).template ? [{ id: 'template', label: 'Text template', sections: [{ id: 'fields', label: 'Fields', content: <TemplateProperties clipId={clipId} /> }] }] : []),
           duration('Duration'),
         ];
       default:

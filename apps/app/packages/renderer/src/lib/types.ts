@@ -870,6 +870,8 @@ export type TextClipProps = ClipProps & {
   captionKeywordColor?: string;
   /** Made by Auto captions: Generate again replaces it. */
   autoCaption?: boolean;
+  /** Its name in a text template's fields (the Text template tab of the group it came with). */
+  templateField?: string;
 };
 
 export type FilterClipProps = ClipProps & {
@@ -1038,6 +1040,8 @@ export type MaskClipProps = {
 export type GroupClipProps = ClipProps & {
   type: "group";
   children: string[][]; // clipIds for the children of the group
+  /** The text template (lib/text-templates.ts) the group was made from: its Text template tab edits the words. */
+  template?: { id: string; name: string };
 };
 
 export type AnyClipProps =

@@ -37,6 +37,7 @@ import DrawingPreview from "./clips/DrawingPreview";
 import PenOverlay from "./PenOverlay";
 import ShapeLibraryPreview from "./ShapeLibraryPreview";
 import StickerLibraryPreview from "./StickerLibraryPreview";
+import TemplateLibraryPreview from "./TemplateLibraryPreview";
 import MaskPreview from "./clips/MaskPreview";
 import { useControlsStore } from "@/lib/control";
 import {
@@ -2765,6 +2766,7 @@ const Preview: React.FC<PreviewProps> = () => {
                 <PenOverlay rectWidth={rectWidth} rectHeight={rectHeight} scale={scale} position={position} />
                 <ShapeLibraryPreview rectWidth={rectWidth} rectHeight={rectHeight} />
                 <StickerLibraryPreview rectWidth={rectWidth} rectHeight={rectHeight} />
+                <TemplateLibraryPreview rectWidth={rectWidth} rectHeight={rectHeight} />
                 {renderLassoPath()}
                 {renderMaskRectPreview()}
                 {renderMaskBrushDrawing()}

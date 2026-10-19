@@ -14,6 +14,7 @@ import { textPreset } from "@/lib/text-presets";
 import { cn } from "@/lib/utils";
 import TextLook from "./TextLook";
 import CaptionsMenu from "./CaptionsMenu";
+import TextTemplatesMenu from "./TextTemplatesMenu";
 
 /** The column's preset categories ("presets:<category>"), as CapCut lists its text effects'. */
 export const PRESET_CATEGORIES = ["All", "Basic", "Title", "Caption", "Style"] as const;
@@ -160,6 +161,7 @@ const TextMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
 
   // Local captions: the caption file import, as Captions ▸ Add captions has it.
   if (part === "captions") return <CaptionsMenu part="add" />;
+  if (part.startsWith("templates:")) return <TextTemplatesMenu part={part} />;
   return (
     <ScrollArea className="h-full">
       <div className="flex flex-col gap-5 p-3 pb-8">{part === "animations" ? animations : part === "add" ? add : styles}</div>
