@@ -9,7 +9,7 @@
 //   undo step each); Rename and Delete from the tile's menu; Yours ▸ Favorites;
 // - the presets still there after the app is restarted.
 // Shots: `pr1-menu` ↔ `30-timeline-toolbar/002`, `pr2-presets` ↔ `05-left-media/015`, `pr3-favorites` ↔ `013`.
-import { drag, openEditor, rulerMap, seek, settled } from "./_preview.mjs";
+import { drag, openEditor, rulerMap, sectionButton, seek, settled } from "./_preview.mjs";
 import { bar, checks, savedProject } from "./_anim.mjs";
 import { undoCase as undoStep } from "./_undo.mjs";
 import { input, open, typeIn } from "./_inspector.mjs";
@@ -146,7 +146,7 @@ export default async (ctx) => {
   await item("save-preset").click();
   await win.waitForTimeout(1200);
   await win.locator("[data-testid=assets-tab-media]").click();
-  await win.locator("[data-testid='assets-section-yours:presets']").click();
+  await (await sectionButton(win, "yours:presets")).click();
   await win.waitForTimeout(600);
   const tiles = win.locator("[data-testid=preset-tile]");
   check("Save preset puts a tile in Yours > My presets named My presets1", (await tiles.count()) === 1 && (await tiles.first().getAttribute("data-preset-name")) === "My presets1", `${await tiles.count()}`);
@@ -223,7 +223,7 @@ export default async (ctx) => {
   check("Delete removes the tile and its entry in the file", (await tiles.count()) === 1 && onDisk().presets.length === 1 && onDisk().presets[0].name === "Warm look", `${await tiles.count()} tiles, ${onDisk()?.presets?.length} in the file`);
 
   // Yours > Favorites is the starred stock media.
-  await win.locator("[data-testid='assets-section-yours:favorites']").click();
+  await (await sectionButton(win, "yours:favorites")).click();
   await win.waitForTimeout(600);
   await shot("pr3-favorites");
 
@@ -233,7 +233,7 @@ export default async (ctx) => {
   await openEditor(win);
   await win.waitForTimeout(2000);
   await win.locator("[data-testid=assets-tab-media]").click();
-  await win.locator("[data-testid='assets-section-yours:presets']").click();
+  await (await sectionButton(win, "yours:presets")).click();
   await win.waitForTimeout(800);
   const again = win.locator("[data-testid=preset-tile]");
   check("after a restart the preset is listed, named Warm look", (await again.count()) === 1 && (await again.first().getAttribute("data-preset-name")) === "Warm look", `${await again.count()}`);
