@@ -21,9 +21,11 @@ export default async (ctx) => {
   for (const name of ["audio", "text", "stickers", "effects", "transitions", "captions", "filters", "adjustment", "templates", "media"]) {
     await left(name);
     await shot(`l-${name}`);
-    // The library beside the tab's sections.
+    // The library beside the tab's sections: words, or tiles (Stickers ▸ Shapes has no labels,
+    // as CapCut's hasn't).
     const text = (await win.locator("[data-testid=assets-content]").innerText()).replace(/\s+/g, " ").trim();
-    check(`left tab ${name} has content`, text.length > 20, text.slice(0, 60));
+    const tiles = await win.locator("[data-testid=assets-content] [data-testid^=shape-], [data-testid=assets-content] button").count();
+    check(`left tab ${name} has content`, text.length > 20 || tiles >= 4, text.slice(0, 60) || `${tiles} tiles`);
   }
 
   // The inspector's tabs follow the selection.
