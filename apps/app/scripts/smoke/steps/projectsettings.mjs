@@ -225,7 +225,16 @@ export default async (ctx) => {
   check("and back", files(home).length === n && files(moved).length === 0, `${files(home).length} back, ${files(moved).length} left`);
 
   // ---- Back to the project's own canvas, unless kept for the reopen check ----
-  if (!process.env.PS_KEEP) {
+  if (process.env.PS_KEEP) {
+    // Left on Custom 720×1280 at 30 fps for projectsettingscheck (after `reopen`).
+    await open();
+    await choose("ps-resolution", "custom");
+    await win.locator("[data-testid=ps-width]").fill("720");
+    await win.locator("[data-testid=ps-width]").press("Enter");
+    await win.locator("[data-testid=ps-height]").fill("1280");
+    await win.locator("[data-testid=ps-height]").press("Enter");
+    await save();
+  } else {
     await open();
     await choose("ps-aspect", aspect0.id === "custom" ? "16:9" : aspect0.id);
     await choose("ps-fps", String(fps0));

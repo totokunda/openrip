@@ -927,14 +927,14 @@ Screenshots are in `17-inspector-project/` unless a path says otherwise.
 |---|---|---|
 | Details panel: Name, Path, Imported media, Arrange layers, Proxy, Timeline name, Aspect ratio, Resolution, Frame rate; Modify button | `17-inspector-project/010-details-empty.png`, `001-project-settings-details.png` | missing (an empty properties panel) |
 | Project settings › Name | `001-project-settings-details.png` | has (Topbar rename) |
-| Project settings › Save to (project folder) | `001-project-settings-details.png` | missing |
-| Project settings › Imported media: Copy media to project / Stay in original location | `001-project-settings-details.png` | missing |
-| Project settings › Color space: Rec. 709 SDR, Rec. 2020 SDR, Rec. 2100 HLG, Rec. 2100 PQ | `002-color-space-dropdown.png` | missing |
-| Project settings › Arrange layers (one-way) | `001-project-settings-details.png` | missing |
-| Project settings › Aspect ratio list | `004-aspect-ratio-dropdown.png` | partly (Topbar) |
-| Project settings › Resolution: Adapted, Custom | `006-resolution-dropdown.png` | missing |
-| Project settings › Frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `007-frame-rate-dropdown.png` | partly (24/25/30/48/60 in an unreachable Settings modal) |
-| Project settings › Performance: Proxy on/off, proxy resolution 720P/540P | `008-project-settings-performance.png`, `009-proxy-resolution-dropdown.png` | partly (per-item 480p proxies) |
+| Project settings › Save to (project folder) | `001-project-settings-details.png` | has (moves the projects folder) |
+| Project settings › Imported media: Copy media to project / Stay in original location | `001-project-settings-details.png` | partly (Copy is disabled with a note) |
+| Project settings › Color space: Rec. 709 SDR, Rec. 2020 SDR, Rec. 2100 HLG, Rec. 2100 PQ | `002-color-space-dropdown.png` | partly (only Rec. 709 SDR; the rest disabled with a note) |
+| Project settings › Arrange layers (one-way) | `001-project-settings-details.png` | partly (shown on, disabled with a note) |
+| Project settings › Aspect ratio list | `004-aspect-ratio-dropdown.png` | has |
+| Project settings › Resolution: Adapted, Custom | `006-resolution-dropdown.png` | has (Custom is W × H fields) |
+| Project settings › Frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `007-frame-rate-dropdown.png` | has |
+| Project settings › Performance: Proxy on/off, proxy resolution 720P/540P | `008-project-settings-performance.png`, `009-proxy-resolution-dropdown.png` | partly (shown disabled: the engine plays the originals) |
 | Global edits › Make volume consistent (classic loudness matching) | `011-project-smart-suggestions.png`, `012-project-global-edits-bottom.png` | missing |
 
 Out of scope: Smart suggestions › Analyze, Make colors better, Make voice clearer, Make video clearer, Retouch face.
@@ -985,7 +985,7 @@ Tabs: Video (Basic, Remove BG, Mask, Retouch), Audio, Speed, Animation, Adjust, 
 | Audio tab › "Audio is separated" state with Recover audio | `023-audio-separated-state.png` | missing |
 | Animation tab › In / Out / Combo with duration (OpenRip's own animations) | `21-inspector-text/020-animation-in-grid.png` (same layout) | missing (OpenRip's Animation tab sets a transition) |
 | Adjust tab (see 6.23) | `25-inspector-adjustment-layer/*` | partly |
-| Crop (from the timeline toolbar): ratio Free/…/16:9/9:16, rotation slider, Reset, Confirm | `31-dialogs/039-crop-dialog.png`, `31-dialogs/040-crop-ratio-menu.png` | partly (no rotation, different presets) |
+| Crop (from the timeline toolbar): ratio Free/…/16:9/9:16, rotation slider, Reset, Confirm | `31-dialogs/039-crop-dialog.png`, `31-dialogs/040-crop-ratio-menu.png` | has (rotation straightens the picture inside the frame) |
 | Mirror (horizontal flip) | `30-timeline-toolbar/032-mirrored-video-state.png` | partly (Mirror and Flip in Transform; not in the timeline toolbar) |
 
 Out of scope: Enhance quality, AI remove, AI expand, AI remix, Eye contact, Lip sync, Relight, Auto reframe, AI movement, Camera tracking, Remove BG › Auto removal and Custom removal, all of Retouch (`018-retouch-face-controls.png`, `019-retouch-features-controls.png`), AI stylize (`024-ai-stylize-form.png`), Velocity effects, Canvas › Brand backgrounds, CapCut canvas patterns.
