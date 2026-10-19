@@ -1,7 +1,7 @@
 // The Transitions tab and transitions on cuts, through the UI (after import timeline; the clip
 // is split at 5 s, later at 8 s too):
-// - the tab's column lists the categories under Transitions (no Basic without Blink's images),
-//   its cards every transition the engine draws, a hovered card its +;
+// - the tab's column lists the categories under Transitions, its cards every transition the
+//   engine draws (translib covers the shader ones), a hovered card its +;
 // - + with the first half selected puts White Flash on the cut: saved, selected (its inspector
 //   with its name and 0.5 s), the engine's frame white at the cut and partly so before it,
 //   unchanged outside it; ⌘Z / ⇧⌘Z;
@@ -58,9 +58,10 @@ export default async (ctx) => {
   await win.locator("[data-testid=assets-tab-transitions]").click();
   await win.waitForTimeout(500);
   const sections = (await win.locator("[data-testid=assets] nav[aria-label=Sections] [data-testid^=assets-section-]").allInnerTexts()).map((s) => s.trim());
-  check("its column: Classic, Slide, Mask, Movement (no Basic without Blink's images)", sections.join() === "Classic,Slide,Mask,Movement", sections.join());
+  check("its column: the twelve categories", sections.join() === "Basic,Slide,Wipe,Mask,Pattern,Camera,Blur,Light,Glitch,Distortion,3D,Overlay", sections.join());
   const offered = await transitionsOffered(win);
-  check("its cards: the engine's transitions but Blink", offered.join() === "Mix,Black Fade,White Flash,White Fade,Pull in,Pull out,Blur,Slide,Push,Wipe,Circle,Spin", offered.join());
+  const classics = ["Mix", "Black Fade", "White Flash", "White Fade", "Pull in", "Pull out", "Blur", "Slide", "Push", "Wipe", "Circle", "Spin"];
+  check("its cards: the engine's twelve classics (not Blink) and the hundred shader ones", classics.every((n) => offered.includes(n)) && !offered.includes("Blink") && offered.length === 112, `${offered.length}: ${offered.slice(0, 14).join()}`);
   const flashCard = await openTransitionCard(win, "White Flash");
   await flashCard.hover();
   await win.waitForTimeout(300);

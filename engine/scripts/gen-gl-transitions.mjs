@@ -145,7 +145,7 @@ const byName = Object.fromEntries(catalog.map((t) => [t.name, t]));
 
 const KIND = { float: "Float", int: "Int", bool: "Bool", vec2: "Vec2", vec3: "Vec3", vec4: "Vec4", ivec2: "IVec2" };
 const label = (k) => {
-  const s = k.replace(/^u_?/, "").replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
+  const s = k.replace(/^u(?=[A-Z_])_?/, "").replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 };
 const round = (x) => Math.round(x * 1000) / 1000;

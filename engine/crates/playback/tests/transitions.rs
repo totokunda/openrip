@@ -240,3 +240,15 @@ fn shader_transitions_draw_the_clips_through_the_collection() {
     let at_cut = px(&mut e, 2.0, 32, 18);
     assert!(at_cut[1] > 200 && at_cut[0] < 60 && at_cut[2] < 60, "{at_cut:?}");
 }
+
+#[test]
+fn a_shader_transitions_switch_changes_the_picture() {
+    let p = project(Some("gl_circleopen"));
+    let mut e = PreviewEngine::new(p.clone()).unwrap();
+    let opening = px(&mut e, 1.9375, 32, 18);
+    let mut p = p;
+    p.materials.transitions[0].params.insert("opening".into(), serde_json::json!(false));
+    let mut e = PreviewEngine::new(p).unwrap();
+    let closing = px(&mut e, 1.9375, 32, 18);
+    assert_ne!(opening, closing);
+}

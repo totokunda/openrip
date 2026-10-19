@@ -15,6 +15,7 @@ const dev = MOTION_DEV ? { MODE: "development", VITE_DEV_SERVER_URL: MOTION_DEV 
 // [case, env (null: skipped), steps]
 const CASES = [
   ["trans", {}, "import timeline transui"],
+  ["translib", {}, "import timeline translib reopen translibcheck"],
   ["clipanim", {}, "import timeline animclip"],
   ["speed", {}, "import timeline speedui"],
   ["freeze", {}, "import timeline freezeui"],
