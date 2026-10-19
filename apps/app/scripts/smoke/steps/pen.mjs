@@ -6,7 +6,7 @@
 // outline, one deleted, each undone and redone; a second path finished open by a
 // double-click gets an arrow at its end from the inspector's Cap; Esc with one point leaves
 // nothing.
-import { drag, engineFrame, previewRect, rulerMap, seek, settled } from "./_preview.mjs";
+import { drag, engineFrame, previewRect, rulerMap, seek, settled, sectionButton } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject } from "./_anim.mjs";
 import { press, state, undoCase } from "./_undo.mjs";
 
@@ -18,7 +18,7 @@ export default async (ctx) => {
   ctx.map ??= await rulerMap(win);
   await seek(win, ctx.map, 1);
   await win.locator("[data-testid=assets-tab-stickers]").click();
-  await win.locator("[data-testid=assets-section-shapes]").click();
+  await (await sectionButton(win, "shapes")).click();
   const p = await previewRect(win);
   const at = (fx, fy) => [p.x + p.w * fx, p.y + p.h * fy];
   const toast = win.locator("[data-testid=pen-toast]");

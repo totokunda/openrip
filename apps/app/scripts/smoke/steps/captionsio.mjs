@@ -5,7 +5,7 @@
 // (the save dialog stubbed) writing the timeline's texts as the same SRT.
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { engineFrame, rulerMap, seek, settled } from "./_preview.mjs";
+import { engineFrame, rulerMap, seek, settled, sectionButton } from "./_preview.mjs";
 import { checks, savedProject, select } from "./_anim.mjs";
 import { undoCase } from "./_undo.mjs";
 
@@ -28,7 +28,7 @@ export default async (ctx) => {
   await seek(win, ctx.map, 0.5);
   await win.locator("[data-testid=assets-tab-captions]").click();
   // The column opens on Auto captions; the file import is Add captions.
-  await win.locator("[data-testid=assets-section-add]").click();
+  await (await sectionButton(win, "add")).click();
   await win.waitForTimeout(400);
   await shot("cio1-add-captions");
   await win.locator("[data-testid=caption-style]").selectOption("yellow");
@@ -50,7 +50,7 @@ export default async (ctx) => {
   // A template on the selected caption's track: every caption gets it.
   await select(ctx, await doc(), got[0].clipId, 0.5);
   await win.locator("[data-testid=assets-tab-captions]").click();
-  await win.locator("[data-testid=assets-section-templates]").click();
+  await (await sectionButton(win, "templates")).click();
   await win.waitForTimeout(300);
   await shot("cio3-templates");
   const f1 = (await engineFrame(win)).sum;
@@ -59,7 +59,7 @@ export default async (ctx) => {
   check("a template restyles the whole caption track", boxed.length === 4 && boxed.every((c) => c.backgroundEnabled && c.backgroundOpacity === 70) && (await engineFrame(win)).sum !== f1, boxed.map((c) => c.backgroundEnabled).join(","));
 
   // Export: the timeline's texts as SRT, on the frames the captions took.
-  await win.locator("[data-testid=assets-section-add]").click();
+  await (await sectionButton(win, "add")).click();
   await win.waitForTimeout(300);
   await win.locator("[data-testid=captions-export]").click();
   // Once written whole (the file exists as soon as the write starts).

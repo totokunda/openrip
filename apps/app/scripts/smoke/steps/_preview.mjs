@@ -210,3 +210,19 @@ export const diff = (win, a, b, tol = 8) => win.evaluate(({ a, b, tol }) => {
   }
   return { n, light: light / (y.length / 4) };
 }, { a, b, tol });
+
+/**
+ * A left-panel section's button (`assets-section-<id>`). The column keeps one group open at a
+ * time (as CapCut's), so a section in a folded group is reached by opening its group first.
+ */
+export const sectionButton = async (win, id) => {
+  const button = win.locator(`[data-testid="assets-section-${id}"]`);
+  if (await button.count()) return button;
+  const opened = await win.evaluate((id) => {
+    const heading = [...document.querySelectorAll("[data-group-ids]")].find((h) => JSON.parse(h.getAttribute("data-group-ids")).includes(id));
+    heading?.click();
+    return !!heading;
+  }, id);
+  if (opened) await win.waitForTimeout(200);
+  return button;
+};

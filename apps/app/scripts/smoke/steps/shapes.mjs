@@ -7,7 +7,7 @@
 // changing the frame, each undone and redone); and S with a number key dragging out a
 // triangle; and a drag with the S tool starting over a shape or the video drawing a shape without
 // selecting the clip under it.
-import { drag, engineFrame, previewRect, rulerMap, seek, settled, tab, timelineRect } from "./_preview.mjs";
+import { drag, engineFrame, previewRect, rulerMap, seek, settled, tab, timelineRect, sectionButton } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject, select } from "./_anim.mjs";
 import { press, state, undoCase } from "./_undo.mjs";
 
@@ -25,7 +25,7 @@ export default async (ctx) => {
   await win.locator("[data-testid=assets-tab-stickers]").click();
   const column = await win.evaluate(() => [...document.querySelectorAll("[data-testid^=assets-section-]")].map((b) => b.innerText.trim()));
   check("the column is Favorites, the sticker categories, Shapes (no Draw)", column[0] === "Favorites" && column.includes("Trending") && column[column.length - 1] === "Shapes" && !column.includes("Draw"), JSON.stringify(column));
-  await win.locator("[data-testid=assets-section-shapes]").click();
+  await (await sectionButton(win, "shapes")).click();
   await win.waitForTimeout(300);
   const tiles = await win.evaluate(() =>
     [...document.querySelectorAll("[data-testid=shapes-library] [data-testid^=shape-]:not([data-testid^=shape-add-])")].map((t) => {
@@ -136,7 +136,7 @@ export default async (ctx) => {
 
   // A line's inspector: no Fill, its caps; an arrow at its end.
   await win.locator("[data-testid=assets-tab-stickers]").click();
-  await win.locator("[data-testid=assets-section-shapes]").click();
+  await (await sectionButton(win, "shapes")).click();
   await settled(win, () => addTile("line"));
   await win.waitForTimeout(500);
   const lineGroups = await win.evaluate(() => [...document.querySelectorAll("[data-testid^=shape-group-]")].map((g) => g.getAttribute("data-testid").slice(12)));

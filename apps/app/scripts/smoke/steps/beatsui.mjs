@@ -6,7 +6,7 @@
 // - the text dragged so its end comes 3 px from the beat lands on it (not with snapping off);
 // - Auto beat from the toolbar's menu (Beat 2: every beat the engine finds, drawn) and from the
 //   clip's menu (Auto mark beats › Beat 1: bar starts only, fewer); Clear beats.
-import { rulerMap, seek, settled } from "./_preview.mjs";
+import { rulerMap, seek, settled, sectionButton } from "./_preview.mjs";
 import { checks, savedProject, select } from "./_anim.mjs";
 import { undoCase } from "./_undo.mjs";
 import { clipsOn, fpsOf, key, rowY } from "./_timeline.mjs";
@@ -18,7 +18,7 @@ export const markerCount = (win) =>
 /** The video's sound on its own track at the playhead, from Audio › Extracted. */
 export const addExtracted = async (win) => {
   await win.locator("[data-testid=assets-tab-audio]").click();
-  await win.locator("[data-testid=assets-section-extracted]").click();
+  await (await sectionButton(win, "extracted")).click();
   await win.waitForTimeout(1500);
   await settled(win, () => win.locator("[data-testid=audio-section-extracted] [data-testid=audio-row-add]").first().click());
 };

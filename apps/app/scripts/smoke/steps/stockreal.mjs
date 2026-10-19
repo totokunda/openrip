@@ -2,7 +2,7 @@
 // server, so it needs the network): the real Trending list, a search, Photos, a real video and
 // a real photo added at the playhead, and the credits. Not part of the automated runs.
 // Shots: `r1-library` ↔ `05-left-media/023-library-default`, `r2-photos`, `r3-added`, `r4-credits`.
-import { engineFrame, rulerMap, seek } from "./_preview.mjs";
+import { engineFrame, rulerMap, seek, sectionButton } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject } from "./_anim.mjs";
 
 export default async (ctx) => {
@@ -11,7 +11,7 @@ export default async (ctx) => {
   ctx.map = await rulerMap(win);
   await seek(win, ctx.map, 1);
   await win.locator("[data-testid=assets-tab-media]").click();
-  await win.locator("[data-testid='assets-section-library:trending']").click();
+  await (await sectionButton(win, "library:trending")).click();
   await win.waitForSelector("[data-testid=stock-tile]", { timeout: 60000 });
   await win.waitForTimeout(3000);
   const tiles = await win.evaluate(() => [...document.querySelectorAll("[data-testid=stock-tile]")].map((t) => `${t.dataset.source}|${t.dataset.license}|${t.getAttribute("aria-label")}`));
@@ -49,7 +49,7 @@ export default async (ctx) => {
   d = await savedProject(win, ctx.udDir);
   check("the video is on the timeline with its credit", clipsWhere(d, (c) => c.type === "video").length >= 2 && Object.values(d.assets).filter((a) => a.credit).length === 2, JSON.stringify(Object.values(d.assets).map((a) => a.credit?.title)));
   await ctx.shot("r3-added");
-  await win.locator("[data-testid='assets-section-library:credits']").click();
+  await (await sectionButton(win, "library:credits")).click();
   await win.waitForTimeout(500);
   check("two credit rows", (await win.locator("[data-testid=credit-row]").count()) === 2);
   await ctx.shot("r4-credits");

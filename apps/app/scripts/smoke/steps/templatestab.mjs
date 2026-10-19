@@ -10,7 +10,7 @@
 // Shots: `t1-empty` ↔ `14-left-templates/001-editor-templates-default` (empty), `t2-tab` ↔ `001`,
 // `t3-preview`, `t4-used`.
 import path from "node:path";
-import { goHome, engineFrame, previewRect, rulerMap, seek } from "./_preview.mjs";
+import { goHome, engineFrame, previewRect, rulerMap, seek, sectionButton } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject } from "./_anim.mjs";
 import { press, state, undoCase } from "./_undo.mjs";
 
@@ -28,7 +28,7 @@ export default async (ctx) => {
   const d0 = await doc();
   const sourceClips = d0.timeline.clips.length;
   await open();
-  check("the tab has its column: Templates with Your templates and the shapes", (await win.locator("[data-testid='assets-section-all']").innerText()) === "Your templates" && (await win.locator("[data-testid='assets-section-square']").count()) === 1);
+  check("the tab has its column: Templates with Your templates and the shapes", (await (await sectionButton(win, "all")).innerText()) === "Your templates" && (await (await sectionButton(win, "square")).count()) === 1);
   check("with no template saved, it explains how to save one", /Save as template/.test(await win.locator("[data-testid=tpltab-empty]").innerText()) && /Home/.test(await win.locator("[data-testid=tpltab-empty]").innerText()));
   await shot("t1-empty");
 
@@ -70,10 +70,10 @@ export default async (ctx) => {
   const ar = tplDoc.settings.aspectRatio;
   const own = ar.width === ar.height ? "square" : ar.width > ar.height ? "landscape" : "portrait";
   const other = own === "portrait" ? "landscape" : "portrait";
-  await win.locator(`[data-testid='assets-section-${other}']`).click();
+  await (await sectionButton(win, other)).click();
   await win.waitForTimeout(400);
   check(`${other} hides a ${own} template`, (await cards.count()) === 0);
-  await win.locator(`[data-testid='assets-section-${own}']`).click();
+  await (await sectionButton(win, own)).click();
   await win.waitForTimeout(400);
   check(`${own} lists it`, (await cards.count()) === 1);
 

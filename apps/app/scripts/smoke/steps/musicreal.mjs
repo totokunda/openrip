@@ -4,7 +4,7 @@
 // the playhead, and read its credit. Not part of the normal runs (`musiclib` uses a fixture).
 import fs from "node:fs";
 import path from "node:path";
-import { rulerMap, seek, settled } from "./_preview.mjs";
+import { rulerMap, seek, settled, sectionButton } from "./_preview.mjs";
 import { checks, savedProject } from "./_anim.mjs";
 
 const until = async (win, fn, ms = 30000) => {
@@ -21,7 +21,7 @@ export default async (ctx) => {
   ctx.map ??= await rulerMap(win);
   const rows = win.locator("[data-testid=music-row]");
   const open = async (id) => {
-    await win.locator(`[data-testid="assets-section-${id}"]`).click();
+    await (await sectionButton(win, id)).click();
     await until(win, async () => (await rows.count()) > 0 || (await win.locator("[data-testid=music-error], [data-testid=music-offline], [data-testid=music-none]").count()) > 0);
   };
   await win.locator("[data-testid=assets-tab-audio]").click();

@@ -18,18 +18,18 @@
 // `ml-2-sfx` ↔ `027-sounds-trending`, `ml-3-hover` ↔ `025-music-item-hover`, `ml-6-favorites` ↔ `029-audio-yours`.
 import fs from "node:fs";
 import path from "node:path";
-import { drag, openEditor, rulerMap, seek, settled, timelineRect } from "./_preview.mjs";
+import { drag, openEditor, rulerMap, seek, settled, timelineRect, sectionButton } from "./_preview.mjs";
 import { checks, focus, savedProject } from "./_anim.mjs";
 import { band, exporter, pcm, side } from "./_audio.mjs";
 import { audioSub } from "./audioui.mjs";
 import { startFixture } from "./_musicfixture.mjs";
 
-const section = (win, id) => win.locator(`[data-testid="assets-section-${id}"]`);
+const section = (win, id) => sectionButton(win, id);
 const rows = (win) => win.locator("[data-testid=music-row]");
 const row = (win, title) => win.locator(`[data-testid=music-row][data-title="${title}"]`);
 const titles = (win) => rows(win).evaluateAll((els) => els.map((e) => e.getAttribute("data-title")));
 const open = async (win, id) => {
-  await section(win, id).click();
+  await (await section(win, id)).click();
   await win.waitForTimeout(900);
 };
 /** Wait for `fn` (a page-side predicate over the locator's element) to hold. */
@@ -67,7 +67,7 @@ export default async (ctx) => {
     const first = row(win, "Sunrise Anthem");
     const text = (await first.innerText()).replace(/\s+/g, " ");
     check(`a row has title, artist, duration and licence ("${text}")`, /Sunrise Anthem/.test(text) && /Fixture Artist · 00:06/.test(text) && /CC BY/.test(text));
-    check("the column has the categories under Music and Sound effects", (await section(win, "music:Epic").count()) === 1 && (await section(win, "sfx:Whoosh").count()) === 1);
+    check("the column has the categories under Music and Sound effects", (await (await section(win, "music:Epic")).count()) === 1 && (await (await section(win, "sfx:Whoosh")).count()) === 1);
     const req = fixture.log.find((l) => l.path === "/v1/audio/");
     check(`the request asks for cc0,pdm,by only, music, and says who's asking (${req?.query.license}, ${req?.query.category}, ${req?.ua})`, req?.query.license === "cc0,pdm,by" && req?.query.category === "music" && /OpenRip/.test(req?.ua ?? ""));
     await shot("ml-1-music");

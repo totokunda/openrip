@@ -13,7 +13,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { clickSplit, drag, engineFrame, rulerMap, seek, settled } from "./_preview.mjs";
+import { clickSplit, drag, engineFrame, rulerMap, seek, settled, sectionButton } from "./_preview.mjs";
 import { checks, savedProject } from "./_anim.mjs";
 import { handleX } from "./_timeline.mjs";
 import { typeInto, undoCase } from "./_undo.mjs";
@@ -25,7 +25,7 @@ export default async (ctx) => {
   const barsIn = async () => (await saved()).timeline.clips.filter((c) => c.type === "filter" && c.effectId);
   const column = () => win.evaluate(() => [...document.querySelectorAll("nav[aria-label=Sections] button")].map((e) => e.innerText.trim()));
   const tiles = () => win.locator("[data-testid=effect-tile]").evaluateAll((els) => els.map((e) => ({ id: e.getAttribute("data-effect"), category: e.getAttribute("data-category"), name: e.title })));
-  const section = (id) => win.locator(`[data-testid='assets-section-${id}']`);
+  const section = (id) => sectionButton(win, id);
   ctx.map ??= await rulerMap(win);
   await seek(win, ctx.map, 2);
   const f0 = (await engineFrame(win)).sum;
@@ -54,11 +54,11 @@ export default async (ctx) => {
 
   // A category.
   const cat = "Glitch";
-  await section(`cat:${cat}`).click();
+  await (await section(`cat:${cat}`)).click();
   await win.waitForTimeout(500);
   const inCat = await tiles();
   check("a category shows only its effects under its name", inCat.length > 3 && inCat.every((t) => t.category === cat) && (await win.locator("[data-testid=effects-heading]").innerText()) === cat, `${cat}: ${inCat.length}`);
-  await section("all").click();
+  await (await section("all")).click();
 
   // The search, and one that matches nothing.
   const search = win.locator("[data-testid=effects-search]");
@@ -74,10 +74,10 @@ export default async (ctx) => {
   check("the field's × clears the search", (await search.inputValue()) === "" && (await tiles()).length === all.length);
 
   // Favorites: empty, then an effect's star.
-  await section("favorites").click();
+  await (await section("favorites")).click();
   await win.waitForTimeout(300);
   check("Favorites starts empty with a note", (await tiles()).length === 0 && (await win.locator("[data-testid=effects-empty]").count()) === 1);
-  await section("all").click();
+  await (await section("all")).click();
   await win.waitForTimeout(500);
   const first = win.locator("[data-testid=effect-tile]").first();
   const firstId = await first.getAttribute("data-effect");
@@ -87,7 +87,7 @@ export default async (ctx) => {
   check("hovering a tile shows its star and +", (await first.locator("[data-testid=effect-favourite]").count()) === 1 && (await first.locator("[data-testid=effect-add]").count()) === 1);
   await first.locator("[data-testid=effect-favourite]").click();
   await win.waitForTimeout(200);
-  await section("favorites").click();
+  await (await section("favorites")).click();
   await win.waitForTimeout(500);
   const fav = await tiles();
   check("a starred effect is under Favorites", fav.length === 1 && fav[0].id === firstId, fav.map((t) => t.id).join(","));
@@ -96,7 +96,7 @@ export default async (ctx) => {
   await win.locator("[data-testid=effect-favourite]").first().click();
   await win.waitForTimeout(300);
   check("its star again takes it out", (await tiles()).length === 0);
-  await section("all").click();
+  await (await section("all")).click();
   await win.waitForTimeout(500);
 
   // Hovering plays the effect: the tile's picture changes over time.

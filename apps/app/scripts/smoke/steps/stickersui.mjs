@@ -15,7 +15,7 @@ import http from "node:http";
 import zlib from "node:zlib";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { drag, engineFrame, openEditor, previewRect, rulerMap, seek, settled, tab, timelineRect } from "./_preview.mjs";
+import { drag, engineFrame, openEditor, previewRect, rulerMap, seek, settled, tab, timelineRect, sectionButton } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject, select } from "./_anim.mjs";
 import { press, state, undoCase } from "./_undo.mjs";
 import { exporter, ffmpeg } from "./_audio.mjs";
@@ -117,7 +117,7 @@ const run = async (ctx, server) => {
   check("the first tiles are the starter set (on this machine already)", (await win.locator("[data-testid=sticker-tile][data-ready='1']").count()) >= 3);
   await shot("s1-trending");
   const category = async (name) => {
-    await win.locator(`[data-testid="assets-section-cat:${name}"]`).click();
+    await (await sectionButton(win, `cat:${name}`)).click();
     await win.waitForTimeout(500);
     return win.evaluate(() => ({ n: document.querySelectorAll("[data-testid=sticker-tile]").length, animated: [...document.querySelectorAll("[data-testid=sticker-tile]")].every((t) => t.dataset.animated === "1"), heading: document.querySelector("[data-testid=stickers-heading]")?.innerText }));
   };
@@ -149,7 +149,7 @@ const run = async (ctx, server) => {
   const joy = await win.evaluate(() => [...document.querySelectorAll("[data-testid=sticker-tile]")].map((t) => t.dataset.sticker));
   check("a keyword finds the 3D and the animated one", joy.some((s) => s.startsWith("f3d-")) && joy.some((s) => s.startsWith("anim-")), JSON.stringify(joy));
   await win.locator("[data-testid=stickers-search-clear]").click();
-  await win.locator('[data-testid="assets-section-cat:Trending"]').click();
+  await (await sectionButton(win, "cat:Trending")).click();
   await win.waitForTimeout(400);
 
   // ---- A click previews, and adds nothing ------------------------------------------------------
@@ -244,7 +244,7 @@ const run = async (ctx, server) => {
 
   // ---- An animated starter sticker: its frame changes with time -------------------------------------------------
   await win.locator("[data-testid=assets-tab-stickers]").click();
-  await win.locator('[data-testid="assets-section-cat:Animated"]').click();
+  await (await sectionButton(win, "cat:Animated")).click();
   await win.waitForTimeout(700);
   const anim = win.locator("[data-testid=sticker-tile][data-ready='1'][data-animated='1']").first();
   await seek(win, ctx.map, 6);
@@ -263,7 +263,7 @@ const run = async (ctx, server) => {
   // ---- On-demand downloads ---------------------------------------------------------------------------------------------
   await win.locator("[data-testid=stickers-style]").click();
   await win.getByRole("option", { name: "Flat" }).click();
-  await win.locator('[data-testid="assets-section-cat:Smileys"]').click();
+  await (await sectionButton(win, "cat:Smileys")).click();
   await win.waitForTimeout(700);
   const remoteId = await win.locator("[data-testid=sticker-tile][data-ready='0']").first().getAttribute("data-sticker");
   // By its id: the tile no longer matches data-ready='0' once it has downloaded.
@@ -290,7 +290,7 @@ const run = async (ctx, server) => {
   // Another download: the tile's "+" downloads and adds in one go; an animated WebP from the fixture.
   await win.locator("[data-testid=stickers-style]").click();
   await win.getByRole("option", { name: "Recommended" }).click();
-  await win.locator('[data-testid="assets-section-cat:Animated"]').click();
+  await (await sectionButton(win, "cat:Animated")).click();
   await win.waitForTimeout(700);
   const remoteAnimId = await win.locator("[data-testid=sticker-tile][data-ready='0'][data-animated='1']").first().getAttribute("data-sticker");
   const remoteAnim = win.locator(`[data-sticker="${remoteAnimId}"]`);
@@ -305,14 +305,14 @@ const run = async (ctx, server) => {
   await state(ctx, Date.now() - 400);
 
   // ---- Favourites ----------------------------------------------------------------------------------------------
-  await win.locator('[data-testid="assets-section-cat:Trending"]').click();
+  await (await sectionButton(win, "cat:Trending")).click();
   await win.waitForTimeout(500);
   const fav = win.locator("[data-testid=sticker-tile]").nth(1);
   const favId = await fav.getAttribute("data-sticker");
   await win.mouse.move(5, 5);
   await fav.hover();
   await fav.locator("[data-testid=sticker-favourite]").click();
-  await win.locator('[data-testid="assets-section-favorites"]').click();
+  await (await sectionButton(win, "favorites")).click();
   await win.waitForTimeout(500);
   check("a starred sticker is under Favorites", JSON.stringify(await win.evaluate(() => [...document.querySelectorAll("[data-testid=sticker-tile]")].map((x) => x.dataset.sticker))) === JSON.stringify([favId]));
   await win.mouse.move(5, 5);
@@ -322,7 +322,7 @@ const run = async (ctx, server) => {
   check("un-starring empties it, with its note", /No favorites yet/.test(await win.locator("[data-testid=stickers-empty]").innerText()));
 
   // ---- A tile dragged onto the timeline and onto the player ------------------------------------------------------
-  await win.locator('[data-testid="assets-section-cat:Trending"]').click();
+  await (await sectionButton(win, "cat:Trending")).click();
   await win.waitForTimeout(500);
   const tl = await timelineRect(win);
   const tile = await win.locator("[data-testid=sticker-tile]").nth(2).boundingBox();
@@ -344,7 +344,7 @@ const run = async (ctx, server) => {
   await state(ctx, Date.now() - 400);
 
   // The Shapes section is still there.
-  await win.locator("[data-testid=assets-section-shapes]").click();
+  await (await sectionButton(win, "shapes")).click();
   await win.waitForTimeout(400);
   check("Shapes still lists its tiles", (await win.locator("[data-testid=shapes-library] [role=button]").count()) >= 8);
 

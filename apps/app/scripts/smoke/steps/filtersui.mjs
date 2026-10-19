@@ -6,7 +6,7 @@
 // its Filters tab; Intensity set there; each edit undone and redone. Shots are named after the
 // CapCut references (f1 ↔ 12-left-filters/001-featured, f2 ↔ 032-unmatched-search-results,
 // f3 ↔ 031-favorites, f4 ↔ 033-item-hover, f6 ↔ 24-inspector-filter/001).
-import { engineFrame, rulerMap, seek, settled } from "./_preview.mjs";
+import { engineFrame, rulerMap, seek, settled, sectionButton } from "./_preview.mjs";
 import { checks, savedProject } from "./_anim.mjs";
 import { typeInto, undoCase } from "./_undo.mjs";
 
@@ -16,7 +16,7 @@ export default async (ctx) => {
   const filtersIn = async () => (await savedProject(win, udDir)).timeline.clips.filter((c) => c.type === "filter");
   const column = () => win.evaluate(() => [...document.querySelectorAll("nav[aria-label=Sections] button")].map((e) => e.innerText.trim()));
   const tiles = () => win.locator("[data-testid=filter-tile]").evaluateAll((els) => els.map((e) => ({ id: e.getAttribute("data-filter"), category: e.getAttribute("data-category"), name: e.title })));
-  const section = (id) => win.locator(`[data-testid='assets-section-${id}']`);
+  const section = (id) => sectionButton(win, id);
   ctx.map ??= await rulerMap(win);
   await seek(win, ctx.map, 2);
   const f0 = (await engineFrame(win)).sum;
@@ -35,11 +35,11 @@ export default async (ctx) => {
 
   // A category.
   const cat = col[3];
-  await section(`cat:${cat}`).click();
+  await (await section(`cat:${cat}`)).click();
   await win.waitForTimeout(400);
   const inCat = await tiles();
   check("a category shows only its filters under its name", inCat.length > 0 && inCat.every((t) => t.category === cat) && (await win.locator("[data-testid=filters-heading]").innerText()) === cat, `${cat}: ${inCat.length}`);
-  await section("all").click();
+  await (await section("all")).click();
 
   // The search, and one that matches nothing.
   const search = win.locator("[data-testid=filters-search]");
@@ -56,10 +56,10 @@ export default async (ctx) => {
   check("the field's × clears the search", (await search.inputValue()) === "" && (await tiles()).length === all.length);
 
   // Favorites: empty, then a filter's star.
-  await section("favorites").click();
+  await (await section("favorites")).click();
   await win.waitForTimeout(300);
   check("Favorites starts empty with a note", (await tiles()).length === 0 && (await win.locator("[data-testid=filters-empty]").count()) === 1);
-  await section("all").click();
+  await (await section("all")).click();
   await win.waitForTimeout(300);
   const first = win.locator("[data-testid=filter-tile]").first();
   const firstId = await first.getAttribute("data-filter");
@@ -68,7 +68,7 @@ export default async (ctx) => {
   check("hovering a tile shows its star and +", (await first.locator("[data-testid=filter-favourite]").count()) === 1 && (await first.locator("[data-testid=filter-add]").count()) === 1);
   await first.locator("[data-testid=filter-favourite]").click();
   await win.waitForTimeout(200);
-  await section("favorites").click();
+  await (await section("favorites")).click();
   await win.waitForTimeout(300);
   const fav = await tiles();
   check("a starred filter is under Favorites", fav.length === 1 && fav[0].id === firstId, fav.map((t) => t.id).join(","));
@@ -77,7 +77,7 @@ export default async (ctx) => {
   await win.locator("[data-testid=filter-favourite]").first().click();
   await win.waitForTimeout(300);
   check("its star again takes it out", (await tiles()).length === 0);
-  await section("all").click();
+  await (await section("all")).click();
   await win.waitForTimeout(300);
 
   // A click previews: the player shows the filter, the project doesn't have it.

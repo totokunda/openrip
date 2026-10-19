@@ -11,7 +11,7 @@
 // clip menu's Generate captions opens the panel for the clip.
 import http from "node:http";
 import path from "node:path";
-import { diff, engineFrame, grab, rulerMap, seek, settled } from "./_preview.mjs";
+import { diff, engineFrame, grab, rulerMap, seek, settled, sectionButton } from "./_preview.mjs";
 import { bar, checks, savedProject, select } from "./_anim.mjs";
 import { undoCase } from "./_undo.mjs";
 
@@ -189,7 +189,7 @@ const run = async (ctx, stop) => {
   // The other word-by-word styles, from the Templates tab on the selected caption's track.
   await select(ctx, await doc(), first.clipId, cs + (+first.endTick / 1e6 - cs) * 0.75);
   await win.locator("[data-testid=assets-tab-captions]").click();
-  await win.locator("[data-testid=assets-section-templates]").click();
+  await (await sectionButton(win, "templates")).click();
   await win.waitForTimeout(400);
   await shot("ac7-templates");
   const groups = await win.locator("[data-testid=caption-templates] h3").allInnerTexts();
@@ -247,7 +247,7 @@ const run = async (ctx, stop) => {
   check("a plain template on the track: whole text, the words kept", plain.every((c) => c.captionStyle === "none" && c.captionWords?.length), JSON.stringify(plain.map((c) => c.captionStyle)));
 
   // Generate again replaces the track the last one made (back to the yellow highlight).
-  await win.locator("[data-testid=assets-section-auto]").click();
+  await (await sectionButton(win, "auto")).click();
   await win.locator("[data-testid=auto-style-highlight-yellow]").click();
   const before = await autoClips();
   await settled(win, async () => {
@@ -272,7 +272,7 @@ const run = async (ctx, stop) => {
   await win.locator("[role=checkbox][aria-label='Delete current captions']").click();
 
   // The clip menu's Generate captions (a video clip), routing to the panel with the clip selected.
-  await win.locator("[data-testid=assets-section-templates]").click();
+  await (await sectionButton(win, "templates")).click();
   const d = await doc();
   const v = d.timeline.clips.find((c) => c.type === "video");
   const [vx, vy] = await bar(ctx, d, v.clipId, +v.startTick / 1e6 + videoSecs * 0.8);
@@ -298,13 +298,13 @@ const run = async (ctx, stop) => {
   check(`for the clip: captions again, from its start (${forClip.length} on ${new Set(forClip.map((c) => c.timelineId)).size} track)`, forClip.length >= 3 && +forClip[0].startTick / 1e6 < 2);
 
   // Auto lyrics: the same panel, word-by-word styles only.
-  await win.locator("[data-testid=assets-section-lyrics]").click();
+  await (await sectionButton(win, "lyrics")).click();
   await win.waitForTimeout(400);
   check("Auto lyrics is the same panel with the word-by-word styles", (await win.locator("[data-testid=auto-lyrics]").count()) === 1 && (await win.locator("button[data-testid^=auto-style-]").count()) === 40, `${await win.locator("[data-testid=auto-lyrics]").count()} panel, ${await win.locator("button[data-testid^=auto-style-]").count()} styles`);
   await shot("ac13-auto-lyrics");
 
   // Delete the model: its file goes and the panel offers the download again.
-  await win.locator("[data-testid=assets-section-auto]").click();
+  await (await sectionButton(win, "auto")).click();
   await win.waitForTimeout(300);
   await win.locator("[data-testid=auto-model-delete]").click();
   await win.waitForTimeout(500);

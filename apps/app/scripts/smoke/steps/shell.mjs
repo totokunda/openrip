@@ -1,7 +1,7 @@
 // The editor's shell (after import timeline newtext): each left-panel tab, the inspector's
 // tabs for the text and the video, the Text tab's styles and the Transitions tab acting on
 // the selection, the player's safe areas and ratio menu, and the layouts, with a shot of each.
-import { drag, engineFrame, rulerMap, settled } from "./_preview.mjs";
+import { drag, engineFrame, rulerMap, settled, sectionButton } from "./_preview.mjs";
 import { checks, savedProject, select } from "./_anim.mjs";
 import { openTab } from "./_undo.mjs";
 
@@ -43,7 +43,7 @@ export default async (ctx) => {
   // A text style from the Text tab: a new text clip, selected, on its Text tab.
   const texts = (await doc()).timeline.clips.filter((c) => c.type === "text").length;
   await left("text");
-  await win.locator("[data-testid='assets-section-presets:All']").click();
+  await (await sectionButton(win, "presets:All")).click();
   await settled(win, () => win.locator("[data-testid=text-preset-outline]").click());
   const after = (await doc()).timeline.clips.filter((c) => c.type === "text");
   check("Text tab: a style adds a text at the playhead", after.length === texts + 1 && after.some((c) => c.strokeEnabled), `${texts} → ${after.length} texts`);
@@ -60,7 +60,7 @@ export default async (ctx) => {
   const tnote = (await win.locator("[data-testid=assets-content]").innerText()).replace(/\s+/g, " ");
   check("Transitions tab: a lone clip has no cut, the tab says so", /between two clips/.test(tnote), tnote.slice(0, 80));
   // White Flash is under Light.
-  await win.locator("[data-testid=assets-section-Light]").click().catch(() => {});
+  await (await sectionButton(win, "Light")).click().catch(() => {});
   await win.waitForTimeout(300);
   await win.locator("[data-testid=transition-white_flash]").hover();
   await win.waitForTimeout(300);

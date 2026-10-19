@@ -102,61 +102,136 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
   templates: templateSections(),
 };
 
+type SectionItem = { id: string; label: string; under?: string };
+
 /**
  * A tab's column of sections, as CapCut's: 24 px items on a 32 px pitch. Top-level items and
  * group headings are filled; the selected item's label (and an open group's) is the accent.
+ *
+ * One group is open at a time: the one holding the selection, or the one last opened (opening a
+ * folded group selects its Trending section, or its first; its heading folds it again). Everything down to the
+ * open group's heading stays at the top and whatever follows the group stays at the bottom;
+ * only the group's sections scroll between them, fading out at the edge where there's more.
+ *
+ * CapCut's column is 120 px, but its UI font is narrower than SF Pro: at 132 px every label we
+ * have fits on one line ("Add adjustment", "Video effects" beside its chevron); a longer one ends
+ * in an ellipsis rather than wrapping.
  */
 const SectionNav: React.FC<{
-  items: { id: string; label: string; under?: string }[];
+  items: SectionItem[];
   value: string;
   onChange: (id: string) => void;
 }> = ({ items, value, onChange }) => {
-  const [folded, setFolded] = useState<Record<string, boolean>>({});
-  const item = (it: { id: string; label: string }, child = false) => (
+  const groupOf = (id: string) => items.find((it) => it.id === id)?.under ?? null;
+  const [open, setOpen] = useState<string | null>(() => groupOf(value));
+  // A selection made elsewhere (a default, the Audio tab's own links) opens its group.
+  const selectedGroup = groupOf(value);
+  useEffect(() => {
+    if (selectedGroup) setOpen(selectedGroup);
+  }, [selectedGroup]);
+
+  const listRef = useRef<HTMLDivElement>(null);
+  const [fade, setFade] = useState({ top: false, bottom: false });
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const update = () => setFade({ top: el.scrollTop > 1, bottom: el.scrollTop + el.clientHeight < el.scrollHeight - 1 });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    el.addEventListener("scroll", update, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", update);
+    };
+  }, [open]);
+  // Keep the selected section in view when its group opens.
+  useEffect(() => {
+    listRef.current?.querySelector("[aria-pressed=true]")?.scrollIntoView({ block: "nearest" });
+  }, [open, value]);
+
+  const item = (it: SectionItem, child = false) => (
     <button
       key={it.id}
       type="button"
       data-testid={`assets-section-${it.id}`}
       aria-pressed={value === it.id}
       onClick={() => onChange(it.id)}
+      title={it.label}
       className={cn(
-        "w-full h-6 shrink-0 flex items-center px-2.5 rounded-[4px] text-[12px] font-semibold text-left truncate transition-colors cursor-pointer",
+        "w-full h-6 shrink-0 flex items-center px-2 rounded-[4px] text-[12px] font-semibold text-left whitespace-nowrap transition-colors cursor-pointer",
         value === it.id ? "bg-brand-background-light text-brand-accent" : child ? "text-brand-light hover:bg-brand-light/[0.04]" : "bg-brand-background-light text-brand-light hover:bg-brand-button",
       )}
     >
-      {it.label}
+      <span className="min-w-0 truncate">{it.label}</span>
     </button>
   );
-  const out: React.ReactNode[] = [];
+  const heading = (name: string, children: SectionItem[]) => {
+    const isOpen = open === name;
+    return (
+      <button
+        key={`group-${name}`}
+        type="button"
+        data-testid={`assets-group-${name}`}
+        data-group-ids={JSON.stringify(children.map((c) => c.id))}
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (isOpen) return setOpen(null);
+          setOpen(name);
+          // As CapCut's libraries do, a group opens on its Trending section when it has one.
+          const first = children.find((c) => c.label === "Trending") ?? children[0];
+          if (!children.some((c) => c.id === value) && first) onChange(first.id);
+        }}
+        title={name}
+        className={cn(
+          "w-full h-6 shrink-0 flex items-center justify-between gap-1 pl-2 pr-1.5 rounded-[4px] text-[12px] font-semibold whitespace-nowrap bg-brand-background-light hover:bg-brand-button cursor-pointer",
+          isOpen || children.some((c) => c.id === value) ? "text-brand-accent" : "text-brand-light",
+        )}
+      >
+        <span className="min-w-0 truncate">{name}</span>
+        {isOpen ? <LuChevronUp className="w-3 h-3 shrink-0" /> : <LuChevronDown className="w-3 h-3 shrink-0" />}
+      </button>
+    );
+  };
+
+  // Above the open group's sections (its heading included), the sections themselves, and below.
+  const top: React.ReactNode[] = [];
+  const middle: React.ReactNode[] = [];
+  const bottom: React.ReactNode[] = [];
   const seen = new Set<string>();
+  let past = false;
   for (const it of items) {
+    const into = past ? bottom : top;
     if (!it.under) {
-      out.push(item(it));
+      into.push(item(it));
       continue;
     }
     if (seen.has(it.under)) continue;
     seen.add(it.under);
-    const heading = it.under;
-    const open = !folded[heading];
-    out.push(
-      <button
-        key={`group-${heading}`}
-        type="button"
-        onClick={() => setFolded((f) => ({ ...f, [heading]: open }))}
-        className={cn(
-          "w-full h-6 shrink-0 flex items-center justify-between px-2.5 rounded-[4px] text-[12px] font-semibold bg-brand-background-light hover:bg-brand-button cursor-pointer",
-          open ? "text-brand-accent" : "text-brand-light",
-        )}
-      >
-        {heading}
-        {open ? <LuChevronUp className="w-3 h-3" /> : <LuChevronDown className="w-3 h-3" />}
-      </button>,
-    );
-    if (open) items.filter((g) => g.under === heading).forEach((g) => out.push(item(g, true)));
+    const children = items.filter((g) => g.under === it.under);
+    into.push(heading(it.under, children));
+    if (open === it.under) {
+      children.forEach((g) => middle.push(item(g, true)));
+      past = true;
+    }
   }
+  const fadeMask =
+    fade.top || fade.bottom
+      ? `linear-gradient(to bottom, ${fade.top ? "transparent, black 24px" : "black"}, ${fade.bottom ? "black calc(100% - 32px), transparent" : "black"})`
+      : undefined;
   return (
-    <nav aria-label="Sections" className="w-[120px] shrink-0 flex flex-col gap-2 px-2 pt-4 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-r-[0.5px] border-brand-hairline">
-      {out}
+    <nav aria-label="Sections" className="w-[132px] shrink-0 flex flex-col overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-r-[0.5px] border-brand-hairline">
+      <div className={cn("shrink-0 flex flex-col gap-2 px-2 pt-4", middle.length === 0 && bottom.length === 0 && "pb-4")}>{top}</div>
+      {middle.length > 0 && (
+        <div
+          ref={listRef}
+          style={fadeMask ? { maskImage: fadeMask, WebkitMaskImage: fadeMask } : undefined}
+          className={cn("min-h-[56px] shrink flex flex-col gap-2 px-2 pt-2 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", bottom.length === 0 && "pb-4")}
+        >
+          {middle}
+        </div>
+      )}
+      {bottom.length > 0 && <div className="shrink-0 flex flex-col gap-2 px-2 pt-2 pb-4">{bottom}</div>}
     </nav>
   );
 };
@@ -297,7 +372,7 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
         )}
       </div>
       <div className="flex-1 min-h-0 flex">
-        {sections && <SectionNav items={sections} value={sub} onChange={(v) => setPicked((p) => ({ ...p, [section]: v }))} />}
+        {sections && <SectionNav key={section} items={sections} value={sub} onChange={(v) => setPicked((p) => ({ ...p, [section]: v }))} />}
         <div data-testid="assets-content" className="flex-1 min-w-0 min-h-0">
           {content()}
         </div>

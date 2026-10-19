@@ -8,7 +8,7 @@
 //   one undo step; an export has the tone there; the left panel's Voiceovers lists it;
 // - with Mute project checked the engine has the project muted while it records; Discard
 //   throws the take away (no clip, no file), and so does closing the panel mid-take.
-import { now, rulerMap, seek } from "./_preview.mjs";
+import { now, rulerMap, seek, sectionButton } from "./_preview.mjs";
 import { checks, savedProject } from "./_anim.mjs";
 import { press, state } from "./_undo.mjs";
 import { band, exporter, pcm, side } from "./_audio.mjs";
@@ -116,7 +116,7 @@ export default async (ctx) => {
 
   // ---- the left panel's Voiceovers ----
   await win.locator("[data-testid=assets-tab-audio]").click();
-  await win.locator("[data-testid=assets-section-voiceovers]").click();
+  await (await sectionButton(win, "voiceovers")).click();
   await win.waitForTimeout(1500);
   const rows = await win.locator("[data-testid=audio-section-voiceovers] [data-testid=audio-row]").evaluateAll((els) => els.map((e) => e.getAttribute("data-name")));
   check(`Voiceovers lists the take (${rows.join(", ")})`, rows.join(",") === "Voiceover 1");

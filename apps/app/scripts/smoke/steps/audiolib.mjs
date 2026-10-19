@@ -9,14 +9,14 @@
 // - with several clips with sound, the Voice changer's Apply to all puts a pick on each.
 import { execFileSync } from "node:child_process";
 import path from "node:path";
-import { rulerMap, seek, settled, tab } from "./_preview.mjs";
+import { rulerMap, seek, settled, tab, sectionButton } from "./_preview.mjs";
 import { checks, focus, savedProject } from "./_anim.mjs";
 import { band, dbOf, exporter, ffmpeg, pcm, residual, side } from "./_audio.mjs";
 import { audioSub } from "./audioui.mjs";
 
 const rows = (win, section) => win.locator(`[data-testid=audio-section-${section}] [data-testid=audio-row]`).evaluateAll((els) => els.map((e) => e.getAttribute("data-name")));
 const open = async (win, section) => {
-  await win.locator(`[data-testid="assets-section-${section}"]`).click();
+  await (await sectionButton(win, section)).click();
   await win.waitForTimeout(1200);
 };
 /** The next file pickers answer with `files`. */

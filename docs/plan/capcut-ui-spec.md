@@ -246,7 +246,9 @@ Reference: `05-left-media/004-media-added-badges.png`, `001-empty-import-dropdow
 | Child item, unselected | no fill, `text.primary` |
 | Selected item | `bg.raised` fill, `accent` label |
 | Badge | a small cyan "AI" corner tag on AI groups (OOS) |
-| Overflow | the column scrolls on its own when long |
+| One open group | only one group is expanded: the one holding the selection, or the one last opened. Opening a folded group selects its first section and folds the open one |
+| Overflow | everything down to the open group's heading stays at the top and whatever follows the group stays at the bottom ("Sounds effects", "Copyright", "Shapes" sit on the panel's bottom edge, 16 px above it); only the open group's sections scroll between them, the last visible one fading out. Long labels end in an ellipsis ("Sounds effe…") |
+| OpenRip | 132 px column: SF Pro semibold is wider than CapCut's UI font, and at 120 px "Add adjustment" and "Video effects" (beside its chevron) don't fit |
 
 Media tab tree: Import ▴ (Media, Subprojects), Yours ▾ (Favorites, My presets, Brand assets), Generate ▾ (AI), Spaces ▾ (cloud), Library ▾ (stock), Dreamina (AI). OpenRip keeps Import (Media, Subprojects) and Yours (Favorites, My presets) only.
 

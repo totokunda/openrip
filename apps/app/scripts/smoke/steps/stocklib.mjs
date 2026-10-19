@@ -12,7 +12,7 @@
 // Shots: `g1-library` ↔ `05-left-media/023-library-default`, `g2-preview`, `g3-photos` ↔ `…/034` (the
 // type menu's neighbour), `g4-credits`, `g5-offline`.
 import path from "node:path";
-import { drag, engineFrame, previewRect, rulerMap, seek, settled, timelineRect } from "./_preview.mjs";
+import { drag, engineFrame, previewRect, rulerMap, seek, settled, timelineRect, sectionButton } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject } from "./_anim.mjs";
 import { press, state, undoCase } from "./_undo.mjs";
 import { fixtureServer, makeMedia } from "./_stockfixture.mjs";
@@ -44,7 +44,7 @@ const run = async (ctx, server) => {
     );
   const searches = () => server.hits.filter((h) => /gsrsearch|\/v1\/images|\/nasa\/search/.test(h)).map((h) => decodeURIComponent(h.replace(/\+/g, " ")));
   const section = async (id) => {
-    await win.locator(`[data-testid='assets-section-${id}']`).click();
+    await (await sectionButton(win, id)).click();
     await win.waitForTimeout(900);
   };
   const waitTiles = (n = 1) => win.waitForFunction((n) => document.querySelectorAll("[data-testid=stock-tile]").length >= n, n, { timeout: 15000 });
@@ -56,8 +56,13 @@ const run = async (ctx, server) => {
 
   // ---- The column and the first list ------------------------------------------------------------
   await win.locator("[data-testid=assets-tab-media]").click();
+  const column = () => win.evaluate(() => [...document.querySelectorAll("nav[aria-label=Sections] button")].map((b) => b.innerText.trim()));
+  check("the column opens with Import open on Media and Library folded", (await column()).join() === "Import,Media,Library", JSON.stringify(await column()));
+  await win.locator('[data-testid="assets-group-Library"]').click();
+  await win.waitForTimeout(400);
+  check("opening Library folds Import and selects Trending", (await column()).slice(0, 3).join() === "Import,Library,Favorites" && (await win.locator('[data-testid="assets-section-library:trending"]').getAttribute("aria-pressed")) === "true", JSON.stringify((await column()).slice(0, 4)));
   const names = await win.evaluate(() => [...document.querySelectorAll("[data-testid^=assets-section-]")].map((b) => b.innerText.trim()));
-  check("the column: Media under Import, then Library with Favorites, the categories and Credits", names[0] === "Media" && names[1] === "Favorites" && names[2] === "Trending" && ["Green Screen", "Background", "Scenery", "Atmosphere", "Life"].every((n) => names.includes(n)) && names[names.length - 1] === "Credits", JSON.stringify(names));
+  check("Library has Favorites, the categories and Credits", names[0] === "Favorites" && names[1] === "Trending" && ["Green Screen", "Background", "Scenery", "Atmosphere", "Life"].every((n) => names.includes(n)) && names[names.length - 1] === "Credits", JSON.stringify(names));
   await section("library:trending");
   await waitTiles(3);
   let list = await tiles();

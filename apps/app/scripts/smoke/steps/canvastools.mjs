@@ -3,7 +3,7 @@
 // rectangle at the playhead; no freehand drawing (CapCut has none: no Draw section, D does
 // nothing); T and V; and the Mask tab's Rectangle
 // adding a mask and its Brush painting one, ended by the chip.
-import { drag, previewRect, rulerMap, seek, settled, tab } from "./_preview.mjs";
+import { drag, previewRect, rulerMap, seek, settled, tab, sectionButton } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject, select } from "./_anim.mjs";
 
 export default async (ctx) => {
@@ -40,8 +40,8 @@ export default async (ctx) => {
   const before = await savedProject(win, udDir);
   const shapes0 = clipsWhere(before, (c) => c.type === "shape").length;
   await win.locator("[data-testid=assets-tab-stickers]").click();
-  check("no Draw section in the Stickers tab", (await win.locator("[data-testid=assets-section-draw]").count()) === 0);
-  await win.locator("[data-testid=assets-section-shapes]").click();
+  check("no Draw section in the Stickers tab", (await (await sectionButton(win, "draw")).count()) === 0);
+  await (await sectionButton(win, "shapes")).click();
   await win.mouse.move(5, 5);
   await win.locator("[data-testid=shape-rectangle]").hover();
   await settled(win, () => win.locator("[data-testid=shape-add-rectangle]").click());

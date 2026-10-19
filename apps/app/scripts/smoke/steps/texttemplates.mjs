@@ -8,7 +8,7 @@
 // drawn the same); an export showing the template; and every template added once without errors.
 // Shots are named after the CapCut reference: `tt1-templates` ↔ `07-left-text/004-text-template-default`.
 import { execFileSync } from "node:child_process";
-import { engineFrame, goHome, now, previewRect, rulerMap, seek, settled } from "./_preview.mjs";
+import { engineFrame, goHome, now, previewRect, rulerMap, seek, settled, sectionButton } from "./_preview.mjs";
 import { checks, savedProject, select } from "./_anim.mjs";
 import { undoCase } from "./_undo.mjs";
 import { exporter, ffmpeg } from "./_audio.mjs";
@@ -23,7 +23,7 @@ export default async (ctx) => {
   const tabs = () => win.evaluate(() => [...document.querySelectorAll("[data-testid=inspector] [role=tab]")].map((e) => e.innerText.trim()).join(","));
   const tiles = () => win.locator("[data-testid=text-templates] [data-testid=text-template-tile]").evaluateAll((els) => els.map((e) => e.dataset.template));
   const section = async (id) => {
-    await win.locator(`[data-testid='assets-section-templates:${id}']`).click();
+    await (await sectionButton(win, `templates:${id}`)).click();
     await win.waitForTimeout(500);
   };
   const tile = (id) => win.locator(`[data-testid=text-template-tile][data-template=${id}]`);
@@ -41,6 +41,9 @@ export default async (ctx) => {
   await win.waitForTimeout(500);
 
   // ---- The column and the tiles ----------------------------------------------------------------------------
+  // One group is open at a time (as CapCut's): Text template's heading opens it.
+  await win.locator('[data-testid="assets-group-Text template"]').click();
+  await win.waitForTimeout(300);
   const names = await win.evaluate(() => [...document.querySelectorAll("nav[aria-label=Sections] button")].map((e) => e.innerText.trim()));
   const at = names.indexOf("Text template");
   check("the column has a Text template group: Favorites, All and the categories", at > 0 && names.slice(at + 1, at + 11).join() === ["Favorites", "All", ...CATEGORIES].join(), names.join(","));

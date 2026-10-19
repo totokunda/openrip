@@ -12,7 +12,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { engineFrame, grab, now, rulerMap, seek, settled } from "./_preview.mjs";
+import { engineFrame, grab, now, rulerMap, seek, settled, sectionButton } from "./_preview.mjs";
 import { checks, savedProject } from "./_anim.mjs";
 import { at, click, keyCase, open, savedClip, typeIn } from "./_inspector.mjs";
 import { undoCase } from "./_undo.mjs";
@@ -23,7 +23,7 @@ export default async (ctx) => {
   const saved = () => savedProject(win, udDir);
   const layersIn = async () => (await saved()).timeline.clips.filter((c) => c.type === "filter" && c.adjustment);
   const column = () => win.evaluate(() => [...document.querySelectorAll("nav[aria-label=Sections] button")].map((e) => e.innerText.trim()));
-  const section = (id) => win.locator(`[data-testid='assets-section-${id}']`);
+  const section = (id) => sectionButton(win, id);
   const frame = async () => (await engineFrame(win)).sum;
   const addVia = async (tile) => {
     await tile.hover();
@@ -49,13 +49,13 @@ export default async (ctx) => {
   await win.waitForTimeout(300);
   check("hovering it shows a round +", (await custom.locator("[data-testid=adjustment-add]").count()) === 1);
   await shot("a2-custom-hover");
-  await section("yours").click();
+  await (await section("yours")).click();
   await win.waitForTimeout(300);
   check("Yours starts empty with a note", (await win.locator("[data-testid=adjustment-preset]").count()) === 0 && (await win.locator("[data-testid=adjustment-yours-empty]").count()) === 1);
-  await section("lut").click();
+  await (await section("lut")).click();
   await win.waitForTimeout(300);
   await shot("a4-lut");
-  await section("add").click();
+  await (await section("add")).click();
   await win.waitForTimeout(300);
 
   // + adds a layer at the playhead.
@@ -128,7 +128,7 @@ export default async (ctx) => {
   await settled(win, () => win.locator("[data-testid=adjustment-save-preset]").click(), { timeout: 1500 }).catch(() => {});
   check("Save as preset says it saved", (await win.locator("[data-testid=adjustment-preset-saved]").count()) === 1);
   await win.locator("[data-testid=assets-tab-adjustment]").click();
-  await section("yours").click();
+  await (await section("yours")).click();
   await win.waitForTimeout(500);
   const presets = await win.locator("[data-testid=adjustment-preset]").count();
   check("the preset is listed under Yours", presets === 1, `${presets}`);
@@ -168,7 +168,7 @@ export default async (ctx) => {
   }, cube);
   await seek(win, ctx.map, 8);
   await win.locator("[data-testid=assets-tab-adjustment]").click();
-  await section("lut").click();
+  await (await section("lut")).click();
   await win.waitForTimeout(300);
   await win.locator("[data-testid=adjustment-lut-import]").click();
   await win.waitForTimeout(600);
