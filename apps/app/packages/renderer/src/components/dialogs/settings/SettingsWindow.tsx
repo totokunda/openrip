@@ -10,10 +10,12 @@ import { toast } from "sonner";
 import {
   checkForAppUpdates,
   clearCache,
+  clearRenderCache,
   downloadAppUpdate,
   getAppPaths,
   getAppUpdateState,
   getCacheSize,
+  getRenderCache,
   getProjectsDir,
   getProxySize,
   installAppUpdate,
@@ -57,6 +59,8 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
   const [cacheBytes, setCacheBytes] = useState<number | null>(null);
   const [proxyBytes, setProxyBytes] = useState<number | null>(null);
   const [mediaDir, setMediaDir] = useState("");
+  const [presetsDefault, setPresetsDefault] = useState("");
+  const [renderCache, setRenderCache] = useState<{ dir: string; bytes: number | null }>({ dir: "", bytes: null });
   const [update, setUpdate] = useState<AppUpdateState | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -67,13 +71,18 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
     setEngineDraft(useEnginePreviewStore.getState().enabled);
     setCacheBytes(null);
     setProxyBytes(null);
+    setRenderCache((r) => ({ ...r, bytes: null }));
+    void getRenderCache().then(setRenderCache);
     void getProjectsDir().then((r) => {
       setProjectsDirDraft(r.dir);
       setSavedProjectsDir(r.dir);
     });
     void getCacheSize().then(setCacheBytes);
     void getProxySize().then(setProxyBytes);
-    void getAppPaths().then((p) => setMediaDir(p.media));
+    void getAppPaths().then((p) => {
+      setMediaDir(p.media);
+      setPresetsDefault(p.presets);
+    });
     void getAppUpdateState().then(setUpdate).catch(() => {});
     const off = onAppUpdateEvent(() => void getAppUpdateState().then(setUpdate).catch(() => {}));
     return () => off();
@@ -130,9 +139,21 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
           }}
         />
       </Row>
-      <Row id="screenRecording" label={t("settings.screenRecording")} disabled>
-        <PathField value="" disabled />
-        <NotYet>{t("settings.screenRecording.note")}</NotYet>
+      <Row id="screenRecording" label={t("settings.screenRecording")}>
+        <div className="flex items-center gap-1">
+          <PathField
+            testId="settings-recordings-dir"
+            value={draft.recordingsDir || (mediaDir ? `${mediaDir}/<project>/recordings` : "")}
+            title={t("settings.chooseFolder")}
+            onPick={async () => {
+              const dir = await pickFolder({ title: t("settings.screenRecording"), defaultPath: draft.recordingsDir || undefined });
+              if (dir) set("recordingsDir", dir);
+            }}
+          />
+          <SmallButton testId="settings-recordings-default" disabled={!draft.recordingsDir} onClick={() => set("recordingsDir", "")}>
+            {t("settings.pathDefault")}
+          </SmallButton>
+        </div>
       </Row>
       <Row id="cache" label={t("settings.cache")}>
         <Radio testId="settings-cache-keep" checked={!draft.cacheAutoDelete} onChange={() => set("cacheAutoDelete", false)}>
@@ -158,9 +179,21 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
         />
       </Row>
       <Divider />
-      <Row id="presetPath" label={t("settings.presetPath")} disabled>
-        <PathField value="" disabled />
-        <NotYet>{t("settings.presetPath.note")}</NotYet>
+      <Row id="presetPath" label={t("settings.presetPath")}>
+        <div className="flex items-center gap-1">
+          <PathField
+            testId="settings-presets-dir"
+            value={draft.presetsDir || presetsDefault}
+            title={t("settings.chooseFolder")}
+            onPick={async () => {
+              const dir = await pickFolder({ title: t("settings.presetPath"), defaultPath: draft.presetsDir || presetsDefault || undefined });
+              if (dir) set("presetsDir", dir);
+            }}
+          />
+          <SmallButton testId="settings-presets-default" disabled={!draft.presetsDir} onClick={() => set("presetsDir", "")}>
+            {t("settings.pathDefault")}
+          </SmallButton>
+        </div>
       </Row>
     </div>
   );
@@ -206,7 +239,7 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
       <Row id="scrubAudio" label={t("settings.scrubAudio")} disabled>
         <Toggle on={false} disabled />
         <Help muted>{t("settings.scrubAudio.help")}</Help>
-        <NotYet>{t("settings.notYet")}</NotYet>
+        <NotYet>{t("settings.scrubAudio.note")}</NotYet>
       </Row>
       <Row id="linkage" label={t("settings.linkage")} disabled>
         <SmallButton disabled>{t("settings.linkage.button")}</SmallButton>
@@ -280,18 +313,29 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
       <Row id="proxySize" label={t("settings.proxySize")}>
         <SizeClear testId="settings-proxy-size" bytes={proxyBytes} disabled title={t("settings.proxySize.clear")} />
       </Row>
-      <Row id="renderCache" label={t("settings.renderCache")} disabled>
-        <PathField value="" disabled />
+      <Row id="renderCache" label={t("settings.renderCache")}>
+        <PathField testId="settings-render-cache-path" value={renderCache.dir} disabled title={t("settings.renderCache.fixed")} />
+        <Help muted>{t("settings.renderCache.fixed")}</Help>
       </Row>
-      <Row id="renderCacheSize" label={t("settings.renderCacheSize")} disabled>
-        <SizeClear bytes={0} disabled />
+      <Row id="renderCacheSize" label={t("settings.renderCacheSize")}>
+        <SizeClear
+          testId="settings-render-cache-size"
+          bytes={renderCache.bytes}
+          title={t("settings.renderCacheSize.clear")}
+          onClear={async () => {
+            setRenderCache((r) => ({ ...r, bytes: null }));
+            const left = await clearRenderCache();
+            setRenderCache((r) => ({ ...r, bytes: left }));
+            void getCacheSize().then(setCacheBytes);
+          }}
+        />
       </Row>
-      <Row id="autoClear" label={t("settings.autoClear")} disabled>
-        <div className="h-[22px] w-[92px] rounded-[4px] bg-brand-background-light flex items-center justify-center gap-3 text-[12px] font-medium text-[#626262]">
-          <span>10</span>
-          <span>GB</span>
+      <Row id="autoClear" label={t("settings.autoClear")}>
+        <div className="flex items-center gap-2.5">
+          <Stepper testId="settings-render-cache-max" value={draft.renderCacheMaxGb} min={1} max={500} onChange={(v) => set("renderCacheMaxGb", v)} />
+          <span className="text-[12px] font-medium text-brand-lighter">GB</span>
         </div>
-        <Help muted>{t("settings.autoClear.help", { n: 10 })}</Help>
+        <Help muted>{t("settings.autoClear.help", { n: draft.renderCacheMaxGb })}</Help>
       </Row>
       <Row id="autoRender" label={t("settings.autoRender")} disabled>
         <Toggle on={false} disabled />

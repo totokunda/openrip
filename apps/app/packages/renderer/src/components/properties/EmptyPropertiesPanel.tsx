@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { useCopyMedia } from "@/lib/media/copy-mode";
 import { useProjectsStore } from "@/lib/projects";
 import { useViewportStore } from "@/lib/viewport";
 import { useControlsStore } from "@/lib/control";
@@ -28,6 +29,7 @@ const EmptyPropertiesPanel: React.FC = () => {
   const mediaCount = useClipStore((s) => Object.keys(s.assets).length);
   const setProjectSettingsOpen = useShellStore((s) => s.setProjectSettingsOpen);
   const timeCodeStyle = usePreference("timeCode");
+  const copyMedia = useCopyMedia((s) => !!s.byProject[project?.folderUuid ?? "_"]);
   // A project made in this session (new, or from a CapCut draft) learns its file from the list.
   useEffect(() => {
     if (project && !project.filePath) void refreshProjects();
@@ -53,7 +55,7 @@ const EmptyPropertiesPanel: React.FC = () => {
           "–"
         ),
       ],
-      ["Imported media:", "Stay in original location"],
+      ["Imported media:", copyMedia ? "Copy media to project" : "Stay in original location"],
       ["Arrange layers:", "Turned on"],
       ["Proxy:", "Turned off"],
       ["Media used:", String(mediaCount)],

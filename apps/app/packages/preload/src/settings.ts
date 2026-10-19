@@ -31,6 +31,9 @@ export interface Preferences {
   shortcutPreset: number;
   shortcutPresets: Record<string, Record<string, string[]>>;
   walkthroughSeen: boolean;
+  recordingsDir: string;
+  presetsDir: string;
+  renderCacheMaxGb: number;
 }
 
 function getPreferences(): Promise<Preferences> {
@@ -62,12 +65,20 @@ function clearCache(): Promise<number> {
   return ipcRenderer.invoke("settings:clear-cache");
 }
 
+/** Performance › Rendering cache: its folder and size, and clearing it (resolves with what's left). */
+function getRenderCache(): Promise<{ dir: string; bytes: number }> {
+  return ipcRenderer.invoke("settings:render-cache");
+}
+function clearRenderCache(): Promise<number> {
+  return ipcRenderer.invoke("settings:clear-render-cache");
+}
+
 /** Performance › Proxy size: the proxies and playable copies in every project's media folder. */
 function getProxySize(): Promise<number> {
   return ipcRenderer.invoke("settings:proxy-size");
 }
 
-function getAppPaths(): Promise<{ userData: string; media: string }> {
+function getAppPaths(): Promise<{ userData: string; media: string; presets: string }> {
   return ipcRenderer.invoke("settings:paths");
 }
 
@@ -112,6 +123,8 @@ export {
   pickFolder,
   getCacheSize,
   clearCache,
+  getRenderCache,
+  clearRenderCache,
   getProxySize,
   getAppPaths,
   getProjectsDir,

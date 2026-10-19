@@ -16,6 +16,7 @@ import { FRAME_RATES } from "@/lib/preferences";
 import { ASPECT_ID_ORIGINAL, PROJECT_ASPECTS, adaptedSize, currentCanvasSize, MAX_SIDE, MIN_SIDE, originalRatio, ratioForChoice, ratioLabel, ratioOfSize } from "@/lib/project-canvas";
 import { ratioBox } from "@/lib/aspect-presets";
 import { refreshProjects, renameProject } from "@/lib/project-actions";
+import { copyMediaFor, setCopyMedia } from "@/lib/media/copy-mode";
 import { Choice, Divider, NotYet, PathField, Radio, Row, Stepper, Tip, Toggle } from "./settings/controls";
 
 type Tab = "details" | "performance";
@@ -43,6 +44,7 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
   const [size, setSize] = useState({ width: 1920, height: 1080 });
   const [projectFps, setProjectFps] = useState(fps || 24);
   const [clipSeconds, setClipSeconds] = useState(defaultClipLength || 5);
+  const [copyMedia, setCopyMediaDraft] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // Each opening starts from the project's values.
@@ -55,6 +57,7 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
     setSize(currentCanvasSize());
     setProjectFps(fps || 24);
     setClipSeconds(defaultClipLength || 5);
+    setCopyMediaDraft(copyMediaFor(project?.folderUuid));
     void getProjectsDir().then((r) => {
       setDir(r.dir);
       setSavedDir(r.dir);
@@ -128,6 +131,10 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
       if (Number.isFinite(projectFps) && projectFps > 0 && projectFps !== controls.fps) controls.setFpsWithRescale(projectFps);
       if (clipSeconds > 0 && clipSeconds !== controls.defaultClipLength) controls.setDefaultClipLength(clipSeconds);
 
+      if (copyMedia !== copyMediaFor(project?.folderUuid)) {
+        const n = await setCopyMedia(project?.folderUuid, copyMedia);
+        if (copyMedia) toast(n > 0 ? `Copied ${n} media file${n === 1 ? "" : "s"} into the project` : "New imports are copied into the project");
+      }
       if (project && name.trim() && name.trim() !== project.name) await renameProject(project, name);
       if (dir && dir !== savedDir) {
         const r = await setProjectsDir(dir);
@@ -172,13 +179,12 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
         />
       </Row>
       <Row id="importedMedia" label="Imported media">
-        <Radio checked={false} disabled testId="ps-copy-media">
+        <Radio checked={copyMedia} onChange={() => setCopyMediaDraft(true)} testId="ps-copy-media">
           Copy media to project
         </Radio>
-        <Radio checked testId="ps-stay-media">
+        <Radio checked={!copyMedia} onChange={() => setCopyMediaDraft(false)} testId="ps-stay-media">
           Stay in original location
         </Radio>
-        <NotYet>OpenRip links media where it is; it doesn't copy it into the project.</NotYet>
       </Row>
       <Row id="colorSpace" label="Color space">
         <Choice

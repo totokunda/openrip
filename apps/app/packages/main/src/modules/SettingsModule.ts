@@ -46,6 +46,12 @@ export interface Preferences {
   shortcutPresets: Record<string, Record<string, string[]>>;
   /** The first-run walkthrough has been shown (or skipped); Help ▸ Walkthrough shows it again. */
   walkthroughSeen: boolean;
+  /** Draft › Screen recording: where recordings are saved ("": each project's media folder). */
+  recordingsDir: string;
+  /** Draft › Preset save path: where My presets are kept ("": `<userData>/clip-presets`). */
+  presetsDir: string;
+  /** Performance › Auto clear: the oldest rendering-cache files go once it's over this many GB. */
+  renderCacheMaxGb: number;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -67,6 +73,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   shortcutPreset: 1,
   shortcutPresets: {},
   walkthroughSeen: false,
+  recordingsDir: "",
+  presetsDir: "",
+  renderCacheMaxGb: 10,
 };
 
 interface Settings {
@@ -90,6 +99,37 @@ async function sizeOf(path: string): Promise<number> {
     return total;
   } catch {
     return 0;
+  }
+}
+
+/** Delete the oldest files under `dir` until what's left is at most `maxBytes`. */
+async function trimToSize(dir: string, maxBytes: number): Promise<void> {
+  const files: { path: string; size: number; mtime: number }[] = [];
+  const walk = async (d: string) => {
+    let entries: string[];
+    try {
+      entries = await fsp.readdir(d);
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(d, e);
+      try {
+        const st = await fsp.lstat(p);
+        if (st.isDirectory()) await walk(p);
+        else files.push({ path: p, size: st.size, mtime: st.mtimeMs });
+      } catch {
+        // gone meanwhile
+      }
+    }
+  };
+  await walk(dir);
+  let total = files.reduce((n, f) => n + f.size, 0);
+  files.sort((a, b) => a.mtime - b.mtime);
+  for (const f of files) {
+    if (total <= maxBytes) break;
+    await fsp.rm(f.path, { force: true }).catch(() => {});
+    total -= f.size;
   }
 }
 
@@ -136,6 +176,18 @@ export class SettingsModule extends EventEmitter implements AppModule {
     this.registerHandlers();
     // Draft › Cache's automatic deletion, once the app is up.
     void app.whenReady().then(() => this.pruneCacheByAge());
+    void app.whenReady().then(() => this.trimRenderCache());
+  }
+
+  /** The engine's rendering cache: timeline thumbnails and the analyses it keeps per file. */
+  renderCacheDir(): string {
+    return join(app.getPath("userData"), "engine-thumbnails");
+  }
+
+  /** Performance › Auto clear: the oldest files of the rendering cache go once it's over its limit. */
+  async trimRenderCache(): Promise<void> {
+    const gb = this.getPreferences().renderCacheMaxGb;
+    if (gb > 0) await trimToSize(this.renderCacheDir(), gb * 1024 ** 3);
   }
 
   getActiveProjectId(): string | null {
@@ -172,6 +224,7 @@ export class SettingsModule extends EventEmitter implements AppModule {
       }
     }
     if (before.cacheAutoDelete !== next.cacheAutoDelete || before.cacheMaxAgeDays !== next.cacheMaxAgeDays) void this.pruneCacheByAge();
+    if (before.renderCacheMaxGb !== next.renderCacheMaxGb) void this.trimRenderCache();
     return next;
   }
 
@@ -265,10 +318,16 @@ export class SettingsModule extends EventEmitter implements AppModule {
       for (const dir of this.cacheDirs()) total += await sizeOf(dir);
       return total;
     });
+    ipcMain.handle("settings:render-cache", async () => ({ dir: this.renderCacheDir(), bytes: await sizeOf(this.renderCacheDir()) }));
+    ipcMain.handle("settings:clear-render-cache", async () => {
+      await prune(this.renderCacheDir());
+      return sizeOf(this.renderCacheDir());
+    });
     ipcMain.handle("settings:proxy-size", () => this.proxySize());
     ipcMain.handle("settings:paths", () => ({
       userData: app.getPath("userData"),
       media: join(app.getPath("userData"), "media"),
+      presets: join(app.getPath("userData"), "clip-presets"),
     }));
 
     // The About window's facts.

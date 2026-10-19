@@ -284,6 +284,8 @@ async function importMediaPaths(
   inputAbsPaths: string[],
   _resolution?: string,
   folderUuid?: string,
+  /** Project settings > Copy media to project: a real copy in the project's media folder instead of a link. */
+  copy?: boolean,
 ): Promise<number> {
   const userDataPath = (await getUserDataPath())?.data?.user_data ?? "";
   const baseRoot = join(userDataPath, "media");
@@ -311,7 +313,8 @@ async function importMediaPaths(
  
     try {
       await fsp.rm(dstAbs, { force: true });
-      await fsp.symlink(srcAbs, dstAbs);
+      if (copy) await fsp.copyFile(srcAbs, dstAbs);
+      else await fsp.symlink(srcAbs, dstAbs);
 
     } catch (error) {
       console.error("Error creating symlink:", error);
@@ -325,6 +328,38 @@ async function importMediaPaths(
     count += 1;
   }
   return count;
+}
+
+/**
+ * Copy media to project, for what is already imported: each library link that points at a file
+ * becomes a real copy of it in the project's media folder (the link's path, which the clips
+ * use, stays). Resolves with how many were copied; links to missing files are left.
+ */
+async function copyMediaIntoProject(folderUuid?: string): Promise<number> {
+  const userDataDir = (await getUserDataPath())?.data?.user_data ?? "";
+  const root = typeof folderUuid === "string" && folderUuid.length > 0 ? join(userDataDir, "media", folderUuid) : join(userDataDir, "media");
+  const dir = symlinksDir(root);
+  let names: string[] = [];
+  try {
+    names = await fsp.readdir(dir);
+  } catch {
+    return 0;
+  }
+  let n = 0;
+  for (const name of names) {
+    const link = join(dir, name);
+    try {
+      if (!(await fsp.lstat(link)).isSymbolicLink()) continue;
+      const target = await fsp.realpath(link);
+      const tmp = `${link}.${process.pid}.part`;
+      await fsp.copyFile(target, tmp);
+      await fsp.rename(tmp, link);
+      n++;
+    } catch {
+      // a link to a missing file, or one that can't be copied: leave it
+    }
+  }
+  return n;
 }
 
 async function ensureUniqueConvertedName(desiredName: string): Promise<string> {
@@ -632,6 +667,7 @@ export {
   pickSavePath,
   listConvertedMedia,
   importMediaPaths,
+  copyMediaIntoProject,
   ensureUniqueConvertedName,
   revealMediaItemInFolder,
   revealPathInFolder,

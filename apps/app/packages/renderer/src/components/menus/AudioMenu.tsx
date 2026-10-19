@@ -3,6 +3,7 @@ import type { IconType } from "react-icons";
 import { LuFilm, LuMic, LuMusic, LuPlus } from "react-icons/lu";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { copyMediaFor } from "@/lib/media/copy-mode";
 import { importMediaPaths, listConvertedMedia, pickMediaPaths, voiceoverList } from "@app/preload";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import Draggable from "@/components/dnd/Draggable";
@@ -99,7 +100,10 @@ const importFiles = async (kind: "video" | "audio") => {
   const ok = paths.filter((p) => extensions.includes(p.split(".").pop()?.toLowerCase() ?? ""));
   if (ok.length === 0) return;
   try {
-    await importMediaPaths(ok, undefined, useProjectsStore.getState().getActiveProject()?.folderUuid);
+    {
+      const folder = useProjectsStore.getState().getActiveProject()?.folderUuid;
+      await importMediaPaths(ok, undefined, folder, copyMediaFor(folder));
+    }
     bumpMediaLibraryVersion();
   } catch (e) {
     console.error(e);

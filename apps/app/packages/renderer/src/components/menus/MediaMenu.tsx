@@ -60,6 +60,7 @@ import { addMediaAtPlayhead, type MediaRange } from "@/lib/media/add";
 import { useMediaFolders, type MediaFolder } from "@/lib/media/folders";
 import { ensureFullMediaStats } from "@/lib/media/utils";
 import { splitScenes } from "@/lib/analysis";
+import { copyMediaFor } from "@/lib/media/copy-mode";
 
 /** The library's grid or list, kept between sessions. */
 const LAYOUT_KEY = "openrip:media-layout";
@@ -473,7 +474,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
       });
       const folderUuid = activeProject?.folderUuid;
 
-      await importMediaPaths(paths, undefined, folderUuid);
+      await importMediaPaths(paths, undefined, folderUuid, copyMediaFor(folderUuid));
       const list = await listConvertedMedia(folderUuid);
 
       // Get the base names of files that were just uploaded
@@ -569,7 +570,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         position: "bottom-right",
       });
       const folderUuid = activeProject?.folderUuid;
-      await importMediaPaths(paths, undefined, folderUuid);
+      await importMediaPaths(paths, undefined, folderUuid, copyMediaFor(folderUuid));
       const list = await listConvertedMedia(folderUuid);
       
       // Get the base names of files that were just uploaded

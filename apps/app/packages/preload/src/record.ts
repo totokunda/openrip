@@ -87,7 +87,19 @@ export type SavedRecording = { path: string; url: string; linkPath: string; link
  * can't be converted.
  */
 export async function recordingSave(data: Bytes, options: { folder?: string; hasAudio?: boolean; fps?: number }): Promise<SavedRecording> {
-  const { root, dir } = await mediaFolderFor(options.folder, "recordings");
+  const found = await mediaFolderFor(options.folder, "recordings");
+  const root = found.root;
+  // Settings › Draft › Screen recording: a folder of the user's choosing, else the project's media.
+  const custom = ((await ipcRenderer.invoke("settings:get-preferences").catch(() => null)) as { recordingsDir?: string } | null)?.recordingsDir;
+  let dir = found.dir;
+  if (custom) {
+    try {
+      await fsp.mkdir(custom, { recursive: true });
+      dir = custom;
+    } catch {
+      // not writable: the project's media folder instead
+    }
+  }
   const name = nextName(dir, "Recording", "mp4");
   const out = join(dir, name);
   const source = join(dir, `${name}.webm.part`);

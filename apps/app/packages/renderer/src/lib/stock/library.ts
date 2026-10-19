@@ -198,7 +198,7 @@ export const addStock = async (item: StockItem, opts: { startFrame?: number } = 
   const fileName = path.split(/[/\\]/).pop() ?? "";
   let listed = (await listConvertedMedia(folderUuid)).find((it) => it.name === fileName);
   if (!listed) {
-    await importMediaPaths([path], undefined, folderUuid);
+    await importMediaPaths([path], undefined, folderUuid, (await import("../media/copy-mode")).copyMediaFor(folderUuid));
     listed = (await listConvertedMedia(folderUuid)).find((it) => it.name === fileName);
     bumpMediaLibraryVersion();
   }

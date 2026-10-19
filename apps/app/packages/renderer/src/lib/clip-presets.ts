@@ -7,6 +7,7 @@ import { create } from "zustand";
 import { ENGINE_FRAME_CANVAS_ID, clipPresetsRead, clipPresetsWrite } from "@app/preload";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
+import { preferences, usePreferencesStore } from "./preferences";
 import { reversePatch } from "./speed";
 import { toast } from "sonner";
 import type { ContextMenuItem } from "./context-menu";
@@ -194,3 +195,13 @@ export const attributeMenuItems = (clip: AnyClipProps | undefined, ids: string[]
     },
   };
 };
+
+// Settings › Preset save path changed: the presets of the new folder (the old ones are copied into
+// it when it has none).
+let presetsDir = preferences().presetsDir;
+usePreferencesStore.subscribe((s) => {
+  if (s.prefs.presetsDir === presetsDir) return;
+  presetsDir = s.prefs.presetsDir;
+  useClipPresets.setState({ presets: [], loaded: false });
+  void useClipPresets.getState().load();
+});

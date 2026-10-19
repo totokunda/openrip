@@ -8,7 +8,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useViewportStore } from "@/lib/viewport";
-import { ASPECT_PRESETS, ratioBox } from "@/lib/aspect-presets";
+import { ratioBox } from "@/lib/aspect-presets";
+import { PROJECT_ASPECTS, originalRatio, ratioForChoice } from "@/lib/project-canvas";
 import Boxed from "./Boxed";
 
 const row = "dark h-7 rounded-[4px] text-[13px] text-brand-light gap-2 px-2 cursor-pointer focus:bg-brand-hover";
@@ -31,6 +32,13 @@ const RatioMenu: React.FC = () => {
   const setIsAspectEditing = useViewportStore((s) => s.setAspectEditing);
   const [open, setOpen] = useState(false);
   const label = aspectRatio.id === "custom" ? `${aspectRatio.width}:${aspectRatio.height}` : aspectRatio.id;
+  const original = open ? originalRatio() : null;
+  const orig = PROJECT_ASPECTS[0];
+  const pick = (id: string) => {
+    setAspectRatio(ratioForChoice(id, aspectRatio));
+    setIsAspectEditing(false);
+    setOpen(false);
+  };
   const check = (on: boolean) => <span className="w-3.5 text-brand-accent">{on && <LuCheck className="w-3.5 h-3.5" />}</span>;
 
   return (
@@ -47,6 +55,18 @@ const RatioMenu: React.FC = () => {
         side="top"
         className="dark w-[200px] p-1 bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px]"
       >
+        {orig && (
+          <DropdownMenuItem
+            textValue="Original"
+            data-testid="ratio-original"
+            disabled={!original}
+            className={row}
+            onClick={() => pick("original")}
+          >
+            {check(aspectRatio.id === "original")}
+            <span>Original</span>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem
           textValue="Custom"
           className={row}
@@ -85,22 +105,15 @@ const RatioMenu: React.FC = () => {
           )}
         </DropdownMenuItem>
         <DropdownMenuSeparator className="bg-[#434343] mx-1" />
-        {ASPECT_PRESETS.map((opt) => (
-          <DropdownMenuItem
-            key={opt.id}
-            textValue={opt.name}
-            className={row}
-            onClick={() => {
-              setAspectRatio({ width: opt.width, height: opt.height, id: opt.id });
-              setIsAspectEditing(false);
-              setOpen(false);
-            }}
-          >
-            {check(aspectRatio.id === opt.id)}
-            <span className="tabular-nums">{opt.id}</span>
-            <span className="text-brand-light/45">{opt.name}</span>
-            <Shape width={opt.width} height={opt.height} />
-          </DropdownMenuItem>
+        {PROJECT_ASPECTS.filter((a) => a.id !== "original").map((opt, i, all) => (
+          <React.Fragment key={opt.id}>
+            <DropdownMenuItem textValue={opt.label} data-testid={`ratio-${opt.id}`} className={row} onClick={() => pick(opt.id)}>
+              {check(aspectRatio.id === opt.id)}
+              <span className="tabular-nums">{opt.label}</span>
+              <Shape width={opt.width} height={opt.height} />
+            </DropdownMenuItem>
+            {opt.landscape && !all[i + 1]?.landscape && <DropdownMenuSeparator className="bg-[#434343] mx-1" />}
+          </React.Fragment>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>

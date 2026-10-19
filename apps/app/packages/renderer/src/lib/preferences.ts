@@ -9,9 +9,11 @@
 // - Adjust value many units: ⇧↑ / ⇧↓ in the inspector's value fields;
 // - Target loudness: Normalize loudness (lib/audio.ts);
 // - Sound for export and Notification: when an export finishes (lib/export-finished.ts);
+// - Screen recording folder: where Record saves (preload record.ts);
+// - Preset save path: where My presets are kept (the main process's ClipPresetsModule);
 // - Auto optimization: the playable copy of a video the app's own preview can't decode;
 // - the shortcuts: lib/keymap.ts.
-// Hardware decoding, the cache's age and Software update act in the main process.
+// Hardware decoding, the cache's age, the rendering cache's size limit and Software update act in the main process.
 import { create } from "zustand";
 import { getPreferences, onPreferencesChanged, setPreferences, type Preferences } from "@app/preload";
 
@@ -36,6 +38,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   shortcutPreset: 1,
   shortcutPresets: {},
   walkthroughSeen: false,
+  recordingsDir: "",
+  presetsDir: "",
+  renderCacheMaxGb: 10,
 };
 
 /** CapCut's choices for the rows with a menu. */
