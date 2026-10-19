@@ -17,7 +17,7 @@ export default async (ctx) => {
   await seek(win, ctx.map, 2);
   await win.locator("[data-testid=assets-tab-text]").click();
   await win.waitForTimeout(500);
-  check("the column: Add text, Presets and its categories, Local captions", (await column()).startsWith("Add text,Presets,All,Basic,Title,Caption,Style,Local captions"), await column());
+  check("the column: Add text, Presets and its categories, Local captions", /^Add text,Presets,All,Basic,Title,Caption,Style,(Text template,Favorites,All,[A-Za-z ,]+,)?Local captions/.test(await column()), await column());
 
   // The default text.
   await win.locator("[data-testid=assets-section-add]").click();

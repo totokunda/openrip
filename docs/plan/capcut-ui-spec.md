@@ -807,7 +807,7 @@ Screenshots are in `07-left-text/` unless a path says otherwise.
 |---|---|---|
 | Add text: "Default text" tile (click or drag to add) | `07-left-text/001-add-text-default.png` | partly (OpenRip draws a text box on the canvas; no tile) |
 | Text style presets grid (OpenRip's own styles) | `003-text-effects-default.png` | missing |
-| Text templates (local, multi-paragraph) | `004-text-template-default.png` | missing |
+| Text templates (local, multi-paragraph) | `004-text-template-default.png` | has (about 55 of OpenRip's own designs in eight categories as groups of text and shape clips; search, favourites, hover play, click preview, "+", drag; words edited in the group's Text template tab) |
 | Yours › Favorites, Presets (saved text styles) | `002-text-yours.png` | missing |
 | Local captions entry (SRT import, see 6.11) | `001-add-text-default.png` | missing |
 
