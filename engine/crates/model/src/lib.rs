@@ -4,6 +4,7 @@
 
 pub mod animated;
 pub mod edit;
+pub mod fx;
 pub mod keyed;
 pub mod material;
 pub mod project;

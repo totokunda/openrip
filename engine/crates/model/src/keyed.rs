@@ -84,6 +84,10 @@ pub enum Param {
     ChromaShadow,
     ChromaEdgeSmooth,
     ChromaSpill,
+    /// The first, second and third of an OpenRip effect's own parameters (0…1; `fx.rs`).
+    FxA,
+    FxB,
+    FxC,
 }
 
 /// Keyframes of one parameter of one of a segment's materials.
@@ -114,6 +118,14 @@ impl Segment {
         if let Some(v) = self.keyed(&e.id, Param::Intensity, t) {
             let key = if e.builtin.as_deref().is_some_and(|b| b.starts_with("v1:")) { "value" } else { "intensity" };
             e.params.insert(key.into(), v);
+        }
+        // An OpenRip effect's own parameters, by the names its catalog entry gives them.
+        if let Some(def) = e.builtin.as_deref().and_then(|b| b.strip_prefix(crate::fx::BUILTIN_PREFIX)).and_then(crate::fx::find) {
+            for (slot, param) in [Param::FxA, Param::FxB, Param::FxC].into_iter().enumerate() {
+                if let (Some(v), Some(name)) = (self.keyed(&e.id, param, t), def.param_name(slot + 1)) {
+                    e.params.insert(name.into(), v);
+                }
+            }
         }
         e
     }

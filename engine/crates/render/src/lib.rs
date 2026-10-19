@@ -18,6 +18,7 @@
 pub mod adjust;
 pub mod blend;
 pub mod exposure;
+mod effects;
 mod flow;
 pub mod fonts;
 pub mod grade;
@@ -29,6 +30,7 @@ mod upload;
 pub use adjust::{Adjust, ExposureLuts, Wheel, Wheels};
 pub use blend::BlendMode;
 pub use grade::{CurvePoint, Curves, Hsl};
+pub use effects::EffectPass;
 pub use flow::{work_factor, FlowField, Picture, Tween, TweenMode, WORK_SIDE};
 pub use interop::Surface;
 pub use upload::Uploader;
@@ -195,6 +197,9 @@ pub enum Source<'a> {
     Mix(Mix),
     /// A frame made in between two frames of a video (Smooth slow-mo, Optical flow).
     Tween(Tween<'a>),
+    /// Not an image: one of OpenRip's own video effects (`effects.wgsl`) over everything drawn
+    /// so far on the canvas, or in the open group.
+    Effect(EffectPass),
 }
 
 impl Source<'_> {
@@ -203,7 +208,7 @@ impl Source<'_> {
             Source::Image(i) | Source::Cached(_, i) => (i.width, i.height),
             Source::Video(f) => (f.width(), f.height()),
             Source::Tween(t) => t.from.size(),
-            Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) => (1, 1),
+            Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) | Source::Effect(_) => (1, 1),
         }
     }
 }
@@ -500,6 +505,8 @@ pub struct Compositor {
     chroma_x: wgpu::RenderPipeline,
     chroma_y: wgpu::RenderPipeline,
     appfx: AppFx,
+    /// OpenRip's own video effects (effects.wgsl).
+    fx: wgpu::RenderPipeline,
     /// CapCut's colour features around the Adjust pass (grade.rs).
     grade: grade::GradeFx,
     /// Exposure lookup tables on the GPU, by key, and a stand-in for clips without one.
@@ -743,6 +750,7 @@ impl Compositor {
             chroma_x: pass_pipeline(&device, &yuv_pipeline_layout, include_str!("chroma.wgsl"), "fs_chroma_smooth_x", CANVAS),
             chroma_y: pass_pipeline(&device, &yuv_pipeline_layout, include_str!("chroma.wgsl"), "fs_chroma_smooth_y", CANVAS),
             adjust: adjust_pipeline("fs_adjust"),
+            fx: pass_pipeline(&device, &yuv_pipeline_layout, include_str!("effects.wgsl"), "fs", CANVAS),
             grade: grade::GradeFx::new(&device, &yuv_pipeline_layout),
             luts: Default::default(),
             no_lut: device.create_texture(&wgpu::TextureDescriptor {
@@ -1302,6 +1310,10 @@ impl Compositor {
                 self.filter_canvas(enc, canvas, place_pipeline, lut, strength, &mut scratch);
                 continue;
             }
+            if let Source::Effect(pass) = layer.source {
+                self.effect_canvas(enc, canvas, place_pipeline, &pass, open.is_empty(), &mut scratch);
+                continue;
+            }
             if let Source::Blur(step) = layer.source {
                 if step > 0.0 {
                     self.blur_canvas(enc, canvas, place_pipeline, step, &mut scratch);
@@ -1326,7 +1338,7 @@ impl Compositor {
                     let src = match layer.source {
                         Source::Image(img) => self.upload(enc, img, None, &mut scratch),
                         Source::Cached(key, img) => self.upload(enc, img, Some(key), &mut scratch),
-                        Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) => unreachable!("canvas passes are drawn above"),
+                        Source::Filter(..) | Source::Blur(_) | Source::BeginGroup(_) | Source::EndGroup | Source::Mix(_) | Source::Effect(_) => unreachable!("canvas passes are drawn above"),
                         Source::Video(frame) => self.video_texture(enc, frame, &mut keep, &mut scratch),
                         Source::Tween(tween) => {
                             let a = self.picture_texture(enc, tween.from, &mut keep, &mut scratch);
