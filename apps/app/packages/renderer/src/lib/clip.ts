@@ -1249,6 +1249,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
         type: timeline.type ?? "media",
         muted: timeline.muted ?? false,
         hidden: timeline.hidden ?? false,
+        ...(timeline.captions ? { captions: true } : {}),
       };
       const timelines =
         index !== undefined

@@ -96,7 +96,7 @@ const CaptionsMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
               <PlusDot />
               <span className="text-[13px] font-semibold text-brand-light">Import file</span>
             </span>
-            <span className="text-[12px] text-[#949494]">Supported file formats: SRT and VTT</span>
+            <span className="text-[12px] text-[#949494]">Supported file formats: SRT, VTT, LRC, ASS and SSA</span>
           </button>
         ) : (
           <>

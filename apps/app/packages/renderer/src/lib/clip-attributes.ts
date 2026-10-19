@@ -88,6 +88,7 @@ const TEXT_FIELDS = [
   "backgroundEnabled", "backgroundColor", "backgroundOpacity", "backgroundCornerRadius",
   "letterSpacing", "lineSpacing", "fillGradient", "moreStrokes",
   "glowEnabled", "glowColor", "glowIntensity", "glowRange", "glowOffsetX", "glowOffsetY", "textEffect",
+  "backgroundWidth", "backgroundHeight", "backgroundOffsetX", "backgroundOffsetY", "textCurve",
 ];
 
 const SPEED_FIELDS = ["changePitch", "smoothSlowMo"];

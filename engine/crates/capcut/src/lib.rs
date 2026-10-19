@@ -1117,6 +1117,7 @@ fn import_text(id: MaterialId, m: &Value, report: &mut ImportReport) -> Text {
             width: f(m, "background_width", 0.14) as f32,
             height: f(m, "background_height", 0.14) as f32,
             style: i(m, "background_style").clamp(0, 255) as u8,
+            offset: [0.0, 0.0],
         }
     });
     // The shadow is in the rich text's styles (newer drafts: `has_shadow` can be false then)

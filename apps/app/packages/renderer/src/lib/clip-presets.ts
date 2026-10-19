@@ -12,7 +12,8 @@ import { toast } from "sonner";
 import type { ContextMenuItem } from "./context-menu";
 import { copyAttributes, groupLabel, groupsIn, hasGroup, pasteAttributes, pastableGroups, pasteTargets, type AttributeGroup, type ClipAttributes } from "./clip-attributes";
 import { nextPresetName, parsePresets, serializePresets, type ClipPreset } from "./clip-preset-data";
-import type { AnyClipProps } from "./types";
+import { isTextStyle, textLookAttributes } from "./text-style-presets";
+import type { AnyClipProps, TextClipProps } from "./types";
 
 /** The attributes Copy attributes took last, or none. */
 export const useAttributeClipboard = create<{ attrs: ClipAttributes | null; set: (a: ClipAttributes | null) => void }>((set) => ({
@@ -83,6 +84,8 @@ interface PresetState {
   load: () => Promise<void>;
   /** Save a clip's attributes (in the groups it has, or just `groups`) under a name; the new preset. */
   save: (clip: AnyClipProps, name?: string, groups?: AttributeGroup[]) => ClipPreset | null;
+  /** Save a text's whole look as a text style (Text ▸ Yours ▸ Presets); the new preset. */
+  saveTextStyle: (clip: TextClipProps, name?: string) => ClipPreset;
   rename: (id: string, name: string) => void;
   remove: (id: string) => void;
 }
@@ -117,6 +120,22 @@ export const useClipPresets = create<PresetState>((set, get) => ({
       source: clip.type,
       attrs,
       thumb: onFrame && (clip.type === "video" || clip.type === "image") ? frameThumb() : undefined,
+    };
+    const next = [...get().presets, preset];
+    set({ presets: next });
+    persist(next);
+    return preset;
+  },
+  saveTextStyle: (clip, name) => {
+    const styles = get().presets.filter(isTextStyle);
+    let n = 1;
+    while (styles.some((p) => p.name === `Text style ${n}`)) n++;
+    const preset: ClipPreset = {
+      id: `preset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      name: name?.trim() || `Text style ${n}`,
+      createdAt: Date.now(),
+      source: "text",
+      attrs: textLookAttributes(clip),
     };
     const next = [...get().presets, preset];
     set({ presets: next });

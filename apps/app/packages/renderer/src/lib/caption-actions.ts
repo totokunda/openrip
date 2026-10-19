@@ -6,8 +6,9 @@
 import { create } from "zustand";
 import { v4 as uuidv4 } from "uuid";
 import { pickMediaPaths, pickSavePath, readFileBuffer, writeFileBuffer } from "@app/preload";
-import { CAPTION_STYLE, captionClips, clipsToCues, parseCaptions, writeSrt } from "./captions";
+import { CAPTION_STYLE, captionClips, clipsToCues, parseSubtitles, writeSrt } from "./captions";
 import { TEXT_PRESETS } from "./text-presets";
+import { captionsOnTrack, replaceAllPatches } from "./caption-edit";
 import { CAPTION_PRESETS, type CaptionKind } from "./caption-presets";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
@@ -77,7 +78,7 @@ export const useCaptionsStore = create<CaptionsState>((set) => ({
   setMessage: (message) => set({ message }),
 }));
 
-const SUBTITLES = [{ name: "Subtitles", extensions: ["srt", "vtt"] }];
+const SUBTITLES = [{ name: "Subtitles", extensions: ["srt", "vtt", "lrc", "ass", "ssa"] }];
 
 const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
@@ -95,7 +96,7 @@ const worldCanvas = () => {
  */
 export async function importCaptionFile(path: string, styleId = useCaptionsStore.getState().styleId): Promise<number> {
   const bytes = await readFileBuffer(path);
-  const { cues, skipped } = parseCaptions(new TextDecoder("utf-8").decode(bytes));
+  const { cues, skipped } = parseSubtitles(new TextDecoder("utf-8").decode(bytes), baseName(path));
   const name = baseName(path);
   if (!cues.length) {
     useCaptionsStore.getState().setMessage(`No captions found in ${name}.`);
@@ -159,4 +160,25 @@ export async function exportCaptions(defaultName = "captions.srt"): Promise<stri
   await writeFileBuffer(path, new TextEncoder().encode(writeSrt(cues)));
   useCaptionsStore.getState().setMessage(`Exported ${cues.length} caption${cues.length === 1 ? "" : "s"} to ${baseName(path)}.`);
   return path;
+}
+
+/** Find and replace over one captions track: every caption containing `find` (any letter case) gets its words rewritten, all in one undo step. Returns how many captions changed. */
+export function replaceAllCaptions(timelineId: string, find: string, replace: string): number {
+  const { clips, updateClip } = useClipStore.getState();
+  const patches = replaceAllPatches(captionsOnTrack(clips, timelineId), find, replace);
+  for (const p of patches) updateClip(p.clipId, { text: p.text } as Partial<TextClipProps>);
+  return patches.length;
+}
+
+/** Whether edits to a caption's look go to every caption on its track ("Apply to all main captions"); kept for the session. */
+export const useApplyToAllCaptions = create<{ on: boolean; set: (on: boolean) => void }>((set) => ({ on: false, set: (on) => set({ on }) }));
+
+/** Put a patch on every caption of the track except `exceptId` (`patch` makes each one's, or null to leave it). */
+export function patchCaptions(timelineId: string, exceptId: string, patch: (other: TextClipProps) => Partial<TextClipProps> | null) {
+  const { clips, updateClip } = useClipStore.getState();
+  for (const c of captionsOnTrack(clips, timelineId)) {
+    if (c.clipId === exceptId) continue;
+    const p = patch(c);
+    if (p && Object.keys(p).length) updateClip(c.clipId, p);
+  }
 }

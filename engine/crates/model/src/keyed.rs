@@ -188,7 +188,7 @@ impl Segment {
         }
         let background = [Param::BackgroundRed, Param::BackgroundGreen, Param::BackgroundBlue, Param::BackgroundAlpha, Param::BackgroundRadius, Param::BackgroundWidth, Param::BackgroundHeight];
         if background.into_iter().any(|p| k(p).is_some()) {
-            let b = text.layout.background.get_or_insert(TextBackground { color: crate::animated::Rgba::BLACK, corner_radius: 0.0, width: 0.14, height: 0.14, style: 1 });
+            let b = text.layout.background.get_or_insert(TextBackground { color: crate::animated::Rgba::BLACK, corner_radius: 0.0, width: 0.14, height: 0.14, style: 1, offset: [0.0, 0.0] });
             let c = &mut b.color;
             (c.r, c.g, c.b, c.a) = (k(Param::BackgroundRed).unwrap_or(c.r), k(Param::BackgroundGreen).unwrap_or(c.g), k(Param::BackgroundBlue).unwrap_or(c.b), k(Param::BackgroundAlpha).unwrap_or(c.a));
             b.corner_radius = k(Param::BackgroundRadius).unwrap_or(b.corner_radius);

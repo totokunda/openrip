@@ -147,8 +147,8 @@ pub struct TextStyle<'a> {
     /// A glow under the text and its outlines and shadow, over the background.
     pub glow: Option<Glow>,
     /// Box behind the text: colour, padding around the block of line boxes (px, x and y),
-    /// corner radius (px).
-    pub background: Option<([u8; 4], [f32; 2], f32)>,
+    /// corner radius (px), offset of the box (px, +y down).
+    pub background: Option<([u8; 4], [f32; 2], f32, [f32; 2])>,
     /// Drop shadow of the text and its outline, over the background: colour, offset (px, +y
     /// down) and blur radius (px).
     pub shadow: Option<([u8; 4], [f32; 2], f32)>,
@@ -640,7 +640,7 @@ impl TextLayout {
         let stroke = style.stroke.map_or(0.0, |s| s.1);
         // The outermost outline.
         let outer = style.more_strokes.iter().map(|s| s.1).fold(stroke, f32::max);
-        let bg_pad = style.background.map_or([0.0, 0.0], |b| b.1);
+        let bg_pad = style.background.map_or([0.0, 0.0], |b| [b.1[0] + b.3[0].abs(), b.1[1] + b.3[1].abs()]);
         let shadow_reach = style.shadow.map_or(0.0, |(_, o, blur)| outer + o[0].abs().max(o[1].abs()) + 2.0 * blur);
         let metrics = style.font.as_ref().metrics(&[]).scale(self.size);
         // A curved line moves its ends by the arc's sagitta and turns its glyphs.
@@ -913,7 +913,7 @@ impl TextLayout {
 
     /// Background box coverage, anti-aliased by distance to its rounded edge.
     fn background(&self, style: &TextStyle, left: f32, top: f32, w: u32, h: u32) -> Option<([u8; 4], Vec<f32>)> {
-        style.background.map(|(color, [px, py], radius)| {
+        style.background.map(|(color, [px, py], radius, [ox, oy])| {
             // One box per line, padded by (px, py), as CapCut draws them (measured on its
             // exports). Neighbouring lines whose widths differ by up to twice the padding on
             // each side share the wider one's width (merged at 0.27 and 0.44 em a side,
@@ -934,7 +934,7 @@ impl TextLayout {
                 .iter()
                 .zip(&spans)
                 .map(|(l, s)| {
-                    let (x0, y0, x1, y1) = (left + s[0] - px, top + l[2] - py, left + s[1] + px, top + l[2] + l[3] + py);
+                    let (x0, y0, x1, y1) = (left + ox + s[0] - px, top + oy + l[2] - py, left + ox + s[1] + px, top + oy + l[2] + l[3] + py);
                     let r = radius.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
                     [(x0 + x1) / 2.0, (y0 + y1) / 2.0, (x1 - x0) / 2.0 - r, (y1 - y0) / 2.0 - r, r]
                 })
@@ -964,7 +964,7 @@ impl TextLayout {
     pub fn prepare_effect(&self, style: &TextStyle, effect: &Effect, origin: [f32; 2]) -> PreparedText {
         let reach = |strokes: &[(f32, Paint)]| strokes.iter().map(|s| s.0).fold(0.0, f32::max);
         let shadow_reach = effect.shadows.iter().map(|sh| sh.offset[0].abs().max(sh.offset[1].abs()) + reach(&sh.strokes).max(2.0 * sh.blur)).fold(0.0, f32::max);
-        let bg_pad = style.background.map_or([0.0, 0.0], |b| b.1);
+        let bg_pad = style.background.map_or([0.0, 0.0], |b| [b.1[0] + b.3[0].abs(), b.1[1] + b.3[1].abs()]);
         let pad = ((self.size * 0.5).max(reach(&effect.strokes)).max(shadow_reach).max(bg_pad[0]).max(bg_pad[1]).ceil() as i32) + 2;
         let [pad_x, pad_y] = glow_pad(style.glow.as_ref(), pad, self.width, self.height);
         let (w, h) = ((self.width.ceil() as i32 + 2 * pad_x + 1) as u32, (self.height.ceil() as i32 + 2 * pad_y + 1) as u32);

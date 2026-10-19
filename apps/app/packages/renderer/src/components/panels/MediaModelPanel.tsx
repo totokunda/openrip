@@ -86,6 +86,8 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
   // CapCut's Text column: Add text, its presets by category, Local captions (the file import).
   text: [
     { id: "add", label: "Add text" },
+    // The text styles saved from a text's Save as preset (kept in the user data folder).
+    { id: "yours:presets", label: "Presets", under: "Yours" },
     ...PRESET_CATEGORIES.map((c) => ({ id: `presets:${c}`, label: c, under: "Presets" })),
     ...TEMPLATE_SECTIONS,
     { id: "captions", label: "Local captions" },

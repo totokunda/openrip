@@ -162,6 +162,24 @@ fn curved_text_arches_or_sags_by_the_sign_of_its_angle() {
 }
 
 #[test]
+fn a_background_offset_moves_the_box_not_the_text() {
+    let Some(f) = font() else { return };
+    let text = "HHHH";
+    // Where the box starts, measured from where the text starts (the picture grows with the offset).
+    let left_of = |img: &RgbaImage, white: bool| {
+        (0..img.width as usize).find(|&x| (0..img.height as usize).any(|y| { let p = &img.data[(y * img.width as usize + x) * 4..][..4]; p[3] > 0 && if white { p[1] > 200 } else { p[0] > 200 && p[1] < 60 } })).unwrap() as i32
+    };
+    let left_ink = |img: &RgbaImage| left_of(img, true) - left_of(img, false);
+    let with = |offset: [f32; 2]| {
+        let s = TextStyle { background: Some(([255, 0, 0, 255], [10.0, 10.0], 0.0, offset)), ..style(&f, None) };
+        layout(text, &s).rasterize(&s, [0.0, 0.0]).image
+    };
+    let (plain, moved) = (with([0.0, 0.0]), with([25.0, 0.0]));
+    // The box's left edge moves 25 px right, against the text.
+    assert!((left_ink(&plain) - left_ink(&moved) - 25).abs() <= 2, "{} vs {}", left_ink(&moved), left_ink(&plain));
+}
+
+#[test]
 fn konva_lines_use_chromiums_font_box() {
     // As Chromium measures them on macOS (fontBoundingBoxAscent/Descent at 1000 px).
     for (path, ascent, descent) in [("/System/Library/Fonts/Supplemental/Arial.ttf", 0.905, 0.212), ("/System/Library/Fonts/Helvetica.ttc", 0.920, 0.230), ("/System/Library/Fonts/Supplemental/Verdana.ttf", 1.005, 0.210)] {

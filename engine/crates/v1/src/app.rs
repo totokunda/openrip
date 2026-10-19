@@ -81,7 +81,7 @@ pub(crate) fn kind_from_name(name: &str) -> Option<TrackKind> {
 
 /// The text panel's style fields (`TextProperties` and its stroke, shadow and background
 /// sections) a converted text clip carries; a change to any of them is applied on import.
-pub(crate) const TEXT_STYLE_KEYS: [&str; 30] = [
+pub(crate) const TEXT_STYLE_KEYS: [&str; 35] = [
     "fontFamily", "fontWeight", "fontStyle", "textDecoration", "textAlign", "textTransform",
     "strokeEnabled", "stroke", "strokeWidth", "strokeOpacity",
     "shadowEnabled", "shadowColor", "shadowOpacity", "shadowOffsetX", "shadowOffsetY", "shadowBlur",
@@ -89,6 +89,8 @@ pub(crate) const TEXT_STYLE_KEYS: [&str; 30] = [
     // Spacing, the gradient fill, more outlines and the glow (`text.rs`).
     "letterSpacing", "lineSpacing", "fillGradient", "moreStrokes",
     "glowEnabled", "glowColor", "glowIntensity", "glowRange", "glowOffsetX", "glowOffsetY",
+    // The Background section's geometry and the Curve section.
+    "backgroundWidth", "backgroundHeight", "backgroundOffsetX", "backgroundOffsetY", "textCurve",
 ];
 
 /// The Adjust panel's sliders; the app's scale, applied on top of CapCut's own adjustments.
@@ -622,6 +624,11 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
             clip.insert("backgroundColor".into(), json!(hex(bg.map_or(Rgba::BLACK, |b| b.color))));
             clip.insert("backgroundOpacity".into(), pct(bg.map_or(1.0, |b| b.color.a)));
             clip.insert("backgroundCornerRadius".into(), num(bg.filter(|b| b.style == 2).map_or(0.0, |b| b.corner_radius as f64 * fs)));
+            clip.insert("backgroundWidth".into(), num(bg.map_or(0.0, |b| b.width as f64 * 100.0)));
+            clip.insert("backgroundHeight".into(), num(bg.map_or(0.0, |b| b.height as f64 * 100.0)));
+            clip.insert("backgroundOffsetX".into(), num(50.0 + bg.map_or(0.0, |b| b.offset[0] as f64 * 100.0)));
+            clip.insert("backgroundOffsetY".into(), num(50.0 + bg.map_or(0.0, |b| b.offset[1] as f64 * 100.0)));
+            clip.insert("textCurve".into(), num(t.layout.curve as f64));
             // Spacing, the gradient fill, more outlines, the glow and the Effects tab's style.
             let style = seg.attachments.iter().find_map(|id| project.materials.effects.iter().find(|e| &e.id == id && e.text_style.is_some()));
             crate::text::emit(&mut clip, t, style, fs, run.is_none_or(|r| r.size_unit == SizeUnit::CapCut));
@@ -743,7 +750,7 @@ mod tests {
                 line_spacing: 0.0,
                 line_height: None,
                 kerning: false,
-                background: Some(TextBackground { color: Rgba { r: 1.0, g: 0.0, b: 0.0, a: 0.5 }, corner_radius: 0.4, width: 0.14, height: 0.14, style: 2 }),
+                background: Some(TextBackground { color: Rgba { r: 1.0, g: 0.0, b: 0.0, a: 0.5 }, corner_radius: 0.4, width: 0.14, height: 0.14, style: 2, offset: [0.0, 0.0] }),
                 shadow: Some(TextShadow { color: Rgba::BLACK, distance: 0.1, angle_deg: -45.0, smoothing: 0.05 }),
                 glow: None,
                 max_width: None,
@@ -793,6 +800,26 @@ mod tests {
         let back = import_v1_json(&doc).unwrap().project;
         assert_eq!(segment(&back, "c").material, MaterialId("t".into()));
         assert_eq!(segment(&back, "v").attachments, segment(&p, "v").attachments);
+    }
+
+    #[test]
+    fn curve_and_background_geometry_round_trip_through_the_app() {
+        let mut p = project();
+        p.materials.texts[0].layout.curve = 72.0;
+        let mut doc = to_app_project(&p, &mut |_| None);
+        let clip = doc["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["clipId"] == "c").unwrap();
+        assert_eq!((clip["textCurve"].as_f64(), clip["backgroundWidth"].as_f64(), clip["backgroundOffsetX"].as_f64()), (Some(72.0), Some(14.0), Some(50.0)));
+        clip["textCurve"] = json!(-40);
+        clip["backgroundWidth"] = json!(30);
+        clip["backgroundHeight"] = json!(20);
+        clip["backgroundOffsetX"] = json!(60);
+        clip["backgroundOffsetY"] = json!(40);
+        let back = import_v1_json(&doc).unwrap().project;
+        let t = back.materials.texts.iter().find(|t| t.id == segment(&back, "c").material).unwrap();
+        assert_eq!(t.layout.curve, -40.0);
+        let bg = t.layout.background.unwrap();
+        assert!((bg.width - 0.3).abs() < 1e-5 && (bg.height - 0.2).abs() < 1e-5, "{bg:?}");
+        assert!((bg.offset[0] - 0.1).abs() < 1e-5 && (bg.offset[1] + 0.1).abs() < 1e-5, "{bg:?}");
     }
 
     #[test]

@@ -546,6 +546,14 @@ pub struct TextBackground {
     /// CapCut's background style (1 = rectangle, 2 = rounded); 0 never reaches the model.
     #[serde(default)]
     pub style: u8,
+    /// The box moved from where the text puts it, in em (x right, y down). OpenRip's own
+    /// text; CapCut's drafts keep none.
+    #[serde(default, skip_serializing_if = "is_zero_pair")]
+    pub offset: [f32; 2],
+}
+
+fn is_zero_pair(v: &[f32; 2]) -> bool {
+    *v == [0.0, 0.0]
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]

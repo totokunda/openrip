@@ -812,15 +812,29 @@ fn edit_text(seg: &mut Segment, clip: &Value, base: &Value, materials: &mut Mate
     if ["shadowEnabled", "shadowColor", "shadowOpacity", "shadowOffsetX", "shadowOffsetY", "shadowBlur"].into_iter().any(differs) {
         t.layout.shadow = style.shadow;
     }
-    if ["backgroundEnabled", "backgroundColor", "backgroundOpacity", "backgroundCornerRadius"].into_iter().any(differs) {
+    if ["backgroundEnabled", "backgroundColor", "backgroundOpacity", "backgroundCornerRadius", "backgroundWidth", "backgroundHeight", "backgroundOffsetX", "backgroundOffsetY"].into_iter().any(differs) {
         t.layout.background = style.background.map(|b| match t.layout.background {
             // A CapCut background keeps its padding around each line.
-            Some(old) => TextBackground { color: b.color, corner_radius: b.corner_radius, style: b.style, ..old },
+            Some(old) => TextBackground {
+                color: b.color,
+                corner_radius: b.corner_radius,
+                style: b.style,
+                width: if differs("backgroundWidth") { b.width } else { old.width },
+                height: if differs("backgroundHeight") { b.height } else { old.height },
+                offset: if differs("backgroundOffsetX") || differs("backgroundOffsetY") { b.offset } else { old.offset },
+            },
             // A new one gets CapCut's default padding, if the text is CapCut's (it has no
             // Konva line boxes).
-            None if t.layout.line_height.is_none() => TextBackground { width: 0.14, height: 0.14, ..b },
+            None if t.layout.line_height.is_none() => TextBackground {
+                width: if clip.get("backgroundWidth").is_some() { b.width } else { 0.14 },
+                height: if clip.get("backgroundHeight").is_some() { b.height } else { 0.14 },
+                ..b
+            },
             None => b,
         });
+    }
+    if differs("textCurve") {
+        t.layout.curve = f(clip, "textCurve", 0.0).clamp(-360.0, 360.0) as f32;
     }
     text::edit(&mut t, clip, &differs);
     seg.material = t.id.clone();
@@ -1817,7 +1831,16 @@ fn text_effects(clip: &Value) -> TextEffects {
         let mut color = hex(clip, "backgroundColor", Rgba::BLACK);
         color.a = (f(clip, "backgroundOpacity", 100.0) / 100.0) as f32;
         let corner_radius = rel(f(clip, "backgroundCornerRadius", 0.0));
-        TextBackground { color, corner_radius, width: 0.0, height: 0.0, style: if corner_radius > 0.0 { 2 } else { 1 } }
+        TextBackground {
+            color,
+            corner_radius,
+            // The Background section's Width, Height (hundredths of an em) and offsets (50 is
+            // centred, hundredths of an em either way).
+            width: (f(clip, "backgroundWidth", 0.0).clamp(0.0, 100.0) / 100.0) as f32,
+            height: (f(clip, "backgroundHeight", 0.0).clamp(0.0, 100.0) / 100.0) as f32,
+            style: if corner_radius > 0.0 { 2 } else { 1 },
+            offset: [((f(clip, "backgroundOffsetX", 50.0) - 50.0).clamp(-50.0, 50.0) / 100.0) as f32, ((f(clip, "backgroundOffsetY", 50.0) - 50.0).clamp(-50.0, 50.0) / 100.0) as f32],
+        }
     });
     let shadow = b(clip, "shadowEnabled").then(|| {
         let mut color = hex(clip, "shadowColor", Rgba::BLACK);
@@ -1872,7 +1895,7 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
             shadow,
             glow: text::glow(clip),
             max_width: None,
-            curve: 0.0,
+            curve: f(clip, "textCurve", 0.0).clamp(-360.0, 360.0) as f32,
             // Konva draws v1 text inside its box (wrapping at the box's width), aligned by
             // textAlign and verticalAlign.
             frame: clip.get("transform").map(|t| TextFrame {

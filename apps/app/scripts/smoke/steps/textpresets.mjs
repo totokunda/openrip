@@ -17,10 +17,10 @@ export default async (ctx) => {
   await seek(win, ctx.map, 2);
   await win.locator("[data-testid=assets-tab-text]").click();
   await win.waitForTimeout(500);
-  check("the column: Add text, then Presets and Text template folded, Local captions", /^Add text,Presets,Text template,Local captions/.test(await column()), await column());
+  check("the column: Add text, Yours, then Presets and Text template folded, Local captions", /^Add text,Yours,Presets,Text template,Local captions/.test(await column()), await column());
   await win.locator('[data-testid="assets-group-Presets"]').click();
   await win.waitForTimeout(300);
-  check("opening Presets shows its categories", /^Add text,Presets,All,Basic,Title,Caption,Style,Text template,Local captions/.test(await column()), await column());
+  check("opening Presets shows its categories", /^Add text,Yours,Presets,All,Basic,Title,Caption,Style,Text template,Local captions/.test(await column()), await column());
 
   // The default text.
   await (await sectionButton(win, "add")).click();

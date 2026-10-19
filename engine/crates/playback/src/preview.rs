@@ -1272,7 +1272,7 @@ impl PreviewEngine {
                 background: text.layout.background.map(|b| {
                     let pad = [b.width * em, b.height * em];
                     let radius = if b.style == 2 { b.corner_radius * 0.55 * em * scale.x.abs() as f32 } else { 0.0 };
-                    ([to_u8(b.color.r), to_u8(b.color.g), to_u8(b.color.b), to_u8(b.color.a)], pad, radius)
+                    ([to_u8(b.color.r), to_u8(b.color.g), to_u8(b.color.b), to_u8(b.color.a)], pad, radius, [b.offset[0] * em, b.offset[1] * em])
                 }),
                 // Distance and blur are fractions of the font size (for CapCut, its line box).
                 shadow: text.layout.shadow.filter(|sh| sh.color.a > 0.0).map(|sh| {
@@ -1333,7 +1333,7 @@ impl PreviewEngine {
                 style.color,
                 style.stroke.map(|(c, r)| (c, r.to_bits())),
                 (
-                    style.background.map(|(c, p, r)| (c, p[0].to_bits(), p[1].to_bits(), r.to_bits())),
+                    style.background.map(|(c, p, r, o)| (c, p[0].to_bits(), p[1].to_bits(), r.to_bits(), o[0].to_bits(), o[1].to_bits())),
                     style.shadow.map(|(c, o, b)| (c, o[0].to_bits(), o[1].to_bits(), b.to_bits())),
                 ),
                 text.layout.alignment,

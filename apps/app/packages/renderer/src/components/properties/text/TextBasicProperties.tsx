@@ -10,6 +10,8 @@ import KeyframeButton from "../KeyframeButton";
 import ColorWell from "./ColorWell";
 import FontPicker from "./FontPicker";
 import { NumberField, Segments, TextSection, ToggleButton } from "./controls";
+import CaptionApplyAll from "./CaptionApplyAll";
+import TextPresetStyles, { SaveTextPreset } from "./TextPresetStyles";
 
 /**
  * Text ▸ Basic in CapCut's order and grouping (docs/plan/capcut-ui-spec.md §4.8a): the text
@@ -74,7 +76,31 @@ const AlignGlyph: React.FC<{ kind: string }> = ({ kind }) => {
 /** The gradient a fill starts as: the text's colour into a blue, left to right across the text. */
 const defaultGradient = (color: string): TextGradient => ({ colors: [color || "#ffffff", "#2f80ed"], angle: 0, span: "text" });
 
-const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNode }> = ({ clipId, transform }) => {
+/** CapCut's background style tiles: a square, a rounded and a pill-shaped box (the corner radius they set). */
+const BG_STYLES = [
+  { id: "square", title: "Rectangle", radius: 0, rx: 0 },
+  { id: "rounded", title: "Rounded", radius: 8, rx: 3 },
+  { id: "pill", title: "Pill", radius: 50, rx: 7 },
+] as const;
+
+/** The arch of CapCut's Curve tile: a few letters along an arc. */
+const CurveGlyph: React.FC<{ strength: number }> = ({ strength }) => {
+  const k = Math.max(-1, Math.min(1, strength / 180));
+  return (
+    <svg viewBox="0 0 40 24" className="w-10 h-6" aria-hidden>
+      {"ABCDE".split("").map((ch, i) => {
+        const t = (i - 2) / 2;
+        return (
+          <text key={ch} x={20 + t * 15} y={13 + (t * t - 1) * 6 * k * -1 + 4 * k} fontSize="8" fontWeight="700" textAnchor="middle" fill="currentColor" transform={`rotate(${t * 22 * k} ${20 + t * 15} ${13 + (t * t - 1) * 6 * k * -1 + 4 * k})`}>
+            {ch}
+          </text>
+        );
+      })}
+    </svg>
+  );
+};
+
+const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNode; captionsTrack?: boolean }> = ({ clipId, transform, captionsTrack }) => {
   const clip = useClipStore((s) => s.getClipById(clipId)) as TextClipProps | undefined;
   const updateClip = useClipStore((s) => s.updateClip);
   const color = useKeyed(clip, "color");
@@ -117,6 +143,7 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
 
   return (
     <div className="flex flex-col min-w-0" data-testid="text-basic">
+      {captionsTrack && <CaptionApplyAll clipId={clipId} />}
       {/* The words, pinned while the rows scroll under them. */}
       <div className="sticky top-0 z-10 bg-brand-background px-3 pt-3 pb-1">
         <textarea
@@ -211,6 +238,8 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
             ))}
           </div>
         </PropertyRow>
+        <label className="pt-1.5 text-start text-[12px] text-brand-light">Presets</label>
+        <TextPresetStyles clip={clip} />
       </div>
       <div className="min-w-0 divide-y divide-brand-divider border-t border-brand-divider">
         {transform}
@@ -230,15 +259,46 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
           title="Background"
           testId="text-background"
           checked={!!clip.backgroundEnabled}
-          onCheckedChange={(on) => set({ backgroundEnabled: on })}
-          onReset={() => reset({ backgroundColor: "#000000", backgroundOpacity: 100, backgroundCornerRadius: 0 }, ["backgroundColor", "backgroundOpacity"])}
+          // Switched on from here, the box gets CapCut's padding (14 %) unless it already has some.
+          onCheckedChange={(on) => set({ backgroundEnabled: on, ...(on && clip.backgroundWidth === undefined ? { backgroundWidth: 14, backgroundHeight: 14 } : {}) })}
+          onReset={() => reset({ backgroundColor: "#000000", backgroundOpacity: 100, backgroundCornerRadius: 0, backgroundWidth: 14, backgroundHeight: 14, backgroundOffsetX: 50, backgroundOffsetY: 50 }, ["backgroundColor", "backgroundOpacity"])}
         >
+          <PropertyRow label="Style">
+            <div data-testid="text-background-style" className="flex flex-row gap-2">
+              {BG_STYLES.map((s) => {
+                const r = num(clip.backgroundCornerRadius, 0);
+                const active = s.id === "square" ? r === 0 : s.id === "pill" ? r >= 50 : r > 0 && r < 50;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    title={s.title}
+                    aria-label={`${s.title} background`}
+                    aria-pressed={active}
+                    data-testid={`text-background-style-${s.id}`}
+                    onClick={() => set({ backgroundCornerRadius: s.radius })}
+                    className={`w-[44px] h-[30px] rounded-[4px] bg-brand-background-light flex items-center justify-center border ${active ? "border-brand-accent" : "border-transparent hover:bg-brand-button"}`}
+                  >
+                    <svg viewBox="0 0 28 16" className="w-7 h-4" aria-hidden>
+                      <rect x="1" y="1" width="26" height="14" rx={s.rx} fill="currentColor" className="text-brand-light" />
+                    </svg>
+                  </button>
+                );
+              })}
+            </div>
+          </PropertyRow>
           <PropertyRow label="Color" clipId={clipId} keyframes="backgroundColor">
             <ColorWell testId="text-background-color" label="Background color" value={str(bgColor.value, "#000000")} onChange={(c) => bgColor.set(c)} />
           </PropertyRow>
           <div className="flex flex-col gap-2">
             <PropertiesSlider label="Opacity" value={num(bgOpacity.value, 100)} onChange={(v) => bgOpacity.set(v)} min={0} max={100} step={1} toFixed={0} suffix="%" end={<KeyframeButton clipId={clipId} properties={["backgroundOpacity"]} />} />
             <PropertiesSlider label="Rounded rectangle" value={num(clip.backgroundCornerRadius, 0)} onChange={(backgroundCornerRadius) => set({ backgroundCornerRadius })} min={0} max={50} step={1} toFixed={0} />
+            <div data-testid="text-background-geometry" className="flex flex-col gap-2">
+              <PropertiesSlider label="Height" value={num(clip.backgroundHeight, 0)} onChange={(backgroundHeight) => set({ backgroundHeight })} min={0} max={100} step={1} toFixed={0} suffix="%" />
+              <PropertiesSlider label="Width" value={num(clip.backgroundWidth, 0)} onChange={(backgroundWidth) => set({ backgroundWidth })} min={0} max={100} step={1} toFixed={0} suffix="%" />
+              <PropertiesSlider label="Y-offset" value={num(clip.backgroundOffsetY, 50)} onChange={(backgroundOffsetY) => set({ backgroundOffsetY })} min={0} max={100} step={1} toFixed={0} suffix="%" />
+              <PropertiesSlider label="X-offset" value={num(clip.backgroundOffsetX, 50)} onChange={(backgroundOffsetX) => set({ backgroundOffsetX })} min={0} max={100} step={1} toFixed={0} suffix="%" />
+            </div>
           </div>
         </TextSection>
         <TextSection
@@ -274,6 +334,20 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
             <PropertiesSlider label="Distance" value={distance} onChange={(d) => setShadow(Math.max(0, d), angle)} min={0} max={50} step={0.5} toFixed={1} />
             <PropertiesSlider label="Angle" value={angle} onChange={(a) => setShadow(distance || 2, a)} min={-180} max={180} step={1} toFixed={0} suffix="°" />
           </div>
+        </TextSection>
+        <TextSection
+          title="Curve"
+          testId="text-curve"
+          checked={num(clip.textCurve, 0) !== 0}
+          onCheckedChange={(on) => set({ textCurve: on ? 72 : 0 })}
+          onReset={() => set({ textCurve: 72 })}
+        >
+          <PropertyRow label="Style">
+            <div className="w-[64px] h-[38px] rounded-[4px] bg-brand-background-light border border-brand-accent text-brand-lighter flex items-center justify-center">
+              <CurveGlyph strength={num(clip.textCurve, 72)} />
+            </div>
+          </PropertyRow>
+          <PropertiesSlider label="Strength" value={num(clip.textCurve, 0)} onChange={(textCurve) => set({ textCurve })} min={-180} max={180} step={1} toFixed={0} suffix="°" />
         </TextSection>
         <TextSection
           title="Gradient fill"
@@ -314,6 +388,7 @@ const TextBasicProperties: React.FC<{ clipId: string; transform?: React.ReactNod
           </PropertyRow>
         </TextSection>
       </div>
+      <SaveTextPreset clipId={clipId} />
     </div>
   );
 };

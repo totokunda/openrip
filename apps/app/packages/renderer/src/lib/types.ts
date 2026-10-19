@@ -263,6 +263,8 @@ export interface TimelineProps {
   hidden: boolean;
   /** Its clips can't be selected or edited (CapCut's "Lock track"). */
   locked?: boolean;
+  /** A captions track: made by Add captions or Auto captions (a text track the Captions inspector knows). */
+  captions?: boolean;
   /** CapCut's Track height (the track's "…" menu); missing is Default. */
   size?: "short" | "tall";
   /** CapCut's Audio waveform size, % (the track's "…" menu); missing is 30. */
@@ -895,6 +897,17 @@ export type TextClipProps = ClipProps & {
   backgroundColor?: string;
   backgroundOpacity?: number;
   backgroundCornerRadius?: number;
+  /**
+   * The Background section's geometry: Height and Width are the box's padding around the lines
+   * in hundredths of an em (CapCut's 14 %), the offsets move it (0–100, 50 is centred, hundredths
+   * of an em either way). Missing is no padding and centred.
+   */
+  backgroundHeight?: number;
+  backgroundWidth?: number;
+  backgroundOffsetX?: number;
+  backgroundOffsetY?: number;
+  /** Curved text (CapCut's Curve ▸ Strength): the degrees of arc each line is bent through, arching up when positive and sagging when negative; 0 or missing is straight. */
+  textCurve?: number;
   /**
    * CapCut's Character and Line fields: steps of 1/20 of the font size between characters and
    * between lines (−10…100; 0 is CapCut's default). Not keyframeable (CapCut doesn't key them).

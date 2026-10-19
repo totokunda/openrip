@@ -20,6 +20,8 @@ import ColorMatch from '../properties/adjust/ColorMatch'
 import { cn } from '@/lib/utils'
 import TextBasicProperties from '../properties/text/TextBasicProperties'
 import TextEffectsProperties from '../properties/text/TextEffectsProperties'
+import CaptionListProperties from '../properties/CaptionListProperties'
+import { isCaption } from '@/lib/caption-edit'
 import LineProperties from '../properties/LineProperties'
 import { useDrawingStore } from '@/lib/drawing';
 import MaskPropertiesPanel from '../properties/mask/MaskPropertiesPanel';
@@ -70,6 +72,9 @@ const ClipPropertiesPanel: React.FC = () => {
     if (type === 'video') return separated || getMediaInfoCached((clip as VideoClipProps)?.assetId)?.audio !== null;
     return false;
   }, [type, separated, (clip as VideoClipProps | ImageClipProps)?.assetId]);
+
+  // A text on a captions track gets the caption inspector (the list editor, Apply to all main captions).
+  const captionClip = useClipStore((s) => isCaption(s.getClipById(clipId), s.timelines));
 
   // Several clips selected: CapCut's Properties tab, or its Video, Speed and Adjust for videos.
   const multi = selectedClipIds.length > 1;
@@ -153,11 +158,13 @@ const ClipPropertiesPanel: React.FC = () => {
         // CapCut's Text tab: Basic (with the clip's Transform and Blend among its sections)
         // and Effects. Its Bubble tab is CapCut's downloaded content, which OpenRip doesn't have.
         return [
+          // A caption (on a captions track) has CapCut's Captions tab first: the list editor and Find and replace.
+          ...(captionClip ? [{ id: 'captions', label: 'Captions', sections: [{ id: 'list', label: 'Captions', own: true, content: <CaptionListProperties clipId={clipId} /> }] }] : []),
           {
             id: 'text',
             label: 'Text',
             sections: [
-              { id: 'basic', label: 'Basic', content: <TextBasicProperties clipId={clipId} transform={stack(<TransformSection key="transform" clipId={clipId} />, <BlendSection key="blend" clipId={clipId} />)} /> },
+              { id: 'basic', label: 'Basic', content: <TextBasicProperties clipId={clipId} captionsTrack={captionClip} transform={stack(<TransformSection key="transform" clipId={clipId} />, <BlendSection key="blend" clipId={clipId} />)} /> },
               { id: 'effects', label: 'Effects', content: <TextEffectsProperties clipId={clipId} /> },
             ],
           },
@@ -228,7 +235,7 @@ const ClipPropertiesPanel: React.FC = () => {
       default:
         return [duration('Duration')];
     }
-  }, [clip, clipId, type, hasAudio, separated, selectedLineId, multi, selectedClipIds, multi ? allClips : null]);
+  }, [clip, clipId, type, captionClip, hasAudio, separated, selectedLineId, multi, selectedClipIds, multi ? allClips : null]);
 
   // A selected line or mask brings up its tab.
   useEffect(() => {

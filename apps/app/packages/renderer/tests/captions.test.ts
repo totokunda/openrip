@@ -1,7 +1,7 @@
 // Tests for src/lib/captions.ts: `node --test tests/*.test.ts` in packages/renderer.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { captionClips, clipsToCues, cueFrames, formatSrtTime, parseCaptions, parseTime, writeSrt } from "../src/lib/captions.ts";
+import { captionClips, clipsToCues, cueFrames, formatSrtTime, parseAss, parseCaptions, parseLrc, parseSubtitles, parseTime, writeSrt } from "../src/lib/captions.ts";
 
 test("times read in SRT's and VTT's forms", () => {
   assert.equal(parseTime("00:00:01,000"), 1);
@@ -154,4 +154,79 @@ test("text clips write out as SRT and read back the same", () => {
   const fromFrames = frames.map(([s, e], k) => clip(`f${k}`, s, e, `c${k}`));
   const again = cueFrames(parseCaptions(writeSrt(clipsToCues(fromFrames, 24))).cues, 24);
   assert.deepEqual(again.map((c) => [c.startFrame, c.endFrame]), frames);
+});
+
+test("an LRC file reads: tags, repeated times, offset, word tags, ends at the next line", () => {
+  const lrc = [
+    "[ti:Song]",
+    "[ar:Someone]",
+    "[offset:+500]",
+    "[00:01.50]First line",
+    "[00:04.00]<00:04.00>Second <00:04.50>line",
+    "[00:06.00]",
+    "[00:08.00][00:20.25]Chorus",
+    "[00:30:50]Last, with a colon fraction",
+    "not a lyric line",
+  ].join("\r\n");
+  const { cues, skipped } = parseLrc(lrc);
+  assert.equal(skipped, 1);
+  assert.deepEqual(
+    cues.map((c) => [c.start, c.end, c.text]),
+    [
+      [1, 3.5, "First line"],
+      // An empty line at 6 s ends the one before it (offset 0.5 s earlier: 5.5 s).
+      [3.5, 5.5, "Second line"],
+      [7.5, 19.75, "Chorus"],
+      [19.75, 30, "Chorus"],
+      [30, 33, "Last, with a colon fraction"],
+    ],
+  );
+});
+
+test("LRC lines at the same time become one two-line cue", () => {
+  const { cues } = parseLrc("[00:01.00]Hello\n[00:01.00]Bonjour\n[00:03.00]Next");
+  assert.equal(cues.length, 2);
+  assert.deepEqual([cues[0].start, cues[0].end, cues[0].text], [1, 3, "Hello\nBonjour"]);
+});
+
+test("an ASS file reads its dialogue by the Format line: commas in text, line breaks, overrides, comments", () => {
+  const ass = [
+    "[Script Info]",
+    "Title: x",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour",
+    "Style: Default,Arial,20,&H00FFFFFF",
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    "Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,{\\an8\\pos(10,10)}Hello, {\\i1}world{\\i0}\\Nsecond line",
+    "Comment: 0,0:00:04.00,0:00:05.00,Default,,0,0,0,,not shown",
+    "Dialogue: 0,0:00:00.25,0:00:00.75,Default,,0,0,0,,Earlier\\hone",
+    "Dialogue: 0,0:00:09.00,0:00:08.00,Default,,0,0,0,,backwards",
+    "Dialogue: 0,0:01:02.50,0:01:03.00,Default,,0,0,0,,",
+  ].join("\n");
+  const { cues, skipped } = parseAss(ass);
+  assert.equal(skipped, 2);
+  assert.deepEqual(
+    cues.map((c) => [c.start, c.end, c.text]),
+    [
+      [0.25, 0.75, "Earlier one"],
+      [1, 3.5, "Hello, world\nsecond line"],
+    ],
+  );
+});
+
+test("an SSA file with its own column order reads", () => {
+  const ssa = ["[Events]", "Format: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text", "Dialogue: Marked=0,0:00:02.00,0:00:04.00,Default,,0,0,0,,Old style"].join("\n");
+  assert.deepEqual(parseAss(ssa).cues, [{ start: 2, end: 4, text: "Old style" }]);
+});
+
+test("parseSubtitles picks the reader by extension, then by contents", () => {
+  assert.equal(parseSubtitles("[00:01.00]a", "x.lrc").cues.length, 1);
+  assert.equal(parseSubtitles("[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,,,0,0,0,,a", "x.ass").cues.length, 1);
+  assert.equal(parseSubtitles("1\n00:00:01,000 --> 00:00:02,000\na\n", "x.srt").cues.length, 1);
+  assert.equal(parseSubtitles("[00:01.00]a\n[00:02.00]b").cues.length, 2);
+  assert.equal(parseSubtitles("[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,,,0,0,0,,a").cues.length, 1);
+  assert.equal(parseSubtitles("WEBVTT\n\n00:01.000 --> 00:02.000\na\n").cues.length, 1);
 });

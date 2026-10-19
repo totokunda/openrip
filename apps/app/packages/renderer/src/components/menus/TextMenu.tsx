@@ -1,5 +1,8 @@
 import React from "react";
-import { LuPlus } from "react-icons/lu";
+import { LuPlus, LuX } from "react-icons/lu";
+import { applyPreset, useClipPresets } from "@/lib/clip-presets";
+import { isTextStyle, savedAsPreset } from "@/lib/text-style-presets";
+import type { TextClipProps } from "@/lib/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TEXT_PRESETS, addPresetText, type TextPreset } from "@/lib/text-presets";
 import { applyAnimation } from "@/components/properties/AnimationProperties";
@@ -82,6 +85,98 @@ const PresetTile: React.FC<{ preset: TextPreset; label?: string; testId?: string
 );
 
 /**
+ * Text ▸ Yours ▸ Presets: the saved text styles (Save as preset in a text's inspector) as tiles
+ * in their own look. A click gives the selected text that look in one undo step (with no text
+ * selected it adds a new text in it); "+" always adds a new text; "×" deletes the style.
+ */
+const SavedTextStyles: React.FC = () => {
+  const presets = useClipPresets((s) => s.presets);
+  const load = useClipPresets((s) => s.load);
+  const remove = useClipPresets((s) => s.remove);
+  const rename = useClipPresets((s) => s.rename);
+  const selected = useControlsStore((s) => s.selectedClipIds);
+  const clips = useClipStore((s) => s.clips);
+  React.useEffect(() => void load(), [load]);
+  const styles = presets.filter(isTextStyle);
+  const target = selected.map((id) => clips.find((c) => c.clipId === id)).filter((c) => c?.type === "text").map((c) => c!.clipId);
+  const [editing, setEditing] = React.useState<string | null>(null);
+  return (
+    <ScrollArea className="h-full">
+      <div className="flex flex-col gap-3 p-3 pb-8 text-left" data-testid="text-saved-styles">
+        {styles.length === 0 ? (
+          <p className="text-[12px] text-[#6c6c6c] leading-snug py-6 text-center" data-testid="text-saved-empty">
+            Your text styles will appear here. Select a text and press Save as preset in its Text tab.
+          </p>
+        ) : (
+          <div className="grid gap-x-4 gap-y-[18px]" style={{ gridTemplateColumns: "repeat(auto-fill, 86px)" }}>
+            {styles.map((p) => {
+              const look = (p.attrs.groups.text?.fields ?? {}) as Partial<TextClipProps>;
+              return (
+                <div key={p.id} className="flex flex-col gap-1.5 w-[86px]" data-testid="text-saved-card">
+                  <div className="group relative w-[86px] h-[86px]">
+                    <button
+                      type="button"
+                      data-testid="text-saved-style"
+                      data-preset-id={p.id}
+                      data-preset-name={p.name}
+                      title={`${p.name}: click to ${target.length ? "apply to the selected text" : "add a text in this style"}`}
+                      onClick={() => (target.length ? applyPreset(p, target) : void addPresetText(savedAsPreset(p)))}
+                      className="w-full h-full rounded-[6px] bg-brand-background-light hover:bg-brand-button flex items-center justify-center overflow-hidden px-1.5 cursor-pointer"
+                    >
+                      <TextLook look={look} text="Text" size={20} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Add a text in ${p.name}`}
+                      data-testid="text-saved-add"
+                      onClick={() => void addPresetText(savedAsPreset(p))}
+                      className="absolute right-1 bottom-1 w-[18px] h-[18px] rounded-full bg-black/55 text-white items-center justify-center hidden group-hover:flex"
+                    >
+                      <LuPlus className="w-3 h-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${p.name}`}
+                      data-testid="text-saved-delete"
+                      onClick={() => remove(p.id)}
+                      className="absolute right-1 top-1 w-[18px] h-[18px] rounded-full bg-black/60 text-white items-center justify-center hidden group-hover:flex"
+                    >
+                      <LuX className="w-3 h-3" />
+                    </button>
+                  </div>
+                  {editing === p.id ? (
+                    <input
+                      autoFocus
+                      defaultValue={p.name}
+                      aria-label="Style name"
+                      data-testid="text-saved-name-input"
+                      onBlur={(e) => {
+                        rename(p.id, e.target.value);
+                        setEditing(null);
+                      }}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === "Enter") e.currentTarget.blur();
+                        if (e.key === "Escape") setEditing(null);
+                      }}
+                      className="h-[18px] w-full rounded-[3px] bg-brand px-1 text-[12px] text-brand-lighter outline-none"
+                    />
+                  ) : (
+                    <span className="text-[12px] leading-none truncate text-left text-[#949494]" data-testid="text-saved-name" title="Double-click to rename" onDoubleClick={() => setEditing(p.id)}>
+                      {p.name}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </ScrollArea>
+  );
+};
+
+/**
  * The Text tab, in CapCut's layout (its column: Add text, Presets ▸ categories, Local
  * captions): "add" is the default text, "presets:<category>" the presets grid
  * (lib/text-presets.ts, drawn by the app), "captions" the caption file import; "animations"
@@ -159,6 +254,8 @@ const TextMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
     </AssetSection>
   );
 
+  // Yours › Presets: the text styles saved from a text's Save as preset.
+  if (part === "yours:presets") return <SavedTextStyles />;
   // Local captions: the caption file import, as Captions ▸ Add captions has it.
   if (part === "captions") return <CaptionsMenu part="add" />;
   if (part.startsWith("templates:")) return <TextTemplatesMenu part={part} />;
