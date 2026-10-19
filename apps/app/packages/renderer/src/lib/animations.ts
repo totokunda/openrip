@@ -11,7 +11,8 @@
 // own curves until that bundle is on hand. See docs/parity/transitions.md and
 // docs/parity/clip-animations.md; docs/plan/app-engine-integration.md ("Transitions and
 // animations") has how the engine and the importer use them.
-import type { AnimationDirection, AnimationParams, AnyClipProps, ClipAnimation, ClipTransition } from "./types";
+import { GL_TRANSITIONS, type GlParamDef } from "./glTransitions";
+import type { AnimationDirection, AnimationParams, AnyClipProps, ClipAnimation, ClipTransition, TransitionParams } from "./types";
 
 /** The kinds of clip animation: In and Out on every clip, Combo on video and photos, Loop on text. */
 export type AnimationKind = "in" | "out" | "combo" | "loop";
@@ -33,6 +34,9 @@ export type BuiltinTransition = {
   capcut: "bundle" | "named";
   /** Draws images from CapCut's downloaded bundle (Blink): offered only with one on hand. */
   needsResource?: boolean;
+  /** A shader transition (the gl-transitions collection the engine draws, lib/glTransitions.ts):
+   * its own parameters, and its author and licence for the notices. */
+  shader?: { params: GlParamDef[]; author: string; license: string };
 };
 
 export type BuiltinAnimation = {
@@ -47,22 +51,45 @@ export type BuiltinAnimation = {
 
 const DIRECTION: BuiltinParam = { key: "direction", label: "Direction", options: ["left", "right", "up", "down"], default: "left" };
 
-/** Every transition the engine draws, in panel order. */
-export const TRANSITIONS: BuiltinTransition[] = [
-  { type: "mix", name: "Mix", category: "Classic", defaultDuration: 0.5, overlap: true, capcut: "named" },
-  { type: "black_fade", name: "Black Fade", category: "Classic", defaultDuration: 0.5, overlap: false, capcut: "named" },
-  { type: "white_flash", name: "White Flash", category: "Classic", defaultDuration: 0.5, overlap: false, capcut: "bundle" },
-  { type: "white_fade", name: "White Fade", category: "Classic", defaultDuration: 2, overlap: false, capcut: "bundle" },
-  { type: "pull_in", name: "Pull in", category: "Classic", defaultDuration: 1, overlap: false, capcut: "bundle" },
-  { type: "pull_out", name: "Pull out", category: "Classic", defaultDuration: 1, overlap: false, capcut: "named" },
-  { type: "blur", name: "Blur", category: "Classic", defaultDuration: 0.5, overlap: false, capcut: "named" },
+/** The categories of the Transitions tab, in its order. */
+export const TRANSITION_CATEGORIES = ["Basic", "Slide", "Wipe", "Mask", "Pattern", "Camera", "Blur", "Light", "Glitch", "Distortion", "3D", "Overlay"];
+
+/** The transitions the engine draws itself, in panel order. */
+const BASIC_TRANSITIONS: BuiltinTransition[] = [
+  { type: "mix", name: "Mix", category: "Basic", defaultDuration: 0.5, overlap: true, capcut: "named" },
+  { type: "black_fade", name: "Black Fade", category: "Basic", defaultDuration: 0.5, overlap: false, capcut: "named" },
   { type: "blink", name: "Blink", category: "Basic", defaultDuration: 0.5, overlap: false, capcut: "bundle", needsResource: true },
   { type: "slide", name: "Slide", category: "Slide", params: [DIRECTION], defaultDuration: 0.5, overlap: true, capcut: "named" },
   { type: "push", name: "Push", category: "Slide", params: [DIRECTION], defaultDuration: 0.5, overlap: true, capcut: "named" },
-  { type: "wipe", name: "Wipe", category: "Slide", params: [DIRECTION], defaultDuration: 0.5, overlap: true, capcut: "named" },
+  { type: "wipe", name: "Wipe", category: "Wipe", params: [DIRECTION], defaultDuration: 0.5, overlap: true, capcut: "named" },
   { type: "circle", name: "Circle", category: "Mask", defaultDuration: 0.5, overlap: true, capcut: "named" },
-  { type: "spin", name: "Spin", category: "Movement", defaultDuration: 0.5, overlap: false, capcut: "named" },
+  { type: "pull_in", name: "Pull in", category: "Camera", defaultDuration: 1, overlap: false, capcut: "bundle" },
+  { type: "pull_out", name: "Pull out", category: "Camera", defaultDuration: 1, overlap: false, capcut: "named" },
+  { type: "spin", name: "Spin", category: "Camera", defaultDuration: 0.5, overlap: false, capcut: "named" },
+  { type: "blur", name: "Blur", category: "Blur", defaultDuration: 0.5, overlap: false, capcut: "named" },
+  { type: "white_flash", name: "White Flash", category: "Light", defaultDuration: 0.5, overlap: false, capcut: "bundle" },
+  { type: "white_fade", name: "White Fade", category: "Light", defaultDuration: 2, overlap: false, capcut: "bundle" },
 ];
+
+/** The collection's shader transitions: 0.8 s centred on the cut, both clips drawn at once. */
+const SHADER_TRANSITIONS: BuiltinTransition[] = GL_TRANSITIONS.map((g) => ({
+  type: g.type,
+  name: g.name,
+  category: g.category,
+  defaultDuration: 0.8,
+  overlap: true,
+  capcut: "named" as const,
+  shader: { params: g.params, author: g.author, license: g.license },
+}));
+
+/** Every transition the engine draws: by category (the tab's order), a category's own first. */
+export const TRANSITIONS: BuiltinTransition[] = [...BASIC_TRANSITIONS, ...SHADER_TRANSITIONS].sort(
+  (a, b) => TRANSITION_CATEGORIES.indexOf(a.category) - TRANSITION_CATEGORIES.indexOf(b.category),
+);
+
+/** A shader transition's default parameters. */
+export const shaderDefaults = (params: GlParamDef[]): TransitionParams =>
+  Object.fromEntries(params.map((p) => [p.key, p.default])) as TransitionParams;
 
 /** A video or photo's moves (the typing intros are the text's own). */
 const MOVES_IN: BuiltinAnimation[] = [
@@ -152,10 +179,16 @@ export const clipSeconds = (clip: AnyClipProps, fps: number): number =>
  * The `transitionOut` field for a built-in, at its default duration (or `duration`) and
  * parameters (or `params`), as the engine draws it; `null` for a type it doesn't know.
  */
-export const transitionOf = (type: string, opts: { duration?: number; params?: AnimationParams; resource?: string | null } = {}): ClipTransition | null => {
+export const transitionOf = (type: string, opts: { duration?: number; params?: TransitionParams; resource?: string | null } = {}): ClipTransition | null => {
   const t = TRANSITIONS.find((x) => x.type === type);
   if (!t) return null;
-  const params = t.params ? { ...defaultParams(t.params), ...opts.params } : undefined;
+  const params: TransitionParams | undefined = t.shader
+    ? t.shader.params.length
+      ? { ...shaderDefaults(t.shader.params), ...opts.params }
+      : undefined
+    : t.params
+      ? { ...defaultParams(t.params), ...opts.params }
+      : undefined;
   return {
     type,
     name: t.name,

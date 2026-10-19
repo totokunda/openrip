@@ -305,6 +305,10 @@ export type AnimationDirection = "left" | "right" | "up" | "down";
  */
 export type AnimationParams = { direction?: AnimationDirection };
 
+/** A shader transition's parameter values by name (lib/glTransitions.ts): a number, a flag, `[x, y]` or a colour as "#rrggbb". */
+export type TransitionParamValue = number | boolean | string | [number, number];
+export type TransitionParams = AnimationParams & { [key: string]: TransitionParamValue | undefined };
+
 /**
  * A clip's In, Out, Combo or Loop animation as the engine draws it: `type` is a built-in's
  * id from lib/animations.ts ("fade_in", "slide", "type_2", …), or "" for one from a CapCut
@@ -324,7 +328,7 @@ export type ClipAnimationIn = ClipAnimation;
  * engine doesn't draw. It runs across the cut, half its duration on each side, at most the
  * clip's length. Blink draws the image sequence CapCut downloaded with it (`resource`).
  */
-export type ClipTransition = { type: string; duration: number; name?: string; resource?: string | null; params?: AnimationParams };
+export type ClipTransition = { type: string; duration: number; name?: string; resource?: string | null; params?: TransitionParams };
 
 /**
  * One of a CapCut draft's own adjustments on a video or photo, by its material id: an Adjust

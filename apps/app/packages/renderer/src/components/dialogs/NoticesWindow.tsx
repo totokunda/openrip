@@ -38,7 +38,7 @@ export const NoticesWindow: React.FC<{ open: boolean; onOpenChange: (open: boole
                 <section key={i} data-testid="notices-license" className="mb-8">
                   <h2 className="text-[15px] font-semibold mb-1">{l.id}</h2>
                   <p className="mb-2 text-[13px] text-[#444]">
-                    {l.packages.map((p) => `${p.name} ${p.version}${p.source === "cargo" ? " (Cargo)" : p.source === "npm" ? " (npm)" : ""}`).join(", ")}
+                    {l.packages.map((p) => `${p.name} ${p.version}${p.source === "cargo" ? " (Cargo)" : p.source === "npm" ? " (npm)" : p.source === "bundled" ? " (bundled)" : ""}`).join(", ")}
                   </p>
                   {l.text ? <pre className="whitespace-pre-wrap font-mono text-[11.5px] leading-[17px] text-[#333] bg-[#f6f6f6] rounded-[6px] p-3">{l.text}</pre> : null}
                 </section>

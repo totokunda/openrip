@@ -1,6 +1,8 @@
 import React from "react";
-import { LuArrowDown, LuArrowLeft, LuArrowRight, LuArrowUp, LuRotateCcw } from "react-icons/lu";
+import Color from "color";
+import { LuArrowDown, LuArrowDownLeft, LuArrowDownRight, LuArrowLeft, LuArrowRight, LuArrowUp, LuArrowUpLeft, LuArrowUpRight, LuRotateCcw } from "react-icons/lu";
 import { TRANSITIONS } from "@/lib/animations";
+import type { GlParamDef } from "@/lib/glTransitions";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import {
@@ -9,12 +11,15 @@ import {
   cutsOn,
   resetTransition,
   setTransitionDirection,
+  setTransitionParam,
   setTransitionDuration,
   takesTransition,
   transitionMax,
 } from "@/lib/transitions";
-import type { AnimationDirection } from "@/lib/types";
+import type { AnimationDirection, ClipTransition, TransitionParamValue } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import ColorInput from "./ColorInput";
+import { Toggle } from "./controls";
 import PropertiesSlider from "./PropertiesSlider";
 import PropertyRow from "./PropertyRow";
 
@@ -24,6 +29,109 @@ const DIRECTIONS: { value: AnimationDirection; label: string; icon: React.Compon
   { value: "up", label: "Up", icon: LuArrowUp },
   { value: "down", label: "Down", icon: LuArrowDown },
 ];
+
+/** The eight ways a shader transition's direction can point, [x, y] (+y up in the collection). */
+const COMPASS: { v: [number, number]; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { v: [-1, 1], label: "Up left", icon: LuArrowUpLeft },
+  { v: [0, 1], label: "Up", icon: LuArrowUp },
+  { v: [1, 1], label: "Up right", icon: LuArrowUpRight },
+  { v: [-1, 0], label: "Left", icon: LuArrowLeft },
+  { v: [1, 0], label: "Right", icon: LuArrowRight },
+  { v: [-1, -1], label: "Down left", icon: LuArrowDownLeft },
+  { v: [0, -1], label: "Down", icon: LuArrowDown },
+  { v: [1, -1], label: "Down right", icon: LuArrowDownRight },
+];
+
+const sameVec = (a: unknown, b: [number, number]) => Array.isArray(a) && Math.sign(a[0]) === b[0] && Math.sign(a[1]) === b[1];
+const decimals = (step: number) => (step >= 1 ? 0 : step >= 0.1 ? 1 : 2);
+
+/** One of a shader transition's own parameters, as its kind asks: a slider, a switch, a colour, a direction. */
+const ShaderParam: React.FC<{ def: GlParamDef; t: ClipTransition; set: (v: TransitionParamValue) => void }> = ({ def, t, set }) => {
+  const raw = t.params?.[def.key];
+  const id = `transition-param-${def.key}`;
+  switch (def.kind) {
+    case "float":
+    case "int": {
+      const value = typeof raw === "number" ? raw : def.default;
+      return (
+        <div className="py-1" data-testid={id}>
+          <PropertiesSlider label={def.label} value={value} onChange={(v) => set(def.kind === "int" ? Math.round(v) : v)} min={def.min} max={def.max} step={def.step} toFixed={decimals(def.step)} />
+        </div>
+      );
+    }
+    case "bool":
+      return (
+        <PropertyRow label={def.label}>
+          <span data-testid={id}>
+            <Toggle on={typeof raw === "boolean" ? raw : def.default} onChange={set} label={def.label} />
+          </span>
+        </PropertyRow>
+      );
+    case "color": {
+      const value = typeof raw === "string" ? raw : def.default;
+      return (
+        <PropertyRow label={def.label}>
+          <span data-testid={id}>
+            <ColorInput
+              value={value}
+              onChange={(c) => {
+                try {
+                  set(Color(c).hex().toLowerCase());
+                } catch {
+                  /* not a colour yet */
+                }
+              }}
+            />
+          </span>
+        </PropertyRow>
+      );
+    }
+    case "direction": {
+      const value = Array.isArray(raw) ? raw : def.default;
+      return (
+        <PropertyRow label={def.label}>
+          <div role="radiogroup" aria-label={def.label} data-testid={id} className="grid grid-cols-4 gap-px rounded-[4px] bg-brand-background-light overflow-hidden w-[104px]">
+            {COMPASS.map(({ v, label, icon: Icon }) => (
+              <button
+                key={label}
+                type="button"
+                role="radio"
+                title={label}
+                aria-checked={sameVec(value, v)}
+                data-testid={`${id}-${label.toLowerCase().replace(" ", "-")}`}
+                onClick={() => set(v)}
+                className={cn("h-[22px] flex items-center justify-center", sameVec(value, v) ? "bg-brand-button text-brand-lighter" : "text-brand-light/70 hover:text-brand-lighter")}
+              >
+                <Icon className="w-3.5 h-3.5" />
+              </button>
+            ))}
+          </div>
+        </PropertyRow>
+      );
+    }
+    case "point":
+    case "int2": {
+      const value = Array.isArray(raw) ? raw : def.default;
+      const [lo, hi, step, names] = def.kind === "int2" ? [def.min, def.max, 1, ["Columns", "Rows"]] : [0, 1, 0.01, ["X", "Y"]];
+      return (
+        <div data-testid={id} className="py-1">
+          {[0, 1].map((i) => (
+            <PropertiesSlider
+              key={i}
+              label={`${def.label} ${names[i]}`}
+              value={value[i]}
+              onChange={(x) => set(i === 0 ? [def.kind === "int2" ? Math.round(x) : x, value[1]] : [value[0], def.kind === "int2" ? Math.round(x) : x])}
+              min={lo as number}
+              max={hi as number}
+              step={step as number}
+              toFixed={decimals(step as number)}
+            />
+          ))}
+        </div>
+      );
+    }
+  }
+};
 
 /**
  * The inspector for the transition selected on the timeline, as CapCut's Transition tab: its
@@ -96,6 +204,14 @@ const TransitionProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
               ))}
             </div>
           </PropertyRow>
+        )}
+        {builtin?.shader?.params.map((def) => (
+          <ShaderParam key={def.key} def={def} t={t} set={(v) => setTransitionParam(clipId, def.key, v)} />
+        ))}
+        {builtin?.shader && (
+          <p data-testid="transition-credit" className="text-[11px] text-[#6c6c6c] text-left py-2">
+            From the gl-transitions collection by {builtin.shader.author} ({builtin.shader.license}).
+          </p>
         )}
         {kept && <p className="text-[12px] text-[#949494] text-left py-2">The engine doesn't draw this CapCut transition yet; CapCut's export has it.</p>}
       </div>

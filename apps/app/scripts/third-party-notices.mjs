@@ -5,6 +5,8 @@
 // - Cargo: every crate the engine's addon (openrip-node) depends on for this platform
 //   (`cargo metadata`, normal and build dependencies), with its licence files from Cargo's
 //   registry. OpenRip's own crates and workspaces are left out.
+// - Bundled sources: code copied into the engine rather than depended on (the gl-transitions
+//   shaders, engine/crates/render/src/glt), with the licence texts kept beside it.
 // Each distinct licence text is kept once, with the packages it covers.
 //
 //   node scripts/third-party-notices.mjs [out.json]   (default: packages/main/dist/third-party-notices.json)
@@ -123,6 +125,17 @@ try {
   console.warn(`[third-party-notices] sticker manifest not read (${String(e.message ?? e).split("\n")[0]})`);
 }
 
+// ---- Bundled sources ----
+// The shader transitions are the gl-transitions collection (MIT, two BSD): their notices are in
+// the folder with the shaders.
+try {
+  const glt = path.join(engineDir, "crates", "render", "src", "glt");
+  const text = fs.readFileSync(path.join(glt, "LICENSES.txt"), "utf8");
+  packages.push({ name: "gl-transitions (shader transitions)", version: "1.76", source: "bundled", license: "MIT / BSD-2-Clause / BSD-3-Clause", text });
+} catch {
+  console.warn("[third-party-notices] the gl-transitions licences (engine/crates/render/src/glt/LICENSES.txt) weren't found");
+}
+
 // ---- Group by text ----
 const norm = (s) => s.replace(/\s+/g, " ").trim();
 const groups = new Map();
@@ -139,5 +152,5 @@ const licenses = [...groups.values()]
 
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, JSON.stringify({ generatedAt: new Date().toISOString().slice(0, 10), licenses }));
-const npm = packages.length - crates;
+const npm = packages.filter((p) => p.source === "npm").length;
 console.log(`[third-party-notices] ${npm} npm packages, ${crates} crates, ${licenses.length} licence texts → ${path.relative(process.cwd(), out)} (${(fs.statSync(out).size / 1024).toFixed(0)} KB)`);

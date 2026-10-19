@@ -3,7 +3,8 @@
 // text going through the animation, and a speed curve's shape. A card shows one still moment
 // of its motion and plays it in a loop while hovered (or while `playing`), with the Web
 // Animations API, so nothing runs for the cards nobody looks at.
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { GL_TRANSITIONS } from "@/lib/glTransitions";
 import { curveSpeedAt, MIN_CURVE_SPEED, MAX_CURVE_SPEED } from "@/lib/speed";
 import type { AnimationDirection, SpeedPoint } from "@/lib/types";
 
@@ -140,8 +141,53 @@ const Shot: React.FC<{ warm?: boolean; part: "a" | "b" }> = ({ warm, part }) => 
   </div>
 );
 
+/**
+ * The sheet of the shader transitions' previews: one row per transition (the order of
+ * lib/glTransitions.ts), eight frames across, each made by the engine's compositor on two
+ * sample pictures (`openrip-dev transition-sheet`), so a card shows what the export draws.
+ */
+const GL_SHEET = new URL("../../assets/transitions/gl-sheet.webp", import.meta.url).href;
+const GL_FRAMES = 8;
+/** The frames a hovered card plays through: the first picture, the transition, the second. */
+const GL_PLAY = [0, 0, 1, 2, 3, 4, 5, 6, 7, 7];
+/** The frame a resting card shows (the transition about a third of the way). */
+const GL_REST = 3;
+const GL_FRAME_MS = 100;
+
+/** A shader transition's card picture: its row of the engine's sheet, played while `playing`. */
+export const GlTransitionPreview: React.FC<{ kind: string; playing: boolean }> = ({ kind, playing }) => {
+  const [step, setStep] = useState(-1);
+  useEffect(() => {
+    if (!playing) {
+      setStep(-1);
+      return;
+    }
+    setStep(0);
+    const id = window.setInterval(() => setStep((s) => (s + 1) % GL_PLAY.length), GL_FRAME_MS);
+    return () => window.clearInterval(id);
+  }, [playing]);
+  const row = GL_TRANSITIONS.findIndex((t) => t.type === kind);
+  if (row < 0) return null;
+  const frame = step < 0 ? GL_REST : GL_PLAY[step];
+  return (
+    <div
+      data-testid="gl-preview"
+      data-frame={frame}
+      className="absolute inset-0"
+      style={{
+        backgroundImage: `url(${GL_SHEET})`,
+        backgroundSize: `${GL_FRAMES * 100}% ${GL_TRANSITIONS.length * 100}%`,
+        backgroundPosition: `${(frame / (GL_FRAMES - 1)) * 100}% ${(row / (GL_TRANSITIONS.length - 1)) * 100}%`,
+      }}
+    />
+  );
+};
+
 /** Two shots meeting through the transition `kind`. */
-export const TransitionPreview: React.FC<{ kind: string; direction?: AnimationDirection; playing: boolean }> = ({ kind, direction = "left", playing }) => {
+export const TransitionPreview: React.FC<{ kind: string; direction?: AnimationDirection; playing: boolean }> = ({ kind, direction = "left", playing }) =>
+  kind.startsWith("gl_") ? <GlTransitionPreview kind={kind} playing={playing} /> : <CssTransitionPreview kind={kind} direction={direction} playing={playing} />;
+
+const CssTransitionPreview: React.FC<{ kind: string; direction: AnimationDirection; playing: boolean }> = ({ kind, direction, playing }) => {
   const root = useRef<HTMLDivElement>(null);
   const tracks = transitionTracks(kind, direction);
   useLoop(root, tracks, playing, 0.46, `${kind}-${direction}`);

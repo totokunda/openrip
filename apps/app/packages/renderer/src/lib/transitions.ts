@@ -6,10 +6,10 @@
 // `updateClip`, so the clips in the store (which the undo history shares) are replaced, not
 // written to.
 import { create } from "zustand";
-import { TRANSITIONS, clipSeconds, maxTransitionDuration, transitionOf } from "./animations";
+import { TRANSITIONS, TRANSITION_CATEGORIES, clipSeconds, maxTransitionDuration, transitionOf } from "./animations";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
-import type { AnimationDirection, AnyClipProps, ClipTransition, ImageClipProps, VideoClipProps } from "./types";
+import type { AnimationDirection, AnyClipProps, ClipTransition, ImageClipProps, TransitionParamValue, VideoClipProps } from "./types";
 
 /** The clips a transition can leave: videos and photos. */
 export const takesTransition = (clip: AnyClipProps | undefined): clip is VideoClipProps | ImageClipProps =>
@@ -62,7 +62,10 @@ export const projectBlink = (clips: AnyClipProps[]): string | null => {
 export const offeredTransitions = (blink: string | null) => TRANSITIONS.filter((t) => !t.needsResource || !!blink);
 
 /** The panel's categories, in its order, for what's offered. */
-export const transitionCategories = (blink: string | null): string[] => [...new Set(offeredTransitions(blink).map((t) => t.category))];
+export const transitionCategories = (blink: string | null): string[] => {
+  const have = new Set(offeredTransitions(blink).map((t) => t.category));
+  return TRANSITION_CATEGORIES.filter((c) => have.has(c));
+};
 
 /**
  * Which cut the Transitions panel's "+" gives a transition to for the selected clip: its own
@@ -91,6 +94,7 @@ export const applyTransition = (clipId: string, type: string) => {
   const was = clip.transitionOut ?? null;
   const builtin = TRANSITIONS.find((t) => t.type === type);
   if (!builtin) return;
+  // The direction carries over to another with one; a shader transition starts from its own defaults.
   const direction = builtin.params?.length && was?.params?.direction ? { direction: was.params.direction } : undefined;
   const next = transitionOf(type, {
     duration: withinTransition(was?.duration ?? builtin.defaultDuration, max),
@@ -123,6 +127,10 @@ export const setTransitionDuration = (clipId: string, seconds: number) =>
 
 export const setTransitionDirection = (clipId: string, direction: AnimationDirection) =>
   editTransition(clipId, (t) => ({ ...t, params: { ...(t.params ?? {}), direction } }));
+
+/** One of a shader transition's own parameters (a number, a flag, `[x, y]` or a colour). */
+export const setTransitionParam = (clipId: string, key: string, value: TransitionParamValue) =>
+  editTransition(clipId, (t) => ({ ...t, params: { ...(t.params ?? {}), [key]: value } }));
 
 /** Back to its default duration and direction (the section's reset). */
 export const resetTransition = (clipId: string) =>

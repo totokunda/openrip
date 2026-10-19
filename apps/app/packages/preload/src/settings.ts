@@ -90,7 +90,7 @@ function getAppInfo(): Promise<AppInfo> {
 export type ThirdPartyNotices = {
   generatedAt: string;
   /** Each distinct licence text with the packages under it. */
-  licenses: { id: string; text: string; packages: { name: string; version: string; source: "npm" | "cargo" | "other"; url?: string }[] }[];
+  licenses: { id: string; text: string; packages: { name: string; version: string; source: "npm" | "cargo" | "bundled" | "other"; url?: string }[] }[];
 };
 
 function getThirdPartyNotices(): Promise<ThirdPartyNotices | null> {
