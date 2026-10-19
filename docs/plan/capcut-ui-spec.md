@@ -638,8 +638,8 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.28 Context menus | 5 | 3 | 13 |
 | 6.29 Export dialog | 5 | 2 | 9 |
 | 6.30 Other dialogs | 2 | 0 | 4 |
-| 6.31 Classic-algorithm features brought into scope | 0 | 1 | 10 |
-| **Total (348 in-scope features)** | **106** | **75** | **167** |
+| 6.31 Classic-algorithm features brought into scope | 0 | 7 | 4 |
+| **Total (348 in-scope features)** | **106** | **81** | **161** |
 
 The counts above are as written. A re-audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows (32.0% strict, 47.8% with partly as half); with the text, inspector and audio branches then in progress, 146 / 86 / 105 (43.3% / 56.1%). §6.31's 11 rows were added after it.
 
@@ -1253,12 +1253,12 @@ CapCut's versions of these are listed under AI or left out above; each has a cla
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
 | Split scenes: cut a clip at its shot changes (Media and clip menus) | `30-timeline-toolbar/001-video-context-menu.png` | missing |
-| Optical flow (Video ▸ Basic): frames blended along motion for smoother low frame rates | `18-inspector-video/004-basic-enhancement-sections.png` | missing |
-| Speed ▸ Smooth slow-mo: in-between frames by motion interpolation when slowed down | `18-inspector-video/020-speed-standard.png` | missing |
-| Text ▸ Tracking: a text follows a point or region of the video under it | `21-inspector-text/022-tracking-default.png`, `023-motion-tracking-options.png` | missing |
-| Sticker ▸ Tracking | `22-inspector-sticker/001-sticker-transform.png` (its tab row) | missing |
-| Photo/overlay ▸ Tracking | `19-inspector-photo/001-photo-selected-basic-top.png` | missing |
-| Mask ▸ Track mask: the mask follows the tracked region, with its direction menu | `25-inspector-adjustment-layer/026-rectangle-mask-controls.png`, `027-mask-track-direction-menu.png`, `028-mask-tracking-bottom.png` | missing |
+| Optical flow (Video ▸ Basic): frames blended along motion for smoother low frame rates | `18-inspector-video/004-basic-enhancement-sections.png` | partly (the engine and section work in preview and export; the frame-rate select is inferred because CapCut's panel was not captured) |
+| Speed ▸ Smooth slow-mo: in-between frames by motion interpolation when slowed down | `18-inspector-video/020-speed-standard.png` | partly (the row and flow interpolation work in preview and export; its Mode select is inferred, CapCut's panel not captured) |
+| Text ▸ Tracking: a text follows a point or region of the video under it | `21-inspector-text/022-tracking-default.png`, `023-motion-tracking-options.png` | partly (Tracking tab follows a point or region; adds a Rotation toggle CapCut lacks) |
+| Sticker ▸ Tracking | `22-inspector-sticker/001-sticker-transform.png` (its tab row) | partly (same tab as text, with the extra Rotation toggle) |
+| Photo/overlay ▸ Tracking | `19-inspector-photo/001-photo-selected-basic-top.png` | partly (same tab as text, with the extra Rotation toggle) |
+| Mask ▸ Track mask: the mask follows the tracked region, with its direction menu | `25-inspector-adjustment-layer/026-rectangle-mask-controls.png`, `027-mask-track-direction-menu.png`, `028-mask-tracking-bottom.png` | partly (the mask follows the tracked region; CapCut's Hide behaviour is unknown) |
 | Adjust ▸ Auto adjust: levels, white balance and contrast set from the clip's own statistics | `25-inspector-adjustment-layer/001-basic-top.png`, `30-timeline-toolbar/008-video-context-adjust-color.png` | missing |
 | Adjust ▸ Color match: a clip graded to match a reference frame's colour statistics | `25-inspector-adjustment-layer/001-basic-top.png`, `30-timeline-toolbar/008-video-context-adjust-color.png` | missing |
 | Smart suggestions ▸ Make colors consistent: every clip matched to one reference | `17-inspector-project/011-project-smart-suggestions.png` | missing |

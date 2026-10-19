@@ -37,7 +37,7 @@ CapCut keeps its flags on each clip's video material, so a clip in the app that 
 
 | Test | Result |
 |---|---|
-| Synthetic: a textured square moving 3.1 px, growing 1.2% and turning 1.5° a frame over a textured background, 30 frames (`motion` crate) | within 0.5 px, 1% of scale and 0.5° (asserted; worst values printed by the test) |
+| Synthetic: a textured square moving 3.1 px, growing 1.2% and turning 1.5° a frame over a textured background, 30 frames (`motion` crate) | within 0.5 px, 1% of scale and 0.5° (asserted); measured worst over the 30 frames: 0.244 px, 0.0080 scale (0.8%), 0.109° |
 | Synthetic, encoded: a square moving 4 px a frame in an H.264 clip, tracked both ways from its middle (`core/tests/track.rs`) | 0.00 px worst over 48 frames; cancel stops it |
 | The face in the 4K ProRes test clip, forward from the start | 278 frames at 27 fps (decoding included); a round trip to the end and back returns within 8.9 source px (0.23% of the frame's height), 1.3% of scale and 2.9° |
 | In the app (`tracking` step): the face tracked, the text's motion against the face found by block matching in the engine's frames | agrees within 0.5–1.2 px at the preview's size |
