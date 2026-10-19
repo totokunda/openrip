@@ -114,6 +114,9 @@ impl Recognizer for Whisper {
                 }
                 let data = token.token_data();
                 let text = token.to_str_lossy().map_err(|e| SpeechError::Failed(e.to_string()))?.into_owned();
+                if std::env::var_os("OPENRIP_WHISPER_DEBUG").is_some() {
+                    eprintln!("token {text:?} t0 {} t1 {} dtw {}", data.t0, data.t1, data.t_dtw);
+                }
                 let (start, end) = if dtw && data.t_dtw >= 0 {
                     let end = cs(data.t_dtw).clamp(done, seg_end.max(done));
                     (done, end)

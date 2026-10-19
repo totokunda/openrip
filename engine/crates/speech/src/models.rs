@@ -30,8 +30,8 @@ pub struct Model {
 /// The model the app picks until the user chooses: multilingual (so the language menu and
 /// auto-detect work) and `small`, the smallest that gets words like "vlog" right where `base`
 /// writes "blog" (docs/plan/auto-captions.md). It's 488 MB to download once, but on Apple
-/// silicon's GPU it runs at about 15x real time, so a ten-minute clip takes under a minute;
-/// `base` (148 MB, 25x) is one click away in the model list.
+/// silicon's GPU it runs at about 20x real time, so a ten-minute clip takes half a minute;
+/// `base` (148 MB, 40x) is one click away in the model list.
 pub const DEFAULT_MODEL: &str = "small";
 
 /// Where a model file is served from.

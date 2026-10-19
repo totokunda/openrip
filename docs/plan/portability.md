@@ -44,6 +44,7 @@ backends      behind seams in the engine crates: FFmpeg, VideoToolbox, cpal, IOS
 | GPU texture interop | `render/src/interop.rs` | `Surface`, `Compositor::render_into`, video import | Apple: hardware frames' IOSurface planes as Metal textures; BGRA and NV12 IOSurfaces rendered into | Frames read back and uploaded (`to_rgb`); a `Surface` holds pixels read back from the GPU. Todo: `AHardwareBuffer` with Vulkan (Android), `importExternalTexture` (web), DXGI and dmabuf (other desktops) |
 | Asset access | `platform/src/assets.rs` | `Assets` (read, open, exists, list, version, write, local_path), `set_assets`, `Memory` | `FileSystem` (paths); `Memory` serves blobs in memory in front of another resolver | Names are any string, so handles and URLs work for everything the engine reads itself. FFmpeg opens by name (`local_path`); todo: a custom AVIO over `Assets::open` for handles and blobs |
 | Fonts | `render/src/fonts.rs` | `register` (core's `register_fonts`), `resolve`, `families`, `font_folders` | Faces a client registers by asset name (the app's bundled WOFF2 files), and the platform's font folders (macOS, Windows, Linux, Android) scanned through `assets` | No folders (iOS, the web): only registered faces, else the text's fallback font. Todo: the web's local fonts, iOS's system fonts through the client |
+| Speech recognition | `speech/src/backend.rs` | `Recognizer`, `transcribe`, `add_recognizer` | whisper.cpp through whisper-rs (`whisper`; Metal on Apple); the desktop addon turns it on | No recognizer: Auto captions says so; the captions logic (`build_captions`) is pure and builds everywhere. Todo: platform recognizers (iOS, Android, web) |
 | Task spawning | `platform/src/tasks.rs` | `Spawner`, `spawn`, `Task` | `Threads`: an OS thread per worker | A worker that can't start is an error (or that optional worker is skipped). Todo: a Web Worker spawner for wasm threads |
 
 The workers that start through `tasks::spawn`: one frame server per source, the render-ahead preview, decoder prefetch, the scrub workers and the audio mixer (and the VideoToolbox warm-up).
@@ -56,7 +57,8 @@ The workers that start through `tasks::spawn`: one frame server per source, the 
 | `openrip-audio` | `ffmpeg` | `AudioDecoder`, `atempo` time-stretch |
 | `openrip-playback` | `ffmpeg`, `cpal` | forwards `ffmpeg` to media and audio; cpal output |
 | `openrip-export` | `ffmpeg` | the VideoToolbox encoder; forwards `ffmpeg` to playback and audio |
-| `openrip-core` | `ffmpeg`, `audio-output` | everything above |
+| `openrip-core` | `ffmpeg`, `audio-output`; `whisper` (off by default) | everything above; speech recognition with whisper.cpp |
+| `openrip-speech` | `whisper` (off by default) | whisper.cpp through whisper-rs |
 
 The workspace's dependencies on media, audio, playback and export come without default features, and each member asks for what it uses. The addon takes core's defaults (plus `static-ffmpeg` in the app's builds), `openrip-dev` asks for FFmpeg and cpal, and render's tests ask for FFmpeg to decode test clips. Tests and examples that decode real media declare `required-features`, so `cargo test --no-default-features` runs the rest.
 

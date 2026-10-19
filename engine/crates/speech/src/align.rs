@@ -35,7 +35,9 @@ pub fn tighten(transcript: &mut Transcript, audio: &[f32]) {
     for seg in &mut transcript.segments {
         let n = seg.words.len();
         for (k, w) in seg.words.iter_mut().enumerate() {
-            let a = to_frame(w.start_us.max(floor_us));
+            // A segment's first word may have begun up to 0.3 s before the recognizer says.
+            let back = if k == 0 { 300_000 } else { 0 };
+            let a = to_frame((w.start_us - back).max(floor_us));
             let b = to_frame(w.end_us.max(w.start_us)).max(a);
             let peak = energy[a..=b].iter().cloned().fold(0.0, f32::max);
             let threshold = (peak * FRACTION).max(floor * 3.0);
@@ -44,11 +46,17 @@ pub fn tighten(transcript: &mut Transcript, audio: &[f32]) {
             if peak > floor * 3.0 {
                 if let Some(first) = (a..=b).find(|&i| sustained(i)) {
                     let mut last = (first..=b).rev().find(|&i| loud(i)).unwrap_or(first);
-                    // The segment's last word may run on past where the alignment ended it (up to
-                    // 0.4 s, while the sound lasts).
-                    if k + 1 == n && last == b {
-                        while last + 1 < energy.len() && last < b + 40 && loud(last + 1) {
-                            last += 1;
+                    // A word may run on past where the alignment ended it, as the sound decays:
+                    // by up to 0.2 s if it dies away in that time (so its tail isn't taken for
+                    // the next word's start), and the segment's last word by up to 0.4 s.
+                    if last == b {
+                        let limit = if k + 1 == n { 40 } else { 20 };
+                        let mut i = b;
+                        while i + 1 < energy.len() && i < b + limit && loud(i + 1) {
+                            i += 1;
+                        }
+                        if k + 1 == n || i + 1 >= energy.len() || !loud(i + 1) {
+                            last = i;
                         }
                     }
                     // A frame of lead before the sound, and the frame it ends in.
