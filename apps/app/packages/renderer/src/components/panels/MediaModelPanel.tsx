@@ -33,6 +33,9 @@ import ShapesMenu from "../menus/ShapesMenu";
 import StickersMenu, { stickerSections } from "../menus/StickersMenu";
 import AudioMenu, { audioSections } from "../menus/AudioMenu";
 import PendingMenu, { type Pending } from "../menus/PendingMenu";
+import StockLibraryMenu, { stockSections } from "../menus/StockLibraryMenu";
+import CreditsView from "../menus/CreditsView";
+import TemplatesMenu, { templateSections } from "../menus/TemplatesMenu";
 import CaptionsMenu from "../menus/CaptionsMenu";
 import { useAutoCaptionsFocus } from "@/lib/autocaptions";
 import { PRESET_CATEGORIES } from "../menus/TextMenu";
@@ -70,7 +73,8 @@ const TABS: { section: SidebarSection; title: string; icon: IconType }[] = [
 const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; under?: string }[]>> = {
   media: [
     { id: "local", label: "Media", under: "Import" },
-    { id: "library", label: "Library" },
+    // CapCut's stock library, from openly licensed sources (StockLibraryMenu).
+    ...stockSections(),
   ],
   // Extracted, Voiceovers, Yours (Favorites, Imported), then the Music and Sound effects categories.
   audio: audioSections(),
@@ -95,7 +99,7 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
     { id: "add", label: "Add captions" },
   ],
   adjustment: adjustmentSections,
-  templates: [{ id: "templates", label: "Templates" }],
+  templates: templateSections(),
 };
 
 /**
@@ -219,7 +223,7 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   const content = () => {
     switch (section) {
       case "media":
-        return sub === "library" ? <PendingMenu section="library" /> : <MediaMenu />;
+        return sub === "library:credits" ? <CreditsView /> : sub.startsWith("library:") ? <StockLibraryMenu category={sub.slice(8)} /> : <MediaMenu />;
       case "filters":
         return <FilterMenu part={sub} />;
       case "effects":
@@ -236,6 +240,8 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
         return sub === "shapes" ? <ShapesMenu /> : <StickersMenu part={sub} />;
       case "audio":
         return <AudioMenu section={sub} onOpen={(v) => setPicked((p) => ({ ...p, audio: v }))} />;
+      case "templates":
+        return <TemplatesMenu part={sub} />;
       default:
         return <PendingMenu section={section as Pending} />;
     }

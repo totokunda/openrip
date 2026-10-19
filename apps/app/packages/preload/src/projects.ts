@@ -100,6 +100,11 @@ async function createProjectFromTemplate<T = any>(id: string, name: string): Pro
   return await ipcRenderer.invoke("templates:use", id, name);
 }
 
+/** A template's project document for the open project (its media copied into the project's folder, its paths pointing there). */
+async function stageTemplate<T = any>(id: string, folderUuid: string): Promise<ConfigResponse<T>> {
+  return await ipcRenderer.invoke("templates:stage", id, folderUuid);
+}
+
 /** A media file the projects import (the Library page). */
 export type LibraryItem = {
   path: string;
@@ -127,6 +132,7 @@ export {
   renameTemplate,
   deleteTemplate,
   createProjectFromTemplate,
+  stageTemplate,
   listLibraryMedia,
   listProjects,
   createProject,

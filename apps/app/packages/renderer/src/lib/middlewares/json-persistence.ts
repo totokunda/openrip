@@ -678,6 +678,112 @@ const debouncedGenerateProjectCover = _.debounce(
   1000,
 );
 
+/**
+ * A saved project document's clips as the editor holds them (frames, not ticks): what loading a project
+ * puts in the store, and what the Templates tab lays into another project.
+ */
+export const clipsFromSnapshot = (doc: ProjectJsonSnapshot): AnyClipProps[] => {
+    const clipsJson = Array.isArray(doc.timeline?.clips)
+      ? (doc.timeline.clips as TimelineClipJson[])
+      : [];
+
+    const clips: AnyClipProps[] = [];
+
+    const fpsForJson =
+      typeof doc.settings?.fps === "number" &&
+      Number.isFinite(doc.settings.fps)
+        ? doc.settings.fps
+        : 24;
+
+    for (const c of clipsJson) {
+      if (!c) continue;
+      // Generated-model clips from older projects have no editor equivalent.
+      if ((c as any).type === "model") continue;
+
+      const baseStartFrame =
+        (c as any).startTick != null
+          ? tickToFrameForJson((c as any).startTick, fpsForJson)
+          : Number((c as any).startFrame ?? 0);
+      const baseEndFrame =
+        (c as any).endTick != null
+          ? tickToFrameForJson((c as any).endTick, fpsForJson)
+          : Number((c as any).endFrame ?? 0);
+      const baseTrimStart =
+        c.type !== "audio" && c.type !== "video" && c.type !== "group"
+          ? Infinity
+          : tickToFrameForJson((c as any).trimStartTick, fpsForJson);
+      const baseTrimEnd =
+        c.type !== "audio" && c.type !== "video" && c.type !== "group"
+          ? -Infinity
+          : tickToFrameForJson((c as any).trimEndTick, fpsForJson);
+
+      const base: Partial<AnyClipProps> = {
+        clipId: String((c as any).clipId),
+        timelineId: String((c as any).timelineId ?? ""),
+        type: (c as any).type,
+        groupId: ((c as any).groupId ?? undefined) as string | undefined,
+        startFrame: baseStartFrame,
+        endFrame: baseEndFrame,
+        trimStart: baseTrimStart,
+        trimEnd: baseTrimEnd,
+        clipPadding: Number(
+          typeof (c as any).clipPadding === "number" &&
+            Number.isFinite((c as any).clipPadding)
+            ? (c as any).clipPadding
+            : 24,
+        ),
+        transform: (c as any).transform,
+        originalTransform: (c as any).originalTransform,
+      };
+
+      const hasLegacyProps =
+        typeof (c as any).props === "object" && (c as any).props !== null;
+
+      let merged: AnyClipProps;
+
+      if (hasLegacyProps) {
+        // Backwards compatibility for older JSON snapshots that used a separate
+        // props bag alongside base clip fields.
+        const props = ((c as any).props ?? {}) as Record<string, any>;
+        merged = { ...(props as any), ...(base as any) } as AnyClipProps;
+      } else {
+        // New format: the JSON clip already contains the full clip state
+        // inline, so we take everything from the JSON entry, drop
+        // JSON-specific metadata fields, and overlay normalized base fields.
+        const clone: Record<string, any> = { ...(c as any) };
+        delete clone.startTick;
+        delete clone.endTick;
+        delete clone.trimStartTick;
+        delete clone.trimEndTick;
+        merged = { ...clone, ...(base as any) } as AnyClipProps;
+      }
+
+      const mergedAny = merged as any;
+
+      if (
+        (mergedAny.type === "video" || mergedAny.type === "image" || (mergedAny.type === "filter" && mergedAny.adjustment)) &&
+        Array.isArray((c as any).masks)
+      ) {
+        mergedAny.masks = (c as any).masks
+          // Drop AI "touch" masks saved by older versions.
+          .filter((m: SerializedMaskForJson) => (m as any).tool !== "touch")
+          .map((m: SerializedMaskForJson) => ({
+            ...m,
+            keyframes: m.keyframes ?? {},
+          }));
+      }
+
+      // Strip fields left behind by older versions' AI features.
+      delete mergedAny.preprocessors;
+      delete mergedAny.frameInterpolateJobId;
+      delete mergedAny.manifestRef;
+      delete mergedAny.manifestVersion;
+
+      clips.push(merged);
+    }
+  return clips;
+};
+
 const hydrateStoresFromProjectJson = async (
   _projectId: string | number,
   doc: ProjectJsonSnapshot,
@@ -691,17 +797,7 @@ const hydrateStoresFromProjectJson = async (
         ? (doc.timeline.tracks as TimelineProps[])
         : [];
 
-      const clipsJson = Array.isArray(doc.timeline?.clips)
-        ? (doc.timeline.clips as TimelineClipJson[])
-        : [];
-
-      const clips: AnyClipProps[] = [];
-
-      const fpsForJson =
-        typeof doc.settings?.fps === "number" &&
-        Number.isFinite(doc.settings.fps)
-          ? doc.settings.fps
-          : 24;
+      const clips = clipsFromSnapshot(doc);
 
       const defaultClipLength =
         typeof doc.settings?.defaultClipLength === "number" &&
@@ -709,92 +805,6 @@ const hydrateStoresFromProjectJson = async (
           ? doc.settings.defaultClipLength
           : 5;
 
-      for (const c of clipsJson) {
-        if (!c) continue;
-        // Generated-model clips from older projects have no editor equivalent.
-        if ((c as any).type === "model") continue;
-
-        const baseStartFrame =
-          (c as any).startTick != null
-            ? tickToFrameForJson((c as any).startTick, fpsForJson)
-            : Number((c as any).startFrame ?? 0);
-        const baseEndFrame =
-          (c as any).endTick != null
-            ? tickToFrameForJson((c as any).endTick, fpsForJson)
-            : Number((c as any).endFrame ?? 0);
-        const baseTrimStart =
-          c.type !== "audio" && c.type !== "video" && c.type !== "group"
-            ? Infinity
-            : tickToFrameForJson((c as any).trimStartTick, fpsForJson);
-        const baseTrimEnd =
-          c.type !== "audio" && c.type !== "video" && c.type !== "group"
-            ? -Infinity
-            : tickToFrameForJson((c as any).trimEndTick, fpsForJson);
-
-        const base: Partial<AnyClipProps> = {
-          clipId: String((c as any).clipId),
-          timelineId: String((c as any).timelineId ?? ""),
-          type: (c as any).type,
-          groupId: ((c as any).groupId ?? undefined) as string | undefined,
-          startFrame: baseStartFrame,
-          endFrame: baseEndFrame,
-          trimStart: baseTrimStart,
-          trimEnd: baseTrimEnd,
-          clipPadding: Number(
-            typeof (c as any).clipPadding === "number" &&
-              Number.isFinite((c as any).clipPadding)
-              ? (c as any).clipPadding
-              : 24,
-          ),
-          transform: (c as any).transform,
-          originalTransform: (c as any).originalTransform,
-        };
-
-        const hasLegacyProps =
-          typeof (c as any).props === "object" && (c as any).props !== null;
-
-        let merged: AnyClipProps;
-
-        if (hasLegacyProps) {
-          // Backwards compatibility for older JSON snapshots that used a separate
-          // props bag alongside base clip fields.
-          const props = ((c as any).props ?? {}) as Record<string, any>;
-          merged = { ...(props as any), ...(base as any) } as AnyClipProps;
-        } else {
-          // New format: the JSON clip already contains the full clip state
-          // inline, so we take everything from the JSON entry, drop
-          // JSON-specific metadata fields, and overlay normalized base fields.
-          const clone: Record<string, any> = { ...(c as any) };
-          delete clone.startTick;
-          delete clone.endTick;
-          delete clone.trimStartTick;
-          delete clone.trimEndTick;
-          merged = { ...clone, ...(base as any) } as AnyClipProps;
-        }
-
-        const mergedAny = merged as any;
-
-        if (
-          (mergedAny.type === "video" || mergedAny.type === "image" || (mergedAny.type === "filter" && mergedAny.adjustment)) &&
-          Array.isArray((c as any).masks)
-        ) {
-          mergedAny.masks = (c as any).masks
-            // Drop AI "touch" masks saved by older versions.
-            .filter((m: SerializedMaskForJson) => (m as any).tool !== "touch")
-            .map((m: SerializedMaskForJson) => ({
-              ...m,
-              keyframes: m.keyframes ?? {},
-            }));
-        }
-
-        // Strip fields left behind by older versions' AI features.
-        delete mergedAny.preprocessors;
-        delete mergedAny.frameInterpolateJobId;
-        delete mergedAny.manifestRef;
-        delete mergedAny.manifestVersion;
-
-        clips.push(merged);
-      }
 
       const assetsRecord: Record<string, Asset> =
         (doc.assets as Record<string, Asset>) ?? {};

@@ -287,22 +287,21 @@ export type Guide = {
 export type MediaClipProps = VideoClipProps | ImageClipProps;
 
 /**
- * Where a library track (Audio tab: Music, Sound effects) came from, kept on its asset in the
- * project: what a CC BY credit needs (title, author, licence, link) and the track's page.
+ * Where an openly licensed asset came from, kept with it (lib/credits.ts lists them for the
+ * project). `kind` is what it is; `attributionRequired` is true for CC BY, which asks for credit.
  */
 export type AssetCredit = {
-  /** The library's id for the track. */
-  id: string;
-  kind: "music" | "sfx";
+  kind: "video" | "photo" | "music" | "sound";
   title: string;
-  author: string;
+  author?: string;
   authorUrl?: string;
-  license: "cc0" | "pdm" | "by";
-  licenseVersion?: string;
-  licenseUrl: string;
-  sourceUrl: string;
-  /** "freesound", "jamendo"… */
-  source: string;
+  /** "CC0", "Public domain", "CC BY 4.0". */
+  license: string;
+  licenseUrl?: string;
+  /** "Wikimedia Commons", "Openverse". */
+  sourceName: string;
+  sourceUrl?: string;
+  attributionRequired: boolean;
 };
 
 export type Asset = {
@@ -313,7 +312,7 @@ export type Asset = {
   height?: number;
   duration: number;
   thumbnail?: string;
-  /** Set on a library track's asset. */
+  /** Set for stock-library (and other openly licensed) assets. */
   credit?: AssetCredit;
 }
 

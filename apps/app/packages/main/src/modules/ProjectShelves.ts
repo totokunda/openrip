@@ -378,5 +378,18 @@ export const registerShelves = (paths: () => ShelfPaths, nextProjectId: () => Pr
     return { id };
   });
   handle("templates:use", (id: string, name: string) => useTemplate(paths(), String(id), String(name), nextProjectId));
+  // The editor's Templates tab: a template's clips for the open project. Its media is copied
+  // into that project's media folder (files already there stay), and the document comes back
+  // with its media paths pointing there, for the renderer to lay in at the playhead.
+  handle("templates:stage", async (id: string, folderUuid: string) => {
+    const p = paths();
+    const dir = templateRoot(p, String(id));
+    const raw = await fs.readFile(path.join(dir, "project.json"), "utf8");
+    const target = String(folderUuid ?? "");
+    if (!target) throw new Error("No project is open");
+    const from = mediaDir(p, `tpl-${id}`);
+    if (await exists(from)) await fs.cp(from, mediaDir(p, target), { recursive: true, force: false, errorOnExist: false, verbatimSymlinks: true });
+    return JSON.parse(retarget(raw, `tpl-${id}`, target));
+  });
   handle("library:list", () => listLibrary(paths()));
 };

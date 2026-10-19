@@ -49,6 +49,8 @@ import { addLibraryShape, type ShapeDrag } from "../menus/ShapesMenu";
 import type { StickerDrag } from "../menus/StickersMenu";
 import { addSticker, useStickerLibrary } from "@/lib/stickers/library";
 import { dropAdjustment, type AdjustmentDrag } from "@/lib/adjustment";
+import { addStock } from "@/lib/stock/library";
+import type { StockDrag } from "@/components/menus/StockLibraryMenu";
 import KeyframeGraph from "./KeyframeGraph";
 import { imageDurationFrames } from "@/lib/preferences";
 import { openCoverEditor } from "@/lib/cover";
@@ -436,7 +438,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       const data = event.active?.data?.current as unknown as
         | MediaItem
         | undefined;
-      if (!data || (data as unknown as TransitionDrag).type === "transition" || (data as unknown as ShapeDrag).type === "shape-preset" || (data as unknown as EffectDrag).type === "effect-preset" || (data as unknown as StickerDrag).type === "sticker-tile") return;
+      if (!data || (data as unknown as TransitionDrag).type === "transition" || (data as unknown as ShapeDrag).type === "shape-preset" || (data as unknown as EffectDrag).type === "effect-preset" || (data as unknown as StickerDrag).type === "sticker-tile" || (data as unknown as StockDrag).type === "stock-tile") return;
 
       setIsDragging(true);
 
@@ -554,6 +556,14 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       if (adjustmentDrag.type === "adjustment-tile") {
         const frame = Math.hypot(event.delta.x, event.delta.y) > 3 ? frameUnder(event) : null;
         if (frame != null) dropAdjustment(adjustmentDrag, frame);
+        setIsDragging(false);
+        return;
+      }
+      // A stock video or photo the same way: downloaded and imported first, then in at the time it's let go at.
+      const stockDrag = data as unknown as StockDrag;
+      if (stockDrag.type === "stock-tile") {
+        const frame = Math.hypot(event.delta.x, event.delta.y) > 3 ? frameUnder(event) : null;
+        if (frame != null) void addStock(stockDrag.item, { startFrame: frame });
         setIsDragging(false);
         return;
       }
