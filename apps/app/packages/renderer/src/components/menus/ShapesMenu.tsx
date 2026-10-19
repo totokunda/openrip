@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useDndMonitor, useDraggable } from "@dnd-kit/core";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SHAPES, addShape, type LibraryShape } from "@/lib/shape-presets";
 import { startPen } from "@/lib/pen";
+import { useShapePreviewStore } from "@/lib/shape-library-preview";
 import { useViewportStore } from "@/lib/viewport";
 import { cn } from "@/lib/utils";
 
@@ -13,8 +14,11 @@ export type ShapeDrag = { type: "shape-preset"; shape: LibraryShape | "pen" };
  * A shape from the library at the playhead (or `startFrame`), or the Pen's shape to draw.
  * `center` (world units) places a preset where it was dropped on the player.
  */
-export const addLibraryShape = (shape: LibraryShape | "pen", opts: { startFrame?: number; center?: { x: number; y: number } } = {}) =>
-  shape === "pen" ? startPen({ startFrame: opts.startFrame }) : addShape(shape, opts);
+export const addLibraryShape = (shape: LibraryShape | "pen", opts: { startFrame?: number; center?: { x: number; y: number } } = {}) => {
+  // What was being previewed is now a clip (or being drawn).
+  useShapePreviewStore.getState().set(null);
+  return shape === "pen" ? startPen({ startFrame: opts.startFrame }) : addShape(shape, opts);
+};
 
 /**
  * The tiles' glyphs, OpenRip's own: each shape as a light outline over a dark fill, sized as
@@ -53,11 +57,13 @@ const Glyph: React.FC<{ shape: LibraryShape | "pen" }> = ({ shape }) => {
 };
 
 /**
- * One 86 px tile, as CapCut's: #3b3b3b with a hairline edge, the glyph centred, no name. On
- * hover a dark "+" at its bottom-right. A press without a move adds the shape; dragged, it
- * goes where it's let go (the timeline: at that time; the player: at the playhead, there).
+ * One 86 px tile, as CapCut's: #3b3b3b with a hairline edge, the glyph centred, no name. A
+ * click previews the shape in the player (the menu's drag monitor); on hover a dark "+" at its
+ * bottom-right adds it at the playhead; dragged, it goes where it's let go (the timeline: at
+ * that time; the player: at the playhead, there). The Pen's click starts drawing.
  */
 const Tile: React.FC<{ shape: LibraryShape | "pen"; label: string; title?: string }> = ({ shape, label, title }) => {
+  const previewed = useShapePreviewStore((s) => s.shape === shape);
   const id = `shape-tile-${shape}`;
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id, data: { type: "shape-preset", shape } satisfies ShapeDrag });
   const [hover, setHover] = useState(false);
@@ -74,14 +80,26 @@ const Tile: React.FC<{ shape: LibraryShape | "pen"; label: string; title?: strin
       onMouseLeave={() => setHover(false)}
       className={cn(
         "relative w-[86px] h-[86px] shrink-0 rounded-[4px] bg-brand-background-light border-[0.5px] border-[#4a4a4a] cursor-pointer select-none",
+        previewed && "ring-[1.5px] ring-brand-accent",
         isDragging && "opacity-50",
       )}
     >
       <Glyph shape={shape} />
       {hover && !isDragging && (
-        <span className="absolute right-1 bottom-1 w-[18px] h-[18px] rounded-full bg-black/50 flex items-center justify-center text-white text-[13px] leading-none pointer-events-none">
+        <button
+          type="button"
+          title={shape === "pen" ? "Draw a shape" : `Add ${label}`}
+          data-testid={`shape-add-${shape}`}
+          // The tile's drag starts on a press: the button keeps its own.
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            void addLibraryShape(shape);
+          }}
+          className="absolute right-1 bottom-1 w-[18px] h-[18px] rounded-full bg-black/60 hover:bg-black/80 flex items-center justify-center text-white text-[13px] leading-none"
+        >
           +
-        </span>
+        </button>
       )}
     </div>
   );
@@ -92,14 +110,18 @@ const Tile: React.FC<{ shape: LibraryShape | "pen"; label: string; title?: strin
  * apart across and 30 px down, 12 px in from the column.
  */
 const ShapesMenu: React.FC = () => {
+  // The preview belongs to the tab: leaving it clears it.
+  useEffect(() => () => useShapePreviewStore.getState().set(null), []);
   useDndMonitor({
     onDragEnd: (event) => {
       const data = event.active?.data?.current as ShapeDrag | undefined;
       if (data?.type !== "shape-preset") return;
       const moved = Math.hypot(event.delta.x, event.delta.y) > 3;
-      // A press without a move is the tile's click (the context has no activation distance).
+      // A press without a move is the tile's click (the context has no activation distance):
+      // it previews the shape in the player, the Pen's starts drawing.
       if (!moved) {
-        void addLibraryShape(data.shape);
+        if (data.shape === "pen") void addLibraryShape("pen");
+        else useShapePreviewStore.getState().set(data.shape);
         return;
       }
       // Let go on the player: at the playhead, where it was let go (the timeline adds its own).

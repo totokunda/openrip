@@ -35,6 +35,7 @@ import TrackingRegion from "./TrackingRegion";
 import { useEngineDraws } from "@/lib/engine-preview";
 import DrawingPreview from "./clips/DrawingPreview";
 import PenOverlay from "./PenOverlay";
+import ShapeLibraryPreview from "./ShapeLibraryPreview";
 import MaskPreview from "./clips/MaskPreview";
 import { useControlsStore } from "@/lib/control";
 import {
@@ -2718,6 +2719,7 @@ const Preview: React.FC<PreviewProps> = () => {
                 />
                 {/* The Stickers tab's Pen: the path being drawn, or a pen shape's points. */}
                 <PenOverlay rectWidth={rectWidth} rectHeight={rectHeight} scale={scale} position={position} />
+                <ShapeLibraryPreview rectWidth={rectWidth} rectHeight={rectHeight} />
                 {renderLassoPath()}
                 {renderMaskRectPreview()}
                 {renderMaskBrushDrawing()}
