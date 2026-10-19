@@ -277,3 +277,80 @@ export interface FontFamily {
 
 /** The families text can be drawn in: the app's registered ones, then the installed ones. The first call reads the system's font folders. */
 export function fontFamilies(): FontFamily[]
+
+// Auto captions: speech recognition with a local Whisper model.
+
+/** A Whisper model on offer (ggml files from ggerganov/whisper.cpp on Hugging Face; MIT). */
+export interface SpeechModel {
+  id: string
+  label: string
+  /** The file's name on disk and at `url`. */
+  file: string
+  englishOnly: boolean
+  /** Bytes. */
+  size: number
+  /** SHA-256 of the file, lower-case hex. */
+  sha256: string
+  note: string
+  url: string
+}
+
+/** The models on offer, smallest first. */
+export function speechModels(): SpeechModel[]
+
+/** The id of the model to start with. */
+export function speechDefaultModel(): string
+
+/** Whether this build can recognize speech. */
+export function speechAvailable(): boolean
+
+/** A recognition's progress, 0–100; null when `job` isn't running. */
+export function speechProgress(job: number): number | null
+
+/** Stop recognition `job`: its promise rejects with "cancelled". */
+export function cancelSpeech(job: number): void
+
+export interface SpeechRequest {
+  modelPath: string
+  /** ISO 639-1 code; null or "auto" detects it. */
+  language: string | null
+  /** A media file to recognize (over `durationUs` from `startUs` of its media)... */
+  audioPath: string | null
+  /** ...or a project's JSON, its mix recognized over `durationUs` from `startUs` of the timeline. */
+  projectJson: string | null
+  startUs: number
+  durationUs: number | null
+  removeFillers: boolean
+  highlightKeywords: boolean
+  /** Longest line in characters (32). */
+  maxChars: number | null
+  /** Lines per caption, 1 or 2 (1). */
+  maxLines: number | null
+}
+
+export interface CaptionWord {
+  /** Character range into the caption's text. */
+  rangeStart: number
+  rangeEnd: number
+  /** Microseconds from the caption's start. */
+  startUs: number
+  endUs: number
+  keyword: boolean
+}
+
+export interface Caption {
+  /** Microseconds from the start of the range recognized. */
+  startUs: number
+  endUs: number
+  text: string
+  words: CaptionWord[]
+}
+
+export interface SpeechResult {
+  language: string
+  captions: Caption[]
+  wordCount: number
+}
+
+/** Recognize speech and cut it into captions on a worker thread. Progress and cancel by `job`, a number the caller picks. */
+export function transcribeSpeech(job: number, request: SpeechRequest): Promise<SpeechResult>

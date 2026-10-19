@@ -1204,3 +1204,193 @@ impl Task for EffectPreviewTask {
 pub fn effect_previews(id: String, intensity: Option<f64>, params: Vec<f64>, times: Vec<f64>, duration: f64, width: u32, height: u32) -> AsyncTask<EffectPreviewTask> {
     AsyncTask::new(EffectPreviewTask { id, intensity, params, times, duration, width, height })
 }
+
+// ---- auto captions: local speech recognition ---------------------------------------
+
+#[napi(object)]
+pub struct SpeechModel {
+    pub id: String,
+    pub label: String,
+    /// The file name on disk and on Hugging Face.
+    pub file: String,
+    pub english_only: bool,
+    /// Bytes.
+    pub size: f64,
+    pub sha256: String,
+    pub note: String,
+    /// Where the file is downloaded from.
+    pub url: String,
+}
+
+/// The Whisper models on offer, smallest first.
+#[napi]
+pub fn speech_models() -> Vec<SpeechModel> {
+    openrip_core::MODELS
+        .iter()
+        .map(|m| SpeechModel {
+            id: m.id.into(),
+            label: m.label.into(),
+            file: m.file.into(),
+            english_only: m.english_only,
+            size: m.size as f64,
+            sha256: m.sha256.into(),
+            note: m.note.into(),
+            url: openrip_core::models::url(m),
+        })
+        .collect()
+}
+
+/// The model the app starts with.
+#[napi]
+pub fn speech_default_model() -> String {
+    openrip_core::DEFAULT_MODEL.into()
+}
+
+/// Whether this build recognizes speech (carries whisper.cpp).
+#[napi]
+pub fn speech_available() -> bool {
+    openrip_core::HAS_WHISPER
+}
+
+type SpeechJob = std::sync::Arc<openrip_core::SpeechControl>;
+
+fn speech_jobs() -> &'static Mutex<std::collections::HashMap<u32, SpeechJob>> {
+    static A: OnceLock<Mutex<std::collections::HashMap<u32, SpeechJob>>> = OnceLock::new();
+    A.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// A running recognition's progress, 0–100; `null` when job `job` isn't running.
+#[napi]
+pub fn speech_progress(job: u32) -> Option<f64> {
+    speech_jobs().lock().unwrap().get(&job).map(|c| c.percent() as f64)
+}
+
+/// Stop recognition `job`: its promise rejects with "cancelled".
+#[napi]
+pub fn cancel_speech(job: u32) {
+    if let Some(c) = speech_jobs().lock().unwrap().get(&job) {
+        c.cancel();
+    }
+}
+
+#[napi(object)]
+pub struct SpeechRequest {
+    /// The model file (from the models folder).
+    pub model_path: String,
+    /// ISO 639-1 code; `null` or "auto" to detect.
+    pub language: Option<String>,
+    /// A media file whose sound to recognize, over `durationUs` from `startUs` of its media.
+    pub audio_path: Option<String>,
+    /// Or the project (the app's JSON) whose mix to recognize, over `durationUs` from
+    /// `startUs` of the timeline.
+    pub project_json: Option<String>,
+    pub start_us: i64,
+    pub duration_us: Option<i64>,
+    pub remove_fillers: bool,
+    pub highlight_keywords: bool,
+    /// Longest line in characters (32 when `null`).
+    pub max_chars: Option<u32>,
+    /// Lines per caption, 1 or 2 (1 when `null`).
+    pub max_lines: Option<u32>,
+}
+
+#[napi(object)]
+pub struct CaptionWordOut {
+    /// Character range into the caption's text.
+    pub range_start: u32,
+    pub range_end: u32,
+    /// Microseconds from the caption's start.
+    pub start_us: f64,
+    pub end_us: f64,
+    pub keyword: bool,
+}
+
+#[napi(object)]
+pub struct CaptionOut {
+    /// Microseconds from the start of the range recognized.
+    pub start_us: f64,
+    pub end_us: f64,
+    pub text: String,
+    pub words: Vec<CaptionWordOut>,
+}
+
+#[napi(object)]
+pub struct SpeechResult {
+    /// The language heard or asked for.
+    pub language: String,
+    pub captions: Vec<CaptionOut>,
+    /// How many words were heard (before the fillers came out).
+    pub word_count: u32,
+}
+
+pub struct SpeechTask {
+    job: u32,
+    control: SpeechJob,
+    request: SpeechRequest,
+}
+
+impl Task for SpeechTask {
+    type Output = (openrip_core::Transcript, Vec<openrip_core::Caption>);
+    type JsValue = SpeechResult;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let r = &self.request;
+        let (start, duration) = (Micros(r.start_us), r.duration_us.map(Micros));
+        let language = r.language.clone().filter(|l| !l.is_empty() && l != "auto");
+        let transcript = if let Some(json) = &r.project_json {
+            let (project, _) = openrip_core::parse_project_json(json).map_err(err)?;
+            openrip_core::transcribe(openrip_core::SpeechInput::Timeline { project: &project, start, duration }, r.model_path.clone().into(), language, &self.control).map_err(err)?
+        } else if let Some(path) = &r.audio_path {
+            openrip_core::transcribe(openrip_core::SpeechInput::File { path: Path::new(path), start, duration }, r.model_path.clone().into(), language, &self.control).map_err(err)?
+        } else {
+            return Err(err("nothing to recognize: give audioPath or projectJson"));
+        };
+        let options = openrip_core::CaptionOptions {
+            max_chars: r.max_chars.map_or(32, |n| n.max(8) as usize),
+            max_lines: r.max_lines.map_or(1, |n| n.clamp(1, 2) as usize),
+            remove_fillers: r.remove_fillers,
+            highlight_keywords: r.highlight_keywords,
+            ..Default::default()
+        };
+        let captions = openrip_core::build_captions(&transcript, &options);
+        Ok((transcript, captions))
+    }
+
+    fn resolve(&mut self, _env: Env, (transcript, captions): Self::Output) -> Result<SpeechResult> {
+        Ok(SpeechResult {
+            language: transcript.language.clone(),
+            word_count: transcript.words().count() as u32,
+            captions: captions
+                .into_iter()
+                .map(|c| CaptionOut {
+                    start_us: c.start_us as f64,
+                    end_us: c.end_us as f64,
+                    text: c.text,
+                    words: c
+                        .words
+                        .into_iter()
+                        .map(|w| CaptionWordOut { range_start: w.range.0, range_end: w.range.1, start_us: w.start_us as f64, end_us: w.end_us as f64, keyword: w.keyword })
+                        .collect(),
+                })
+                .collect(),
+        })
+    }
+
+    fn finally(self, _env: Env) -> Result<()> {
+        let mut jobs = speech_jobs().lock().unwrap();
+        if jobs.get(&self.job).is_some_and(|c| std::sync::Arc::ptr_eq(c, &self.control)) {
+            jobs.remove(&self.job);
+        }
+        Ok(())
+    }
+}
+
+/// Recognize speech with a local model and cut it into captions, on a worker thread. The
+/// times are from the start of the range asked for. Progress and cancel by `job`, a number
+/// the caller picks.
+#[napi]
+pub fn transcribe_speech(job: u32, request: SpeechRequest) -> AsyncTask<SpeechTask> {
+    let control = std::sync::Arc::new(openrip_core::SpeechControl::new());
+    speech_jobs().lock().unwrap().insert(job, control.clone());
+    AsyncTask::new(SpeechTask { job, control, request })
+}

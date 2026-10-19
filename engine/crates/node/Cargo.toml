@@ -13,7 +13,8 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "3", default-features = false, features = ["napi6"] }
 napi-derive = "3"
-openrip-core.workspace = true
+# whisper.cpp for auto captions (Metal on Apple platforms).
+openrip-core = { workspace = true, features = ["whisper"] }
 # Only to switch FFmpeg to static linking (see the feature below).
 ffmpeg-sys-next = { version = "9.0.1", default-features = false, optional = true }
 

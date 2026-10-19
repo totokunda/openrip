@@ -19,6 +19,7 @@ openrip-export.workspace = true
 openrip-platform.workspace = true
 openrip-motion.workspace = true
 openrip-analysis.workspace = true
+openrip-speech.workspace = true
 serde_json.workspace = true
 # Still frames saved as PNG (pure Rust).
 png = "0.18"
@@ -34,6 +35,9 @@ default = ["ffmpeg", "audio-output"]
 ffmpeg = ["openrip-media/ffmpeg", "openrip-audio/ffmpeg", "openrip-playback/ffmpeg", "openrip-export/ffmpeg"]
 # Audio output through cpal.
 audio-output = ["openrip-playback/cpal"]
+# Speech recognition with whisper.cpp (Metal on Apple platforms): a native library built by
+# cmake, so not on by default. The desktop addon turns it on.
+whisper = ["openrip-speech/whisper"]
 
 # Records from the stand-in microphone and decodes what it wrote: needs the built-in decoder.
 
@@ -46,3 +50,9 @@ required-features = ["ffmpeg"]
 [[test]]
 name = "track"
 required-features = ["ffmpeg"]
+
+# Transcribes speech made with macOS `say` using the tiny model: needs whisper.cpp and the decoder.
+
+[[test]]
+name = "speech"
+required-features = ["whisper", "ffmpeg"]

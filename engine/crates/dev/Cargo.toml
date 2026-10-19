@@ -21,7 +21,7 @@ openrip-render.workspace = true
 openrip-analysis.workspace = true
 openrip-export = { workspace = true, features = ["ffmpeg"] }
 openrip-audio = { workspace = true, features = ["ffmpeg"] }
-openrip-core.workspace = true
+openrip-core = { workspace = true, features = ["whisper"] }
 png = "0.18"
 realfft = "3"
 serde_json.workspace = true

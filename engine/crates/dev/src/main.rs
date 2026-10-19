@@ -8,6 +8,9 @@
 //!   openrip-dev v1-import <project-N.json> [--out project.json]
 //!   openrip-dev v1-scan <projects-json-dir>
 //!       Same, for projects saved by the TypeScript app (format v1).
+//!   openrip-dev transcribe <media-file> [--model base] [--ref "text"] [--spans spans.json]
+//!       Recognize the speech with a local Whisper model (src/speech.rs): words, captions, the
+//!       word error rate against --ref, timing against --spans, and the speed.
 //!   openrip-dev probe <media-file>
 //!       Print what the decoder sees in a media file (JSON).
 //!   openrip-dev decode-bench <media-file> [--sw | --ffmpeg-hw]
@@ -106,6 +109,7 @@ mod analysis;
 mod audio;
 mod motion;
 mod transition_sheet;
+mod speech;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -114,6 +118,7 @@ fn main() -> ExitCode {
         Some("capcut-scan") if args.len() >= 2 => capcut_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("v1-import") if args.len() >= 2 => v1_import(Path::new(&args[1]), flag(&args, "--out")).map_err(|e| e.to_string()),
         Some("v1-scan") if args.len() >= 2 => v1_scan(Path::new(&args[1])).map_err(|e| e.to_string()),
+        Some("transcribe") if args.len() >= 2 => speech::transcribe_cmd(&args).map_err(|e| e.to_string()),
         Some("probe") if args.len() >= 2 => probe(Path::new(&args[1])).map_err(|e| e.to_string()),
         Some("slowmo") if args.len() >= 2 => motion::slowmo(&args).map_err(|e| e.to_string()),
         Some("transition-sheet") if args.len() >= 2 => transition_sheet::sheet(&args).map_err(|e| e.to_string()),

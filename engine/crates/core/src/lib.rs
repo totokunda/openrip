@@ -31,6 +31,7 @@ mod export;
 mod fonts;
 mod project;
 mod session;
+mod speech;
 mod thumbs;
 mod track;
 
@@ -49,6 +50,7 @@ pub use openrip_model::{Micros, Project};
 pub use openrip_render::Adjust;
 pub use project::{load_project, parse_project_json, ProjectInfo, Source, TextBlock};
 pub use session::{DisplayFrame, FrameHandle, FrameJob, Image, RenderedFrame, Renderer, Session, Surface};
+pub use speech::{build_captions, decode_speech_audio, mix_speech_audio, models, transcribe, transcribe_audio, Caption, CaptionOptions, CaptionWord, Model, Segment, SpeechControl, SpeechError, SpeechInput, Transcript, Word, DEFAULT_MODEL, HAS_WHISPER, MODELS};
 pub use thumbs::{Beats, Thumbnail, Thumbnails, Waveform};
 pub use track::{track_region, TrackControl, TrackDirection, TrackRequest, TrackResult, TrackSample};
 

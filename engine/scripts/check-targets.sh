@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target/check-targets}"
 
 # Pure Rust, no platform code at all: these build anywhere Rust does.
-PURE=(-p openrip-model -p openrip-platform -p openrip-motion -p openrip-capcut -p openrip-v1 -p openrip-frame -p openrip-analysis)
+PURE=(-p openrip-model -p openrip-platform -p openrip-motion -p openrip-capcut -p openrip-v1 -p openrip-frame -p openrip-analysis -p openrip-speech)
 # The engine up to its API, with no built-in backend (no FFmpeg, no cpal): the seams,
 # rendering, playback logic, export's render loop and openrip-core. Platform code inside
 # them is behind cfgs with a portable fallback.
@@ -48,6 +48,10 @@ for t in "${targets[@]}"; do
     host)
       # The desktop build without backends: what the other targets build, checked here first.
       check "host: engine without FFmpeg or cpal" "${PURE[@]}" "${ENGINE[@]}" --no-default-features
+      # The speech recognizer: whisper.cpp (cmake, Metal on Apple), the one native library the
+      # engine builds that is not a seam backend on by default. Mobile and web take a platform
+      # recognizer through openrip-speech's Recognizer seam (docs/plan/portability.md).
+      check "host: speech with whisper.cpp" -p openrip-speech --features whisper
       ;;
     ios)
       need aarch64-apple-ios
