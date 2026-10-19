@@ -110,10 +110,11 @@ export default async (ctx) => {
   // ---- The header menu: CapCut's three items, 200 wide, 32 px rows.
   await menuOpen(win);
   const items = await win.evaluate(() => [...document.querySelectorAll("[data-testid=player-menu-content] [role=menuitem]")].map((e) => e.innerText.trim()));
-  check("header menu: Color oscilloscope, Guides and rulers, Export still frames", JSON.stringify(items) === JSON.stringify(["Color oscilloscope", "Guides and rulers", "Export still frames"]), JSON.stringify(items));
+  // (After a separator, OpenRip's own Pop out: the player in a window of its own.)
+  check("header menu: Color oscilloscope, Guides and rulers, Export still frames (then Pop out)", JSON.stringify(items) === JSON.stringify(["Color oscilloscope", "Guides and rulers", "Export still frames", "Pop out"]), JSON.stringify(items));
   const menuBox = await box(win, "[data-testid=player-menu-content]");
   const rows = await win.evaluate(() => [...document.querySelectorAll("[data-testid=player-menu-content] [role=menuitem]")].map((e) => e.getBoundingClientRect().y));
-  check("header menu 200 wide, rows 32 px apart", Math.abs(menuBox.width - 200) < 2 && rows.length === 3 && Math.abs(rows[1] - rows[0] - 32) < 1.5, `${menuBox.width}×${menuBox.height}, rows ${rows.map((y) => y.toFixed(1)).join(",")}`);
+  check("header menu 200 wide, rows 32 px apart", Math.abs(menuBox.width - 200) < 2 && rows.length === 4 && Math.abs(rows[1] - rows[0] - 32) < 1.5 && Math.abs(rows[2] - rows[1] - 32) < 1.5, `${menuBox.width}×${menuBox.height}, rows ${rows.map((y) => y.toFixed(1)).join(",")}`);
   await shot("p01-header-menu"); // 001-header-menu
   await win.locator("[data-testid=menu-guides]").hover();
   await win.waitForTimeout(400);
