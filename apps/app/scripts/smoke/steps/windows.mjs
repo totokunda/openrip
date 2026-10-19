@@ -249,7 +249,17 @@ export default async (ctx) => {
   // Its opacity slider dragged there changes the clip; ⌘Z pressed there undoes it.
   const opacity = async () => (await savedClips(win, ctx.udDir)).find((c) => c.type === "video")?.transform?.opacity ?? 100;
   const o0 = await opacity();
-  const thumb = await inspector.locator("[data-testid=inspector] [role=slider]").first().boundingBox({ timeout: 3000 }).catch(() => null);
+  // (The Basic tab's first slider is Scale now; Opacity is the one under its own label.)
+  const thumb = await inspector
+    .evaluate(() => {
+      const label = [...document.querySelectorAll("[data-testid=inspector] *")].find((e) => e.children.length === 0 && e.textContent.trim() === "Opacity");
+      for (let e = label?.parentElement; e && e.dataset?.testid !== "inspector"; e = e.parentElement) {
+        const r = e.querySelector("[role=slider]")?.getBoundingClientRect();
+        if (r) return { x: r.x, y: r.y, width: r.width, height: r.height };
+      }
+      return null;
+    })
+    .catch(() => null);
   let o1 = NaN, o2 = NaN;
   if (thumb) {
     const [sx, sy] = [thumb.x + thumb.width / 2, thumb.y + thumb.height / 2];
