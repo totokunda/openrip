@@ -12,7 +12,7 @@
 //   say, and the face (found by block matching in the engine's frames, independently of the
 //   tracker) moved as the text did;
 // - None takes the keys off (⌘Z puts them back);
-// - Track mask: a rectangle mask drawn on the face, Track: the mask's poses saved and undoable,
+// - Track mask: Add mask's rectangle put on the face, Track: the mask's poses saved and undoable,
 //   and the masked picture in the engine's frames moving with them.
 import { drag, engineFrame, grab, rulerMap, seek, settled, tab } from "./_preview.mjs";
 import { checks, clipsWhere, savedProject, select } from "./_anim.mjs";
@@ -206,17 +206,16 @@ export default async (ctx) => {
   await seek(win, ctx.map, pick);
   await select(ctx, doc, video.clipId);
   await tab(win, "Mask");
-  await win.locator("[data-testid=add-mask-rectangle]").click();
-  {
-    const [x0, y0] = toScreen(face.cx - face.w / 2, face.cy - face.h / 2);
-    const [x1, y1] = toScreen(face.cx + face.w / 2, face.cy + face.h / 2);
-    await settled(win, () => drag(win, x0, y0, x1, y1));
-  }
-  await win.locator("[data-testid=tool-chip-done]").click();
-  await win.waitForTimeout(600);
-  // The player's layout moves while the mask tool is out: put the mask exactly on the face
-  // with its Transform fields (its top-left and size, in world units on the clip's box).
-  await tab(win, "Mask");
+  // Add mask: a rectangle centred on the picture (as CapCut's), put exactly on the face with
+  // Mask settings' fields, in project pixels: Size, and Position from the picture's middle, y
+  // up. The world-to-project scale is read off the new mask's width, half the picture's
+  // shorter side.
+  await settled(win, () => win.locator("[data-testid=mask-add]").click());
+  const fieldOf = (letter) =>
+    win.evaluate((letter) => {
+      const span = [...document.querySelectorAll("[data-testid=inspector] [role=tabpanel] span")].find((e) => e.innerText.trim() === letter && e.parentElement?.querySelector("input"));
+      return span?.parentElement?.querySelector("input") ? span.parentElement.querySelector("input").value : null;
+    }, letter);
   const setField = async (letter, value) => {
     const at = await win.evaluate((letter) => {
       const span = [...document.querySelectorAll("[data-testid=inspector] [role=tabpanel] span")].find((e) => e.innerText.trim() === letter && e.parentElement?.querySelector("input"));
@@ -232,10 +231,12 @@ export default async (ctx) => {
     await win.keyboard.type(value.toFixed(1));
     await settled(win, () => win.keyboard.press("Enter"), { timeout: 2000 });
   };
-  await setField("W", face.w);
-  await setField("H", face.h);
-  await setField("X", face.cx - vt.x - face.w / 2);
-  await setField("Y", face.cy - vt.y - face.h / 2);
+  const toPx = parseFloat(await fieldOf("W")) / (0.5 * Math.min(bw, bh));
+  await win.locator("[data-testid=inspector] button[aria-label='Unlink width and height']").click();
+  await setField("W", face.w * toPx);
+  await setField("H", face.h * toPx);
+  await setField("X", (face.cx - vt.x - bw / 2) * toPx);
+  await setField("Y", (bh / 2 - (face.cy - vt.y)) * toPx);
   doc = await savedProject(win, udDir);
   const mask0 = doc.timeline.clips.find((v) => v.clipId === video.clipId)?.masks?.find((m) => m.tool === "shape");
   check("a rectangle mask on the face", !!mask0, JSON.stringify(doc.timeline.clips.find((v) => v.clipId === video.clipId)?.masks?.map((m) => m.tool)));
