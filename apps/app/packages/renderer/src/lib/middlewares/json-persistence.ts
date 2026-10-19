@@ -28,6 +28,7 @@ import type {
 import _ from "lodash";
 import { getMediaInfo } from "../media/utils";
 import { useViewportStore } from "../viewport";
+import { useCoverStore, type CoverSpec } from "../cover-store";
 import { exportSequence, type ExportClip } from "@app/export-renderer";
 import { prepareExportClipsForValue } from "../prepareExportClips";
 import { sortClipsForStacking } from "../clipOrdering";
@@ -141,6 +142,8 @@ type ProjectJsonSnapshot = {
     mainTrackMagnet?: boolean;
     /** The player's guides (lib/guides.ts). */
     guides?: Guide[];
+    /** The cover the cover editor set (lib/cover.ts); absent while the cover follows the first frame. */
+    cover?: CoverSpec;
   };
   editorState: {
     duration: number;
@@ -367,6 +370,7 @@ const buildProjectJsonSnapshot = (
         defaultClipLength: controlsState.defaultClipLength,
         mainTrackMagnet: clipState.magnet,
         guides: clipState.guides ?? [],
+        ...(useCoverStore.getState().cover ? { cover: useCoverStore.getState().cover! } : {}),
       },
       editorState: {
         duration: Number(clipState.clipDuration || 0),
@@ -524,6 +528,9 @@ const debouncedGenerateProjectCover = _.debounce(
         ) {
           return;
         }
+
+        // A cover chosen in the cover editor stays as it is.
+        if (useCoverStore.getState().cover) return;
 
         const clipState = useClipStore.getState();
         const controlsState = useControlsStore.getState();
@@ -818,6 +825,15 @@ const hydrateStoresFromProjectJson = async (
         (typeof doc.settings?.mainTrackMagnet === "boolean" ? doc.settings.mainTrackMagnet : true) &&
         isMainTrackPacked(clips, timelineTracks);
 
+      // The cover chosen in the cover editor, as saved.
+      const savedCover = doc.settings?.cover as CoverSpec | undefined;
+      useCoverStore.setState({
+        cover:
+          savedCover && Array.isArray(savedCover.texts) && savedCover.source && (savedCover.source.kind === "frame" || savedCover.source.kind === "image")
+            ? savedCover
+            : null,
+      });
+
       if (useClipStore && typeof useClipStore.setState === "function") {
         useClipStore.setState({
           clips,
@@ -1018,6 +1034,10 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
         "jsonPersistence: clip store not ready for JSON subscriptions; JSON autosave will rely on project-store changes only until it is available",
       );
     }
+
+    useCoverStore.subscribe((state, prev) => {
+      if (state.cover !== prev.cover) scheduleJsonProjectSave(getProjectState);
+    });
 
     if (useViewportStore && typeof useViewportStore.subscribe === "function") {
       useViewportStore.subscribe((state, prev) => {

@@ -19,6 +19,7 @@ import { useClipStore } from "./clip";
 import { useEnginePreviewStore } from "./engine-preview";
 import { useViewportStore } from "./viewport";
 import { newProjectFps } from "./preferences";
+import { useCoverStore } from "./cover-store";
 
 /** "Project <k>" with the smallest k no project uses. */
 export const nextProjectName = (projects: ProjectSettings[]) => {
@@ -176,6 +177,8 @@ export const saveCoverFromEngine = async () => {
   const id = useProjectsStore.getState().activeProjectId;
   const engine = useEnginePreviewStore.getState();
   if (id == null || !engine.enabled || !engine.project || useClipStore.getState().clips.length === 0) return;
+  // A cover chosen in the cover editor stays as it is.
+  if (useCoverStore.getState().cover) return;
   const frame = document.getElementById(ENGINE_FRAME_CANVAS_ID) as HTMLCanvasElement | null;
   if (!frame || frame.width < 16 || frame.height < 16) return;
   try {

@@ -46,6 +46,7 @@ import type { TransitionDrag } from "../menus/TransitionMenu";
 import { addLibraryShape, type ShapeDrag } from "../menus/ShapesMenu";
 import KeyframeGraph from "./KeyframeGraph";
 import { imageDurationFrames } from "@/lib/preferences";
+import { openCoverEditor } from "@/lib/cover";
 
 interface TimelineEditorProps {}
 
@@ -242,15 +243,46 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
 
 /**
  * CapCut's Cover tile, in the column between the track headers and time 0 on the main track:
- * a dashed rounded tile with "Cover" in it. Drawn only, dimmed: the cover editor it opens in
- * CapCut isn't here yet, and clicks go through to the timeline.
+ * a dashed rounded tile with "Cover" in it. A click opens the cover editor (lib/cover.ts).
  */
 const CoverTile: React.FC<{ top: number; height: number }> = ({ top, height }) => {
   const size = Math.max(0, Math.min(42, height - 4, TIME_ZERO_X - 8));
+  const [hover, setHover] = useState(false);
   if (size < 20) return null;
+  const stop = (e: Konva.KonvaEventObject<Event>) => {
+    // The tile is not part of the timeline: no seek, no selection.
+    e.cancelBubble = true;
+  };
+  const cursor = (e: Konva.KonvaEventObject<MouseEvent>, value: string) => {
+    const c = e.target.getStage()?.container();
+    if (c) c.style.cursor = value;
+  };
   return (
-    <Group x={(TIME_ZERO_X - size) / 2} y={top + (height - size) / 2} opacity={0.6} listening={false}>
-      <Rect width={size} height={size} cornerRadius={4} fill="#3b3b3b" stroke="#5c5c5c" strokeWidth={1} dash={[3, 2]} />
+    <Group
+      name="cover-tile"
+      x={(TIME_ZERO_X - size) / 2}
+      y={top + (height - size) / 2}
+      opacity={hover ? 1 : 0.85}
+      onMouseDown={stop}
+      onTouchStart={stop}
+      onClick={(e) => {
+        stop(e);
+        openCoverEditor();
+      }}
+      onTap={(e) => {
+        stop(e);
+        openCoverEditor();
+      }}
+      onMouseEnter={(e) => {
+        setHover(true);
+        cursor(e, "pointer");
+      }}
+      onMouseLeave={(e) => {
+        setHover(false);
+        cursor(e, "");
+      }}
+    >
+      <Rect width={size} height={size} cornerRadius={4} fill={hover ? "#454545" : "#3b3b3b"} stroke="#5c5c5c" strokeWidth={1} dash={[3, 2]} />
       <Text
         width={size}
         y={size / 2 - 5.5}
@@ -259,6 +291,7 @@ const CoverTile: React.FC<{ top: number; height: number }> = ({ top, height }) =
         fontSize={11}
         fill="#cccccc"
         fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
+        listening={false}
       />
     </Group>
   );

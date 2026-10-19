@@ -12,6 +12,7 @@ import ShortcutsWindow from "./ShortcutsWindow";
 import AboutWindow from "./AboutWindow";
 import NoticesWindow from "./NoticesWindow";
 import ProjectSettingsModal from "./ProjectSettingsModal";
+import CoverEditor from "./CoverEditor";
 
 const LAYOUTS: AppLayoutId[] = ["default", "media", "properties", "vertical"];
 
@@ -52,6 +53,7 @@ export const AppDialogs: React.FC = () => {
       <ShortcutsWindow open={s.shortcutsOpen} onOpenChange={s.setShortcutsOpen} />
       <AboutWindow open={s.aboutOpen} onOpenChange={s.setAboutOpen} />
       <NoticesWindow open={s.noticesOpen} onOpenChange={s.setNoticesOpen} />
+      {s.view === "editor" && <CoverEditor />}
       {s.view === "editor" && <ProjectSettingsModal open={s.projectSettingsOpen} onOpenChange={s.setProjectSettingsOpen} />}
     </>
   );
