@@ -11,12 +11,13 @@ import {
 import {
   TbDots,
   TbFolderOpen,
+  TbLink,
   TbPencil,
   TbTrash,
   TbVideo,
   TbVideoOff,
 } from "react-icons/tb";
-import { LuLoaderCircle } from "react-icons/lu";
+import { LuLoaderCircle, LuUnlink } from "react-icons/lu";
 
 interface DeleteAlertDialogProps {
   onDelete: () => void;
@@ -105,6 +106,10 @@ export type MediaItem = {
   isPlayableCopy?: boolean;
   /** A library track's credit (Audio tab), kept on the asset the drop makes. */
   credit?: AssetCredit;
+  /** The file behind the card is gone (moved or deleted): Link to media points it at the file again. */
+  missing?: boolean;
+  /** Where the card's link pointed (a missing card's old place). */
+  target?: string;
 };
 
 interface ItemProps {
@@ -131,6 +136,8 @@ interface ItemProps {
   added?: boolean;
   /** A card (thumbnail over name) or a row (a small thumbnail beside it). */
   layout?: "card" | "row";
+  /** Link to media: pick the file a missing card should show. */
+  onRelink?: (item: MediaItem) => void;
 }
 
 function fileURLToPathInWorker(raw: string): string {
@@ -377,6 +384,7 @@ const Item: React.FC<ItemProps> = ({
   showName = true,
   added = false,
   layout = "card",
+  onRelink,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const row = layout === "row";
@@ -388,11 +396,19 @@ const Item: React.FC<ItemProps> = ({
         isOpen ||
         renamingItem === item.name ||
         deleteAlertOpen ||
-        isCreatingProxy
+        isCreatingProxy ||
+        !!item.missing
       }
     >
       <div
         key={item.name}
+        data-testid="media-card"
+        data-name={item.name}
+        data-missing={item.missing ? "true" : undefined}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setIsOpen(true);
+        }}
         className={cn(
           "group rounded-[4px] transition-colors",
           row ? "flex items-center gap-2.5 p-1 hover:bg-brand-light/5" : "w-[120px]",
@@ -413,7 +429,19 @@ const Item: React.FC<ItemProps> = ({
               },
             )}
           >
-            <MediaThumb item={item} />
+            {item.missing ? null : <MediaThumb item={item} />}
+            {item.missing && (
+              <button
+                type="button"
+                data-testid="media-missing"
+                title={`${item.target ?? item.name} isn't there. Link to media to find it.`}
+                onClick={() => onRelink?.(item)}
+                className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-[#3a1d1f] text-[#e5898c] cursor-pointer hover:bg-[#46222a]"
+              >
+                <LuUnlink className={row ? "w-3.5 h-3.5" : "w-6 h-6"} />
+                {!row && <span className="text-[11px] font-medium">Media missing</span>}
+              </button>
+            )}
             {added && !row && (
               <span className="absolute top-1 left-1 z-10 text-[10px] leading-none px-1.5 py-[2px] rounded-[2px] bg-brand-background-dark/85 text-brand-light">
                 Added
@@ -453,7 +481,7 @@ const Item: React.FC<ItemProps> = ({
                 align="start"
                 className="dark w-40 flex flex-col text-brand-light bg-brand-background font-poppins"
               >
-                {item.type === "video" && !item.isPlayableCopy && (
+                {item.type === "video" && !item.isPlayableCopy && !item.missing && (
                   <>
                     {!item.hasProxy ? (
                       <DropdownMenuItem
@@ -489,6 +517,17 @@ const Item: React.FC<ItemProps> = ({
                   </span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="py-1 rounded"
+                  data-testid="media-link"
+                  disabled={!item.missing}
+                  onClick={() => onRelink?.(item)}
+                >
+                  <TbLink className="w-3.5 h-3.5" />
+                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">
+                    Link to media
+                  </span>
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   className="py-1 rounded"
                   onClick={() => {
@@ -538,7 +577,7 @@ const Item: React.FC<ItemProps> = ({
             />
           </div>
         ) : (
-          <div title={item.name} className={cn("px-0 text-[11.5px] cursor-pointer text-[#949494] text-start whitespace-nowrap overflow-hidden", row ? "flex-1 min-w-0 truncate" : "pt-1")}>
+          <div title={item.name} className={cn("px-0 text-[11.5px] cursor-pointer text-start whitespace-nowrap overflow-hidden", item.missing ? "text-[#e5898c]" : "text-[#949494]", row ? "flex-1 min-w-0 truncate" : "pt-1")}>
             {showName ? (row ? item.name : middle(item.name, 20)) : ""}
             {row && added && <span className="ml-2 text-[10px] px-1.5 py-px rounded-[2px] bg-brand-background-dark/85 text-brand-light">Added</span>}
           </div>

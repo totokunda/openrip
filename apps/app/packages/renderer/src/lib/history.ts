@@ -30,8 +30,14 @@ type Doc = {
   guides: Guide[];
 };
 
+/**
+ * A step that changes something outside the document (Link to media points the library's
+ * links at other files): undoing or redoing it runs these, and the document stays as it is.
+ */
+export type Effect = { undo: () => void | Promise<void>; redo: () => void | Promise<void> };
+
 /** A state in the history and the clips that were selected while it was the current one. */
-type Entry = { doc: Doc; selection: string[] };
+type Entry = { doc: Doc; selection: string[]; effect?: Effect };
 
 /** How many steps can be undone. */
 const LIMIT = 100;
@@ -56,6 +62,17 @@ const publish = () => {
   const now = useHistoryStore.getState();
   if (now.canUndo !== next.canUndo || now.canRedo !== next.canRedo) useHistoryStore.setState(next);
 };
+
+/** Make a step of something done outside the document, which undo and redo run again. */
+export function recordEffect(effect: Effect) {
+  if (present == null) return;
+  past.push({ doc: present, selection: useControlsStore.getState().selectedClipIds, effect });
+  if (past.length > LIMIT) past.shift();
+  future = [];
+  // What the app does in answer (assets read again) isn't another step.
+  stepAction = action;
+  publish();
+}
 
 const readDoc = (): Doc => {
   const c = useClipStore.getState();
@@ -250,8 +267,11 @@ export function undo() {
   if (present == null || pointerDown) return;
   // A step that came back to where it began (a drag returned to its start) changes nothing.
   let entry = past.pop();
-  while (entry && sameDoc(entry.doc, present)) entry = past.pop();
-  if (entry) {
+  while (entry && !entry.effect && sameDoc(entry.doc, present)) entry = past.pop();
+  if (entry?.effect) {
+    future.unshift({ doc: present, selection: useControlsStore.getState().selectedClipIds, effect: entry.effect });
+    void entry.effect.undo();
+  } else if (entry) {
     future.unshift({ doc: share(present, entry.doc), selection: useControlsStore.getState().selectedClipIds });
     restore(entry);
   }
@@ -262,7 +282,10 @@ export function undo() {
 export function redo() {
   if (present == null || pointerDown) return;
   const entry = future.shift();
-  if (entry) {
+  if (entry?.effect) {
+    past.push({ doc: present, selection: useControlsStore.getState().selectedClipIds, effect: entry.effect });
+    void entry.effect.redo();
+  } else if (entry) {
     past.push({ doc: share(present, entry.doc), selection: useControlsStore.getState().selectedClipIds });
     if (past.length > LIMIT) past.shift();
     restore(entry);

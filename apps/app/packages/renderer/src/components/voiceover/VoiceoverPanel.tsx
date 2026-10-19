@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
-import { LuMic } from "react-icons/lu";
-import { onVoiceoverLevel, voiceoverCancel, voiceoverStart, voiceoverStatus, voiceoverStop } from "@app/preload";
+import { LuCheck, LuChevronDown, LuChevronUp, LuMic } from "react-icons/lu";
+import { voiceoverAsk, voiceoverBegin, voiceoverEnd, voiceoverSaveTake, voiceoverStatus } from "@app/preload";
 import type { VoiceoverStatus } from "@app/preload";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
@@ -10,19 +10,22 @@ import { useProjectsStore } from "@/lib/projects";
 import { placeVoiceover } from "@/lib/audio";
 import { bumpMediaLibraryVersion } from "@/lib/media/library";
 import { SmallCheckbox } from "@/components/properties/AudioProperties";
+import PropertiesSlider from "@/components/properties/PropertiesSlider";
+import { listAudioInputs, MicError, MicRecorder, type AudioInput } from "@/lib/mic";
 import { cn } from "@/lib/utils";
 
 /**
  * Recording a voiceover, as CapCut's timeline microphone and Voiceover panel do it
  * (docs/plan/capcut-ui-spec.md §4.14, `31-dialogs/036-voiceover-panel.png`): the panel floats at
- * the window's top right. Record counts 3, 2, 1, then records the default microphone (the main
- * process's VoiceoverModule, through the preload) while the timeline plays from the playhead;
- * the level meter and the time follow it. Stop puts the take on a new audio track where the
- * playhead was (lib/audio.ts `placeVoiceover`) and selects it; Discard throws it away, as does
- * closing the panel while it records. The microphone's permission shows under the device, with
- * what to do when it's refused. "Mute project" silences the project's playback while it records.
- * CapCut's input device menu, input volume and echo reduction aren't here: the engine records
- * the system's default microphone at its own level.
+ * the window's top right. Record counts 3, 2, 1, then records the chosen input device (the page's
+ * own capture, lib/mic.ts) while the timeline plays from the playhead; the level meter and the
+ * time follow it. Stop puts the take on a new audio track where the playhead was (lib/audio.ts
+ * `placeVoiceover`) and selects it; Discard throws it away, as does closing the panel while it
+ * records. The microphone's permission shows under the device, with what to do when it's
+ * refused. Volume is a gain on the take (0 to 200, 100 is the microphone's own level), Echo
+ * reduction turns on the browser's echo cancellation and noise suppression, and "Mute project"
+ * silences the project's playback while it records. The device, volume and both checkboxes are
+ * remembered.
  */
 
 type Phase = "idle" | "countdown" | "recording" | "saving";
@@ -92,6 +95,65 @@ const permissionLine = (status: VoiceoverStatus | null, denied: boolean): { text
   return { text: "Microphone connected", refused: false };
 };
 
+/** A remembered setting of the panel (the input device, volume, echo reduction, mute project). */
+const kept = <T,>(key: string, fallback: T): T => {
+  try {
+    const raw = window.localStorage.getItem(`openrip:voiceover:${key}`);
+    return raw == null ? fallback : (JSON.parse(raw) as T);
+  } catch {
+    return fallback;
+  }
+};
+const keep = (key: string, value: unknown) => {
+  try {
+    window.localStorage.setItem(`openrip:voiceover:${key}`, JSON.stringify(value));
+  } catch {}
+};
+
+/** CapCut's input device select: the chosen microphone, and a menu of them with a tick on it. */
+const DevicePicker: React.FC<{ devices: AudioInput[]; value: string; onChange: (id: string) => void; disabled?: boolean }> = ({ devices, value, onChange, disabled }) => {
+  const [menu, setMenu] = useState(false);
+  const rows = [{ id: "", label: "System default microphone" }, ...devices];
+  const current = rows.find((d) => d.id === value) ?? rows[0];
+  return (
+    <div className="relative mt-2">
+      <button
+        type="button"
+        data-testid="voiceover-device"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={menu}
+        onClick={() => setMenu(!menu)}
+        className="w-full h-[22px] px-2 rounded-[4px] bg-brand flex items-center justify-between gap-2 text-[12px] text-[#cccccc] disabled:opacity-50"
+      >
+        <span className="truncate">{current.label}</span>
+        {menu ? <LuChevronUp className="w-3 h-3 shrink-0" /> : <LuChevronDown className="w-3 h-3 shrink-0" />}
+      </button>
+      {menu && (
+        <div role="listbox" data-testid="voiceover-device-menu" className="absolute z-10 left-0 right-0 top-[26px] p-1 rounded-[6px] bg-[#2a2a2b] border border-[#3c3c3c] shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
+          {rows.map((d) => (
+            <button
+              key={d.id || "default"}
+              type="button"
+              role="option"
+              aria-selected={d.id === current.id}
+              data-testid="voiceover-device-option"
+              onClick={() => {
+                onChange(d.id);
+                setMenu(false);
+              }}
+              className="w-full h-8 px-2 flex items-center gap-2 rounded-[4px] text-left text-[12px] text-brand-light hover:bg-brand-hover"
+            >
+              <LuCheck className={cn("w-3.5 h-3.5 shrink-0 text-brand-accent", d.id !== current.id && "invisible")} />
+              <span className="truncate">{d.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const VoiceoverPanel: React.FC = () => {
   const open = useVoiceoverPanel((s) => s.open);
   const phase = useVoiceoverPanel((s) => s.phase);
@@ -103,44 +165,79 @@ export const VoiceoverPanel: React.FC = () => {
   const [count, setCount] = useState(3);
   const [elapsed, setElapsed] = useState(0);
   const [peak, setPeak] = useState(0);
-  const [muteProject, setMuteProject] = useState(false);
+  const [devices, setDevices] = useState<AudioInput[]>([]);
+  const [deviceId, setDeviceId] = useState(() => kept("device", ""));
+  const [volume, setVolume] = useState(() => kept("volume", 100));
+  const [echo, setEcho] = useState(() => kept("echo", false));
+  const [muteProject, setMuteProject] = useState(() => kept("mute", false));
   const [saved, setSaved] = useState<string | null>(null);
   const startFrame = useRef(0);
   const played = useRef(false);
   const countdown = useRef<ReturnType<typeof setInterval> | null>(null);
-  const unsubscribe = useRef<(() => void) | null>(null);
+  const mic = useRef<MicRecorder | null>(null);
+  const startedAt = useRef(0);
+  const clock$ = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const refresh = () => void voiceoverStatus().then(setStatus, () => setStatus(null));
+  const refresh = async () => {
+    void voiceoverStatus().then(setStatus, () => setStatus(null));
+    setDevices(await listAudioInputs());
+  };
   useEffect(() => {
-    if (open) refresh();
+    if (open) void refresh();
   }, [open]);
+  // Microphones plugged in or out while the panel is open.
+  useEffect(() => {
+    if (!open) return;
+    const onChange = () => void listAudioInputs().then(setDevices);
+    navigator.mediaDevices?.addEventListener?.("devicechange", onChange);
+    return () => navigator.mediaDevices?.removeEventListener?.("devicechange", onChange);
+  }, [open]);
+
+  const setKept = <T,>(key: string, set: (v: T) => void) => (v: T) => {
+    set(v);
+    keep(key, v);
+  };
+  const changeVolume = setKept("volume", setVolume);
+  // The slider moves the gain while it records.
+  useEffect(() => {
+    mic.current?.setGain(volume / 100);
+  }, [volume]);
 
   const stopPlayback = () => {
     if (played.current) useControlsStore.getState().pause();
     played.current = false;
   };
-  const endLevels = () => {
-    unsubscribe.current?.();
-    unsubscribe.current = null;
+  const endCapture = () => {
+    if (clock$.current) clearInterval(clock$.current);
+    clock$.current = null;
     setPeak(0);
+    void voiceoverEnd();
   };
 
   const begin = async () => {
-    const folder = useProjectsStore.getState().getActiveProject()?.folderUuid;
-    const started = await voiceoverStart(folder, { muteProject });
-    if (!started.ok) {
+    try {
+      if (!(await voiceoverAsk())) {
+        setPhase("idle");
+        setDenied(true);
+        void refresh();
+        return;
+      }
+      const device = deviceId && devices.some((d) => d.id === deviceId) ? deviceId : undefined;
+      mic.current = await MicRecorder.start({ deviceId: device, gain: volume / 100, echoReduction: echo, onLevel: setPeak });
+    } catch (e) {
       setPhase("idle");
-      if (started.denied) setDenied(true);
-      else setError(`Couldn't start recording: ${started.error}`);
-      refresh();
+      if (e instanceof MicError && e.reason === "denied") setDenied(true);
+      else if (e instanceof MicError && e.reason === "missing") setError("That microphone isn't available. Pick another input device.");
+      else setError(`Couldn't start recording: ${e instanceof Error ? e.message : String(e)}`);
+      void refresh();
       return;
     }
+    await voiceoverBegin({ muteProject });
     setElapsed(0);
-    unsubscribe.current = onVoiceoverLevel((l) => {
-      setElapsed(l.elapsedMs);
-      setPeak(l.peak);
-    });
+    startedAt.current = Date.now();
+    clock$.current = setInterval(() => setElapsed(Date.now() - startedAt.current), 100);
     setPhase("recording");
+    void refresh();
     // The timeline plays from the playhead while it records, as CapCut's does.
     const controls = useControlsStore.getState();
     startFrame.current = controls.focusFrame;
@@ -171,19 +268,26 @@ export const VoiceoverPanel: React.FC = () => {
 
   const stop = async () => {
     setPhase("saving");
-    endLevels();
-    const done = await voiceoverStop();
+    const take = mic.current?.stop();
+    mic.current = null;
+    endCapture();
     stopPlayback();
-    setPhase("idle");
-    if (!done.ok) {
-      setError(`The recording couldn't be saved: ${done.error}`);
+    if (!take) {
+      setPhase("idle");
       return;
     }
-    const fps = useControlsStore.getState().fps || 30;
-    const clip = placeVoiceover(useClipStore.getState(), { path: done.path, durationSec: done.durationSec }, done.url, startFrame.current, fps);
-    useControlsStore.getState().setSelectedClipIds([clip.clipId]);
-    bumpMediaLibraryVersion();
-    setSaved(`${done.path.split("/").pop()?.replace(/\.wav$/i, "")} added to the timeline`);
+    try {
+      const folder = useProjectsStore.getState().getActiveProject()?.folderUuid;
+      const done = await voiceoverSaveTake(take.pcm, { folder, rate: take.rate, channels: take.channels });
+      const fps = useControlsStore.getState().fps || 30;
+      const clip = placeVoiceover(useClipStore.getState(), { path: done.path, durationSec: done.durationSec }, done.url, startFrame.current, fps);
+      useControlsStore.getState().setSelectedClipIds([clip.clipId]);
+      bumpMediaLibraryVersion();
+      setSaved(`${done.path.split("/").pop()?.replace(/\.wav$/i, "")} added to the timeline`);
+    } catch (e) {
+      setError(`The recording couldn't be saved: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setPhase("idle");
   };
 
   /** Throw the take away (or stop the count before it starts). */
@@ -195,8 +299,9 @@ export const VoiceoverPanel: React.FC = () => {
       return;
     }
     if (phase !== "recording") return;
-    endLevels();
-    await voiceoverCancel();
+    mic.current?.cancel();
+    mic.current = null;
+    endCapture();
     stopPlayback();
     setPhase("idle");
     setElapsed(0);
@@ -210,9 +315,11 @@ export const VoiceoverPanel: React.FC = () => {
   // Gone mid-take (the editor closed): nothing is left recording.
   useEffect(() => () => {
     if (countdown.current) clearInterval(countdown.current);
-    if (unsubscribe.current) {
-      unsubscribe.current();
-      void voiceoverCancel();
+    if (clock$.current) clearInterval(clock$.current);
+    if (mic.current) {
+      mic.current.cancel();
+      mic.current = null;
+      void voiceoverEnd();
     }
   }, []);
 
@@ -268,10 +375,13 @@ export const VoiceoverPanel: React.FC = () => {
         </div>
         <div className="mt-4 h-px bg-brand-divider" />
         <div className="mt-4 text-[13px] text-brand-light">Input device</div>
-        <div className="mt-2 h-[22px] px-2 rounded-[4px] bg-brand flex items-center text-[12px] text-[#cccccc] truncate">System default microphone</div>
+        <DevicePicker devices={devices} value={deviceId} onChange={setKept("device", setDeviceId)} disabled={live || phase === "countdown"} />
         <p data-testid="voiceover-permission" data-refused={perm.refused} className={cn("mt-2 text-[12px] leading-snug", perm.refused ? "text-[#e5484d]" : "text-[#6c6c6c]")}>
           {perm.text}
         </p>
+        <div className="mt-4" data-testid="voiceover-volume">
+          <PropertiesSlider label="Volume" value={volume} onChange={(v) => changeVolume(Math.max(0, Math.min(200, Math.round(v))))} min={0} max={200} step={1} toFixed={0} />
+        </div>
         {live && (
           <button type="button" data-testid="voiceover-discard" onClick={() => void discard()} className="mt-3 h-[22px] px-3 rounded-[4px] bg-brand-button text-[12px] text-brand-light hover:brightness-110">
             Discard take
@@ -280,12 +390,20 @@ export const VoiceoverPanel: React.FC = () => {
       </div>
       <div className="mx-[10px] mt-3 mb-4 px-2">
         <label className="flex flex-row items-center gap-2 cursor-pointer">
-          <SmallCheckbox checked={muteProject} disabled={live} label="Mute project" onChange={setMuteProject} />
+          <SmallCheckbox checked={echo} disabled={live} label="Echo reduction" onChange={setKept("echo", setEcho)} />
+          <span data-testid="voiceover-echo" className="text-[13px] font-semibold text-brand-lighter">
+            Echo reduction
+          </span>
+        </label>
+        <p className="mt-1 pl-5 text-[12px] leading-snug text-[#cccccc]">Turn on to avoid echo from the speaker</p>
+        <div className="my-3 h-px bg-brand-divider" />
+        <label className="flex flex-row items-center gap-2 cursor-pointer">
+          <SmallCheckbox checked={muteProject} disabled={live} label="Mute project" onChange={setKept("mute", setMuteProject)} />
           <span data-testid="voiceover-mute" className="text-[13px] font-semibold text-brand-lighter">
             Mute project
           </span>
         </label>
-        <p className="mt-1 pl-5 text-[12px] leading-snug text-[#cccccc]">Sounds in all clips are turned off while you record.</p>
+        <p className="mt-1 pl-5 text-[12px] leading-snug text-[#cccccc]">Sounds in all clips will be turned off after Mute project turned on</p>
       </div>
     </div>,
     document.body,

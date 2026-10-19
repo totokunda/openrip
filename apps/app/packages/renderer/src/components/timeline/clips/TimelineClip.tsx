@@ -88,6 +88,8 @@ import { Html } from "react-konva-utils";
 import { cn } from "@/lib/utils";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { TIMELINE_COLORS } from "@/lib/timeline-colors";
+import { useIsMissing } from "@/lib/media/missing";
+import { canReplaceClip, replaceClip, revealClipFile } from "@/lib/replace-clip";
 
 /**
  * text rx/RxText
@@ -219,6 +221,13 @@ const TimelineClip: React.FC<
   const bands = useMediaBands(clipType, timelineId, timelineHeight);
   const thumbsHeight = bands ? bands.thumbs : timelineHeight;
 
+  // The clip's file is gone: it says so (Link to media in the Media tab brings it back).
+  const mediaMissing = useIsMissing(
+    useClipStore((s) => {
+      const id = (currentClip as { assetId?: string } | undefined)?.assetId;
+      return id ? s.assets[id]?.path : undefined;
+    }),
+  );
   const currentStartFrame = currentClip?.startFrame ?? 0;
   const currentEndFrame = currentClip?.endFrame ?? 0;
 
@@ -1267,6 +1276,20 @@ const TimelineClip: React.FC<
           : { id: "link", label: "Link", action: "link", disabled: targetIds.length < 2 || isGroup },
       );
 
+      // More clip actions ▸ Replace clip, Trim clip (not here yet), Open file location.
+      if (targetIds.length === 1 && canReplaceClip(clip)) {
+        clipActions.push({
+          id: "more-actions",
+          label: "More clip actions",
+          action: "none",
+          children: [
+            { id: "replace-clip", label: "Replace clip", action: "custom", run: () => void replaceClip(clip.clipId) },
+            { id: "trim-clip", label: "Trim clip", action: "custom", disabled: true },
+            { id: "open-file-location", label: "Open file location", action: "custom", run: () => void revealClipFile(clip.clipId) },
+          ],
+        });
+      }
+
       useContextMenuStore.getState().openMenu({
         position: { x: e.evt.clientX, y: e.evt.clientY },
         target: {
@@ -2075,6 +2098,22 @@ const TimelineClip: React.FC<
                 fontStyle="500"
                 fill="white"
                 align="left"
+                verticalAlign="middle"
+                offsetY={5}
+              />
+            </Group>
+          )}
+          {!assetMode && mediaMissing && (
+            <Group listening={false} name="media-missing">
+              <Rect width={clipWidth} height={timelineHeight} cornerRadius={safeCornerRadius} fill="rgba(120, 28, 32, 0.62)" />
+              <Text
+                x={8}
+                y={timelineHeight / 2}
+                text="Media missing"
+                fontSize={10}
+                fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
+                fontStyle="500"
+                fill="#ffb4b7"
                 verticalAlign="middle"
                 offsetY={5}
               />

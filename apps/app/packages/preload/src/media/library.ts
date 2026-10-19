@@ -37,33 +37,35 @@ export type ConvertedMediaItem = {
    * makePlayable), not an optional speed-up: it can't be removed.
    */
   isPlayableCopy?: boolean;
+  /**
+   * The library's link points at a file that is gone (moved, deleted, a drive unplugged):
+   * the card says so and "Link to media" can point it at the file again. `target` is where
+   * the link points.
+   */
+  missing?: boolean;
+  target?: string;
 };
 
 function isSupportedExt(ext: string): boolean {
   return VIDEO_EXTS.has(ext) || IMAGE_EXTS.has(ext) || AUDIO_EXTS.has(ext);
 }
 
-async function removeIfBrokenSymlink(absPath: string): Promise<boolean> {
+/** Where a library link points if the file there is gone (a broken symlink), else null. */
+async function brokenSymlinkTarget(absPath: string): Promise<string | null> {
   try {
     const st = await fsp.lstat(absPath);
-    if (!st.isSymbolicLink()) return false;
-
+    if (!st.isSymbolicLink()) return null;
     try {
-      // Follow the link; if target is missing, stat() throws ENOENT.
+      // Follow the link; if the target is missing, stat() throws ENOENT.
       await fsp.stat(absPath);
-      return false;
+      return null;
     } catch (e: any) {
       const code = e?.code;
-      if (code !== "ENOENT" && code !== "ENOTDIR") return false;
-      try {
-        await fsp.unlink(absPath);
-      } catch {
-        await fsp.rm(absPath, { force: true });
-      }
-      return true;
+      if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+      return await fsp.readlink(absPath);
     }
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -202,27 +204,14 @@ async function listConvertedMedia(
 
     const originalAbsPath = join(symlinksAbs, name);
 
-    // If the media item is a symlink and its target has been deleted, remove
-    // the broken symlink from disk (and any proxy mapping) and skip it.
-    if (await removeIfBrokenSymlink(originalAbsPath)) {
-      if (proxyIndex[name]) {
-        const proxyPath = join(proxyAbs, proxyIndex[name]);
-        try {
-          await fsp.rm(proxyPath, { force: true });
-        } catch {
-          // ignore
-        }
-        delete proxyIndex[name];
-        proxyIndexDirty = true;
-      }
-      continue;
-    }
+    // A link whose file is gone stays in the library, marked missing (Link to media fixes it).
+    const brokenTarget = await brokenSymlinkTarget(originalAbsPath);
 
     let absPath = originalAbsPath;
     let hasProxy = false;
     let isPlayableCopy = false;
 
-    if (proxyIndex[name]) {
+    if (proxyIndex[name] && brokenTarget == null) {
       const proxyPath = join(proxyAbs, proxyIndex[name]);
       if (fs.existsSync(proxyPath)) {
         absPath = proxyPath;
@@ -260,6 +249,7 @@ async function listConvertedMedia(
       type,
       hasProxy,
       isPlayableCopy,
+      ...(brokenTarget != null ? { missing: true, target: brokenTarget } : {}),
     });
   }
 

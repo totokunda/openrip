@@ -128,9 +128,11 @@ class Recording {
 
 export class VoiceoverModule implements AppModule {
   #recording: Recording | null = null;
+  /** A take the page is capturing itself (the panel's input device, volume and echo reduction need the page's own capture). */
+  #session: { muted: boolean } | null = null;
 
   enable(_context: ModuleContext): void {
-    for (const channel of ["voiceover:status", "voiceover:start", "voiceover:stop", "voiceover:cancel", "voiceover:list"]) {
+    for (const channel of ["voiceover:status", "voiceover:start", "voiceover:stop", "voiceover:cancel", "voiceover:list", "voiceover:begin", "voiceover:end", "voiceover:ask"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -139,10 +141,21 @@ export class VoiceoverModule implements AppModule {
 
     ipcMain.handle("voiceover:status", (): VoiceoverStatus => ({
       available: !!getEngine(),
-      recording: !!this.#recording,
+      recording: !!this.#recording || !!this.#session,
       permission: permission(),
-      projectMuted: !!this.#recording?.muted,
+      projectMuted: !!this.#recording?.muted || !!this.#session?.muted,
     }));
+
+    // The page records the take itself (getUserMedia): these keep the status and "Mute project".
+    ipcMain.handle("voiceover:ask", () => askForMicrophone());
+    ipcMain.handle("voiceover:begin", (_event, options?: { muteProject?: boolean }) => {
+      this.#session = { muted: !!options?.muteProject };
+      if (this.#session.muted) getEngine()?.setVolume(0);
+    });
+    ipcMain.handle("voiceover:end", () => {
+      if (this.#session?.muted) getEngine()?.setVolume(playbackVolume());
+      this.#session = null;
+    });
 
     ipcMain.handle("voiceover:list", (_event, options?: { folder?: string }): VoiceoverTake[] => listTakes(options?.folder));
 
@@ -201,6 +214,8 @@ export class VoiceoverModule implements AppModule {
     });
 
     app.on("before-quit", () => {
+      if (this.#session?.muted) getEngine()?.setVolume(playbackVolume());
+      this.#session = null;
       if (!this.#recording) return;
       this.#recording.end();
       try {

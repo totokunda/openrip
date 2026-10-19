@@ -12,6 +12,14 @@ import { TransitionDragTile } from "@/components/menus/TransitionMenu";
 import { cn } from "@/lib/utils";
 import { useClipStore } from "@/lib/clip";
 import GlobalContextMenu from "@/components/GlobalContextMenu";
+import { useMissingMediaWatcher } from "@/lib/media/missing";
+import RecordPanel from "@/components/record/RecordPanel";
+
+/** Keeps the missing-media state current while the editor is open (renders nothing). */
+const MissingMediaWatcher: React.FC = () => {
+  useMissingMediaWatcher();
+  return null;
+};
 import AnalysisPill from "@/components/timeline/AnalysisPill";
 import { useProjectsStore } from "@/lib/projects";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -259,6 +267,8 @@ const App: React.FC = () => {
       <GlobalContextMenu />
       <AppDialogs />
       <AnalysisPill />
+      <MissingMediaWatcher />
+      <RecordPanel />
       {/* The dragged picture, in the timeline's window (it can have one of its own). */}
       {portalInto(
         timelineWindow?.document.body,

@@ -30,6 +30,10 @@
     <key>com.apple.security.device.audio-input</key>
     <true/>
 
+    <!-- The camera, for Record > Camera -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
     <!-- File access for imported media and exports -->
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>

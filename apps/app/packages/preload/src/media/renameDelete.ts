@@ -3,6 +3,16 @@ import { promises as fsp } from "node:fs";
 import { join } from "node:path";
 import { symlinksDir, proxyDir } from "./paths.js";
 
+/** Whether something is there: a link counts even when its file is gone. */
+function present(p: string): boolean {
+  try {
+    fs.lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function renameMediaPairInRoot(
   mediaRootAbs: string,
   convertedOldName: string,
@@ -12,7 +22,7 @@ export async function renameMediaPairInRoot(
   const oldSymlinkAbs = join(symlinksPath, convertedOldName);
   const newSymlinkAbs = join(symlinksPath, convertedNewName);
 
-  if (oldSymlinkAbs !== newSymlinkAbs && fs.existsSync(oldSymlinkAbs)) {
+  if (oldSymlinkAbs !== newSymlinkAbs && present(oldSymlinkAbs)) {
     await fsp.rename(oldSymlinkAbs, newSymlinkAbs);
   }
 
@@ -45,7 +55,7 @@ export async function deleteMediaPairInRoot(
   const symlinksPath = symlinksDir(mediaRootAbs);
   const symlinkAbs = join(symlinksPath, convertedName);
 
-  if (fs.existsSync(symlinkAbs)) {
+  if (present(symlinkAbs)) {
     await fsp.rm(symlinkAbs, { force: true });
   }
 

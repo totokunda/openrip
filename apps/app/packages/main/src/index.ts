@@ -14,6 +14,7 @@ import { appDirProtocol } from "./modules/AppDirProtocol.js";
 import { coreIpc } from "./modules/CoreIpc.js";
 import { engineModule } from "./modules/EngineModule.js";
 import { voiceoverModule } from "./modules/VoiceoverModule.js";
+import { applyFakeCapture, recordModule } from "./modules/RecordModule.js";
 import { speechModule } from "./modules/SpeechModule.js";
 import { capCutImportModule } from "./modules/CapCutImportModule.js";
 import { appMenu } from "./modules/AppMenu.js";
@@ -25,6 +26,8 @@ import { app } from "electron";
 export async function initApp(initConfig: AppInitConfig) {
   // Set app name early, before any modules are initialized
   app.setName("OpenRip");
+  // Test mode: the fake camera and microphone are switches, which must be set before the app is ready.
+  applyFakeCapture();
 
   let moduleRunner = createModuleRunner()
     // Ensure single instance lock before any window creation
@@ -37,6 +40,8 @@ export async function initApp(initConfig: AppInitConfig) {
     .init(engineModule())
     // Voiceover recording through the engine, once it's loaded
     .init(voiceoverModule())
+    // Record: the screens that can be recorded, camera and microphone permissions
+    .init(recordModule())
     // Auto captions: local speech recognition and its models
     .init(speechModule())
     .init(jsonPersistenceModule())

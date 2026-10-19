@@ -53,6 +53,8 @@ import { HiFilm } from "react-icons/hi";
 import { useClipStore } from "@/lib/clip";
 import { useShellStore } from "@/lib/shell";
 import { preferences } from "@/lib/preferences";
+import { linkMissingInFolder, linkToMedia } from "@/lib/relink";
+import { useRecordPanel } from "@/components/record/RecordPanel";
 
 /** The library's grid or list, kept between sessions. */
 const LAYOUT_KEY = "openrip:media-layout";
@@ -270,7 +272,10 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
       for (let idx = 0; idx < list.length; idx++) {
         const it = list[idx];
         const result = infoResults[idx];
-        if (result.status === "fulfilled") {
+        if (it.missing) {
+          // A file that's gone has no info to read: the card says so (Link to media).
+          results.push({ name: it.name, type: it.type, absPath: it.absPath, assetUrl: it.assetUrl, dateAddedMs: it.dateAddedMs, missing: true, target: it.target });
+        } else if (result.status === "fulfilled") {
           results.push({
             name: it.name,
             type: it.type,
@@ -772,6 +777,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [importOnOpen]);
 
+  const missingItems = useMemo(() => items.filter((it) => it.missing), [items]);
   const empty = !isMediaListLoading && items.length === 0;
   const [searching, setSearching] = useState(false);
   const heading =
@@ -839,9 +845,10 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         </DropdownMenu>
         <button
           type="button"
-          disabled
-          title="Recording isn't here yet"
-          className="h-6 shrink-0 px-2 flex items-center gap-1.5 rounded-[4px] bg-brand-background-light text-[12px] font-medium text-brand-light/35 cursor-not-allowed"
+          title="Record the screen or the camera"
+          data-testid="media-record"
+          onClick={() => useRecordPanel.getState().setOpen(true)}
+          className="h-6 shrink-0 px-2 flex items-center gap-1.5 rounded-[4px] bg-brand-background-light text-[12px] font-medium text-brand-lighter hover:bg-brand-button cursor-pointer"
         >
           <LuVideo className="w-3.5 h-3.5" />
           Record
@@ -1008,6 +1015,21 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         {/* Keep showing the grid even while background reloads happen. */}
         {items.length > 0 && (
           <ScrollArea className="h-full px-3 pb-3 pt-1 dark">
+            {missingItems.length > 0 && (
+              <div data-testid="media-missing-bar" className="mt-2 mb-1 rounded-[4px] bg-[#3a1d1f] px-2.5 py-2 text-left text-[12px] text-[#e5898c] flex flex-row items-center gap-2">
+                <span className="flex-1 min-w-0">
+                  {missingItems.length} media file{missingItems.length > 1 ? "s are" : " is"} missing
+                </span>
+                <button
+                  type="button"
+                  data-testid="media-link-folder"
+                  onClick={() => void linkMissingInFolder(missingItems.map((m) => ({ name: m.name, target: m.target ?? m.name })))}
+                  className="shrink-0 h-[22px] px-2 rounded-[4px] bg-brand-button text-brand-light hover:brightness-110 cursor-pointer"
+                >
+                  Link to a folder
+                </button>
+              </div>
+            )}
             <div className="text-[12px] text-brand-light text-left pt-2 pb-2">{heading}</div>
             <div
               className={cn("grid w-full", layout === "grid" ? "gap-x-4 gap-y-3" : "gap-0.5")}
@@ -1037,6 +1059,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
                   isCreatingProxy={creatingProxies.has(item.name)}
                   added={onTimeline.has(item.assetUrl)}
                   layout={layout === "list" ? "row" : "card"}
+                  onRelink={(it) => void linkToMedia({ name: it.name, target: it.target ?? it.name })}
                 />
               ))}
             </div>

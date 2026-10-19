@@ -56,6 +56,10 @@ export type { EngineTrackRequest, EngineTrackResult, EngineTrackSample } from ".
 export { voiceoverStatus, voiceoverStart, voiceoverStop, voiceoverCancel, voiceoverList, onVoiceoverLevel } from "./voiceover.js";
 export type { VoiceoverStatus, VoiceoverStart, VoiceoverStop, VoiceoverLevel, VoiceoverTake } from "./voiceover.js";
 
+// Record (screen, camera) and the Voiceover panel's own capture
+export { recordSources, recordPermission, recordAsk, recordPick, recordingSave, voiceoverSaveTake, voiceoverAsk, voiceoverBegin, voiceoverEnd } from "./record.js";
+export type { RecordSource, RecordSources, RecordKind, SavedRecording, SavedTake } from "./record.js";
+
 // The Stickers tab's downloads and cache
 export { stickersCached, stickerDownload, stickerStore } from "./stickers.js";
 export type { StickerFile } from "./stickers.js";
@@ -105,6 +109,8 @@ export * from "./core/ipc.js";
 // Media library and previews
 export * from "./media/library.js";
 export * from "./media/previews.js";
+// Missing media and Link to media, Replace clip's import, Open file location
+export * from "./media/relink.js";
 // Explicit re-export to ensure the virtual browser shim includes this new API.
 export { exportVideoTranscodeWithFfmpeg } from "./media/previews.js";
 

@@ -115,9 +115,10 @@ module.exports = {
     gatekeeperAssess: false,
     entitlements: "buildResources/entitlements.mac.plist",
     entitlementsInherit: "buildResources/entitlements.mac.plist",
-    // What macOS shows when a voiceover first asks for the microphone.
+    // What macOS shows when a voiceover or a recording first asks for the microphone or camera.
     extendInfo: {
-      NSMicrophoneUsageDescription: "OpenRip records voiceovers from your microphone.",
+      NSMicrophoneUsageDescription: "OpenRip records voiceovers and recordings from your microphone.",
+      NSCameraUsageDescription: "OpenRip records video from your camera.",
     },
     // Enable notarization only when required env vars are present.
     notarize: Boolean(hasMacNotarizeEnv),
