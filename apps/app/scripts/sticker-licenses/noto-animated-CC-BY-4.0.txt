@@ -1,0 +1,13 @@
+Animated Noto Emoji
+Copyright Google LLC
+
+The animated Noto emoji (published as Lottie, WebP and GIF at
+https://googlefonts.github.io/noto-emoji-animation/) are licensed under the Creative Commons
+Attribution 4.0 International licence (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/legalcode
+
+You may share and adapt the material for any purpose, even commercially, if you give
+appropriate credit, link to the licence and say if changes were made. OpenRip shows and
+exports the animations as published, unchanged, and downloads them on demand from
+https://fonts.gstatic.com/s/e/notoemoji/. Credit: "Animated Noto Emoji" by Google LLC,
+CC BY 4.0.

@@ -108,6 +108,21 @@ try {
   }
 }
 
+// ---- Stickers (the Stickers tab's sets: the starter ones ship, the rest download on demand) ----
+// Each set's licence and attribution come from the manifest scripts/build-sticker-manifest.mjs
+// wrote; the licence texts are kept in scripts/sticker-licenses/.
+try {
+  const manifest = JSON.parse(fs.readFileSync(path.join(appDir, "packages", "renderer", "public", "stickers", "manifest.json"), "utf8"));
+  const TEXTS = { MIT: "fluentui-emoji-MIT.txt", "Apache-2.0": "noto-emoji-Apache-2.0.txt", "CC-BY-4.0": "noto-animated-CC-BY-4.0.txt" };
+  for (const set of manifest.sets) {
+    const file = TEXTS[set.license];
+    const text = file ? fs.readFileSync(path.join(here, "sticker-licenses", file), "utf8").trim() : "";
+    packages.push({ name: `${set.name} (stickers)`, version: manifest.generated, source: "assets", license: set.license, text: `${set.attribution}\n${set.licenseUrl}\n\n${text}` });
+  }
+} catch (e) {
+  console.warn(`[third-party-notices] sticker manifest not read (${String(e.message ?? e).split("\n")[0]})`);
+}
+
 // ---- Group by text ----
 const norm = (s) => s.replace(/\s+/g, " ").trim();
 const groups = new Map();
