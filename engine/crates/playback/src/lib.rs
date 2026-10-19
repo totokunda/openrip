@@ -17,6 +17,7 @@ mod analysis;
 pub mod animation;
 pub mod caption;
 pub mod colour;
+mod crop;
 mod gif;
 pub mod input;
 pub mod mask;

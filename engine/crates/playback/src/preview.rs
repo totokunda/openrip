@@ -10,7 +10,7 @@ use std::path::Path;
 
 pub use openrip_media::load_png;
 use openrip_media::{open_video, Decoder, DecoderOptions, MediaError, ReverseReader, VideoFrame};
-use openrip_model::{Animation, CanvasFillKind, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
+use openrip_model::{Animation, CanvasFillKind, CropRect, EffectCategory, MediaKind, Micros, PaintKind, Project, Segment, SizeUnit, TextEffect, TextureStretch, TrackKind, CAPCUT_SIZE_UNIT_EM};
 use openrip_platform::assets;
 use openrip_render::fonts;
 use openrip_render::text::{self, Align, Font, TextStyle};
@@ -1540,6 +1540,25 @@ impl PreviewEngine {
     /// axes, each with what it shows inside and outside.
     fn masked(&mut self, seg: &Segment, size: (u32, u32), orientation: i32, at: Micros, local: Micros, cutout: Option<std::sync::Arc<RgbaImage>>) -> Vec<Painted> {
         let mut out: Vec<Painted> = cutout.into_iter().map(|c| (c, None, Some([0.0; 4]))).collect();
+        // The clip's crop: the picture is clear outside its rectangle.
+        if let Some(c) = seg.crop.filter(|c| *c != CropRect::FULL) {
+            let k = (2048.0 / size.0.max(size.1).max(1) as f64).min(1.0);
+            let (w, h) = (((size.0 as f64 * k).round() as u32).max(1), ((size.1 as f64 * k).round() as u32).max(1));
+            let key = format!("crop:{:x}", key_of((c.x.to_bits(), c.y.to_bits(), c.width.to_bits(), c.height.to_bits(), c.rotation.to_bits(), size, w, h, orientation)));
+            let tick = self.tick;
+            let image = match self.mattes.get_mut(&key) {
+                Some((img, last)) => {
+                    *last = tick;
+                    img.clone()
+                }
+                None => {
+                    let img = std::sync::Arc::new(turn_to_stored(&crate::crop::coverage(&c, size, w, h), w, h, orientation));
+                    self.mattes.insert(key, (img.clone(), tick));
+                    img
+                }
+            };
+            out.push((image, None, Some([0.0; 4])));
+        }
         let masks: Vec<openrip_model::Mask> = self.project.materials.masks.iter().filter(|m| seg.attachments.contains(&m.id)).map(|m| seg.mask_at(m, local)).collect();
         // At the picture's size, up to 2048 pixels on its long side.
         let k = (2048.0 / size.0.max(size.1).max(1) as f64).min(1.0);
@@ -1736,6 +1755,23 @@ impl PreviewEngine {
                 }
                 // Flips are on screen axes: fold them into the scale signs.
                 let scale = [scale.x * if tr.flip_h { -1.0 } else { 1.0 }, scale.y * if tr.flip_v { -1.0 } else { 1.0 }];
+                // A cropped clip's whole picture, placed so the crop's rectangle fills its box
+                // (the crop itself is cut out in `masked`).
+                let crop = seg.crop.filter(|c| *c != CropRect::FULL).filter(|_| matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..)));
+                let (pos, scale, rot) = match crop {
+                    Some(c) => {
+                        let ((sw, sh), o) = match p {
+                            Pixels::Image(i, ..) => ((i.width, i.height), 0),
+                            Pixels::Video(f, o, ..) => (Source::Video(f).size(), *o),
+                            Pixels::Tween(frames, _, _, _, o, _) => (Source::Video(&frames.0).size(), *o),
+                            _ => unreachable!(),
+                        };
+                        let up = if o.rem_euclid(180) == 90 { (sh, sw) } else { (sw, sh) };
+                        let (at, whole, turn) = crate::crop::place(&c, (up.0 as f64, up.1 as f64), (w as f64, h as f64), [pos.x, pos.y], scale, rot);
+                        (openrip_model::Vec2::new(at[0], at[1]), whole, turn)
+                    }
+                    None => (pos, scale, rot),
+                };
                 let mut layer = match p {
                     Pixels::Image(i, key, mattes) => Layer { mattes: painted(mattes), ..Layer::from_model(Source::Cached(*key, i), [w, h], [pos.x, pos.y], scale, rot) },
                     Pixels::Video(f, orientation, mattes) => Layer { mattes: painted(mattes), ..Layer::from_model_oriented(Source::Video(f), [w, h], [pos.x, pos.y], scale, rot, *orientation) },

@@ -172,6 +172,7 @@ fn convert_transform(
         y: f(c, "y", 0.0),
         width: f(c, "width", 1.0),
         height: f(c, "height", 1.0),
+        rotation: f(c, "rotation", 0.0),
     });
     if let Some((fit_w, fit_h)) = fit {
         if fit_w > 0.0 && fit_h > 0.0 && w > 0.0 && h > 0.0 {
@@ -972,6 +973,7 @@ fn convert_clip(
                     y: f(c, "y", 0.0),
                     width: f(c, "width", 1.0),
                     height: f(c, "height", 1.0),
+                    rotation: 0.0,
                 });
                 let fit = contain_fit(world, mw, mh, crop);
                 if fit.is_none() {

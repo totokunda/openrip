@@ -193,17 +193,22 @@ pub struct Transform {
     pub flip_v: bool,
 }
 
-/// A normalised rectangle of the source frame (0…1 on each axis, origin top-left).
+/// A normalised rectangle of the source frame (0…1 on each axis, origin top-left), turned
+/// `rotation` degrees clockwise about its centre when the crop straightens the picture (the
+/// clip shows the rectangle upright, so the picture inside it is turned the other way).
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CropRect {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    /// Degrees; the rectangle's own turn in the source's pixel space.
+    #[serde(default)]
+    pub rotation: f64,
 }
 
 impl CropRect {
-    pub const FULL: CropRect = CropRect { x: 0.0, y: 0.0, width: 1.0, height: 1.0 };
+    pub const FULL: CropRect = CropRect { x: 0.0, y: 0.0, width: 1.0, height: 1.0, rotation: 0.0 };
 }
 
 impl Default for Transform {
