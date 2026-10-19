@@ -76,6 +76,5 @@ export const addMediaAtPlayhead = async (item: MediaItem, opts: { startFrame?: n
     useViewportStore.getState().setAspectRatio({ width: Math.round(width), height: Math.round(height), id: `${Math.round(width / g)}:${Math.round(height / g)}` });
   }
   useClipStore.getState().addClip(clip as never);
-  useControlsStore.getState().setSelectedClipIds([clip.clipId]);
   return clip.clipId;
 };
