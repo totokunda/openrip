@@ -11,7 +11,7 @@ fn font() -> Option<Font> {
 }
 
 fn style(font: &Font, max_width: Option<f32>) -> TextStyle<'_> {
-    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: false, stroke: None, more_strokes: &[], gradient: None, glow: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None, underline: false }
+    TextStyle { font, size: 40.0, color: [255, 255, 255, 255], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: false, stroke: None, more_strokes: &[], gradient: None, glow: None, background: None, shadow: None, max_width, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None, word_boxes: None, underline: false }
 }
 
 #[test]
@@ -292,4 +292,28 @@ fn spacing_widens_lines_and_spreads_them() {
     // Three gaps on the longest line, a quarter of the 40 px size each; half a size between lines.
     assert!((spaced.width - base.width - 3.0 * 10.0).abs() < 0.01, "{} {}", spaced.width, base.width);
     assert!((spaced.height - base.height - 20.0).abs() < 0.01);
+}
+
+#[test]
+fn a_box_sits_behind_the_chosen_word_only() {
+    let Some(f) = font() else { return };
+    let red = [255, 0, 0, 255];
+    let boxes: Vec<Option<[u8; 4]>> = "HH HH".chars().enumerate().map(|(i, _)| (i < 2).then_some(red)).collect();
+    let s = TextStyle { word_boxes: Some(&boxes), ..style(&f, None) };
+    let lay = layout("HH HH", &s);
+    let r = lay.rasterize(&s, [0.0, 0.0]);
+    let (w, h) = (r.image.width as usize, r.image.height as usize);
+    // Red pixels (the box, not the white glyphs): all in the left half, between the words.
+    let red_at = |x: usize, y: usize| {
+        let p = &r.image.data[(y * w + x) * 4..(y * w + x) * 4 + 4];
+        p[3] > 200 && p[0] > 200 && p[1] < 60
+    };
+    let cols: Vec<usize> = (0..w).filter(|&x| (0..h).any(|y| red_at(x, y))).collect();
+    assert!(!cols.is_empty());
+    assert!(*cols.last().unwrap() <= r.center[0] as usize + 2, "the box reaches {} of centre {}", cols.last().unwrap(), r.center[0]);
+    // The box is taller than the glyphs: red above the cap height of the H's.
+    let plain = style(&f, None);
+    let bare = layout("HH HH", &plain).rasterize(&plain, [0.0, 0.0]).image;
+    let first_ink = |img: &RgbaImage| (0..img.height as usize).find(|&y| (0..img.width as usize).any(|x| img.data[(y * img.width as usize + x) * 4 + 3] > 128)).unwrap();
+    assert!(first_ink(&r.image) < first_ink(&bare), "box top {} vs ink top {}", first_ink(&r.image), first_ink(&bare));
 }

@@ -102,6 +102,8 @@ pub(crate) const BUILTIN_OUT: [&str; 8] = ["fade_out", "zoom_in", "zoom_out", "s
 pub(crate) const BUILTIN_COMBO: [&str; 4] = ["swing", "shake", "pulse", "spin"];
 pub(crate) const BUILTIN_LOOP: [&str; 5] = ["pulse", "swing", "shake", "float", "blink"];
 pub(crate) const BUILTIN_CAPTION: [&str; 2] = ["caption_word_color", "caption_one_word"];
+/// The caption styles OpenRip's Auto captions has, besides CapCut's (playback/src/caption.rs).
+pub(crate) const OWN_CAPTION: [&str; 4] = ["orip_highlight", "orip_karaoke", "orip_pop", "orip_boxed"];
 pub(crate) const BUILTIN_TRANSITION: [&str; 13] = ["white_flash", "white_fade", "blink", "mix", "black_fade", "slide", "push", "wipe", "circle", "pull_in", "pull_out", "blur", "spin"];
 /// Types that take a direction ("left", "right", "up" or "down"; left when none is given).
 const DIRECTED: [&str; 3] = ["slide", "push", "wipe"];

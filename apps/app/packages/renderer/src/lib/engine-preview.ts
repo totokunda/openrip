@@ -405,6 +405,12 @@ function soloClip<T>(snapshot: T, clipId: string): T {
   return { ...(snapshot as any), timeline: { ...timeline, tracks, clips: moved, markers: [] }, editorState: { ...(snapshot as any).editorState, duration: Math.max(...moved.map((c) => c.endFrame)) } };
 }
 
+/** The open project as the engine reads it (originals in place of proxies), for tools that ask the engine about it (Auto captions' timeline mix); null with no project. */
+export async function engineProjectSnapshot(): Promise<{ projectId: number; snapshot: unknown } | null> {
+  const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any);
+  return snap ? { projectId: snap.projectId, snapshot: await withOriginalMedia(snap.snapshot) } : null;
+}
+
 /** Export the open project with the engine (the snapshot the preview gets, with originals). */
 export async function engineExportProject(request: EngineExportRequest, onProgress: (ratio: number) => void, clipId?: string): Promise<EngineExportResult> {
   const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any);

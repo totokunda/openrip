@@ -1196,20 +1196,18 @@ impl PreviewEngine {
                 }
                 own
             };
-            // A caption that follows the speech shows a page of its words at a time.
-            let (shown, char_colors) = match crate::caption::caption_frame(&animations, &text.text, &text.words, local) {
+            // A caption that follows the speech shows a page of its words at a time (or the
+            // whole line, for our own styles), its words painted by when they are said.
+            let (shown, char_colors, caption_alpha, word_boxes) = match crate::caption::caption_frame(&animations, &text.text, &text.words, local) {
                 Some(None) => return Ok(None),
                 Some(Some(f)) => {
                     let (a, b) = (f.page.0 as usize, f.page.1 as usize);
-                    let mut colors = own[a..b].to_vec();
-                    for (k, w) in f.words.iter().enumerate() {
-                        for c in w.0 as usize..w.1 as usize {
-                            colors[c - a] = f.style.color(own[c], f.reading == Some(k));
-                        }
-                    }
-                    (text.text.chars().skip(a).take(b - a).collect::<String>(), Some(colors))
+                    let paint = f.paint(&own[a..b]);
+                    let faded = paint.alpha.iter().any(|v| *v < 1.0).then_some(paint.alpha);
+                    let boxed = paint.boxes.iter().any(Option::is_some).then_some(paint.boxes);
+                    (text.text.chars().skip(a).take(b - a).collect::<String>(), Some(paint.colors), faded, boxed)
                 }
-                None => (text.text.clone(), own.iter().any(|c| *c != own[0]).then(|| own.clone())),
+                None => (text.text.clone(), own.iter().any(|c| *c != own[0]).then(|| own.clone()), None, None),
             };
             // A library text style attached to the clip replaces the run's colour and stroke.
             let styled = seg.attachments.iter().find_map(|id| self.project.materials.effects.iter().find(|e| &e.id == id).and_then(|e| Some((e.id.clone(), e.text_style.clone()?))));
@@ -1269,11 +1267,15 @@ impl PreviewEngine {
                 effect: effect.as_ref(),
                 curve: text.layout.curve,
                 char_colors: char_colors.as_deref(),
+                word_boxes: word_boxes.as_deref(),
                 underline: run.underline,
             };
             let lay = text::layout(&shown, &style);
             // Library text animations (typing reveals) as per-character opacity.
-            let char_alpha = crate::animation::char_alpha(&animations, shown.chars().count(), local);
+            let char_alpha = match (crate::animation::char_alpha(&animations, shown.chars().count(), local), caption_alpha) {
+                (Some(a), Some(b)) => Some(a.iter().zip(b).map(|(a, b)| a * b).collect()),
+                (a, b) => a.or(b),
+            };
             // Block centre on the canvas; rasterise so the image sits on the pixel grid. In a text
             // box the block sits at the box's side or middle, by its alignments.
             let (mut cx, mut cy) = (w as f64 / 2.0 + pos.x * w as f64 / 2.0, h as f64 / 2.0 - pos.y * h as f64 / 2.0);
@@ -1301,7 +1303,7 @@ impl PreviewEngine {
             let shape_key = key_of((
                 &path,
                 &shown,
-                &char_colors,
+                (&char_colors, &word_boxes),
                 em.to_bits(),
                 style.color,
                 style.stroke.map(|(c, r)| (c, r.to_bits())),
@@ -1679,6 +1681,7 @@ impl PreviewEngine {
             effect: None,
             curve: 0.0,
             char_colors: None,
+            word_boxes: None,
             underline: t.underline,
         };
         let layout = text::layout(&t.text, &style);

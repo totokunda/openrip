@@ -58,6 +58,9 @@ export type { VoiceoverStatus, VoiceoverStart, VoiceoverStop, VoiceoverLevel, Vo
 // The Stickers tab's downloads and cache
 export { stickersCached, stickerDownload, stickerStore } from "./stickers.js";
 export type { StickerFile } from "./stickers.js";
+// Auto captions: local speech recognition and its models (the main process's SpeechModule)
+export { speechStatus, speechDownload, speechDownloadCancel, speechDelete, speechTranscribe, speechProgress, speechCancel } from "./speech.js";
+export type { SpeechModelState, SpeechStatus, SpeechAsk, SpeechCaption, SpeechResult, SpeechAnswer } from "./speech.js";
 
 // App updates (Electron auto-updater)
 export * from "./appUpdates.js";

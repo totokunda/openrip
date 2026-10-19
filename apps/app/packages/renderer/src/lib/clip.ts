@@ -1386,6 +1386,11 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       // media, so its end moves; its trims scale and its keys stay on the media. A constant
       // speed drops a curve (CapCut's Normal tab).
       let nextUpdate: Partial<AnyClipProps> = { ...clipToUpdate };
+      // New words drop a speech caption's word timing (it no longer fits the text).
+      if (current.type === "text" && (current as TextClipProps).captionWords && typeof (clipToUpdate as Partial<TextClipProps>).text === "string" && (clipToUpdate as Partial<TextClipProps>).text !== (current as TextClipProps).text) {
+        const recased = (clipToUpdate as Partial<TextClipProps>).text!.toLowerCase() === (current as TextClipProps).text?.toLowerCase();
+        if (!recased) nextUpdate = { ...nextUpdate, captionWords: undefined, spokenWords: false } as Partial<AnyClipProps>;
+      }
       const speedChange = (Object.prototype.hasOwnProperty.call(clipToUpdate, "speed") || Object.prototype.hasOwnProperty.call(clipToUpdate, "speedCurve")) && (current.type === "video" || current.type === "audio");
       const speedArgs = () => {
         const u = clipToUpdate as Partial<VideoClipProps>;

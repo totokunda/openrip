@@ -5,6 +5,7 @@ import { LuCheck, LuChevronRight } from "react-icons/lu";
 import { removeTransition } from "@/lib/transitions";
 import { freezeAtPlayhead, toggleReverse } from "@/lib/timeline-motion";
 import { runAnalysisAction } from "@/lib/analysis";
+import { runGenerateCaptions } from "@/lib/autocaptions";
 import { easeKeysAt, removeKeysAt, useKeyframeGraphStore } from "@/lib/timeline-keyframes";
 import type { KeyframePreset } from "@/lib/types";
 import { useClipStore } from "@/lib/clip";
@@ -243,6 +244,8 @@ const GlobalContextMenu: React.FC = () => {
         toggleReverse(target.primaryClipId);
       } else if (action === "splitScenes" || action === "autoAdjust" || action === "colorMatch") {
         runAnalysisAction(action, target.primaryClipId);
+      } else if (action === "generateCaptions") {
+        runGenerateCaptions(target.primaryClipId);
       }
     } else if (target?.type === "marker") {
       if (action === "editMarker") useMarkerEditorStore.getState().open(target.markerId);

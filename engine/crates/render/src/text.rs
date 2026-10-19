@@ -167,6 +167,11 @@ pub struct TextStyle<'a> {
     /// Fill colour per character (indices as in the laid-out text, line breaks included),
     /// replacing `color`; characters past the end use `color`. Not used with `effect`.
     pub char_colors: Option<&'a [[u8; 4]]>,
+    /// A rounded box behind each run of characters that have a colour here (one per
+    /// character, line breaks included; `None` for no box), behind the text and over the
+    /// background: the box a caption puts on the word being said. Padded by a fraction of the
+    /// em. Not used with `effect`.
+    pub word_boxes: Option<&'a [Option<[u8; 4]>]>,
     /// A line under each line of text at the font's underline position and thickness, in the
     /// fill and inside the outlines. Not drawn on curved text or with `effect`.
     pub underline: bool,
@@ -798,6 +803,12 @@ impl TextLayout {
             }
         }
         let background = self.background(style, left, top, w, h);
+        // What lies under the text: the background, then the word boxes.
+        let word_boxes = style.word_boxes.map(|b| self.word_box_layer(b, left, top, w, h));
+        let under_text = |i: usize| {
+            let bg = background.as_ref().map_or([0.0; 4], |(c, cov)| premul(*c, cov[i]));
+            word_boxes.as_ref().map_or(bg, |l| over(l[i], bg))
+        };
         // The shadow: the text and its outline, moved and blurred.
         let shadow = style.shadow.map(|(color, [ox, oy], blur)| {
             let solid = |i: usize| {
@@ -840,18 +851,64 @@ impl TextLayout {
             let mut lit: Vec<[f32; 4]> = (0..px.len()).map(|i| ink(i, [0.0; 4])).collect();
             glow_under(&mut lit, w as usize, h as usize, [left, top, self.width, self.height], glow);
             for (i, px) in px.iter_mut().enumerate() {
-                let under = background.as_ref().map_or([0.0; 4], |(c, cov)| premul(*c, cov[i]));
-                *px = over(lit[i], under);
+                *px = over(lit[i], under_text(i));
             }
         } else {
             for (i, px) in px.iter_mut().enumerate() {
-                if let Some((c, cov)) = &background {
-                    *px = premul(*c, cov[i]);
-                }
-                *px = ink(i, *px);
+                *px = ink(i, under_text(i));
             }
         }
         finish(px, w, h, [(left + self.width / 2.0) as f64, (top + self.height / 2.0) as f64])
+    }
+
+    /// The boxes behind runs of characters (see [`TextStyle::word_boxes`]), premultiplied:
+    /// each run's glyphs from the first one's left edge to the last one's right edge, the
+    /// line box tall, padded and rounded by fractions of the em, each over the one before.
+    fn word_box_layer(&self, colors: &[Option<[u8; 4]>], left: f32, top: f32, w: u32, h: u32) -> Vec<[f32; 4]> {
+        // (line, colour, left, right) of each run.
+        let mut runs: Vec<(usize, [u8; 4], f32, f32)> = Vec::new();
+        let mut last_char = usize::MAX;
+        for g in &self.glyphs {
+            let Some(Some(c)) = colors.get(g.char_index) else {
+                last_char = usize::MAX;
+                continue;
+            };
+            let continues = runs.last().is_some_and(|r| r.0 == g.line && r.1 == *c) && last_char != usize::MAX && g.char_index <= last_char + 1;
+            if continues {
+                let r = runs.last_mut().unwrap();
+                r.2 = r.2.min(g.x);
+                r.3 = r.3.max(g.x + g.advance);
+            } else {
+                runs.push((g.line, *c, g.x, g.x + g.advance));
+            }
+            last_char = g.char_index;
+        }
+        let (padx, pady, radius) = (self.size * 0.16, self.size * 0.04, self.size * 0.22);
+        let boxes: Vec<([u8; 4], [f32; 5])> = runs
+            .iter()
+            .map(|&(line, c, x0, x1)| {
+                let l = self.lines[line.min(self.lines.len() - 1)];
+                let (x0, y0, x1, y1) = (left + x0 - padx, top + l[2] - pady, left + x1 + padx, top + l[2] + l[3] + pady);
+                let r = radius.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
+                (c, [(x0 + x1) / 2.0, (y0 + y1) / 2.0, (x1 - x0) / 2.0 - r, (y1 - y0) / 2.0 - r, r])
+            })
+            .collect();
+        let mut layer = vec![[0f32; 4]; (w * h) as usize];
+        if boxes.is_empty() {
+            return layer;
+        }
+        for (i, px) in layer.iter_mut().enumerate() {
+            let (x, y) = ((i as u32 % w) as f32 + 0.5, (i as u32 / w) as f32 + 0.5);
+            for (c, [cx, cy, hx, hy, r]) in &boxes {
+                let (dx, dy) = ((x - cx).abs() - hx, (y - cy).abs() - hy);
+                let d = (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0) - r;
+                let cov = (0.5 - d).clamp(0.0, 1.0);
+                if cov > 0.0 {
+                    *px = over(premul(*c, cov), *px);
+                }
+            }
+        }
+        layer
     }
 
     /// Background box coverage, anti-aliased by distance to its rounded edge.
@@ -1387,7 +1444,7 @@ mod tests {
         assert!(latin.covers("Hello") && !latin.covers("ő") && ext.covers("ő"));
         fn style(font: &Font) -> TextStyle<'_> {
             #[rustfmt::skip]
-            let s = TextStyle { font, size: 40.0, color: [255; 4], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: true, stroke: None, more_strokes: &[], gradient: None, glow: None, background: None, shadow: None, max_width: None, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None, underline: false };
+            let s = TextStyle { font, size: 40.0, color: [255; 4], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: true, stroke: None, more_strokes: &[], gradient: None, glow: None, background: None, shadow: None, max_width: None, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: None, word_boxes: None, underline: false };
             s
         }
         let alone = layout("Hő Ha", &style(&latin));

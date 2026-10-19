@@ -859,6 +859,17 @@ export type TextClipProps = ClipProps & {
    * start, so the words stay with the speech.
    */
   spokenFrom?: number;
+  /**
+   * The words of a caption made from speech (Auto captions) and when each is said: its
+   * character range in `text` and clip-local seconds. The caption styles follow them
+   * (engine/crates/playback/src/caption.rs); editing the text drops them.
+   */
+  captionWords?: { from: number; to: number; start: number; end: number; keyword?: boolean }[];
+  /** The colour of an own caption style's highlight, fill or box, and of its keywords. */
+  captionColor?: string;
+  captionKeywordColor?: string;
+  /** Made by Auto captions: Generate again replaces it. */
+  autoCaption?: boolean;
 };
 
 export type FilterClipProps = ClipProps & {

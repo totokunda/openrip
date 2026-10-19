@@ -951,11 +951,18 @@ fn convert_clip(
     // The Animation tab's animations: a text's In, Out and Loop; a video or photo's In, Out
     // and Combo.
     let kinds: &[AnimationKind] = match ty {
-        "text" | "sticker" => &[AnimationKind::In, AnimationKind::Out, AnimationKind::Loop],
+        "text" => &[AnimationKind::In, AnimationKind::Out, AnimationKind::Loop, AnimationKind::Caption],
+        "sticker" => &[AnimationKind::In, AnimationKind::Out, AnimationKind::Loop],
         "video" | "image" => &[AnimationKind::In, AnimationKind::Out, AnimationKind::Combo],
         _ => &[],
     };
-    let items: Vec<Animation> = kinds.iter().filter_map(|k| app_animation(clip, k.clone(), target.duration)).collect();
+    let items: Vec<Animation> = kinds
+        .iter()
+        .filter_map(|k| match k {
+            AnimationKind::Caption => app_caption_style(clip, target.duration),
+            k => app_animation(clip, k.clone(), target.duration),
+        })
+        .collect();
     if !items.is_empty() {
         let mid = MaterialId(format!("{id}-animations"));
         materials.animations.push(Animations { id: mid.clone(), items });
@@ -1229,7 +1236,20 @@ fn app_animation(clip: &Value, kind: AnimationKind, length: Micros) -> Option<An
 /// The Animation tab's caption style, over the whole clip.
 fn app_caption_style(clip: &Value, duration: Micros) -> Option<Animation> {
     let ty = s(clip, "captionStyle");
-    app::BUILTIN_CAPTION.contains(&ty.as_str()).then(|| Animation { kind: AnimationKind::Caption, start: Micros::ZERO, duration, builtin: Some(ty), library: None, resource: None })
+    let builtin = if app::BUILTIN_CAPTION.contains(&ty.as_str()) {
+        ty
+    } else if app::OWN_CAPTION.contains(&ty.as_str()) {
+        // Our own styles carry their colour: "orip_highlight:#ffe600".
+        match Rgba::from_hex(&s(clip, "captionColor")) {
+            Some(_) => format!("{ty}:{}", s(clip, "captionColor")),
+            None => ty,
+        }
+    } else {
+        return None;
+    };
+    // A caption cut off at its start (a split, a trim) starts that far into its speech.
+    let from = Micros::from_secs_f64(f(clip, "spokenFrom", 0.0).max(0.0));
+    Some(Animation { kind: AnimationKind::Caption, start: Micros(-from.0), duration: duration + from, builtin: Some(builtin), library: None, resource: None })
 }
 
 /// The Animation tab's transition into the next clip, if it's one the engine draws, at most
@@ -1778,7 +1798,7 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
     let font_size = f(clip, "fontSize", 48.0).max(1.0);
     let TextEffects { stroke, shadow, background } = text_effects(clip);
     let chars = text.chars().count() as u32;
-    Text {
+    let mut material = Text {
         id: id.clone(),
         runs: vec![TextRun {
             range: (0, chars),
@@ -1824,7 +1844,40 @@ fn convert_text(id: &MaterialId, clip: &Value, world: &World) -> Text {
                 },
             }).filter(|fr| fr.width > 0.0 && fr.height > 0.0),
         },
+    };
+    caption_words(clip, &mut material);
+    material
+}
+
+/// The words of a caption this app made from speech (Auto captions): the clip's
+/// `captionWords`, one `{from, to, start, end, keyword}` per word, are the character range
+/// of the word in the text and when it's said (clip-local seconds). They go on the text
+/// material for the caption styles to follow, and the words flagged `keyword` get their own
+/// run in `captionKeywordColor`. Words that don't fit the text (it was edited since) are left
+/// out, and the text shows whole.
+fn caption_words(clip: &Value, material: &mut Text) {
+    let Some(list) = clip.get("captionWords").and_then(Value::as_array) else { return };
+    let n = material.text.chars().count() as u32;
+    let mut words = Vec::new();
+    let mut at = 0u32;
+    for w in list {
+        let (from, to) = (f(w, "from", -1.0), f(w, "to", -1.0));
+        if from < at as f64 || to <= from || to > n as f64 || from.fract() != 0.0 || to.fract() != 0.0 {
+            return;
+        }
+        let (start, end) = (Micros::from_secs_f64(f(w, "start", 0.0).max(0.0)), Micros::from_secs_f64(f(w, "end", 0.0).max(0.0)));
+        words.push(SpokenWord { range: (from as u32, to as u32), start, end: end.max(start) });
+        at = to as u32;
     }
+    if let Some(base) = material.runs.first().cloned() {
+        let color = Rgba::from_hex(&s(clip, "captionKeywordColor")).unwrap_or(Rgba { r: 1.0, g: 0.9, b: 0.0, a: 1.0 });
+        for (word, w) in words.iter().zip(list) {
+            if b(w, "keyword") {
+                material.runs.push(TextRun { range: word.range, fill: Rgba { a: base.fill.a, ..color }, gradient: None, ..base.clone() });
+            }
+        }
+    }
+    material.words = words;
 }
 
 #[cfg(test)]
@@ -2222,6 +2275,29 @@ mod tests {
         let glow = at.layout.glow.unwrap();
         assert!((glow.strength - 0.5).abs() < 1e-3, "{glow:?}");
         assert_eq!(glow.color, Some(Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }));
+    }
+
+    #[test]
+    fn captions_made_from_speech_carry_their_words_style_and_keywords() {
+        let mut d = doc();
+        let clip = d["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["type"] == "text").unwrap();
+        // "hello world" shown as "Hello World": two words, the second a keyword.
+        clip["captionWords"] = json!([{ "from": 0, "to": 5, "start": 0.0, "end": 0.4 }, { "from": 6, "to": 11, "start": 0.5, "end": 0.9, "keyword": true }]);
+        clip["captionStyle"] = json!("orip_karaoke");
+        clip["captionColor"] = json!("#00ff88");
+        clip["captionKeywordColor"] = json!("#ff0000");
+        let Imported { project, .. } = import_v1_json(&d).unwrap();
+        let text = &project.materials.texts[0];
+        assert_eq!(text.words, vec![SpokenWord { range: (0, 5), start: Micros(0), end: Micros(400_000) }, SpokenWord { range: (6, 11), start: Micros(500_000), end: Micros(900_000) }]);
+        assert_eq!(text.runs.len(), 2);
+        assert_eq!((text.runs[1].range, text.runs[1].fill.r, text.runs[1].fill.g), ((6, 11), 1.0, 0.0));
+        let seg = project.tracks.iter().flat_map(|t| &t.segments).find(|s| s.material == text.id).unwrap();
+        let cap = attached_animations(seg, &project.materials).into_iter().find(|a| a.kind == AnimationKind::Caption).unwrap();
+        assert_eq!(cap.builtin.as_deref(), Some("orip_karaoke:#00ff88"));
+        // Words that no longer fit the text (it was edited) are left out; the style stays.
+        d["timeline"]["clips"].as_array_mut().unwrap().iter_mut().find(|c| c["type"] == "text").unwrap()["text"] = json!("hi");
+        let edited = import_v1_json(&d).unwrap().project;
+        assert!(edited.materials.texts[0].words.is_empty() && edited.materials.texts[0].runs.len() == 1);
     }
 }
 

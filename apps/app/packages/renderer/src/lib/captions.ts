@@ -9,8 +9,11 @@
 // rate. See docs/plan/app-engine-integration.md ("Text styles and captions").
 import type { AnyClipProps, TextClipProps, TimelineProps } from "./types";
 
-/** A caption: its text (lines joined by "\n") from `start` to `end`, in seconds. */
-export type Cue = { start: number; end: number; text: string };
+/** A word of a caption made from speech: its character range in the text and when it's said, seconds from the caption's start. */
+export type CueWord = { from: number; to: number; start: number; end: number; keyword?: boolean };
+
+/** A caption: its text (lines joined by "\n") from `start` to `end`, in seconds, and for one made from speech its words' timing. */
+export type Cue = { start: number; end: number; text: string; words?: CueWord[] };
 
 /** What reading a file gave: its cues in time order, and the blocks it couldn't read. */
 export type ParsedCaptions = { cues: Cue[]; skipped: number };
@@ -142,17 +145,19 @@ export const clipsToCues = (clips: AnyClipProps[], fps: number, opts: { timeline
  * track can't hold overlapping clips). Frames are counted from `offsetFrames` (where the
  * captions go on the timeline).
  */
-export const cueFrames = (cues: Cue[], fps: number, offsetFrames = 0): { startFrame: number; endFrame: number; text: string }[] => {
-  const framed: { startFrame: number; endFrame: number; text: string }[] = [];
+export const cueFrames = (cues: Cue[], fps: number, offsetFrames = 0): { startFrame: number; endFrame: number; text: string; words?: CueWord[] }[] => {
+  const framed: { startFrame: number; endFrame: number; text: string; words?: CueWord[] }[] = [];
   for (const c of [...cues].sort((a, b) => a.start - b.start)) {
-    const startFrame = offsetFrames + Math.round(c.start * fps);
-    const endFrame = Math.max(startFrame + 1, offsetFrames + Math.round(c.end * fps));
+    let startFrame = offsetFrames + Math.round(c.start * fps);
     const prev = framed[framed.length - 1];
+    // A caption with its words' timing can't take another's lines: it starts a frame later.
+    if (prev && prev.startFrame === startFrame && (prev.words || c.words)) startFrame += 1;
+    const endFrame = Math.max(startFrame + 1, offsetFrames + Math.round(c.end * fps));
     if (prev && prev.startFrame === startFrame) {
       prev.text += `\n${c.text}`;
       prev.endFrame = Math.max(prev.endFrame, endFrame);
     } else {
-      framed.push({ startFrame, endFrame, text: c.text });
+      framed.push({ startFrame, endFrame, text: c.text, words: c.words });
     }
   }
   framed.forEach((c, k) => {
@@ -178,6 +183,8 @@ export const captionClips = (
     makeId: () => string;
     offsetFrames?: number;
     bottom?: number;
+    /** The captions are made from speech (Auto captions): marked so Generate again replaces them. */
+    auto?: boolean;
   },
 ): { timeline: Partial<TimelineProps> & { timelineId: string; type: "text" }; clips: TextClipProps[] } => {
   const timelineId = opts.makeId();
@@ -185,11 +192,12 @@ export const captionClips = (
   const fontSize = style.fontSize ?? 32;
   const width = opts.canvas.width * 0.9;
   const lines = (t: string) => t.split("\n").length;
-  const clips = cueFrames(cues, opts.fps, opts.offsetFrames ?? 0).map(({ startFrame, endFrame, text }): TextClipProps => {
+  const clips = cueFrames(cues, opts.fps, opts.offsetFrames ?? 0).map(({ startFrame, endFrame, text, words }): TextClipProps => {
     const height = fontSize * 1.25 * lines(text) + fontSize * 0.4;
     return {
       ...(JSON.parse(JSON.stringify(style)) as Partial<TextClipProps>),
       text,
+      ...(words ? { captionWords: words, spokenWords: true, spokenFrom: 0, autoCaption: !!opts.auto } : {}),
       clipId: opts.makeId(),
       type: "text",
       timelineId,

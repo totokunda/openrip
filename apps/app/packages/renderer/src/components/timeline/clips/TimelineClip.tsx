@@ -56,6 +56,7 @@ import { freezeTarget } from "@/lib/timeline-motion";
 import BeatMarkers from "./BeatMarkers";
 import { projectBeatPoints, soundMenuItems } from "@/lib/audio-tools";
 import { analysisMenuItems } from "@/lib/analysis";
+import { captionMenuItems } from "@/lib/autocaptions";
 import { useViewportStore } from "@/lib/viewport";
 import { useContextMenuStore, ContextMenuItem } from "@/lib/context-menu";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -1242,6 +1243,8 @@ const TimelineClip: React.FC<
         ...editTools,
         // Split scenes and Adjust color ▸ (lib/analysis.ts).
         ...analysisMenuItems(clip, targetIds.length),
+        // Generate captions: the Auto captions panel for this clip (lib/autocaptions.ts).
+        ...captionMenuItems(clip, targetIds.length),
         {
           id: "split",
           label: "Split at Playhead",

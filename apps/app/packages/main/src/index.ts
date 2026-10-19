@@ -14,6 +14,7 @@ import { appDirProtocol } from "./modules/AppDirProtocol.js";
 import { coreIpc } from "./modules/CoreIpc.js";
 import { engineModule } from "./modules/EngineModule.js";
 import { voiceoverModule } from "./modules/VoiceoverModule.js";
+import { speechModule } from "./modules/SpeechModule.js";
 import { capCutImportModule } from "./modules/CapCutImportModule.js";
 import { appMenu } from "./modules/AppMenu.js";
 import { stickerLibraryModule } from "./modules/StickerLibraryModule.js";
@@ -34,6 +35,8 @@ export async function initApp(initConfig: AppInitConfig) {
     .init(engineModule())
     // Voiceover recording through the engine, once it's loaded
     .init(voiceoverModule())
+    // Auto captions: local speech recognition and its models
+    .init(speechModule())
     .init(jsonPersistenceModule())
     .init(capCutImportModule())
     // The Stickers tab's downloads and cache

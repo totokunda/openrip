@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { pickMediaPaths, pickSavePath, readFileBuffer, writeFileBuffer } from "@app/preload";
 import { CAPTION_STYLE, captionClips, clipsToCues, parseCaptions, writeSrt } from "./captions";
 import { TEXT_PRESETS } from "./text-presets";
+import { CAPTION_PRESETS, type CaptionKind } from "./caption-presets";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
 import { useViewportStore } from "./viewport";
@@ -15,7 +16,7 @@ import { BASE_LONG_SIDE } from "./settings";
 import type { TextClipProps } from "./types";
 
 /** A look for captions: the default, or one of the text presets made for captions. */
-export type CaptionStyle = { id: string; name: string; props: Partial<TextClipProps> };
+export type CaptionStyle = { id: string; name: string; props: Partial<TextClipProps>; /** For OpenRip's word-by-word styles: how they treat the word being said. */ kind?: CaptionKind };
 
 /** The text presets' look without their sample words. */
 const look = (props: Partial<TextClipProps>): Partial<TextClipProps> => {
@@ -35,6 +36,9 @@ export const CAPTION_STYLES: CaptionStyle[] = [
     return p ? [{ id: p.id, name: p.name, props: { ...CAPTION_STYLE, strokeEnabled: false, ...look(p.props), fontSize: Math.min(p.props.fontSize ?? 30, 40) } }] : [];
   }),
 ];
+
+// OpenRip's forty word-by-word styles (lib/caption-presets.ts), after the first eight.
+CAPTION_STYLES.push(...CAPTION_PRESETS.map((p): CaptionStyle => ({ id: p.id, name: p.name, kind: p.kind, props: { ...CAPTION_STYLE, strokeEnabled: false, ...p.props } })));
 
 export const captionStyle = (id: string): CaptionStyle => CAPTION_STYLES.find((s) => s.id === id) ?? CAPTION_STYLES[0];
 
@@ -128,7 +132,11 @@ export function applyCaptionStyle(timelineId: string, styleId: string) {
   const props = captionStyle(styleId).props;
   const { clips, updateClip } = useClipStore.getState();
   for (const c of clips) {
-    if (c.type === "text" && c.timelineId === timelineId) updateClip(c.clipId, { ...props });
+    if (c.type === "text" && c.timelineId === timelineId) {
+      // A caption made from speech takes a plain style's "whole text" in place of the last word-by-word one.
+      const words = (c as TextClipProps).captionWords ? { captionStyle: "none" } : {};
+      updateClip(c.clipId, { ...words, ...props });
+    }
   }
 }
 
