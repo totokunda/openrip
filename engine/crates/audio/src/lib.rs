@@ -196,7 +196,14 @@ fn splice_compounds(tracks: &[Track], project: &Project, shift: i64, window: Opt
             if let Some(c) = project.materials.compounds.iter().find(|c| c.id == seg.material) {
                 let inner = seg.target.start.0 + shift - seg.source.map_or(0, |s| s.start.0);
                 let volume = gain * seg.volume.sample(Micros::ZERO);
-                splice_compounds(&c.tracks, project, inner, Some(TimeRange::new(Micros(start), Micros(end - start))), volume, false, out);
+                let window = Some(TimeRange::new(Micros(start), Micros(end - start)));
+                // At the clip's speed or backward, the content's clips are timed as it plays them.
+                if (seg.speed - 1.0).abs() > 1e-9 || seg.reverse {
+                    let played = timed_as_played(&c.tracks, seg);
+                    splice_compounds(&played, project, inner, window, volume, false, out);
+                } else {
+                    splice_compounds(&c.tracks, project, inner, window, volume, false, out);
+                }
             } else if !top {
                 let mut seg = seg.clone();
                 let (cut_head, cut_tail) = (start - (seg.target.start.0 + shift), (seg.target.end().0 + shift) - end);
@@ -219,6 +226,32 @@ fn splice_compounds(tracks: &[Track], project: &Project, shift: i64, window: Opt
             out.push(Track { id: format!("{}#sound{}", track.id, out.len()), segments: kept, ..track.clone() });
         }
     }
+}
+
+/// A compound clip's content as `seg` plays it: each clip of it kept in the content's time but
+/// squeezed by the compound's speed about the content's in-point (and mirrored about its
+/// out-point when the compound plays backward), its own speed multiplied by it and its direction
+/// flipped, so a clip placed by [`splice_compounds`] at the compound's start plays what the
+/// compound shows at the pace and direction it shows it.
+fn timed_as_played(tracks: &[Track], seg: &Segment) -> Vec<Track> {
+    let Some(source) = seg.source else { return tracks.to_vec() };
+    let (s0, end, k) = (source.start.0 as f64, source.end().0 as f64, seg.speed.max(1e-6));
+    tracks
+        .iter()
+        .map(|track| {
+            let mut track = track.clone();
+            for inner in &mut track.segments {
+                let (c0, d) = (inner.target.start.0 as f64, inner.target.duration.0 as f64);
+                let start = if seg.reverse { s0 + (end - c0 - d) / k } else { s0 + (c0 - s0) / k };
+                inner.target = TimeRange::new(Micros(start.round() as i64), Micros((d / k).round().max(1.0) as i64));
+                inner.speed *= k;
+                if seg.reverse {
+                    inner.reverse = !inner.reverse;
+                }
+            }
+            track
+        })
+        .collect()
 }
 
 pub struct Mixer {

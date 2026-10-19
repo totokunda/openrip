@@ -265,3 +265,28 @@ fn a_compound_plays_its_contents_sound_inside_its_clip() {
         assert!((a * 0.5 - b).abs() < 1e-6);
     }
 }
+
+/// A compound clip at twice the speed plays its content's sound twice as fast: what is at the
+/// content's 1 s (its first sound) comes half as far into the clip.
+#[test]
+fn a_compound_at_twice_the_speed_plays_its_contents_sound_sooner() {
+    let Some(path) = noise() else { return };
+    let inner = project(path.to_str().unwrap(), &[(false, false, 1.0)]);
+    let compound = |speed: f64| {
+        let mut p = inner.clone();
+        p.materials.compounds.push(openrip_model::Compound { id: "c".into(), name: String::new(), tracks: std::mem::take(&mut p.tracks) });
+        let mut clip = serde_json::json!({ "id": "outer", "material": "c", "source": { "start": 0, "duration": (2_500_000.0 * speed) as i64 }, "target": { "start": 500000, "duration": 2500000 },
+            "speed": speed, "visible": true, "render_index": 0,
+            "transform": { "position": { "value": { "x": 0.0, "y": 0.0 } }, "scale": { "value": { "x": 1.0, "y": 1.0 } }, "rotation": { "value": 0.0 } },
+            "opacity": { "value": 1.0 }, "volume": { "value": 1.0 } });
+        clip["attachments"] = serde_json::json!([]);
+        p.tracks.push(serde_json::from_value(serde_json::json!({ "id": "main", "kind": "video", "segments": [clip] })).unwrap());
+        mix(p)
+    };
+    let first_sound = |out: &[f32]| out.iter().position(|v| *v != 0.0).unwrap() as f64 / (RATE as f64 * CHANNELS as f64);
+    // Speed 1: the sound starts at the content's 1 s, 0.5 s after the clip's start: 1.5 s.
+    assert!((first_sound(&compound(1.0)) - 1.5).abs() < 0.02);
+    // Speed 2: 0.5 s into the content's own time is 0.25 s of the clip: 1 s of content in
+    // is 0.5 s of the clip, 1.0 s on the timeline.
+    assert!((first_sound(&compound(2.0)) - 1.0).abs() < 0.05, "{}", first_sound(&compound(2.0)));
+}

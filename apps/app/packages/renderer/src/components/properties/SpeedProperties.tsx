@@ -14,6 +14,7 @@ import {
   timelineProgressAt,
 } from "@/lib/speed";
 import { linkedClips } from "@/lib/timeline-edit";
+import { isCompound } from "@/lib/compound";
 import type { AnyClipProps, SpeedCurve, SpeedPoint, VideoClipProps } from "@/lib/types";
 import { CurveIcon, speedLevel } from "@/components/motion/Previews";
 import { cn } from "@/lib/utils";
@@ -192,7 +193,7 @@ const StandardSpeed: React.FC<{ clipId: string }> = ({ clipId }) => {
           {/* A curve's sound always follows its speed (CapCut ignores the toggle then). */}
           <Toggle label="Change audio pitch" on={!!clip.changePitch} onChange={setPitch} disabled={curved} />
         </div>
-        {clip.type === "video" && <SmoothSlowMoRow clipId={clipId} />}
+        {clip.type === "video" && !isCompound(clip) && <SmoothSlowMoRow clipId={clipId} />}
       </div>
       <div className="h-9 shrink-0 flex items-center justify-end px-3 bg-brand-header">
         <button

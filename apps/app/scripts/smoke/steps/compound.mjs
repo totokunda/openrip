@@ -7,7 +7,9 @@
 //   (times from 0), and the engine's frame is what it was before (the picture is unchanged);
 // - the compound's own Scale and Opacity change the engine's frame (it's one picture), and undo;
 // - the clip's menu names Create compound clip and Undo compound clip; the inspector's tabs are
-//   the video's without Speed;
+//   the video's, its Speed the constant one (Standard alone, no Curve);
+// - Speed 2× on the compound plays its content twice as fast: 1 s in shows what 2 s did at 1×, the
+//   clip half as long (one undo step, the engine's frame and the saved project exact);
 // - double-click opens its timeline: the breadcrumb "Main timeline › Compound clip1", the nested
 //   clips on the timeline, the player showing the nested timeline; an edit inside (a scale on the
 //   video, one undo step) reaches the compound's picture; Back returns to the main timeline;
@@ -23,9 +25,9 @@
 // `cp4-subprojects` ↔ `05-left-media/012`.
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { engineFrame, grab, diff, drag, now, openEditor, rulerMap, sectionButton, seek, settled } from "./_preview.mjs";
+import { engineFrame, grab, diff, drag, now, openEditor, rulerMap, sectionButton, seek, settled, tab } from "./_preview.mjs";
 import { bar, checks, savedProject } from "./_anim.mjs";
-import { undoCase as undoStep } from "./_undo.mjs";
+import { undoCase as undoStep, press } from "./_undo.mjs";
 import { input, open, typeIn } from "./_inspector.mjs";
 import { ffmpeg } from "./_audio.mjs";
 
@@ -109,7 +111,7 @@ export default async (ctx) => {
   await selectBars([[comp.clipId, 2.5]], doc);
   await win.waitForTimeout(500);
   const t = await tabs(win);
-  check("a compound uses the video inspector (Video, Audio, Animation, Adjust; no Speed)", t[0] === "Video" && t.includes("Animation") && t.includes("Adjust") && !t.includes("Speed"), t.join(","));
+  check("a compound uses the video inspector (Video, Audio, Speed, Animation, Adjust)", t[0] === "Video" && t.includes("Animation") && t.includes("Adjust") && t.includes("Speed"), t.join(","));
   await shot("cp1-compound");
   await open(win, "Video", "Basic");
   const sections = await win.evaluate(() => [...document.querySelectorAll("[data-testid=inspector] [data-section]")].map((e) => e.getAttribute("data-section")));
@@ -125,6 +127,34 @@ export default async (ctx) => {
   await typeIn(win, "Opacity", 100);
   await grab(win, "reset");
   check("back at 100% it's the original picture again", (await diff(win, "before", "reset", 6)).n < 40);
+
+  // ---- Speed: constant, applied to the content -----------------------------------------------------
+  doc = await saved();
+  const compLen = (c) => +c.endTick - +c.startTick;
+  const len1 = compLen(compounds(doc)[0]);
+  await seek(win, ctx.map, 2);
+  const at2 = (await engineFrame(win)).sum;
+  await selectBars([[comp.clipId, 3.5]], doc);
+  await tab(win, "Speed");
+  const speedSubs = await win.evaluate(() => [...document.querySelectorAll("[data-testid=inspector] [role=tablist]")][1]?.innerText.replace(/\s+/g, ",") ?? "");
+  check("a compound's Speed has no Curve (Standard alone)", !/Curve/.test(speedSubs) && (await win.locator("[data-testid=speed-value]").count()) === 1, speedSubs);
+  await undoCase("compound speed 2x", async () => {
+    const input = win.locator("[data-testid=speed-value]");
+    await input.click();
+    await win.keyboard.press("Meta+A");
+    await win.keyboard.type("2");
+    await settled(win, () => win.keyboard.press("Enter"));
+  }, { frame: false });
+  doc = await saved();
+  const fast = compounds(doc)[0];
+  check("2x: saved, half the length", fast.speed === 2 && Math.abs(compLen(fast) - len1 / 2) < len1 * 0.02, `${fast.speed}x, ${compLen(fast)} of ${len1}`);
+  await seek(win, ctx.map, 1);
+  check("2x: 1 s in shows what 2 s showed at 1x", (await engineFrame(win)).sum === at2);
+  await press(win, "Meta+z");
+  await win.waitForTimeout(800);
+  doc = await saved();
+  check("undone: 1x and the length back", compounds(doc)[0].speed !== 2 && compLen(compounds(doc)[0]) === len1, `${compounds(doc)[0].speed}`);
+  await selectBars([[comp.clipId, 2.5]], doc);
 
   // ---- the clip's menu -----------------------------------------------------------------------------
   doc = await saved();

@@ -118,7 +118,8 @@ const ClipPropertiesPanel: React.FC = () => {
     const audioBasic: Section = { id: 'basic', label: 'Basic', content: <AudioProperties clipId={clipId} /> };
     const voiceChanger: Section = { id: 'voice', label: 'Voice changer', content: <VoiceChangerProperties clipId={clipId} /> };
     // A compound clip: the video inspector without what reads a file (stabilize and the rest of
-    // the clean-up, Speed, auto adjust and colour match); it plays at speed 1.
+    // the clean-up, auto adjust and colour match); its Speed is the constant one (no curve, no
+    // smooth slow-mo), applied to its picture and sound.
     if (isCompound(clip)) {
       return [
         {
@@ -131,6 +132,7 @@ const ClipPropertiesPanel: React.FC = () => {
           ],
         },
         ...(hasAudio ? [{ id: 'audio', label: 'Audio', sections: [audioBasic] }] : []),
+        speed(false),
         animation,
         {
           id: 'adjust',

@@ -798,8 +798,8 @@ impl PreviewEngine {
 
     /// Draw a compound clip: its content's segments at the matching time, into a group of their
     /// own (`Begin`), then the group as the clip's picture (`Group`). The content's tracks are
-    /// moved so a segment reads the frame's time as it reads its own (a constant shift: a
-    /// compound plays at speed 1), and so draw as ordinary tracks do, transitions, effects
+    /// moved so a segment reads the frame's time as it reads its own (a constant shift, the time itself
+    /// scaled by the compound clip's speed), and so draw as ordinary tracks do, transitions, effects
     /// and all.
     fn draw_compound(&mut self, seg: &Segment, t: Micros, w: u32, h: u32, out: &mut Vec<(Segment, Pixels)>, report: &mut FrameReport) {
         let Some(content) = self.project.materials.compounds.iter().find(|c| c.id == seg.material) else { return };
@@ -817,9 +817,12 @@ impl PreviewEngine {
                 .collect(),
         };
         out.push((seg.clone(), Pixels::Begin(None)));
+        // The content's time at this frame: the clip's own speed and direction (constant), read
+        // as the frame time the shifted tracks answer to.
+        let at = seg.source_time(t).map_or(t, |c| Micros(c.0 + shift));
         let outer = self.scope.replace(tracks);
-        let active = Self::active_in(self.scope.as_deref().unwrap_or_default(), t);
-        self.draw_segments(active, t, w, h, out, report);
+        let active = Self::active_in(self.scope.as_deref().unwrap_or_default(), at);
+        self.draw_segments(active, at, w, h, out, report);
         let tracks = std::mem::replace(&mut self.scope, outer).unwrap_or_default();
         self.compound_tracks.insert(seg.id.clone(), (shift, tracks));
         let mattes = self.masked(seg, (w, h), 0, t, seg.local_time(t), None);

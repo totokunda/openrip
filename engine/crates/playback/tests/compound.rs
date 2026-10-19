@@ -125,3 +125,30 @@ fn a_compound_in_a_compound_draws_both_levels() {
     assert!(near(px(&frame(p.clone(), 5.5), 20, 18), [128, 128, 128], 2));
     assert!(near(px(&frame(p, 4.5), 20, 18), [0, 0, 0], 2));
 }
+
+#[test]
+fn a_compound_plays_its_content_at_its_speed_and_direction() {
+    // At twice the speed the clip's 2 s read 4 s of the content (from its 1 s): the still,
+    // which is there from 1 s to 3 s of it, is on screen for the clip's first second only.
+    let fast = |s: &mut Segment| {
+        s.speed = 2.0;
+        s.source = Some(TimeRange::new(Micros(1_000_000), Micros(4_000_000)));
+    };
+    assert!(near(px(&frame(project(fast), 5.75), 32, 18), [128, 128, 128], 2));
+    assert!(near(px(&frame(project(fast), 6.5), 32, 18), [0, 0, 0], 2));
+    // Slower than 1 the other way: half speed reads 1 s of content over the 2 s.
+    let slow = |s: &mut Segment| {
+        s.speed = 0.5;
+        s.source = Some(TimeRange::new(Micros(1_000_000), Micros(1_000_000)));
+    };
+    assert!(near(px(&frame(project(slow), 6.9), 32, 18), [128, 128, 128], 2));
+    // Backward at twice the speed: the clip starts at the content's 5 s end of the range
+    // (nothing there yet) and reaches the still a second and a quarter in.
+    let back = |s: &mut Segment| {
+        s.speed = 2.0;
+        s.reverse = true;
+        s.source = Some(TimeRange::new(Micros(1_000_000), Micros(4_000_000)));
+    };
+    assert!(near(px(&frame(project(back), 5.25), 32, 18), [0, 0, 0], 2));
+    assert!(near(px(&frame(project(back), 6.5), 32, 18), [128, 128, 128], 2));
+}

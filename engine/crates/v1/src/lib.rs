@@ -880,8 +880,9 @@ fn convert_clip(
     }
     let is_av = matches!(ty, "video" | "audio");
     let compound = ty == "video" && clip.get("compound").is_some_and(Value::is_object);
-    // A compound plays its content at its own speed, 1.
-    let speed = if is_av && !compound { f(clip, "speed", 1.0).clamp(0.1, 100.0) } else { 1.0 };
+    // A compound plays its content at the clip's constant speed (its picture and sound are the
+    // content's read faster or slower); a speed curve on one isn't applied.
+    let speed = if is_av { f(clip, "speed", 1.0).clamp(0.1, 100.0) } else { 1.0 };
     let mut attachments = Vec::new();
 
     // Source range. v1 trims are in timeline frames before speed (preview semantics).
@@ -984,6 +985,11 @@ fn convert_clip(
     let reverse = is_av && freeze.is_none() && b(clip, "reverse");
     let source = match (source, materials.media.iter().find(|m| m.id == material)) {
         (Some(src), Some(m)) if reverse => Some(played_order(src, m.duration)),
+        // A compound reads its content backward from the content's end.
+        (Some(src), None) if reverse && compound => {
+            let length = materials.compounds.iter().find(|c| c.id == material).map_or(Micros::ZERO, |c| c.tracks.iter().flat_map(|t| t.segments.iter()).map(|s| s.target.end()).max().unwrap_or(Micros::ZERO));
+            Some(played_order(src, length))
+        }
         (s, _) => s,
     };
 
@@ -2316,9 +2322,11 @@ mod tests {
         inner.sort();
         assert_eq!(inner, ["it", "iv"]);
         assert_eq!(content.duration(), Micros(2_000_000));
-        // Plays at speed 1 from its trim, with its own placement and sound.
-        assert_eq!(seg.speed, 1.0);
-        assert_eq!(seg.source.unwrap().start, Micros(10 * 1_000_000 / 24 + 1));
+        // Plays at the clip's speed (2) from its trim, with its own placement and sound: its source
+        // is the content's range it reads, twice the clip's length.
+        assert_eq!(seg.speed, 2.0);
+        assert_eq!(seg.source.unwrap().start, Micros((10 * 1_000_000 / 24 + 1) * 2));
+        assert_eq!(seg.source.unwrap().duration.0, seg.target.duration.0 * 2);
         assert!((seg.opacity.sample(Micros(0)) - 0.8).abs() < 1e-6 && (seg.transform.scale.sample(Micros(0)).x - 0.5).abs() < 1e-6);
         assert!((seg.volume.sample(Micros(0)) - 10f32.powf(-6.0 / 20.0)).abs() < 1e-5);
     }
