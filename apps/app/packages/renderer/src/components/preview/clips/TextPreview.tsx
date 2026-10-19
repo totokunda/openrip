@@ -1303,6 +1303,9 @@ const TextPreview: React.FC<
       }
 
       if (!isEditing) {
+        // Only the pointer selects: a drag with a mask, shape or drawing tool, or the hand,
+        // that starts over a text belongs to that tool, not to the text under it.
+        if (tool !== "pointer") return;
         clearSelection();
         addClipSelection(clipId);
         return;
@@ -1343,6 +1346,7 @@ const TextPreview: React.FC<
     [
       isFullscreen,
       isEditing,
+      tool,
       getCharIndexAtPosition,
       clearSelection,
       addClipSelection,
