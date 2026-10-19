@@ -13,6 +13,7 @@ import { useClipStore, pruneAssetsForClips } from "./clip";
 import { useControlsStore } from "./control";
 import { useViewportStore } from "./viewport";
 import type { AnyClipProps, Asset, Guide, Marker, TimelineProps } from "./types";
+import type { CompoundFrame } from "./compound";
 
 /** The part of the stores an undo puts back. Playhead, selection, zoom and views aren't in it. */
 type Doc = {
@@ -28,6 +29,8 @@ type Doc = {
   markers: Marker[];
   magnet: boolean;
   guides: Guide[];
+  /** The timelines left to open the compound clip being edited (`clips` and `timelines` are its content's); empty on the main timeline. */
+  stack: CompoundFrame[];
 };
 
 /**
@@ -89,6 +92,7 @@ const readDoc = (): Doc => {
     markers: c.markers,
     magnet: c.magnet,
     guides: c.guides,
+    stack: c.compoundStack,
   };
 };
 
@@ -103,6 +107,7 @@ const sameDoc = (a: Doc, b: Doc) =>
   _.isEqual(a.aspectRatio, b.aspectRatio) &&
   _.isEqual(a.canvasSize, b.canvasSize) &&
   a.fps === b.fps &&
+  (a.stack === b.stack || _.isEqual(a.stack, b.stack)) &&
   _.isEqual(a.markers, b.markers) &&
   _.isEqual(a.guides, b.guides) &&
   a.magnet === b.magnet;
@@ -164,6 +169,7 @@ const onChange = () => {
     next.aspectRatio === present.aspectRatio &&
     next.canvasSize === present.canvasSize &&
     next.fps === present.fps &&
+    next.stack === present.stack &&
     next.markers === present.markers &&
     next.guides === present.guides &&
     next.magnet === present.magnet;
@@ -191,7 +197,8 @@ const subscribe = () => {
       s.clipDuration !== p.clipDuration ||
       s.markers !== p.markers ||
       s.guides !== p.guides ||
-      s.magnet !== p.magnet
+      s.magnet !== p.magnet ||
+      s.compoundStack !== p.compoundStack
     ) {
       onChange();
     }
@@ -222,7 +229,7 @@ export const isRestoredAspect = (aspectRatio: unknown) => aspectRatio != null &&
 
 /** Put a state back into the stores, with its selection where its clips are still there. */
 const restore = (entry: Entry) => {
-  const { clips, timelines, clipDuration, aspectRatio, canvasSize, fps, markers, magnet, guides } = entry.doc;
+  const { clips, timelines, clipDuration, aspectRatio, canvasSize, fps, markers, magnet, guides, stack } = entry.doc;
   const clipStore = useClipStore.getState();
   // Assets are the media's metadata: the newest of each, for the clips that use them.
   const assets = pruneAssetsForClips({ ...entry.doc.assets, ...clipStore.assets }, clips);
@@ -246,7 +253,7 @@ const restore = (entry: Entry) => {
       });
     }
     clipStore._updateZoomLevel(clips, clipDuration);
-    useClipStore.setState({ clips, timelines, assets, clipDuration, markers, magnet, guides, mainPreview: null });
+    useClipStore.setState({ clips, timelines, assets, clipDuration, markers, magnet, guides, compoundStack: stack, mainPreview: null });
     if (aspectRatio !== useViewportStore.getState().aspectRatio) {
       restoredAspect = aspectRatio;
       useViewportStore.setState({ aspectRatio, canvasSize, shouldUpdateViewport: true });

@@ -20,7 +20,8 @@ const MotionMarks: React.FC<{ clip: AnyClipProps | undefined; width: number; hei
   const len = Math.max(1, (clip.endFrame ?? 0) - (clip.startFrame ?? 0));
   const px = (seconds: number) => Math.min(width - 4, Math.max(6, (seconds * fps * width) / len));
   const y = height - 3;
-  const timed = (clip.type === "video" || clip.type === "audio") && !c.freeze;
+  // (A compound clip plays at speed 1 and has no Speed tab.)
+  const timed = (clip.type === "video" || clip.type === "audio") && !c.freeze && !(c as VideoClipProps).compound;
   const label = hasCurve(clip) ? "Curve ▸" : `${Number(c.speed || 1).toFixed(2)}x ▸`;
   return (
     <Group listening={selected && timed}>

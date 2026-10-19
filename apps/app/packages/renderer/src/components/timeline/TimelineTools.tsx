@@ -4,7 +4,7 @@
 // the toolbar's other buttons, its tooltip naming its shortcut, so any toolbar can place them.
 import React from "react";
 import { TbArrowBarToLeft, TbArrowBarToRight, TbArrowsHorizontal, TbSeparatorVertical, TbSnowflake, TbTransform } from "react-icons/tb";
-import { LuCheck, LuFlipHorizontal2, LuHistory, LuLink, LuMagnet, LuMousePointer2, LuRotateCw, LuScissors, LuScan, LuShield } from "react-icons/lu";
+import { LuCheck, LuChevronLeft, LuChevronRight, LuFlipHorizontal2, LuHistory, LuLink, LuMagnet, LuMousePointer2, LuRotateCw, LuScissors, LuScan, LuShield } from "react-icons/lu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { freezeAtPlayhead, freezeTarget, reverseTarget, toggleReverse } from "@/lib/timeline-motion";
 import { rotate90, toggleFlip } from "@/lib/transform-presets";
@@ -12,6 +12,8 @@ import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { addMarkerAtPlayhead, deleteToPlayhead, selectBeside, toggleZoomToFit } from "@/lib/timeline-shortcuts";
 import { mainTrackOf } from "@/lib/timeline-edit";
+import { trail } from "@/lib/compound";
+import { closeCompound } from "@/lib/compound-edit";
 import { keyLabels, useKeymapStore, useShortcutTitle } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
 
@@ -255,5 +257,40 @@ export const TransformToolsMenu = () => {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+};
+
+/**
+ * While a compound clip's timeline is open: the way back, centred in the toolbar as CapCut's
+ * "‹ Compound clip1" bar, here a breadcrumb: Main timeline › (each compound opened) ›
+ * the one being edited. Its parts close back to that level, the arrow one level.
+ */
+export const CompoundBar = () => {
+  const stack = useClipStore((s) => s.compoundStack);
+  if (stack.length === 0) return null;
+  const crumbs = trail(stack);
+  const part = "px-1 rounded-[3px] text-brand-light/70 hover:text-brand-light hover:bg-brand-hover cursor-pointer";
+  return (
+    <div data-testid="compound-bar" className="absolute left-1/2 top-0 h-full -translate-x-1/2 flex items-center gap-x-1 text-[13px] text-brand-light select-none">
+      <button type="button" title="Back" data-testid="compound-back" aria-label="Back" onClick={() => closeCompound()} className="h-6 w-5 flex items-center justify-center text-brand-light/80 hover:text-brand-light">
+        <LuChevronLeft className="h-4 w-4" />
+      </button>
+      <span data-testid="compound-crumb" data-depth={0} className={part} onClick={() => closeCompound(stack.length)}>
+        Main timeline
+      </span>
+      {crumbs.map((c, i) => (
+        <React.Fragment key={c.clipId}>
+          <LuChevronRight className="h-3 w-3 text-brand-light/40" />
+          <span
+            data-testid="compound-crumb"
+            data-depth={i + 1}
+            className={i === crumbs.length - 1 ? "px-1 font-medium" : part}
+            onClick={() => i < crumbs.length - 1 && closeCompound(crumbs.length - 1 - i)}
+          >
+            {c.name}
+          </span>
+        </React.Fragment>
+      ))}
+    </div>
   );
 };

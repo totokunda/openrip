@@ -674,6 +674,16 @@ export type ClipAudio = {
   beats?: ClipBeats | null;
 };
 
+/**
+ * What a compound clip plays (CapCut's subproject): a timeline of its own, with its own
+ * tracks and clips, in frames from 0 at the compound's start (before its trims). The clips
+ * can be any clip, including other compounds. See lib/compound.ts.
+ */
+export interface CompoundContent {
+  clips: AnyClipProps[];
+  timelines: TimelineProps[];
+}
+
 export type VideoClipProps = ClipProps &
   MediaAdjustments &
   SpeedProps &
@@ -700,6 +710,13 @@ export type VideoClipProps = ClipProps &
     draftAdjustments?: DraftAdjustment[];
     /** Set on a freeze-frame clip (`freezeFrame` in lib/speed.ts). */
     freeze?: FreezeFrame | null;
+    /**
+     * Set on a compound clip (lib/compound.ts): a video clip whose picture and sound are this
+     * timeline's, with no asset of its own (`assetId` is empty). Speed stays 1.
+     */
+    compound?: CompoundContent;
+    /** A compound clip's name (CapCut's "Compound clip1"). */
+    name?: string;
   };
 
 export type ImageClipProps = ClipProps &

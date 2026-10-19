@@ -205,6 +205,8 @@ const en = {
   "action.selectAll": "Select all",
   "action.group": "Group",
   "action.ungroup": "Ungroup",
+  "action.createCompound": "Create compound clip (subproject)",
+  "action.breakApartCompound": "Undo compound clip (subproject)",
   "action.resizeTextCenter": "Resize the text box from the center",
   "action.pointerTool": "Pointer tool",
   "action.handTool": "Hand tool",

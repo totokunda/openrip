@@ -1,3 +1,4 @@
+import { isCompound } from "@/lib/compound";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   LuChevronDown,
@@ -126,6 +127,9 @@ const TopBar: React.FC<TopBarProps> = () => {
       if (!clip.timelineId || !visibleTimelineIds.has(clip.timelineId)) {
         return false;
       }
+
+      // A compound clip is exportable when it has anything in it.
+      if (isCompound(clip)) return clip.compound.clips.length > 0;
 
       // Basic media clips must have an assetId
       if (clip.type === "image" || clip.type === "audio" || clip.type === "video") {

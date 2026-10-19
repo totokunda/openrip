@@ -26,6 +26,7 @@ import {
   DeleteRightButton,
   LinkageToggle,
   MagnetToggle,
+  CompoundBar,
   SnappingToggle,
   ToolbarDivider,
   TransformToolsMenu,
@@ -383,6 +384,19 @@ const Controls = () => {
         return;
       }
 
+      // Create compound clip (⌥G) from the selection; Undo compound clip (⌥⇧G) on a compound.
+      if (action === "createCompound") {
+        e.preventDefault();
+        if ((controls.selectedClipIds || []).length > 0) clipsStore.createCompound(controls.selectedClipIds);
+        return;
+      }
+      if (action === "breakApartCompound") {
+        e.preventDefault();
+        const selected = controls.selectedClipIds || [];
+        if (selected.length === 1) clipsStore.breakApartCompound(selected[0]);
+        return;
+      }
+
       // The player's zoom keys (⌘0, ⌘5, ⌘1, ⌘2, ⌥⇧+ …) are the keymap's player actions,
       // handled with the timeline's above.
       const viewport = useViewportStore.getState();
@@ -452,6 +466,7 @@ const Controls = () => {
   }, [tool, selectedMaskId, selectedLineId, selectedIds]);
   return (
     <div data-testid="timeline-toolbar" className="relative flex items-center h-8 shrink-0 border-b-[0.5px] border-brand-hairline">
+      <CompoundBar />
       <div className="flex items-center w-full justify-between px-2">
         {/* CapCut's order, left to right; Undo and Redo name themselves. Split stays
             right after Redo. */}

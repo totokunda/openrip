@@ -101,7 +101,8 @@ async function syncNow() {
     syncAgain = true;
     return;
   }
-  const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any);
+  // The timeline being edited: a compound's content while one is open.
+  const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any, "current");
   if (!snap) {
     scheduleSync(200); // still loading
     return;
@@ -164,6 +165,14 @@ function fitTextBlocks(project: EngineProjectInfo) {
 /** A volume (dB) the engine plays as silence. */
 const SILENT_DB = -1000;
 
+/** `fn` on each clip of a snapshot's timeline, and on the clips of the compounds in it (their timelines are in the file as `compound.clips`). */
+const eachClip = (clips: any[], fn: (clip: any) => any): any[] =>
+  clips.map((c) => {
+    const out = fn(c);
+    const inner = out?.compound?.clips;
+    return Array.isArray(inner) ? { ...out, compound: { ...out.compound, clips: eachClip(inner, fn) } } : out;
+  });
+
 /**
  * The snapshot with each asset's path pointing at its original file. A video whose audio was
  * detached (separateClip) uses the file as `…#video` and its audio as `…#audio`: the engine
@@ -184,7 +193,7 @@ async function withOriginalMedia<T>(snapshot: T): Promise<T> {
   let out = { ...(snapshot as any), assets: mapped };
   const clips = out.timeline?.clips;
   if (silent.size > 0 && Array.isArray(clips)) {
-    out = { ...out, timeline: { ...out.timeline, clips: clips.map((c: any) => (silent.has(c?.assetId) ? { ...c, volume: SILENT_DB } : c)) } };
+    out = { ...out, timeline: { ...out.timeline, clips: eachClip(clips, (c: any) => (silent.has(c?.assetId) ? { ...c, volume: SILENT_DB } : c)) } };
   }
   return out;
 }
@@ -200,7 +209,7 @@ function withoutMasksWhileEditing<T>(snapshot: T): T {
   const maskTool = useMaskStore.getState().tool;
   if (useViewportStore.getState().tool !== "mask" || maskTool === "draw" || maskTool === "pen" || !Array.isArray(clips)) return snapshot;
   const s = snapshot as any;
-  return { ...s, timeline: { ...s.timeline, clips: clips.map((c: any) => (c?.masks?.length ? { ...c, masks: [] } : c)) } };
+  return { ...s, timeline: { ...s.timeline, clips: eachClip(clips, (c: any) => (c?.masks?.length ? { ...c, masks: [] } : c)) } };
 }
 
 /**
@@ -316,7 +325,7 @@ export function initEnginePreview() {
       const [a, b] = [pick(s), pick(p)];
       if (a.some((v, i) => v !== b[i])) scheduleSync();
     });
-  watch(useClipStore.subscribe as any, (s: any) => [s.clips, s.timelines, s.assets]);
+  watch(useClipStore.subscribe as any, (s: any) => [s.clips, s.timelines, s.assets, s.compoundStack]);
   watch(useControlsStore.subscribe as any, (s: any) => [s.fps]);
   watch(useViewportStore.subscribe as any, (s: any) => [s.aspectRatio, s.canvasSize, s.tool === "mask"]);
   useFilterLibrary.subscribe((s, p) => {

@@ -93,6 +93,9 @@ import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 import { useIsMissing } from "@/lib/media/missing";
 import { canReplaceClip, replaceClip, revealClipFile } from "@/lib/replace-clip";
+import { isCompound } from "@/lib/compound";
+import { openCompound } from "@/lib/compound-edit";
+import { paintCompoundStrip } from "@/lib/compound-thumb";
 import { bladeCut, bladeFrame, frameAtStageX } from "@/lib/timeline-tools";
 
 /** The diagonal stripes a deactivated clip is drawn with. */
@@ -518,6 +521,16 @@ const TimelineClip: React.FC<
         groupRef,
         resizeSide,
       );
+    } else if (clipType === "video" && isCompound(currentClip)) {
+      // A compound clip: its content's posters (the clip shows frames from its trim).
+      const from = Math.max(0, currentClip.trimStart ?? 0);
+      const paint = () => {
+        paintCompoundStrip(imageCanvas, currentClip.compound, from, from + (currentEndFrame - currentStartFrame), Math.max(36, thumbsHeight * 1.2), TIMELINE_COLORS.video, () => {
+          paint();
+          groupRef.current?.getLayer()?.batchDraw();
+        });
+      };
+      paint();
     } else if (clipType === "video") {
       generateTimelineThumbnailVideo(
         clipType,
@@ -1213,6 +1226,8 @@ const TimelineClip: React.FC<
         ? controls.selectedClipIds
         : [currentClipId];
       const isGroup = clip?.type === "group";
+      // A compound clip has no media of its own: the tools that read a file's frames or sound skip it.
+      const compoundClip = isCompound(clip);
 
       const otherCommands: ContextMenuItem[] = [];
 
@@ -1262,9 +1277,40 @@ const TimelineClip: React.FC<
         });
       }
 
+      // Create compound clip (⌥G) from the selection, and (on a compound) Undo compound clip
+      // (⌥⇧G) and Open compound clip, after Group as CapCut orders them.
+      otherCommands.push({
+        id: "create-compound",
+        label: "Create compound clip (subproject)",
+        action: "custom",
+        shortcut: "⌥G",
+        run: () => {
+          useClipStore.getState().createCompound(targetIds);
+        },
+      });
+      if (compoundClip) {
+        otherCommands.push({
+          id: "undo-compound",
+          label: "Undo compound clip (subproject)",
+          action: "custom",
+          shortcut: "⌥⇧G",
+          disabled: targetIds.length !== 1,
+          run: () => {
+            useClipStore.getState().breakApartCompound(currentClipId);
+          },
+        });
+        otherCommands.push({
+          id: "open-compound",
+          label: "Open compound clip",
+          action: "custom",
+          disabled: targetIds.length !== 1,
+          run: () => void openCompound(currentClipId),
+        });
+      }
+
       // CapCut's Edit › on a video: Freeze (at the playhead, when it's on the clip) and Reverse.
       const editTools: ContextMenuItem[] = [];
-      if (clip?.type === "video" && !(clip as VideoClipProps).freeze && targetIds.length === 1) {
+      if (clip?.type === "video" && !compoundClip && !(clip as VideoClipProps).freeze && targetIds.length === 1) {
         const canFreeze = !!freezeTarget(clipsState.clips, clipsState.timelines, controls.focusFrame, [clip.clipId]);
         editTools.push({
           id: "edit",
@@ -1282,11 +1328,11 @@ const TimelineClip: React.FC<
         ...editTools,
         // Split scenes, Enhance visuals, Adjust color ▸ (lib/analysis.ts) and Enhance motion
         // (lib/enhance.ts), in CapCut's order.
-        ...withEnhance(analysisMenuItems(clip, targetIds.length), enhanceMenuItems(targetIds)),
+        ...(compoundClip ? [] : withEnhance(analysisMenuItems(clip, targetIds.length), enhanceMenuItems(targetIds))),
         // Generate captions: the Auto captions panel for this clip (lib/autocaptions.ts).
-        ...captionMenuItems(clip, targetIds.length),
-        // Transcript: the clip's words to edit the video by (lib/transcript.ts).
-        ...transcriptMenuItems(clip, targetIds.length),
+        ...(compoundClip ? [] : captionMenuItems(clip, targetIds.length)),
+        // Transcript: the clip's words to edit the video by (lib/transcript.ts); a compound has no file of its own.
+        ...(compoundClip ? [] : transcriptMenuItems(clip, targetIds.length)),
         {
           id: "split",
           label: "Split at Playhead",
@@ -1297,7 +1343,7 @@ const TimelineClip: React.FC<
           id: "separate",
           label: "Detach Audio",
           action: "separateAudio",
-          disabled: !isVideo || isSeparated,
+          disabled: !isVideo || isSeparated || compoundClip,
         },
       ];
       // A video and its detached audio are linked; Unlink lets them go their own ways, Link
@@ -1366,7 +1412,7 @@ const TimelineClip: React.FC<
             items: [...clipActions],
           },
           // Beats and loudness on a clip with sound (lib/audio-tools.ts).
-          { id: "audio", items: soundMenuItems(clip) },
+          { id: "audio", items: compoundClip ? [] : soundMenuItems(clip) },
           {
             id: "other",
             items: [...otherCommands],
@@ -1753,6 +1799,11 @@ const TimelineClip: React.FC<
         onMouseLeave={handleMouseLeave}
         // A text template's group opens its words (the Text template tab) on a double click.
         onDblClick={() => {
+          // A compound opens its own timeline.
+          if (!assetMode && isCompound(currentClip)) {
+            void openCompound(currentClipId);
+            return;
+          }
           if (clipType !== "group" || !(currentClip as { template?: unknown }).template) return;
           useControlsStore.getState().setSelectedClipIds([currentClipId]);
           void import("@/lib/inspector").then((m) => m.useInspectorStore.getState().setTab("template"));

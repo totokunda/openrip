@@ -33,6 +33,7 @@ import ShapeProperties from '../properties/ShapeProperties'
 import { BlendSection, TransformSection } from '../properties/VideoBasicProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
 import { useInspectorStore } from '@/lib/inspector'
+import { allClips as deepClips, isCompound } from '@/lib/compound'
 import TrackingProperties from '../properties/TrackingProperties'
 import TemplateProperties from '../properties/TemplateProperties'
 import OpticalFlowProperties from '../properties/OpticalFlowProperties'
@@ -69,6 +70,8 @@ const ClipPropertiesPanel: React.FC = () => {
   const separated = useClipStore(() => soundSeparated(clip));
   const hasAudio = useMemo(() => {
     if (type === 'audio') return true;
+    // A compound has sound when any clip in it does.
+    if (isCompound(clip)) return deepClips(clip.compound.clips).some((c) => c.type === 'audio' || (c.type === 'video' && !isCompound(c) && getMediaInfoCached((c as VideoClipProps).assetId)?.audio !== null));
     if (type === 'video') return separated || getMediaInfoCached((clip as VideoClipProps)?.assetId)?.audio !== null;
     return false;
   }, [type, separated, (clip as VideoClipProps | ImageClipProps)?.assetId]);
@@ -113,6 +116,34 @@ const ClipPropertiesPanel: React.FC = () => {
     // an audio clip's own tabs.
     const audioBasic: Section = { id: 'basic', label: 'Basic', content: <AudioProperties clipId={clipId} /> };
     const voiceChanger: Section = { id: 'voice', label: 'Voice changer', content: <VoiceChangerProperties clipId={clipId} /> };
+    // A compound clip: the video inspector without what reads a file (stabilize and the rest of
+    // the clean-up, Speed, auto adjust and colour match); it plays at speed 1.
+    if (isCompound(clip)) {
+      return [
+        {
+          id: 'video',
+          label: 'Video',
+          sections: [
+            { id: 'basic', label: 'Basic', content: <VideoBasicProperties clipId={clipId} /> },
+            { id: 'removebg', label: 'Remove BG', content: <ChromaKeyProperties clipId={clipId} /> },
+            { id: 'mask', label: 'Mask', content: <MaskPropertiesPanel clipId={clipId} /> },
+          ],
+        },
+        ...(hasAudio ? [{ id: 'audio', label: 'Audio', sections: [audioBasic] }] : []),
+        animation,
+        {
+          id: 'adjust',
+          label: 'Adjust',
+          sections: [
+            { id: 'basic', label: 'Basic', content: <AdjustBasic clipId={clipId} /> },
+            { id: 'hsl', label: 'HSL', content: <AdjustHsl clipId={clipId} /> },
+            { id: 'curves', label: 'Curves', content: <AdjustCurves clipId={clipId} /> },
+            { id: 'wheels', label: 'Color wheel', content: <AdjustWheels clipId={clipId} /> },
+            { id: 'effects', label: 'Effects', content: <ClipEffectsProperties clipId={clipId} /> },
+          ],
+        },
+      ];
+    }
     switch (type) {
       case 'video':
       case 'image':

@@ -53,6 +53,8 @@ import { addLibraryShape, type ShapeDrag } from "../menus/ShapesMenu";
 import type { StickerDrag } from "../menus/StickersMenu";
 import { addSticker, useStickerLibrary } from "@/lib/stickers/library";
 import { dropAdjustment, type AdjustmentDrag } from "@/lib/adjustment";
+import { addCompoundInstance } from "@/lib/compound-edit";
+import type { SubprojectDrag } from "@/components/menus/SubprojectsMenu";
 import { addStock } from "@/lib/stock/library";
 import type { StockDrag } from "@/components/menus/StockLibraryMenu";
 import KeyframeGraph from "./KeyframeGraph";
@@ -466,7 +468,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       const data = event.active?.data?.current as unknown as
         | MediaItem
         | undefined;
-      if (!data || (data as unknown as PresetDrag).type === "clip-preset" || (data as unknown as TransitionDrag).type === "transition" || (data as unknown as ShapeDrag).type === "shape-preset" || (data as unknown as EffectDrag).type === "effect-preset" || (data as unknown as StickerDrag).type === "sticker-tile" || (data as unknown as StockDrag).type === "stock-tile") return;
+      if (!data || (data as unknown as SubprojectDrag).type === "subproject" || (data as unknown as PresetDrag).type === "clip-preset" || (data as unknown as TransitionDrag).type === "transition" || (data as unknown as ShapeDrag).type === "shape-preset" || (data as unknown as EffectDrag).type === "effect-preset" || (data as unknown as StickerDrag).type === "sticker-tile" || (data as unknown as StockDrag).type === "stock-tile") return;
 
       setIsDragging(true);
 
@@ -556,6 +558,14 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         const target = Math.hypot(event.delta.x, event.delta.y) > 3 ? cutUnder(event) : null;
         useTransitionDropStore.getState().setTarget(null);
         if (target) applyTransition(target, drag.transition);
+        return;
+      }
+      // A subproject goes in as another instance at the time it's let go at (its "+" adds one at the playhead).
+      const subprojectDrag = data as unknown as SubprojectDrag;
+      if (subprojectDrag.type === "subproject") {
+        const frame = Math.hypot(event.delta.x, event.delta.y) > 3 ? frameUnder(event) : null;
+        if (frame != null) addCompoundInstance(subprojectDrag.clipId, frame);
+        setIsDragging(false);
         return;
       }
       // A saved preset goes onto the clip it's let go on (My presets handles a press without a move).

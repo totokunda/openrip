@@ -23,6 +23,7 @@ import { useClipStore } from "@/lib/clip";
 import { projectBlink, transitionCategories } from "@/lib/transitions";
 import type { SidebarSection } from "@/lib/types";
 import MediaMenu from "@/components/menus/MediaMenu";
+import SubprojectsMenu from "../menus/SubprojectsMenu";
 import FilterMenu, { filterSections, useFilters } from "../menus/FilterMenu";
 import EffectsMenu, { effectSections } from "../menus/EffectsMenu";
 import AdjustmentMenu, { adjustmentSections } from "../menus/AdjustmentMenu";
@@ -75,6 +76,8 @@ const TABS: { section: SidebarSection; title: string; icon: IconType }[] = [
 const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; under?: string }[]>> = {
   media: [
     { id: "local", label: "Media", under: "Import" },
+    // CapCut's compound clips (subprojects) of the project.
+    { id: "subprojects", label: "Subprojects", under: "Import" },
     // CapCut's Yours: the starred stock media and the clip presets saved from the timeline.
     { id: "yours:favorites", label: "Favorites", under: "Yours" },
     { id: "yours:presets", label: "My presets", under: "Yours" },
@@ -312,6 +315,7 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   const content = () => {
     switch (section) {
       case "media":
+        if (sub === "subprojects") return <SubprojectsMenu />;
         if (sub === "yours:presets") return <PresetsMenu />;
         if (sub === "yours:favorites") return <StockLibraryMenu category="favorites" />;
         return sub === "library:credits" ? <CreditsView /> : sub.startsWith("library:") ? <StockLibraryMenu category={sub.slice(8)} /> : <MediaMenu />;

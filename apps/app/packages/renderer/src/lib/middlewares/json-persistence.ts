@@ -24,7 +24,9 @@ import type {
   Point,
   Marker,
   Guide,
+  CompoundContent,
 } from "../types";
+import { foldStack } from "../compound";
 
 import _ from "lodash";
 import { getMediaInfo } from "../media/utils";
@@ -228,8 +230,97 @@ const serializeMasksForJson = (clip: AnyClipProps): SerializedMaskForJson[] => {
   }));
 };
 
+/**
+ * A clip as the project file holds it: frames as ticks, masks in their file shape, and a
+ * compound clip's nested timeline the same way (`compound: { tracks, clips }`).
+ */
+const clipToJson = (orig: AnyClipProps, fps: number): TimelineClipJson => {
+  const clipId = String((orig as any).clipId);
+  const timelineId = String((orig as any).timelineId ?? "");
+
+  const startFrameRaw = (orig as any).startFrame;
+  const endFrameRaw = (orig as any).endFrame;
+  const trimStartRaw = (orig as any).trimStart;
+  const trimEndRaw = (orig as any).trimEnd;
+  const clipPaddingRaw = (orig as any).clipPadding;
+
+  const startFrame =
+    typeof startFrameRaw === "number" && Number.isFinite(startFrameRaw)
+      ? startFrameRaw
+      : 0;
+  const endFrame =
+    typeof endFrameRaw === "number" && Number.isFinite(endFrameRaw)
+      ? endFrameRaw
+      : 0;
+  const trimStart =
+    typeof trimStartRaw === "number" && Number.isFinite(trimStartRaw)
+      ? trimStartRaw
+      : 0;
+  const trimEnd =
+    typeof trimEndRaw === "number" && Number.isFinite(trimEndRaw)
+      ? trimEndRaw
+      : 0;
+  const clipPadding =
+    typeof clipPaddingRaw === "number" && Number.isFinite(clipPaddingRaw)
+      ? clipPaddingRaw
+      : 24;
+
+  const startTick = frameToTickForJson(startFrame, fps);
+  const endTick = frameToTickForJson(endFrame, fps);
+  const trimStartTick = frameToTickForJson(trimStart, fps);
+  const trimEndTick = frameToTickForJson(trimEnd, fps);
+
+  let masks: SerializedMaskForJson[] | undefined;
+
+  const origClip = orig as AnyClipProps;
+
+  const serializedMasks = serializeMasksForJson(origClip);
+  if (serializedMasks.length > 0) {
+    masks = serializedMasks;
+  }
+  // Normalize the clip state we persist and strip large/derived fields
+  const clipForJson: any = {
+    ...(origClip as any),
+    clipId,
+    timelineId,
+    clipPadding,
+  };
+
+  // Do not store frame-based fields in JSON; we derive them from ticks on load.
+  delete clipForJson.startFrame;
+  delete clipForJson.endFrame;
+  delete clipForJson.trimStart;
+  delete clipForJson.trimEnd;
+
+  // These are stored as JSON-specific shapes below
+  delete clipForJson.masks;
+
+  const jsonClip: TimelineClipJson = {
+    ...(clipForJson as TimelineClipBaseForJson),
+    startTick: startTick.toString(),
+    endTick: endTick.toString(),
+    trimStartTick: trimStartTick.toString(),
+    trimEndTick: trimEndTick.toString(),
+    ...(masks ? { masks } : {}),
+  };
+
+  const nested = (orig as any).compound as CompoundContent | undefined;
+  if (nested) {
+    (jsonClip as any).compound = {
+      tracks: nested.timelines,
+      clips: nested.clips.filter(Boolean).map((n) => clipToJson(n, fps)),
+    };
+  }
+  return jsonClip;
+};
+
+/**
+ * `scope` "root" (the file, the export) is the main timeline whatever compound is open;
+ * "current" is the timeline being edited, which the preview and playback show.
+ */
 const buildProjectJsonSnapshot = (
   projectState: JsonProjectSlice,
+  scope: "root" | "current" = "root",
 ): {
   projectId: number | null;
   snapshot: ProjectJsonSnapshot;
@@ -262,84 +353,16 @@ const buildProjectJsonSnapshot = (
     const projectId = activeProject.id;
     const fps = controlsState.fps || activeProject.fps || 24;
 
-    const allClips = Array.isArray(clipState.clips)
-      ? (clipState.clips as AnyClipProps[])
-      : ([] as AnyClipProps[]);
+    const stack = scope === "root" ? clipState.compoundStack ?? [] : [];
+    const edited = { clips: Array.isArray(clipState.clips) ? (clipState.clips as AnyClipProps[]) : ([] as AnyClipProps[]), timelines: Array.isArray(clipState.timelines) ? (clipState.timelines as TimelineProps[]) : ([] as TimelineProps[]) };
+    // With a compound open the file holds the main timeline, its compound as edited so far.
+    const root = stack.length ? foldStack(stack, edited.clips, edited.timelines) : edited;
+    const allClips = root.clips;
     const clipsForJson: ProjectJsonSnapshot["timeline"]["clips"] = [];
 
     for (const orig of allClips) {
       if (!orig) continue;
-
-      const clipId = String((orig as any).clipId);
-      const timelineId = String((orig as any).timelineId ?? "");
-
-      const startFrameRaw = (orig as any).startFrame;
-      const endFrameRaw = (orig as any).endFrame;
-      const trimStartRaw = (orig as any).trimStart;
-      const trimEndRaw = (orig as any).trimEnd;
-      const clipPaddingRaw = (orig as any).clipPadding;
-
-      const startFrame =
-        typeof startFrameRaw === "number" && Number.isFinite(startFrameRaw)
-          ? startFrameRaw
-          : 0;
-      const endFrame =
-        typeof endFrameRaw === "number" && Number.isFinite(endFrameRaw)
-          ? endFrameRaw
-          : 0;
-      const trimStart =
-        typeof trimStartRaw === "number" && Number.isFinite(trimStartRaw)
-          ? trimStartRaw
-          : 0;
-      const trimEnd =
-        typeof trimEndRaw === "number" && Number.isFinite(trimEndRaw)
-          ? trimEndRaw
-          : 0;
-      const clipPadding =
-        typeof clipPaddingRaw === "number" && Number.isFinite(clipPaddingRaw)
-          ? clipPaddingRaw
-          : 24;
-
-      const startTick = frameToTickForJson(startFrame, fps);
-      const endTick = frameToTickForJson(endFrame, fps);
-      const trimStartTick = frameToTickForJson(trimStart, fps);
-      const trimEndTick = frameToTickForJson(trimEnd, fps);
-
-      let masks: SerializedMaskForJson[] | undefined;
-
-      const origClip = orig as AnyClipProps;
-
-      const serializedMasks = serializeMasksForJson(origClip);
-      if (serializedMasks.length > 0) {
-        masks = serializedMasks;
-      }
-      // Normalize the clip state we persist and strip large/derived fields
-      const clipForJson: any = {
-        ...(origClip as any),
-        clipId,
-        timelineId,
-        clipPadding,
-      };
-
-      // Do not store frame-based fields in JSON; we derive them from ticks on load.
-      delete clipForJson.startFrame;
-      delete clipForJson.endFrame;
-      delete clipForJson.trimStart;
-      delete clipForJson.trimEnd;
-
-      // These are stored as JSON-specific shapes below
-      delete clipForJson.masks;
-
-      const jsonClip: TimelineClipJson = {
-        ...(clipForJson as TimelineClipBaseForJson),
-        startTick: startTick.toString(),
-        endTick: endTick.toString(),
-        trimStartTick: trimStartTick.toString(),
-        trimEndTick: trimEndTick.toString(),
-        ...(masks ? { masks } : {}),
-      };
-
-      clipsForJson.push(jsonClip);
+      clipsForJson.push(clipToJson(orig, fps));
     }
 
     // Normalize assets from the clip store into a Record<string, Asset> keyed by id.
@@ -384,11 +407,11 @@ const buildProjectJsonSnapshot = (
         ...(useCoverStore.getState().cover ? { cover: useCoverStore.getState().cover! } : {}),
       },
       editorState: {
-        duration: Number(clipState.clipDuration || 0),
-        zoomLevel: Number(controlsState.zoomLevel || 1),
+        duration: Number((stack[0]?.clipDuration ?? clipState.clipDuration) || 0),
+        zoomLevel: Number((stack[0]?.view.zoom ?? controlsState.zoomLevel) || 1),
         scrollX: 0,
         scrollY: 0,
-        playheadPosition: Number(controlsState.focusFrame || 0),
+        playheadPosition: Number((stack[0]?.playhead ?? controlsState.focusFrame) || 0),
         tool: viewportState.tool,
         shape: viewportState.shape, 
         scale: viewportState.scale,
@@ -399,17 +422,17 @@ const buildProjectJsonSnapshot = (
           typeof (clipState as any).snapGuideX === "number"
             ? (clipState as any).snapGuideX
             : null,
-        timelineWindow: Array.isArray(controlsState.timelineDuration)
-          ? (controlsState.timelineDuration as [number, number])
-          : [0, controlsState.totalTimelineFrames || 0],
+        timelineWindow: stack[0]
+          ? stack[0].view.window
+          : Array.isArray(controlsState.timelineDuration)
+            ? (controlsState.timelineDuration as [number, number])
+            : [0, controlsState.totalTimelineFrames || 0],
         snapping: controlsState.snapping,
         linkage: controlsState.linkage,
       },
       assets,
       timeline: {
-        tracks: Array.isArray(clipState.timelines)
-          ? (clipState.timelines as TimelineProps[])
-          : [],
+        tracks: root.timelines,
         clips: clipsForJson,
         markers: clipState.markers,
       },
@@ -775,6 +798,15 @@ export const clipsFromSnapshot = (doc: ProjectJsonSnapshot): AnyClipProps[] => {
           }));
       }
 
+      // A compound clip's timeline, in frames like the rest.
+      const content = (c as any).compound;
+      if (content && typeof content === "object") {
+        mergedAny.compound = {
+          clips: clipsFromSnapshot({ settings: { fps: fpsForJson }, timeline: { clips: content.clips } } as unknown as ProjectJsonSnapshot),
+          timelines: resolveOverlapsTimelines(Array.isArray(content.tracks) ? content.tracks : []),
+        } satisfies CompoundContent;
+      }
+
       // Strip fields left behind by older versions' AI features.
       delete mergedAny.preprocessors;
       delete mergedAny.frameInterpolateJobId;
@@ -859,6 +891,7 @@ const hydrateStoresFromProjectJson = async (
       if (useClipStore && typeof useClipStore.setState === "function") {
         useClipStore.setState({
           clips,
+          compoundStack: [],
           // Laid out again: each track its kind's height (an older project's or a draft's
           // tracks were sized differently).
           timelines: resolveOverlapsTimelines(timelineTracks),
@@ -1116,9 +1149,10 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
  */
 export const getActiveProjectJsonSnapshot = (
   projectState: JsonProjectSlice,
+  scope: "root" | "current" = "root",
 ): { projectId: number; snapshot: ProjectJsonSnapshot } | null => {
   if (isHydratingFromJson || (projectState as any).projectsLoaded === false) return null;
-  const r = buildProjectJsonSnapshot(projectState);
+  const r = buildProjectJsonSnapshot(projectState, scope);
   return r && r.projectId != null ? { projectId: r.projectId, snapshot: r.snapshot } : null;
 };
 
@@ -1261,6 +1295,7 @@ export const withJsonProjectPersistence =
             try {
               useClipStore.setState({
                 clips: [],
+                compoundStack: [],
                 timelines: [],
                 assets: {},
                 clipDuration: 0,

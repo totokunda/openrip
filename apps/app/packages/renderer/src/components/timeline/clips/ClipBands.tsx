@@ -1,6 +1,6 @@
 import React from "react";
 import { Rect } from "react-konva";
-import type { AnyClipProps, AudioClipProps } from "@/lib/types";
+import type { AnyClipProps, AudioClipProps, VideoClipProps } from "@/lib/types";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { mainTrackOf } from "@/lib/timeline-edit";
@@ -142,7 +142,7 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
           snap={snap}
         />
       )}
-      <ClipChips texts={[nameOf(asset?.path), timecode(len, fps)]} fill={VIDEO_CHIP} maxWidth={width} clipId={clip.clipId} />
+      <ClipChips texts={[(clip as VideoClipProps).compound ? (clip as VideoClipProps).name ?? "Compound clip" : nameOf(asset?.path), timecode(len, fps)]} fill={VIDEO_CHIP} maxWidth={width} clipId={clip.clipId} />
     </>
   );
 };

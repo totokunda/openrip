@@ -7,6 +7,7 @@
 // wrote. The choices are written by lib/export-run.ts; their numbers come from
 // lib/export-options.ts. The same dialog exports one clip (`scope`), with the sections that make
 // sense for it.
+import { allClips, foldStack } from "@/lib/compound";
 import React, { useEffect, useRef, useState } from "react";
 import { LuCheck, LuChevronDown, LuChevronUp, LuCircleCheck, LuCircleHelp, LuCircleX, LuClapperboard, LuFolder, LuFolderOpen, LuInfo, LuPencil } from "react-icons/lu";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -351,10 +352,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
       return;
     }
     wasOpen.current = true;
-    const { clips, clipDuration, getClipById } = useClipStore.getState();
+    const { compoundStack, getClipById } = useClipStore.getState();
+    // An export is of the main timeline, whatever compound is open (and the compounds' sound counts).
+    const { clips } = foldStack(compoundStack, useClipStore.getState().clips, useClipStore.getState().timelines);
+    const clipDuration = compoundStack[0]?.clipDuration ?? useClipStore.getState().clipDuration;
     const rate = useControlsStore.getState().fps || 30;
     const one = scope ? getClipById(scope.clipId) : undefined;
-    const pool = one ? [one] : clips;
+    const pool = allClips(one ? [one] : clips);
     const audible = pool.some((c: any) => {
       if (c.hidden) return false;
       if (c.type === "audio") return true;

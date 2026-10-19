@@ -36,6 +36,10 @@ import {
   MARKER_COLORS,
 } from "./timeline-edit";
 
+import { useViewportStore } from "./viewport";
+import { BASE_LONG_SIDE } from "./settings";
+import { allClips, breakApart, cloneContent, createCompound, isCompound, type CompoundFrame } from "./compound";
+
 import _ from "lodash";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 
@@ -124,6 +128,21 @@ interface ClipStore {
   pasteClips: (atFrame?: number, targetTimelineId?: string) => void;
   groupClips: (clipIds: string[]) => void;
   ungroupClips: (groupId: string) => void;
+  /**
+   * The timelines left to open the compound clip being edited, outermost first (empty on the
+   * main timeline): `clips` and `timelines` are always those being edited. Opened and closed
+   * by lib/compound-edit.ts; the saved project and the export have the main timeline's
+   * (`rootDocument`).
+   */
+  compoundStack: CompoundFrame[];
+  /**
+   * Create compound clip (⌥G): the given clips (and what goes with them) become one clip with
+   * a timeline of its own, selected. Returns its id; null when nothing was taken (a locked
+   * track).
+   */
+  createCompound: (clipIds: string[]) => string | null;
+  /** Break apart (⌥⇧G): the compound clip's content goes back onto the timeline, selected. False when it isn't a compound or is locked. */
+  breakApartCompound: (clipId: string) => boolean;
   getClipsForGroup: (children: string[][]) => AnyClipProps[];
   getClipAtFrame: (frame: number) => [AnyClipProps, number] | null;
   activeMediaItem: MediaItem | null;
@@ -241,7 +260,9 @@ const rescaleFrame = (frame: any, oldFps: number, newFps: number): number | unde
 const collectUsedAssetIds = (clips: AnyClipProps[]): Set<string> => {
   const used = new Set<string>();
 
-  for (const clip of clips) {
+  // A compound's clips use assets too, and so do the timelines left to edit one.
+  const outer = useClipStore.getState().compoundStack.flatMap((f) => f.clips);
+  for (const clip of allClips([...clips, ...outer])) {
     // Direct clip asset references
     if (
       (clip.type === "video" ||
@@ -547,6 +568,9 @@ const splitClipAt = (clip: AnyClipProps, cutFrame: number): [AnyClipProps, AnyCl
     newClip2.keyframes = rightKeys;
   }
 
+  // Each half of a compound is a compound of its own: the right one gets a copy of the content.
+  if (isCompound(clip)) (newClip2 as typeof clip).compound = cloneContent(clip.compound, uuidv4);
+
   // An In animation plays where the clip starts, so it stays on the left clip; an Out
   // animation and a transition lead out of it, so they stay on the right one, which ends
   // where the clip did. A Combo (video, photos) and a Loop (text) stay on both, each
@@ -718,6 +742,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
   clipDuration: 0,
   _setClipDuration: (duration) => set({ clipDuration: duration }),
   clips: [],
+  compoundStack: [],
   assets: {},
   timelines: [],
   magnet: true,
@@ -1839,6 +1864,39 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
         timelines: resolvedTimelines,
       };
     }),
+  createCompound: (clipIds) => {
+    let made: string | null = null;
+    set((state) => {
+      const { aspectRatio } = useViewportStore.getState();
+      const ratio = aspectRatio.width / aspectRatio.height;
+      const world = { width: BASE_LONG_SIDE * (Number.isFinite(ratio) && ratio > 0 ? ratio : 16 / 9), height: BASE_LONG_SIDE };
+      const done = createCompound(state.clips, state.timelines, clipIds, { world, linkage: linkage(), newId: uuidv4 });
+      if (!done) return {};
+      made = done.select[0];
+      // Its content's tracks are laid out as any timeline's.
+      const clips = done.clips.map((c) => (c.clipId === made && isCompound(c) ? { ...c, compound: { ...c.compound, timelines: resolveOverlapsTimelines(c.compound.timelines) } } : c));
+      const resolved = resolveOverlaps(clips);
+      const clipDuration = calculateTotalClipDuration(resolved);
+      get()._updateZoomLevel(resolved, clipDuration);
+      useControlsStore.getState().setSelectedClipIds(done.select);
+      return { clips: resolved, timelines: resolveOverlapsTimelines(done.timelines), clipDuration, assets: pruneAssetsForClips(state.assets, resolved) };
+    });
+    return made;
+  },
+  breakApartCompound: (clipId) => {
+    let ok = false;
+    set((state) => {
+      const done = breakApart(state.clips, state.timelines, clipId, { newId: uuidv4, fps: useControlsStore.getState().fps || 30 });
+      if (!done) return {};
+      ok = true;
+      const resolved = resolveOverlaps(done.clips);
+      const clipDuration = calculateTotalClipDuration(resolved);
+      get()._updateZoomLevel(resolved, clipDuration);
+      useControlsStore.getState().setSelectedClipIds(done.select);
+      return { clips: resolved, timelines: resolveOverlapsTimelines(done.timelines), clipDuration, assets: pruneAssetsForClips(state.assets, resolved) };
+    });
+    return ok;
+  },
   ungroupClips: (_groupId: string) =>
     set((state) => {
       const groupClip = state.clips.find((c) => c.clipId === _groupId);
@@ -2307,7 +2365,8 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
         newIds.push(newId);
         const timelineId = chooseTimelineFor(template);
         return {
-          ...template,
+          // A compound's content is copied with fresh ids, so the copies share nothing.
+          ...(isCompound(template) ? { ...template, compound: cloneContent(template.compound, uuidv4) } : template),
           clipId: newId,
           timelineId,
           startFrame: start,
