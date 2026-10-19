@@ -601,7 +601,22 @@ export type AudioEffect = { type: AudioEffectKind | "draft"; params?: Record<str
  * with the engine; without a measurement nothing changes. `range` is the media range measured
  * ([start, duration] s), so a trim can tell the measurement is stale.
  */
-export type ClipLoudness = { enabled: boolean; target: number; measured?: number | null; peak?: number | null; range?: [number, number] };
+export type ClipLoudness = {
+  enabled: boolean;
+  target: number;
+  measured?: number | null;
+  peak?: number | null;
+  range?: [number, number];
+  /** Set by Make volume consistent (lib/audio.ts): what the clip's loudness was before it, to give back when it's turned off. */
+  consistent?: { was: ClipLoudness | null };
+};
+
+/**
+ * Reduce noise (OpenRip's classic spectral-gating denoiser, engine/crates/audio/src/denoise.rs):
+ * the clip's own noise, read from its quietest moments, taken out. `strength` is 0–100 (the
+ * engine's default, 70, without it).
+ */
+export type ClipDenoise = { enabled: boolean; strength?: number };
 
 /**
  * CapCut's "Fill channel": "left" plays the left channel on both sides ("Fill right with left"),
@@ -624,6 +639,7 @@ export type ClipBeats = { manual?: number[]; auto?: boolean; everyBeat?: boolean
 export type ClipAudio = {
   audioEffects?: AudioEffect[];
   loudness?: ClipLoudness | null;
+  denoise?: ClipDenoise | null;
   channel?: ChannelFill;
   beats?: ClipBeats | null;
 };
@@ -1388,7 +1404,8 @@ function audioSignature(clip: ClipAudio | undefined): string {
   const fx = (clip.audioEffects ?? []).map((e) => `${e.type}:${e.id ?? ""}:${Object.entries(e.params ?? {}).map(([k, v]) => `${k}=${v}`).join(",")}`).join(";");
   const l = clip.loudness;
   const b = clip.beats;
-  return [fx, l ? `${l.enabled ? 1 : 0}/${l.target}/${l.measured ?? ""}` : "", clip.channel ?? "", b ? `${(b.manual ?? []).join(",")}/${b.auto ? 1 : 0}/${b.everyBeat ? 1 : 0}/${b.detected?.length ?? 0}` : ""].join("|");
+  const d = clip.denoise;
+  return [fx, l ? `${l.enabled ? 1 : 0}/${l.target}/${l.measured ?? ""}` : "", d ? `${d.enabled ? 1 : 0}/${d.strength ?? ""}` : "", clip.channel ?? "", b ? `${(b.manual ?? []).join(",")}/${b.auto ? 1 : 0}/${b.everyBeat ? 1 : 0}/${b.detected?.length ?? 0}` : ""].join("|");
 }
 
 function masksSignature(arr: MaskClipProps[] | undefined): string {

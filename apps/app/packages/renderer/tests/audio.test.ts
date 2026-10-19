@@ -15,7 +15,7 @@ import {
   removeAudioEffect,
   setEffectParam,
 } from "../src/lib/audio-effects.ts";
-import { CHANNEL_FILLS, LOUDNESS_TARGET, loudnessGain, loudnessOff, loudnessStale, normalizeLoudness, placeVoiceover, playedRange, setChannelFill } from "../src/lib/audio.ts";
+import { CHANNEL_FILLS, LOUDNESS_TARGET, consistentTarget, consistentVolumeOffPatches, consistentVolumeOn, consistentVolumePatches, loudnessGain, reduceNoiseOn, setReduceNoise, loudnessOff, loudnessStale, normalizeLoudness, placeVoiceover, playedRange, setChannelFill } from "../src/lib/audio.ts";
 import {
   addBeat,
   addBeatAtPlayhead,
@@ -239,4 +239,46 @@ test("Mark beat at the playhead toggles a hand-marked beat there, through the cl
   // Automatic beats aren't hand-marked: the toggle adds one beside them.
   const auto = audio({ beats: { auto: true, everyBeat: true, detected: [{ time: 1, downbeat: true }] } });
   assert.deepEqual((toggleBeatAtPlayhead(auto, 60, fps) as Partial<AudioClipProps>).beats!.manual, [1]);
+});
+
+test("reduce noise: a switch on the clip that keeps its strength", () => {
+  const clip = audio({});
+  assert.equal(reduceNoiseOn(clip), false);
+  assert.deepEqual(setReduceNoise(clip, false), {});
+  const on = { ...clip, ...setReduceNoise(clip, true) } as AudioClipProps;
+  assert.equal(reduceNoiseOn(on), true);
+  const strong = { ...on, denoise: { enabled: true, strength: 90 } } as AudioClipProps;
+  assert.deepEqual((setReduceNoise(strong, false) as AudioClipProps).denoise, { enabled: false, strength: 90 });
+});
+
+test("make volume consistent: one target, clips within a LU, the clips' own settings given back", () => {
+  const a = audio({ clipId: "a" });
+  const b = audio({ clipId: "b", loudness: { enabled: true, target: -14, measured: -20, peak: -3, range: [0, 5] } } as Partial<AudioClipProps>);
+  const silent = audio({ clipId: "s" });
+  const measures = {
+    a: { integrated: -31, peak: -12, range: [0, 10] as [number, number] },
+    b: { integrated: -18, peak: -4, range: [0, 5] as [number, number] },
+    s: { integrated: null, peak: -200, range: [0, 5] as [number, number] },
+  };
+  // The preferred −23 is within both clips' reach: peaks have room (a: −31 + 8 ≤ 12 under; b: −18 − 5 ≤ 4 under).
+  assert.equal(consistentTarget(measures, -23), -23);
+  const patches = consistentVolumePatches([a, b, silent], measures, -23);
+  assert.deepEqual(patches.map(([id]) => id), ["a", "b"]);
+  const after = [a, b, silent].map((c) => ({ ...c, ...Object.fromEntries(patches)[c.clipId] }) as AudioClipProps);
+  assert.equal(consistentVolumeOn(after), true);
+  // Each clip's loudness after its gain: measured + gain, the same for both.
+  const landed = after.slice(0, 2).map((c) => c.loudness!.measured! + loudnessGain(c));
+  assert.ok(Math.abs(landed[0] - landed[1]) < 1, `${landed}`);
+  close(landed[0], -23, 1e-9, "target");
+  // Off gives back what each had: nothing for a, its own Normalize setting for b.
+  const off = Object.fromEntries(consistentVolumeOffPatches(after));
+  assert.equal(off.a.loudness, null);
+  assert.deepEqual(off.b.loudness, { enabled: true, target: -14, measured: -20, peak: -3, range: [0, 5] });
+  // A second run keeps the first's `was`.
+  const again = Object.fromEntries(consistentVolumePatches(after, measures, -14));
+  assert.equal((again.b.loudness as any).consistent.was.target, -14);
+  // A peaky clip lowers the target so both still land together, but never by more than 6 dB.
+  const peaky = { a: { integrated: -30, peak: -1, range: [0, 1] as [number, number] }, b: measures.b };
+  assert.equal(consistentTarget(peaky, -14), -20);
+  assert.equal(consistentTarget({}, -23), null);
 });

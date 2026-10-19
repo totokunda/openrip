@@ -1,9 +1,10 @@
 import React from "react";
 import { create } from "zustand";
-import { LuPalette } from "react-icons/lu";
+import { LuAudioLines, LuPalette } from "react-icons/lu";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { consistentOn, consistentReference, consistentReferenceId, mainTrackClips } from "@/lib/color-tools";
+import { makeVolumeConsistent, soundClips, useVolumeStore, volumeConsistentOff, volumeConsistentOn } from "@/lib/audio-tools";
 import { colorsConsistentOff, makeColorsConsistent, useAnalysisStore } from "@/lib/analysis";
 import { SmallCheckbox } from "../text/controls";
 import PropertyRow from "../PropertyRow";
@@ -28,6 +29,13 @@ const GlobalEdits: React.FC = () => {
   const referenceId = consistentReferenceId(clips, timelines);
   const busy = running?.kind === "consistent";
   const main = mainTrackClips(clips, timelines);
+  const measuring = useVolumeStore((s) => s.running);
+  const volumeOn = volumeConsistentOn(clips);
+  const sounds = soundClips(clips);
+  const toggleVolume = (next: boolean) => {
+    if (next) void makeVolumeConsistent();
+    else volumeConsistentOff();
+  };
   const toggle = (next: boolean) => {
     if (!next) {
       colorsConsistentOff();
@@ -44,6 +52,16 @@ const GlobalEdits: React.FC = () => {
         <span className="flex-1 text-left text-[13px] text-brand-light truncate">Make colors consistent</span>
         <SmallCheckbox checked={on || busy} onChange={toggle} label="Make colors consistent" testId="make-colors-consistent-on" />
       </div>
+      <div data-testid="make-volume-consistent" className="mt-2 h-[40px] rounded-[6px] bg-brand-background-light/50 px-3 flex flex-row items-center gap-2.5">
+        <LuAudioLines className="w-[15px] h-[15px] text-brand-light shrink-0" />
+        <span className="flex-1 text-left text-[13px] text-brand-light truncate">Make volume consistent</span>
+        <SmallCheckbox checked={volumeOn || !!measuring} onChange={toggleVolume} label="Make volume consistent" testId="make-volume-consistent-on" />
+      </div>
+      {(measuring || (!volumeOn && sounds.length < 2)) && (
+        <p data-testid="volume-consistent-note" className="px-1 pt-2 text-[12px] text-[#8a8a8a] text-left">
+          {measuring ? `Measuring ${measuring.done} of ${measuring.total}…` : "Needs two or more clips with sound."}
+        </p>
+      )}
       <div className="px-1 pt-1">
         {busy && <Analysing label="Matching" progress={running!.progress} />}
         {on && !busy && (

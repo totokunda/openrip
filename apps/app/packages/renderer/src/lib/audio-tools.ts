@@ -3,13 +3,16 @@
 // preload (its loudness meter, its beat finder) and put the pure helpers' patches
 // (lib/audio.ts, lib/audio-effects.ts, lib/beats.ts) through the clip store's `updateClip`, so a
 // store's clip is never written to in place and each action is one undo step.
+import { create } from "zustand";
+import { toast } from "sonner";
 import { engineBeats, engineLoudness } from "@app/preload";
 import type { AnyClipProps, Asset, AssetCredit, AudioClipProps } from "./types";
 import type { ContextMenuItem } from "./context-menu";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
 import { getMediaInfoCached } from "./media/utils";
-import { loudnessOff, normalizeLoudness, placeVoiceover } from "./audio.ts";
+import { beginStep } from "./history";
+import { consistentVolumeOffPatches, consistentVolumeOn, consistentVolumePatches, loudnessOff, normalizeLoudness, placeVoiceover, playedRange, reduceNoiseOn, setReduceNoise, targetLoudness, type ClipMeasure } from "./audio.ts";
 import { beatSnapPoints, beatsOfFile, canHaveBeats, clearBeats, knownBeatsOfFile, setAutoBeats, toggleBeatAtPlayhead, type BeatGrid } from "./beats.ts";
 
 /** The file under an asset's path: the halves a detach made (`…#video`, `…#audio`) are the file itself. */
@@ -119,12 +122,81 @@ export const setNormalize = async (clipId: string, on: boolean): Promise<void> =
   if (useClipStore.getState().getClipById(clipId)) useClipStore.getState().updateClip(clipId, patch);
 };
 
+// ---- reduce noise -----------------------------------------------------------------------------
+
+/** Reduce noise on or off for the clip: the engine reads the clip's noise itself, so it's one patch. */
+export const setReduceNoiseInStore = (clipId: string, on: boolean) => {
+  const clip = useClipStore.getState().getClipById(clipId);
+  if (!clip) return;
+  const patch = setReduceNoise(clip, on);
+  if (Object.keys(patch).length) useClipStore.getState().updateClip(clipId, patch);
+};
+
+// ---- make volume consistent -------------------------------------------------------------------
+
+/** Make volume consistent while it measures: how many clips are done of how many (null when idle). */
+export const useVolumeStore = create<{ running: { done: number; total: number } | null }>(() => ({ running: null }));
+
+/** The project's clips with sound Make volume consistent works on: videos with their sound, and audio clips. */
+export const soundClips = (clips: AnyClipProps[]): AnyClipProps[] => clips.filter((c) => canHaveBeats(c) && !soundSeparated(c) && !!fileOf(assetOfClip(c)?.path));
+
+/** Whether Make volume consistent is on. */
+export const volumeConsistentOn = (clips: AnyClipProps[]): boolean => consistentVolumeOn(clips);
+
+/**
+ * Make volume consistent on: the engine's meter reads each clip's played range (as Normalize
+ * loudness does), and every clip with sound is turned to one target (Settings › Target
+ * loudness), the clips' own settings kept for turning it off, as one undo step. Does nothing
+ * while it's measuring already.
+ */
+export const makeVolumeConsistent = async (): Promise<number> => {
+  if (useVolumeStore.getState().running) return 0;
+  const clips = soundClips(useClipStore.getState().clips);
+  if (clips.length === 0) return 0;
+  useVolumeStore.setState({ running: { done: 0, total: clips.length } });
+  try {
+    const measures: Record<string, ClipMeasure> = {};
+    const seen = new Map<string, Awaited<ReturnType<typeof engineLoudness>>>();
+    for (let i = 0; i < clips.length; i++) {
+      const clip = clips[i];
+      const path = fileOf(assetOfClip(clip)?.path);
+      const range = playedRange(clip, fps(), mediaSecondsOf(clip));
+      const key = `${path}|${range[0].toFixed(3)}|${range[1].toFixed(3)}`;
+      if (!seen.has(key)) seen.set(key, await engineLoudness(path, range[0], range[1]));
+      const m = seen.get(key);
+      if (m) measures[clip.clipId] = { integrated: m.integrated, peak: m.peak, range };
+      useVolumeStore.setState({ running: { done: i + 1, total: clips.length } });
+    }
+    // The clips as they are now: an edit made meanwhile isn't undone.
+    const now = useClipStore.getState();
+    const patches = consistentVolumePatches(now.clips, measures, targetLoudness());
+    if (patches.length === 0) {
+      toast.message("Nothing to match: the clips are silent.");
+      return 0;
+    }
+    beginStep();
+    for (const [id, patch] of patches) useClipStore.getState().updateClip(id, patch);
+    return patches.length;
+  } finally {
+    useVolumeStore.setState({ running: null });
+  }
+};
+
+/** Make volume consistent off: each clip's own loudness setting given back, as one step. */
+export const volumeConsistentOff = () => {
+  const { clips, updateClip } = useClipStore.getState();
+  const patches = consistentVolumeOffPatches(clips);
+  if (patches.length === 0) return;
+  beginStep();
+  for (const [id, patch] of patches) updateClip(id, patch);
+};
+
 // ---- the clip's menu --------------------------------------------------------------------------
 
 /**
  * The clip menu's audio items, as CapCut's: on an audio clip, Auto mark beats › (Beat 1,
- * Beat 2, Off, then Mark beat at the playhead and Clear beats) and Normalize loudness (ticked
- * while on); on a video with its sound, Enhance audio › Normalize loudness. None for other clips
+ * Beat 2, Off, then Mark beat at the playhead and Clear beats), Normalize loudness and Reduce noise
+ * (ticked while on); on a video with its sound, Enhance audio › Normalize loudness, Reduce noise. None for other clips
  * or a video whose sound was detached.
  */
 export const soundMenuItems = (clip: AnyClipProps | undefined): ContextMenuItem[] => {
@@ -132,7 +204,9 @@ export const soundMenuItems = (clip: AnyClipProps | undefined): ContextMenuItem[
   const id = clip.clipId;
   const on = !!(clip as AudioClipProps).loudness?.enabled;
   const normalize: ContextMenuItem = { id: "normalize", label: "Normalize loudness", action: "custom", checked: on, run: () => void setNormalize(id, !on) };
-  if (clip.type === "video") return [{ id: "enhance-audio", label: "Enhance audio", action: "none", children: [normalize] }];
+  const denoise = reduceNoiseOn(clip);
+  const reduce: ContextMenuItem = { id: "reduce-noise", label: "Reduce noise", action: "custom", checked: denoise, run: () => setReduceNoiseInStore(id, !denoise) };
+  if (clip.type === "video") return [{ id: "enhance-audio", label: "Enhance audio", action: "none", children: [normalize, reduce] }];
   const auto = autoBeatOf(clip);
   const frame = useControlsStore.getState().focusFrame;
   const onClip = frame >= (clip.startFrame ?? 0) && frame <= (clip.endFrame ?? 0);
@@ -151,6 +225,7 @@ export const soundMenuItems = (clip: AnyClipProps | undefined): ContextMenuItem[
       ],
     },
     normalize,
+    reduce,
   ];
 };
 

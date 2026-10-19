@@ -5,9 +5,9 @@ import PropertiesSlider from "./PropertiesSlider";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import type { AnyClipProps, AudioClipProps, ChannelFill, VideoClipProps } from "@/lib/types";
-import { CHANNEL_FILLS, LOUDNESS_TARGET, loudnessGain, loudnessStale, setChannelFill } from "@/lib/audio";
+import { CHANNEL_FILLS, loudnessGain, loudnessStale, reduceNoiseOn, setChannelFill } from "@/lib/audio";
 import { clearKeyframes, editProperty, hasKeyframes, keyframeAt, localFrame, nextKeyframe, previousKeyframe, toggleKeyframe, valueAt } from "@/lib/keyframes";
-import { assetOfClip, mediaSecondsOf, setNormalize, soundSeparated } from "@/lib/audio-tools";
+import { assetOfClip, mediaSecondsOf, setNormalize, setReduceNoiseInStore, soundSeparated } from "@/lib/audio-tools";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { ClipLicense } from "@/components/dialogs/ExportCredits";
@@ -290,9 +290,18 @@ const AudioProperties: React.FC<AudioPropertiesProps> = ({ clipId }) => {
               ? "Measuring…"
               : loudness.measured == null
                 ? "Nothing to measure: the clip is silent here."
-                : `${LOUDNESS_TARGET} LUFS target · measured ${loudness.measured.toFixed(1)} LUFS · ${gain >= 0 ? "+" : "−"}${Math.abs(gain).toFixed(1)} dB`}
+                : `${loudness.target} LUFS target · measured ${loudness.measured.toFixed(1)} LUFS · ${gain >= 0 ? "+" : "−"}${Math.abs(gain).toFixed(1)} dB`}
           </p>
         )}
+      </AudioSection>
+      <AudioSection
+        title="Reduce noise"
+        checked={reduceNoiseOn(clip)}
+        onCheckedChange={(on) => setReduceNoiseInStore(clipId, on)}
+        collapsible={false}
+        testId="audio-section-denoise"
+      >
+        <p className="text-[12px] leading-snug text-[#949494]">Take steady background noise (hiss, hum, fans) out of the clip.</p>
       </AudioSection>
       <AudioSection
         title="Fill channel"

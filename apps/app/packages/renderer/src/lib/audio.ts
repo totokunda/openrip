@@ -7,10 +7,14 @@
 //   the clip; engine/crates/audio/src/loudness.rs, docs/parity/loudness.md). The measurement is
 //   kept on the clip, as CapCut keeps it; a trim makes it stale (`loudnessStale`) and the panel
 //   measures again.
+// - Reduce noise: the engine's spectral-gating denoiser on or off for the clip (`denoise`).
+// - Make volume consistent (the project inspector's Global edits): every clip's loudness measured
+//   the same way and Normalize loudness set on all to one target, as one step; the clip's own
+//   setting is kept under `loudness.consistent.was` to give back when it's turned off.
 // - Fill channel: one side on both, or (OpenRip's own) both mixed to mono.
 // - Voiceover: the recording the main process made (preload `voiceoverStop`) as an asset and an
 //   audio clip on a new track at the playhead, as CapCut puts a voiceover.
-import type { AnyClipProps, Asset, AssetCredit, AudioClipProps, ChannelFill, ClipLoudness, TimelineProps, VideoClipProps } from "./types";
+import type { AnyClipProps, Asset, AssetCredit, AudioClipProps, ChannelFill, ClipAudio, ClipLoudness, TimelineProps, VideoClipProps } from "./types";
 import { preferences } from "./preferences.ts";
 
 /** CapCut's loudness target, LUFS. */
@@ -77,6 +81,61 @@ export const loudnessGain = (clip: AnyClipProps): number => {
   if (!l?.enabled || l.measured == null || !Number.isFinite(l.measured) || l.measured <= -70) return 0;
   return Math.min(l.target - l.measured, -Math.min(l.peak ?? 0, 0));
 };
+
+/** Whether Reduce noise is on for the clip. */
+export const reduceNoiseOn = (clip: AnyClipProps | undefined): boolean => !!clip && hasSound(clip) && !!(clip as ClipAudio).denoise?.enabled;
+
+/** A patch turning the clip's Reduce noise on or off (its strength, if set, kept). */
+export const setReduceNoise = (clip: AnyClipProps, on: boolean): Partial<AnyClipProps> => {
+  if (!hasSound(clip)) return {};
+  const now = (clip as ClipAudio).denoise;
+  return on || now ? ({ denoise: { ...now, enabled: on } } as Partial<AnyClipProps>) : {};
+};
+
+/** What the engine's meter read over a clip's played range (the range as `playedRange`). */
+export type ClipMeasure = { integrated: number | null; peak: number; range: [number, number] };
+
+/** How far under the preferred target Make volume consistent may go to keep a peaky clip's peak under full scale, dB. */
+export const CONSISTENT_HEADROOM = 6;
+
+/** Whether Make volume consistent is on: a clip carries a setting it made. */
+export const consistentVolumeOn = (clips: AnyClipProps[]): boolean => clips.some((c) => hasSound(c) && !!(c as ClipAudio).loudness?.consistent);
+
+/**
+ * The one loudness Make volume consistent turns every measured clip to: the preferred target,
+ * or lower (by at most `CONSISTENT_HEADROOM`) where the engine's gain would otherwise stop a
+ * peaky clip short of it, so the clips still land together. Null if nothing was measured.
+ */
+export const consistentTarget = (measures: Record<string, ClipMeasure>, preferred: number): number | null => {
+  const reads = Object.values(measures).filter((m) => m.integrated != null && Number.isFinite(m.integrated) && m.integrated > -70);
+  if (reads.length === 0) return null;
+  const reach = Math.min(...reads.map((m) => m.integrated! - Math.min(m.peak ?? 0, 0)));
+  return Math.max(preferred - CONSISTENT_HEADROOM, Math.min(preferred, reach));
+};
+
+/**
+ * Make volume consistent: `[clipId, patch]` for each clip measured (`measures` by clip id; a
+ * clip without sound there is left out), all turned to one target. The clip's own loudness
+ * setting is kept to give back (a second run keeps the first's).
+ */
+export const consistentVolumePatches = (clips: AnyClipProps[], measures: Record<string, ClipMeasure>, preferred: number): [string, Partial<AnyClipProps>][] => {
+  const target = consistentTarget(measures, preferred);
+  if (target == null) return [];
+  const out: [string, Partial<AnyClipProps>][] = [];
+  for (const clip of clips) {
+    const m = measures[clip.clipId];
+    if (!hasSound(clip) || !m || m.integrated == null || !(m.integrated > -70)) continue;
+    const now = (clip as ClipAudio).loudness ?? null;
+    const was = now?.consistent ? now.consistent.was : now;
+    const loudness: ClipLoudness = { enabled: true, target, measured: m.integrated, peak: m.peak, range: m.range, consistent: { was } };
+    out.push([clip.clipId, { loudness } as Partial<AnyClipProps>]);
+  }
+  return out;
+};
+
+/** Make volume consistent off: each clip's own loudness setting given back. */
+export const consistentVolumeOffPatches = (clips: AnyClipProps[]): [string, Partial<AnyClipProps>][] =>
+  clips.filter((c) => hasSound(c) && (c as ClipAudio).loudness?.consistent).map((c) => [c.clipId, { loudness: (c as ClipAudio).loudness!.consistent!.was } as Partial<AnyClipProps>]);
 
 /** Fill channel's menu, CapCut's names first. */
 export const CHANNEL_FILLS: { id: ChannelFill; name: string }[] = [
