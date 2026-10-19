@@ -1,462 +1,219 @@
-import React, { useEffect, useState, useRef, useMemo, useLayoutEffect } from "react";
-import { Filter } from "@/lib/types";
-import Draggable from "@/components/dnd/Draggable";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  LuSearch,
-  LuChevronLeft,
-  LuChevronRight,
-  LuArrowRight,
-} from "react-icons/lu";
-import CategorySidebar from "./CategorySidebar";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useDndMonitor, useDraggable } from "@dnd-kit/core";
+import { LuPlus, LuSearch, LuX } from "react-icons/lu";
 import { useQuery } from "@tanstack/react-query";
 import { fetchFilters } from "@app/preload";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { addFilterAtPlayhead, filterKey, useFilterLibrary } from "@/lib/filters/library";
+import type { Filter } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
-const FilterItem = ({ filter }: { filter: Filter }) => {
-  return (
-    <Draggable
-      id={filter.id}
-      data={{
-        ...filter,
-        type: "filter",
-        absPath: filter.examplePath,
-        assetUrl: filter.exampleAssetUrl,
-        fillCanvas: true,
-      }}
-    >
-      <div className="cursor-pointer w-32 transition-all duration-200 rounded-md">
-        <div className="flex flex-col gap-y-2.5">
-          <div className="flex items-center gap-x-1 relative">
-            <img
-              src={filter.examplePath}
-              alt={filter.name}
-              className="h-full object-cover rounded-md"
-            />
-          </div>
-          <div className="w-full truncate leading-tight font-medium text-brand-light text-[10px] text-start">
-            {filter.name}
-          </div>
-        </div>
-      </div>
-    </Draggable>
-  );
-};
-
-const FilterCategory: React.FC<{
-  category: string;
-  filters: Filter[];
-  width: number;
-  onViewAll: () => void;
-}> = ({ category, filters, width, onViewAll }) => {
-  const carouselRef = useRef<HTMLDivElement>(null);
-  const [showLeftArrow, setShowLeftArrow] = useState(false);
-  const [showRightArrow, setShowRightArrow] = useState(false);
-  void width; // param retained to avoid broader refactor
-
-  const checkScroll = () => {
-    if (carouselRef.current) {
-      const { scrollLeft, scrollWidth, clientWidth } = carouselRef.current;
-      const hasOverflow = scrollWidth > clientWidth;
-      setShowLeftArrow(scrollLeft > 5);
-      setShowRightArrow(
-        hasOverflow && scrollLeft + clientWidth < scrollWidth - 5,
-      );
-    } else {
-      setShowLeftArrow(false);
-      setShowRightArrow(false);
-    }
-  };
-
-  useEffect(() => {
-    const timeouts = [
-      setTimeout(checkScroll, 0),
-      setTimeout(checkScroll, 100),
-      setTimeout(checkScroll, 300),
-      setTimeout(checkScroll, 500),
-    ];
-
-    const carousel = carouselRef.current;
-    if (carousel) {
-      carousel.addEventListener("scroll", checkScroll);
-      window.addEventListener("resize", checkScroll);
-      return () => {
-        timeouts.forEach(clearTimeout);
-        carousel.removeEventListener("scroll", checkScroll);
-        window.removeEventListener("resize", checkScroll);
-      };
-    }
-    return () => timeouts.forEach(clearTimeout);
-  }, [filters]);
-
-  const scroll = (direction: "left" | "right") => {
-    if (carouselRef.current) {
-      const scrollAmount = 300;
-      carouselRef.current.scrollBy({
-        left: direction === "left" ? -scrollAmount : scrollAmount,
-        behavior: "smooth",
-      });
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-y-1 w-full px-4">
-      <div
-        className="flex items-center justify-between py-2"
-        style={{ maxWidth: width }}
-      >
-        <span className="text-brand-light text-[13px] font-medium">
-          {category}
-        </span>
-        <button
-          onClick={onViewAll}
-          className="flex items-center gap-x-1.5 text-brand-light hover:text-brand-light/70 text-[12px] font-medium cursor-pointer transition-colors rounded-md shrink-0"
-        >
-          <span>View all</span>
-          <LuArrowRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-      <div className="relative" style={{ width: width }}>
-        {showLeftArrow && (
-          <button
-            onClick={() => scroll("left")}
-            className="absolute -left-3 top-1/2 cursor-pointer -translate-y-1/2 z-9999 bg-brand hover:bg-brand/80 rounded-full p-1.5 transition-colors shadow-lg border border-brand-light/20"
-          >
-            <LuChevronLeft className="w-4 h-4 text-brand-light" />
-          </button>
-        )}
-        {showRightArrow && (
-          <button
-            onClick={() => scroll("right")}
-            className="absolute -right-3 top-1/2 cursor-pointer -translate-y-1/2 z-9999 bg-brand hover:bg-brand/80 rounded-full p-1.5 transition-colors shadow-lg border border-brand-light/20"
-          >
-            <LuChevronRight className="w-4 h-4 text-brand-light" />
-          </button>
-        )}
-        <div
-          ref={carouselRef}
-          className="carousel-container flex gap-x-2 overflow-x-auto rounded-md"
-          style={{
-            scrollbarWidth: "none",
-            msOverflowStyle: "none",
-            WebkitOverflowScrolling: "touch",
-          }}
-        >
-          {filters.map((filter) => (
-            <div key={filter.id} className="shrink-0">
-              <FilterItem filter={filter} />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const CategoryDetailView: React.FC<{
-  category: string;
-  filters: Filter[];
-  onBack: () => void;
-  scrollCache: Map<string, number>;
-}> = ({ category, filters, onBack, scrollCache }) => {
-  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
-
-  useLayoutEffect(() => {
-    const root = scrollAreaRef.current;
-    if (!root) return;
-
-    const viewport = root.querySelector(
-      "[data-radix-scroll-area-viewport]",
-    ) as HTMLDivElement | null;
-    if (!viewport) return;
-
-    const key = `filterMenu:category:${category}`;
-    const saved = scrollCache.get(key);
-    if (typeof saved === "number") {
-      viewport.scrollTop = saved;
-    }
-
-    const onScroll = () => {
-      scrollCache.set(key, viewport.scrollTop);
-    };
-    viewport.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      viewport.removeEventListener("scroll", onScroll as EventListener);
-    };
-  }, [category, scrollCache]);
-
-  return (
-    <div className="flex flex-col h-full w-full">
-      <div className="px-7 pt-4 pb-4 border-b border-brand/20">
-        <div className="flex items-center gap-x-3">
-          <button
-            onClick={onBack}
-            className="text-brand-light hover:text-brand-light/70 p-1 flex items-center justify-center bg-brand border border-brand-light/10 rounded-md transition-colors cursor-pointer"
-          >
-            <LuChevronLeft className="w-4 h-4" />
-          </button>
-          <span className="text-brand-light text-[14px] font-medium">
-            {category}
-          </span>
-        </div>
-      </div>
-      <ScrollArea className="flex-1 pb-16" ref={scrollAreaRef}>
-        <div className="px-7 pt-6">
-          <div
-            className="grid gap-x-2 gap-y-3"
-            style={{
-              gridTemplateColumns: "repeat(auto-fit, minmax(128px, 1fr))",
-            }}
-          >
-            {filters.map((filter) => (
-              <div key={filter.id} className="flex justify-center">
-                <FilterItem filter={filter} />
-              </div>
-            ))}
-          </div>
-        </div>
-      </ScrollArea>
-    </div>
-  );
-};
-
-const FilterMenu = () => {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const scrollCacheRef = useRef<Map<string, number>>(new Map());
-  const { data: filters = [] } = useQuery({
+/** The library's filters (read once; they're files on disk). */
+export const useFilters = (): Filter[] => {
+  const { data = [] } = useQuery({
     queryKey: ["filters"],
-    queryFn: async () => {
-      const res = await fetchFilters();
-      return res ?? [];
-    },
+    queryFn: async () => (await fetchFilters()) ?? [],
     placeholderData: (prev) => prev ?? [],
     retry: false,
     refetchOnWindowFocus: false,
     staleTime: Infinity,
   });
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [scrollWidth, setScrollWidth] = useState(0);
-  const categorySectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const handleCategoryClick = (category: string) => {
-    setActiveCategory(category);
-    const section = categorySectionRefs.current[category];
-    const viewport = viewportRef.current;
+  return data;
+};
 
-    if (section && viewport) {
-      // Calculate offset from the top of the scrollable container
-      const containerTop = viewport.getBoundingClientRect().top;
-      const sectionTop = section.getBoundingClientRect().top;
-      const scrollOffset = sectionTop - containerTop + viewport.scrollTop;
+/** The tab's column: Favorites, then the categories under Filters (what the panel lists). */
+export const filterSections = (filters: Filter[]) => [
+  { id: "favorites", label: "Favorites" },
+  { id: "all", label: "All", under: "Filters" },
+  ...[...new Set(filters.map((f) => f.category))].map((c) => ({ id: `cat:${c}`, label: c, under: "Filters" })),
+];
 
-      viewport.scrollTo({ top: scrollOffset, behavior: "smooth" });
-    } else if (section) {
-      section.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  };
+/** A star: outlined, or filled when the filter is a favourite. */
+const Star: React.FC<{ on: boolean }> = ({ on }) => (
+  <svg width="11" height="11" viewBox="0 0 12 12" fill={on ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round">
+    <path d="M6 1.2 7.5 4.4l3.5.5-2.5 2.4.6 3.5L6 9.1 2.9 10.8l.6-3.5L1 4.9l3.5-.5z" />
+  </svg>
+);
 
-  const filteredFilters = useMemo(() => {
-    const list = filters ?? [];
-    if (!searchQuery.trim()) return list;
-    const query = searchQuery.toLowerCase();
-    return list.filter(
-      (filter) =>
-        filter.name.toLowerCase().includes(query) ||
-        filter.category.toLowerCase().includes(query),
-    );
-  }, [filters, searchQuery]);
+/**
+ * One tile, as CapCut's library tiles: an 86 px rounded square showing the filter on a sample
+ * picture, its name under it. Clicked, the filter is previewed in the player (the project
+ * doesn't change); hovered, a star (favourite) and a round "+" (add at the playhead) sit at
+ * the bottom-right. Dragged onto the timeline, it lands as a filter clip.
+ */
+const FilterTile: React.FC<{ filter: Filter; active: boolean; favourite: boolean }> = ({ filter, active, favourite }) => {
+  const [hover, setHover] = useState(false);
+  const toggleFavourite = useFilterLibrary((s) => s.toggleFavourite);
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `filter:${filterKey(filter)}`,
+    data: { ...filter, type: "filter", absPath: filter.examplePath, assetUrl: filter.exampleAssetUrl, fillCanvas: true },
+  });
+  // The buttons keep their own presses (a press on the tile starts its drag).
+  const own = (e: React.PointerEvent) => e.stopPropagation();
+  return (
+    <div className="flex flex-col gap-1.5 w-[86px]" data-testid={`filter-card-${filterKey(filter)}`}>
+      <div
+        ref={setNodeRef}
+        {...listeners}
+        {...attributes}
+        role="button"
+        tabIndex={0}
+        title={filter.name}
+        data-testid="filter-tile"
+        data-filter={filter.id}
+        data-category={filter.category}
+        aria-pressed={active}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        className={cn(
+          "relative w-[86px] h-[86px] rounded-[6px] bg-brand-background-light overflow-hidden cursor-pointer outline-none",
+          active && "ring-[1.5px] ring-brand-accent",
+          isDragging && "opacity-50",
+        )}
+      >
+        <img src={filter.examplePath} alt={filter.name} draggable={false} loading="lazy" className="w-full h-full object-cover pointer-events-none" />
+        {(hover || favourite) && (
+          <div className="absolute right-1 bottom-1 flex items-center gap-1">
+            <button
+              type="button"
+              title={favourite ? "Remove from Favorites" : "Add to Favorites"}
+              aria-label={favourite ? "Remove from Favorites" : "Add to Favorites"}
+              aria-pressed={favourite}
+              data-testid="filter-favourite"
+              onPointerDown={own}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleFavourite(filter);
+              }}
+              className={cn(
+                "w-[18px] h-[18px] rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80",
+                favourite ? "text-brand-accent" : "text-white",
+                !hover && "hidden",
+              )}
+            >
+              <Star on={favourite} />
+            </button>
+            {hover && (
+              <button
+                type="button"
+                title={`Add ${filter.name}`}
+                aria-label={`Add ${filter.name}`}
+                data-testid="filter-add"
+                onPointerDown={own}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void addFilterAtPlayhead(filter);
+                }}
+                className="w-[18px] h-[18px] rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80"
+              >
+                <LuPlus className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        )}
+        {!hover && favourite && (
+          <span className="absolute right-1 bottom-1 w-[18px] h-[18px] rounded-full bg-black/60 text-brand-accent flex items-center justify-center pointer-events-none" data-testid="filter-favourite-mark">
+            <Star on />
+          </span>
+        )}
+      </div>
+      <span className={cn("text-[12px] leading-none truncate text-left", active ? "text-brand-light" : "text-[#949494]")}>{filter.name}</span>
+    </div>
+  );
+};
 
-  const categories = useMemo(() => {
-    return [...new Set(filteredFilters.map((filter) => filter.category))];
-  }, [filteredFilters]);
+/**
+ * The Filters tab, in CapCut's layout: a search field, then the picked part of the column
+ * (Favorites, All, or a category) as a grid of tiles under its name. A search looks through
+ * every filter. The click on a tile (a press let go where it began; the app's drags start on a
+ * press and swallow the click) previews it; "+" adds it.
+ */
+const FilterMenu: React.FC<{ part?: string }> = ({ part = "all" }) => {
+  const filters = useFilters();
+  const favourites = useFilterLibrary((s) => s.favourites);
+  const preview = useFilterLibrary((s) => s.preview);
+  const setPreview = useFilterLibrary((s) => s.setPreview);
+  const [query, setQuery] = useState("");
 
-  // Keep active category reasonable as data/search changes (overview mode only).
-  useEffect(() => {
-    if (selectedCategory) return;
-    setActiveCategory((prev) => {
-      if (prev && categories.includes(prev)) return prev;
-      return categories[0] ?? null;
-    });
-  }, [categories, selectedCategory]);
+  // A preview lasts while the tab shows.
+  useEffect(() => () => useFilterLibrary.getState().setPreview(null), []);
 
-  useEffect(() => {
-    const updateWidth = () => {
-      if (scrollRef.current) {
-        const viewport = scrollRef.current.querySelector(
-          "[data-radix-scroll-area-viewport]",
-        ) as HTMLDivElement | null;
-        viewportRef.current = viewport;
-        const newWidth = (viewport || scrollRef.current).clientWidth;
-        if (newWidth > 0) {
-          setScrollWidth(newWidth);
-        }
-      }
-    };
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
+  useDndMonitor({
+    onDragEnd: (e) => {
+      const d = e.active?.data?.current as (Filter & { type?: string }) | undefined;
+      if (d?.type !== "filter" || Math.hypot(e.delta.x, e.delta.y) > 3) return;
+      const f = filters.find((x) => filterKey(x) === filterKey(d));
+      if (!f) return;
+      setPreview(previewRef.current && filterKey(previewRef.current) === filterKey(f) ? null : f);
+    },
+  });
 
-    // Initial update with multiple attempts to catch the width after layout
-    const timeouts = [
-      setTimeout(updateWidth, 0),
-      setTimeout(updateWidth, 50),
-      setTimeout(updateWidth, 100),
-      setTimeout(updateWidth, 200),
-    ];
+  const q = query.trim().toLowerCase();
+  const category = part.startsWith("cat:") ? part.slice(4) : null;
+  const heading = q ? "" : part === "favorites" ? "Favorites" : (category ?? "All");
+  const shown = useMemo(() => {
+    if (q) return filters.filter((f) => f.name.toLowerCase().includes(q) || f.category.toLowerCase().includes(q));
+    if (part === "favorites") return filters.filter((f) => favourites.includes(filterKey(f)));
+    return category ? filters.filter((f) => f.category === category) : filters;
+  }, [filters, favourites, q, part, category]);
 
-    // Use ResizeObserver for more reliable resize tracking
-    const resizeObserver = new ResizeObserver(updateWidth);
-    if (scrollRef.current) {
-      resizeObserver.observe(scrollRef.current);
-    }
-
-    // Also listen to window resize as fallback
-    window.addEventListener("resize", updateWidth);
-
-    return () => {
-      timeouts.forEach(clearTimeout);
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", updateWidth);
-    };
-  }, [selectedCategory]);
-
-  // Remember & restore scroll position for the overview list (no-jank: restore before paint).
-  useLayoutEffect(() => {
-    if (selectedCategory) return;
-    const root = scrollRef.current;
-    if (!root) return;
-    const viewport = root.querySelector(
-      "[data-radix-scroll-area-viewport]",
-    ) as HTMLDivElement | null;
-    if (!viewport) return;
-    viewportRef.current = viewport;
-
-    const key = "filterMenu:overview";
-    const saved = scrollCacheRef.current.get(key);
-    if (typeof saved === "number") {
-      viewport.scrollTop = saved;
-    }
-
-    const onScroll = () => {
-      scrollCacheRef.current.set(key, viewport.scrollTop);
-    };
-    viewport.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      viewport.removeEventListener("scroll", onScroll as EventListener);
-    };
-  }, [selectedCategory]);
-
-  // Sync active category to manual scroll position
-  useEffect(() => {
-    if (selectedCategory) return; // Only in overview mode
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-
-    let rafId = 0;
-    const handleScroll = () => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        const viewportTop = viewport.getBoundingClientRect().top;
-        let nearestCategory: string | null = null;
-        let nearestDelta = Infinity;
-        for (const category of categories) {
-          const section = categorySectionRefs.current[category];
-          if (!section) continue;
-          const sectionTop = section.getBoundingClientRect().top;
-          const delta = Math.abs(sectionTop - viewportTop);
-          if (delta < nearestDelta) {
-            nearestDelta = delta;
-            nearestCategory = category;
-          }
-        }
-        if (nearestCategory && nearestCategory !== activeCategory) {
-          setActiveCategory(nearestCategory);
-        }
-      });
-    };
-
-    viewport.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("resize", handleScroll);
-    handleScroll();
-
-    return () => {
-      viewport.removeEventListener("scroll", handleScroll as EventListener);
-      window.removeEventListener("resize", handleScroll);
-      cancelAnimationFrame(rafId);
-    };
-  }, [categories, selectedCategory, activeCategory]);
-
-  if (selectedCategory) {
-    return (
-      <>
-        <style>{`
-          .carousel-container::-webkit-scrollbar {
-            display: none;
-          }
-        `}</style>
-        <CategoryDetailView
-          category={selectedCategory}
-          filters={filteredFilters.filter(
-            (f) => f.category === selectedCategory,
-          )}
-          onBack={() => setSelectedCategory(null)}
-          scrollCache={scrollCacheRef.current}
-        />
-      </>
-    );
-  }
+  const empty =
+    shown.length > 0
+      ? ""
+      : q
+        ? `No filters match “${query.trim()}”`
+        : part === "favorites"
+          ? "No favorites yet. Hover a filter and click its star to keep it here."
+          : "No filters found.";
 
   return (
-    <>
-      <style>{`
-        .carousel-container::-webkit-scrollbar {
-          display: none;
-        }
-      `}</style>
-      <div className="flex flex-row h-full w-full bg-brand-background">
-        <CategorySidebar
-          categories={categories}
-          activeCategory={activeCategory}
-          onCategoryClick={handleCategoryClick}
-          title="FILTERS"
-          persistenceKey="sidebar:filter"
-        />
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="w-full p-3 rounded shrink-0">
-            <div className="relative bg-brand text-brand-light rounded-md placeholder:text-brand-light/50 items-center flex w-full p-3 space-x-2 text-[11px] focus:outline-none focus:ring-2 focus:ring-brand-light/30 transition-all">
-              <LuSearch className="w-4 h-4 text-brand-light/60" />
-              <input
-                type="text"
-                placeholder="Search filters..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full outline-none bg-brand"
-              />
-            </div>
-          </div>
-          <ScrollArea className="flex-1" ref={scrollRef}>
-            <div className="flex flex-col gap-y-6 pt-1 pb-28">
-              {categories.map((category) => (
-                <div
-                  key={category}
-                  ref={(el) => {
-                    categorySectionRefs.current[category] = el;
-                  }}
-                  className="w-full"
-                >
-                  <FilterCategory
-                    width={scrollWidth - 36}
-                    category={category}
-                    filters={filteredFilters.filter(
-                      (filter) => filter.category === category,
-                    )}
-                    onViewAll={() => setSelectedCategory(category)}
-                  />
-                </div>
+    <div className="h-full flex flex-col" data-testid="filters-view">
+      <div className="px-3.5 pt-3 pb-3 shrink-0">
+        <label className="h-[26px] flex flex-row items-center gap-1.5 px-2.5 rounded-[4px] bg-brand border border-transparent focus-within:border-[#515151]">
+          <LuSearch className="w-3.5 h-3.5 text-[#949494] shrink-0" />
+          <input
+            data-testid="filters-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search filters"
+            className="flex-1 min-w-0 bg-transparent text-[12px] text-brand-lighter placeholder:text-[#6c6c6c] outline-none"
+          />
+          {query && (
+            <button
+              type="button"
+              aria-label="Clear search"
+              data-testid="filters-search-clear"
+              onClick={() => setQuery("")}
+              className="w-3.5 h-3.5 rounded-full bg-[#6c6c6c] text-brand flex items-center justify-center hover:bg-[#8a8a8a]"
+            >
+              <LuX className="w-2.5 h-2.5" />
+            </button>
+          )}
+        </label>
+      </div>
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="flex flex-col pl-3.5 pr-3 pb-8 text-left">
+          {heading && (
+            <h3 className="text-[12.5px] text-brand-light leading-none mb-3" data-testid="filters-heading">
+              {heading}
+            </h3>
+          )}
+          {empty ? (
+            <p className="text-[12px] text-[#6c6c6c] leading-snug py-6" data-testid="filters-empty">
+              {empty}
+            </p>
+          ) : (
+            <div className="grid gap-x-4 gap-y-[18px]" style={{ gridTemplateColumns: "repeat(auto-fill, 86px)" }}>
+              {shown.map((f) => (
+                <FilterTile key={filterKey(f)} filter={f} active={!!preview && filterKey(preview) === filterKey(f)} favourite={favourites.includes(filterKey(f))} />
               ))}
             </div>
-          </ScrollArea>
+          )}
         </div>
-      </div>
-    </>
+      </ScrollArea>
+    </div>
   );
 };
 

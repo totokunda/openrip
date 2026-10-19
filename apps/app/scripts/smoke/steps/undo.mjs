@@ -134,7 +134,7 @@ export default async (ctx) => {
     },
     intensity: async () => {
       await pick("filter", 0);
-      await openTab(win, "Filter");
+      await openTab(win, "Filters");
       await typeInto(win, "Intensity", 30);
     },
     // The video's halves grouped (⌘G with both selected).

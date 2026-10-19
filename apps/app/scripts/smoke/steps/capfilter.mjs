@@ -10,7 +10,7 @@ export default async (ctx) => {
   const bar = clipsWhere(doc, (c) => c.type === "filter" && c.draftKind !== "sticker")[0];
   if (!bar) throw new Error("no filter bar");
   await focus(ctx, doc, bar);
-  await tab(win, "Filter");
+  await tab(win, "Filters");
   await shot("f1-filter-tab");
   const panel = await win.locator("[data-testid=inspector] [role=tabpanel]").first().innerText();
   const field = win.locator("[data-testid=inspector] [role=tabpanel] input").first();

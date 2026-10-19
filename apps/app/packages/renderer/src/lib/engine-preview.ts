@@ -28,6 +28,7 @@ import { getActiveProjectJsonSnapshot } from "./middlewares/json-persistence";
 import { withoutHistory } from "./history";
 import { BASE_LONG_SIDE } from "./settings";
 import { registerBundledFonts } from "./fonts";
+import { useFilterLibrary } from "./filters/library";
 
 type EnginePreviewState = {
   /** The user's setting. */
@@ -104,7 +105,7 @@ async function syncNow() {
   try {
     // The engine reads originals (ProRes included) where the app uses proxies or playable
     // copies.
-    const snapshot = withoutMasksWhileEditing(await withOriginalMedia(snap.snapshot));
+    const snapshot = withFilterPreview(withoutMasksWhileEditing(await withOriginalMedia(snap.snapshot)));
     // Its text in the bundled fonts from the first frame.
     await registerBundledFonts();
     const r = await engineSyncProject(snap.projectId, snapshot);
@@ -191,6 +192,36 @@ function withoutMasksWhileEditing<T>(snapshot: T): T {
   return { ...s, timeline: { ...s.timeline, clips: clips.map((c: any) => (c?.masks?.length ? { ...c, masks: [] } : c)) } };
 }
 
+/**
+ * The filter picked in the Filters tab, on the engine's copy only: a filter clip on a track of
+ * its own above the rest, over the whole timeline. The project (and so the saved file and an
+ * export) never has it.
+ */
+function withFilterPreview<T>(snapshot: T): T {
+  const f = useFilterLibrary.getState().preview;
+  const s = snapshot as any;
+  if (!f || !s?.timeline || !Array.isArray(s.timeline.clips)) return snapshot;
+  const end = Math.max(1, ...s.timeline.clips.map((c: any) => Number(c?.endTick) || 0));
+  const track = { type: "filter", timelineId: "filter-preview", timelineWidth: 0, timelineY: 0, timelineHeight: 40, timelinePadding: 0, muted: false, hidden: false };
+  const clip = {
+    type: "filter",
+    clipId: "filter-preview",
+    timelineId: "filter-preview",
+    startTick: "0",
+    endTick: String(end),
+    trimStartTick: "0",
+    trimEndTick: "0",
+    name: f.name,
+    smallPath: f.smallPath,
+    fullPath: f.fullPath,
+    category: f.category,
+    examplePath: f.examplePath,
+    exampleAssetUrl: f.exampleAssetUrl,
+    intensity: 100,
+  };
+  return { ...s, timeline: { ...s.timeline, tracks: [track, ...(s.timeline.tracks ?? [])], clips: [...s.timeline.clips, clip] } };
+}
+
 /** Sync soon; edits arriving within `ms` are sent together. */
 function scheduleSync(ms = 60) {
   if (syncTimer) clearTimeout(syncTimer);
@@ -223,6 +254,9 @@ export function initEnginePreview() {
   watch(useClipStore.subscribe as any, (s: any) => [s.clips, s.timelines, s.assets]);
   watch(useControlsStore.subscribe as any, (s: any) => [s.fps]);
   watch(useViewportStore.subscribe as any, (s: any) => [s.aspectRatio, s.tool === "mask"]);
+  useFilterLibrary.subscribe((s, p) => {
+    if (s.preview !== p.preview && useEnginePreviewStore.getState().enabled) scheduleSync(0);
+  });
   watch(useProjectsStore.subscribe as any, (s: any) => [s.activeProjectId, (s as any).projectsLoaded]);
 
   // Playback by the engine: its sound, and its clock moving the playhead. Each run has a

@@ -158,8 +158,8 @@ const ClipPropertiesPanel: React.FC = () => {
         return [
           {
             id: 'filter',
-            label: 'Filter',
-            sections: [{ id: 'filter', label: 'Filter', content: stack(<FilterProperties key="filter" clipId={clipId} />, <DurationProperties key="duration" clipId={clipId} />) }],
+            label: 'Filters',
+            sections: [{ id: 'filter', label: 'Filter', content: stack(<FilterProperties key="filter" clipId={clipId} />) }],
           },
           // A draft's sticker tracks as CapCut's do.
           ...((clip as any).draftKind === 'sticker' ? [tracking] : []),

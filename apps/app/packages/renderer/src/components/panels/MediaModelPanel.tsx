@@ -23,7 +23,7 @@ import { useClipStore } from "@/lib/clip";
 import { projectBlink, transitionCategories } from "@/lib/transitions";
 import type { SidebarSection } from "@/lib/types";
 import MediaMenu from "@/components/menus/MediaMenu";
-import FilterMenu from "../menus/FilterMenu";
+import FilterMenu, { filterSections, useFilters } from "../menus/FilterMenu";
 import TextMenu from "../menus/TextMenu";
 import TransitionMenu from "../menus/TransitionMenu";
 import ShapesMenu from "../menus/ShapesMenu";
@@ -57,8 +57,8 @@ const TABS: { section: SidebarSection; title: string; icon: IconType }[] = [
 ];
 
 /**
- * Each tab's own column of sections, as CapCut has beside its libraries. Filters has its
- * categories in its own column (FilterMenu). A section under a heading (Media under Import)
+ * Each tab's own column of sections, as CapCut has beside its libraries. Filters has Favorites and
+ * its categories (FilterMenu's filterSections). A section under a heading (Media under Import)
  * folds with it.
  */
 const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; under?: string }[]>> = {
@@ -146,7 +146,7 @@ const SectionNav: React.FC<{
     if (open) items.filter((g) => g.under === heading).forEach((g) => out.push(item(g, true)));
   }
   return (
-    <nav aria-label="Sections" className="w-[120px] shrink-0 flex flex-col gap-2 px-2 pt-4 overflow-y-auto border-r-[0.5px] border-brand-hairline">
+    <nav aria-label="Sections" className="w-[120px] shrink-0 flex flex-col gap-2 px-2 pt-4 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-r-[0.5px] border-brand-hairline">
       {out}
     </nav>
   );
@@ -192,15 +192,22 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   // Transitions' column is its categories under one heading, as CapCut's (Basic only when the
   // project has Blink's images).
   const blink = useClipStore((s) => projectBlink(s.clips));
-  const sections = section === "transitions" ? transitionCategories(blink).map((c) => ({ id: c, label: c, under: "Transitions" })) : SECTIONS[section];
-  const sub = picked[section] ?? sections?.[0]?.id ?? "";
+  const filters = useFilters();
+  const sections =
+    section === "transitions"
+      ? transitionCategories(blink).map((c) => ({ id: c, label: c, under: "Transitions" }))
+      : section === "filters"
+        ? filterSections(filters)
+        : SECTIONS[section];
+  // Filters opens on All (Favorites is the first item, as CapCut's, but starts empty).
+  const sub = picked[section] ?? (section === "filters" ? "all" : sections?.[0]?.id) ?? "";
 
   const content = () => {
     switch (section) {
       case "media":
         return sub === "library" ? <PendingMenu section="library" /> : <MediaMenu />;
       case "filters":
-        return <FilterMenu />;
+        return <FilterMenu part={sub} />;
       case "text":
         return <TextMenu part={sub} />;
       case "captions":

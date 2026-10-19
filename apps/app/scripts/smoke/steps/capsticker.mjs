@@ -16,7 +16,7 @@ export default async (ctx) => {
   await win.waitForTimeout(900);
   const drawn = await engineFrame(win, bright);
   check("the sticker is drawn", drawn.count > 0, `${drawn.count} bright pixels`);
-  await tab(win, "Filter").catch(() => {});
+  await tab(win, "Filters").catch(() => {});
   await shot("s1-sticker-tab");
   const body = await win.locator("body").innerText();
   check("the bar is a drawn sticker", body.includes("Sticker") && !body.includes("doesn't draw this yet"));
