@@ -30,6 +30,7 @@ mod scrub;
 mod server;
 mod timing;
 pub mod sticker;
+mod sticker_decode;
 pub mod thumbs;
 pub mod transition;
 mod waveform;

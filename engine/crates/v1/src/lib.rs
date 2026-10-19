@@ -279,6 +279,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
             "text" => TrackKind::Text,
             "filter" => TrackKind::Filter,
             "shape" | "draw" => TrackKind::Graphic,
+            "sticker" => TrackKind::Sticker,
             other => {
                 report.warnings.push(format!("skipped track of unknown type {other:?}"));
                 continue;
@@ -321,7 +322,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
                 bump(&mut report.dropped, "group container (children kept)");
                 continue;
             }
-            "video" | "image" | "audio" | "text" | "filter" | "shape" | "draw" => {}
+            "video" | "image" | "audio" | "text" | "filter" | "shape" | "draw" | "sticker" => {}
             other => {
                 bump(&mut report.dropped, &format!("unknown clip type {other}"));
                 continue;
@@ -340,6 +341,7 @@ pub fn import_v1_json(doc: &Value) -> Result<Imported, ImportError> {
                     // An effect bar is on an effect track, as CapCut's.
                     "filter" if !s(clip, "effectId").is_empty() => TrackKind::Effect,
                     "filter" => TrackKind::Filter,
+                    "sticker" => TrackKind::Sticker,
                     _ => TrackKind::Graphic,
                 };
                 (seg, kind)
@@ -905,6 +907,11 @@ fn convert_clip(
             });
             mid
         }
+        "sticker" => {
+            let mid = MaterialId(format!("{id}-sticker"));
+            materials.stickers.push(convert_sticker(&mid, clip));
+            mid
+        }
         "shape" | "draw" => {
             let mid = MaterialId(format!("{id}-{ty}"));
             materials.shapes.push(if ty == "shape" { convert_shape(&mid, clip) } else { convert_drawing(&mid, clip, world) });
@@ -944,7 +951,7 @@ fn convert_clip(
     // The Animation tab's animations: a text's In, Out and Loop; a video or photo's In, Out
     // and Combo.
     let kinds: &[AnimationKind] = match ty {
-        "text" => &[AnimationKind::In, AnimationKind::Out, AnimationKind::Loop],
+        "text" | "sticker" => &[AnimationKind::In, AnimationKind::Out, AnimationKind::Loop],
         "video" | "image" => &[AnimationKind::In, AnimationKind::Out, AnimationKind::Combo],
         _ => &[],
     };
@@ -999,7 +1006,16 @@ fn convert_clip(
             } else {
                 None
             };
-            convert_transform(world, t, center_pivot, fit)
+            let (mut tr, crop, opacity) = convert_transform(world, t, center_pivot, fit);
+            if ty == "sticker" {
+                // A sticker draws at its own size on the canvas (crate playback::sticker):
+                // the model's scale is the box the app shows, as a multiple of that.
+                let design = [f(clip, "stickerWidth", 0.0).max(1.0), f(clip, "stickerHeight", 0.0).max(1.0)];
+                let k = crate::STICKER_CANVAS_WIDTH / world.w;
+                let (w, h) = (f(t, "width", 0.0) * f(t, "scaleX", 1.0), f(t, "height", 0.0) * f(t, "scaleY", 1.0));
+                tr.scale = Animated::constant(Vec2::new(w * k / design[0], h * k / design[1]));
+            }
+            (tr, crop, opacity)
         }
     };
     let mut transform = transform;
@@ -1635,6 +1651,25 @@ fn convert_shape(id: &MaterialId, clip: &Value) -> Shape {
     }
 }
 
+/// The canvas width a sticker's pixels are drawn at one to one (`openrip-playback`'s sticker
+/// size rule, which CapCut's stickers share).
+pub(crate) const STICKER_CANVAS_WIDTH: f64 = 1080.0;
+
+/// A sticker clip (Stickers tab): the cached file it shows (a PNG, an animated WebP, a GIF, an
+/// SVG) and the size, in pixels, its box is laid out at; the engine reads the file's content
+/// to tell a still from an animation.
+fn convert_sticker(id: &MaterialId, clip: &Value) -> Sticker {
+    let name = s(clip, "name");
+    Sticker {
+        id: id.clone(),
+        path: file_url_to_path(&s(clip, "stickerPath")),
+        animated: b(clip, "stickerAnimated"),
+        width: f(clip, "stickerWidth", 0.0).max(0.0) as u32,
+        height: f(clip, "stickerHeight", 0.0).max(0.0) as u32,
+        library: Some(LibraryRef { app: "openrip".into(), resource_id: s(clip, "stickerId"), name, category: s(clip, "category") }),
+    }
+}
+
 /// A drawing clip (`DrawingLine.tsx`): its lines over the whole canvas, each placed by its
 /// own transform. Brushes are round and curved by their smoothing, highlighters square and
 /// straight, erasers round, curved at 0.5 and opaque. The app names a blend for each tool
@@ -1866,6 +1901,34 @@ mod tests {
         assert!((p.x - (383.3333333333333 / (1066.6666666666667) * 2.0 - 1.0)).abs() < 1e-9, "{p:?}");
         assert!((p.y - (1.0 - 350.0 / 600.0 * 2.0)).abs() < 1e-9, "{p:?}");
         assert_eq!(t1.transform.rotation.value, 90.0);
+    }
+
+    /// A sticker clip of the Stickers tab: a sticker material on a sticker track, in a box
+    /// the model reads as a multiple of the sticker's design size on the 1080-wide canvas, with
+    /// its Animation tab's animations.
+    #[test]
+    fn a_sticker_clip_becomes_a_sticker_on_a_sticker_track() {
+        let mut d = doc();
+        let tl = d["timeline"].as_object_mut().unwrap();
+        tl["tracks"].as_array_mut().unwrap().insert(0, json!({"type": "sticker", "timelineId": "T-sticker"}));
+        tl["clips"].as_array_mut().unwrap().push(json!({"clipId": "k1", "type": "sticker", "timelineId": "T-sticker", "name": "Heart", "category": "Love",
+            "stickerId": "fluent-3d-red-heart", "stickerPath": "file:///cache/heart.png", "stickerWidth": 256, "stickerHeight": 256, "stickerAnimated": false,
+            "animationIn": {"type": "fade_in", "duration": 0.5}, "startTick": "0", "endTick": "2000000", "trimStartTick": "0", "trimEndTick": "0",
+            // 200 world units wide on a 1066.67-wide canvas.
+            "transform": {"x": 433.3333333333333, "y": 200, "width": 200, "height": 200, "scaleX": 1, "scaleY": 1, "rotation": 0, "opacity": 80}}));
+        let Imported { project, report } = import_v1_json(&d).unwrap();
+        assert!(report.kept_foreign.is_empty(), "{report:?}");
+        let sticker = project.materials.stickers.iter().find(|m| m.id.0 == "k1-sticker").unwrap();
+        assert_eq!((sticker.path.as_str(), sticker.width, sticker.height), ("/cache/heart.png", 256, 256));
+        assert_eq!(sticker.library.as_ref().map(|l| l.name.as_str()), Some("Heart"));
+        let track = project.tracks.iter().find(|t| t.segments.iter().any(|s| s.id == "k1")).unwrap();
+        assert_eq!(track.kind, TrackKind::Sticker);
+        let seg = &track.segments[0];
+        // 200 of 1066.67 world units is 18.75% of the canvas's width: 202.5 of 1080 pixels, which is
+        // 0.791 of the 256-pixel design.
+        assert!((seg.transform.scale.value.x - 202.5 / 256.0).abs() < 1e-9, "{:?}", seg.transform.scale);
+        assert!((seg.opacity.value - 0.8).abs() < 1e-6);
+        assert_eq!(project.materials.animations.iter().flat_map(|a| a.items.iter()).filter(|a| a.kind == AnimationKind::In).count(), 1);
     }
 
     #[test]

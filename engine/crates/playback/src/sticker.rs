@@ -56,7 +56,7 @@ impl Stickers {
         }
         self.loaded.retain(|_, (_, last)| tick.saturating_sub(*last) < KEEP_TICKS);
         if !self.loaded.contains_key(&sticker.path) {
-            let frames = load(Path::new(&sticker.path), sticker.animated)?;
+            let frames = load(Path::new(&sticker.path))?;
             self.loaded.insert(sticker.path.clone(), (Arc::new(frames), tick));
         }
         let (frames, last) = self.loaded.get_mut(&sticker.path).unwrap();
@@ -72,22 +72,27 @@ impl Stickers {
     }
 }
 
-fn load(path: &Path, animated: bool) -> Result<Frames, String> {
-    if !animated {
-        let img = crate::preview::load_png(path).map_err(|e| e.to_string())?;
-        return Ok(Frames { frames: vec![(Arc::new(img), 1)], period: 0 });
-    }
+fn load(path: &Path) -> Result<Frames, String> {
     let bytes = openrip_platform::assets::read(path).map_err(|e| e.to_string())?;
-    let decoded = crate::gif::decode(&bytes).ok_or("not a GIF")?;
+    Ok(timed(crate::sticker_decode::decode(&bytes)?))
+}
+
+/// The frames as the loop's table: each with where it ends, and the loop's length (0 for a
+/// still).
+fn timed(frames: Vec<crate::sticker_decode::Timed>) -> Frames {
+    if frames.len() <= 1 {
+        return Frames { frames: frames.into_iter().map(|(img, _)| (Arc::new(img), 1)).collect(), period: 0 };
+    }
     let mut end = 0i64;
-    let frames = decoded
+    let frames = frames
         .into_iter()
-        .map(|f| {
-            end += f.delay_ms as i64 * 1000;
-            (Arc::new(f.image), end)
+        .map(|(img, delay_ms)| {
+            // A zero delay is read as browsers do: 100 ms.
+            end += if delay_ms == 0 { 100_000 } else { delay_ms as i64 * 1000 };
+            (Arc::new(img), end)
         })
         .collect();
-    Ok(Frames { frames, period: end })
+    Frames { frames, period: end }
 }
 
 #[cfg(test)]

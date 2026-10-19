@@ -177,7 +177,7 @@ enum Pixels {
     /// centres go to.
     Shape(Vec<(std::sync::Arc<RgbaImage>, u64, bool)>, [f64; 2]),
     /// A sticker's picture (the GIF's current frame) and its cache key.
-    Sticker(std::sync::Arc<RgbaImage>, u64),
+    Sticker(std::sync::Arc<RgbaImage>, u64, [u32; 2]),
     /// A transition's clip begins: what follows draws into a group of its own over this
     /// colour (or clear), up to `End`.
     Begin(Option<[u8; 3]>),
@@ -1395,7 +1395,10 @@ impl PreviewEngine {
         // A library sticker: its image, or its GIF's frame now.
         if let Some(sticker) = self.project.materials.stickers.iter().find(|m| m.id == seg.material) {
             let (img, key) = self.stickers.frame(sticker, seg.local_time(t), self.tick).map_err(|why| (sticker.path.clone(), why))?;
-            return Ok(Some(Pixels::Sticker(img, key)));
+            // Drawn at the size the material says (an OpenRip sticker's own, which an SVG's
+            // bitmap or a differently sized file keeps), else the picture's.
+            let design = if sticker.width > 0 && sticker.height > 0 { [sticker.width, sticker.height] } else { [img.width, img.height] };
+            return Ok(Some(Pixels::Sticker(img, key, design)));
         }
         let Some(media) = self.project.materials.media.iter().find(|m| m.id == seg.material).cloned() else { return Ok(None) };
         if media.kind == MediaKind::Audio {
@@ -1789,7 +1792,7 @@ impl PreviewEngine {
                 let tr = &seg.transform;
                 let (mut pos, mut scale, mut rot) = (tr.position.sample(local), tr.scale.sample(local), tr.rotation.sample(local));
                 // Its animations on top of the clip's own (keyframed) transform.
-                let motion = if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Text(..)) { self.motion_of(seg, local) } else { None };
+                let motion = if matches!(p, Pixels::Image(..) | Pixels::Video(..) | Pixels::Tween(..) | Pixels::Text(..) | Pixels::Sticker(..)) { self.motion_of(seg, local) } else { None };
                 if let Some(m) = motion {
                     pos = openrip_model::Vec2::new(pos.x + m.offset[0], pos.y + m.offset[1]);
                     scale = openrip_model::Vec2::new(scale.x * m.scale, scale.y * m.scale);
@@ -1865,8 +1868,8 @@ impl PreviewEngine {
                     }
                     // Centred on its position at its own size (crate::sticker), scaled and
                     // turned with the clip.
-                    Pixels::Sticker(img, key) => {
-                        let [sw, sh] = crate::sticker::size_on_canvas(img.width, img.height, w);
+                    Pixels::Sticker(img, key, design) => {
+                        let [sw, sh] = crate::sticker::size_on_canvas(design[0], design[1], w);
                         Layer {
                             rotation: rot,
                             flip_h: scale[0] < 0.0,
