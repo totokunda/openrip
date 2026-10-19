@@ -74,7 +74,7 @@ export default async (ctx) => {
   await win.waitForTimeout(500);
   const sectionButtons = () => win.locator("[data-testid=assets] nav[aria-label=Sections] [data-testid^=assets-section-]");
   const sections = (await sectionButtons().allInnerTexts()).map((s) => s.trim());
-  check("its column: the twelve categories, in order", sections.join() === CATEGORIES.join(), sections.join());
+  check("its column: Favorites, then the twelve categories, in order", sections.join() === ["Favorites", ...CATEGORIES].join(), sections.join());
   const counts = {};
   const names = new Set();
   for (const [i, s] of (await sectionButtons().all()).entries()) {

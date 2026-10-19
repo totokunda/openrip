@@ -58,7 +58,7 @@ export default async (ctx) => {
   await win.locator("[data-testid=assets-tab-transitions]").click();
   await win.waitForTimeout(500);
   const sections = (await win.locator("[data-testid=assets] nav[aria-label=Sections] [data-testid^=assets-section-]").allInnerTexts()).map((s) => s.trim());
-  check("its column: the twelve categories", sections.join() === "Basic,Slide,Wipe,Mask,Pattern,Camera,Blur,Light,Glitch,Distortion,3D,Overlay", sections.join());
+  check("its column: Favorites, then the twelve categories", sections.join() === "Favorites,Basic,Slide,Wipe,Mask,Pattern,Camera,Blur,Light,Glitch,Distortion,3D,Overlay", sections.join());
   const offered = await transitionsOffered(win);
   const classics = ["Mix", "Black Fade", "White Flash", "White Fade", "Pull in", "Pull out", "Blur", "Slide", "Push", "Wipe", "Circle", "Spin"];
   check("its cards: the engine's twelve classics (not Blink) and the hundred shader ones", classics.every((n) => offered.includes(n)) && !offered.includes("Blink") && offered.length === 112, `${offered.length}: ${offered.slice(0, 14).join()}`);

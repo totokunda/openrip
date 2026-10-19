@@ -159,7 +159,7 @@ export default async (ctx) => {
     aspect: async () => {
       await win.locator("[data-testid=ratio-menu]").click();
       await win.waitForTimeout(500);
-      await settled(win, () => win.getByRole("menuitem").filter({ hasText: "Square" }).first().click());
+      await settled(win, () => win.getByRole("menuitem").filter({ hasText: "1:1" }).first().click());
       await win.keyboard.press("Escape");
     },
   };

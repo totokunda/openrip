@@ -57,10 +57,10 @@ const run = async (ctx, server) => {
   // ---- The column and the first list ------------------------------------------------------------
   await win.locator("[data-testid=assets-tab-media]").click();
   const column = () => win.evaluate(() => [...document.querySelectorAll("nav[aria-label=Sections] button")].map((b) => b.innerText.trim()));
-  check("the column opens with Import open on Media and Library folded", (await column()).join() === "Import,Media,Library", JSON.stringify(await column()));
+  check("the column opens with Import open on Media and Library folded", (await column()).join() === "Import,Media,Yours,Library", JSON.stringify(await column()));
   await win.locator('[data-testid="assets-group-Library"]').click();
   await win.waitForTimeout(400);
-  check("opening Library folds Import and selects Trending", (await column()).slice(0, 3).join() === "Import,Library,Favorites" && (await win.locator('[data-testid="assets-section-library:trending"]').getAttribute("aria-pressed")) === "true", JSON.stringify((await column()).slice(0, 4)));
+  check("opening Library folds Import and selects Trending", (await column()).slice(0, 3).join() === "Import,Yours,Library" && (await win.locator('[data-testid="assets-section-library:trending"]').getAttribute("aria-pressed")) === "true", JSON.stringify((await column()).slice(0, 4)));
   const names = await win.evaluate(() => [...document.querySelectorAll("[data-testid^=assets-section-]")].map((b) => b.innerText.trim()));
   check("Library has Favorites, the categories and Credits", names[0] === "Favorites" && names[1] === "Trending" && ["Green Screen", "Background", "Scenery", "Atmosphere", "Life"].every((n) => names.includes(n)) && names[names.length - 1] === "Credits", JSON.stringify(names));
   await section("library:trending");
@@ -206,7 +206,8 @@ const run = async (ctx, server) => {
   await chooseKind("photo");
   check("Favorites is per kind (no photos starred)", /No favorite photos yet/.test(await win.locator("[data-testid=stock-empty]").innerText()));
   await chooseKind("video");
-  const stored = await win.evaluate(() => JSON.parse(localStorage.getItem("openrip.stock-favorites") ?? "[]").map((x) => [x.id, x.license, x.sourceUrl]));
+  await win.waitForTimeout(800);
+  const stored = (JSON.parse(ctx.fs.readFileSync(`${ctx.udDir}/user-store/store.json`, "utf8"))["favourites.stock"] ?? []).map((x) => [x.id, x.license, x.sourceUrl]);
   check("a favourite keeps its licence and source (it works offline)", stored.length === 1 && !!stored[0][1] && /^https:/.test(stored[0][2]), JSON.stringify(stored));
   await win.mouse.move(5, 5);
   await win.locator("[data-testid=stock-tile]").first().hover();
