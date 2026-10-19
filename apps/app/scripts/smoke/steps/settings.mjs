@@ -278,7 +278,7 @@ export default async (ctx) => {
     await win.keyboard.press("Meta+a");
     await win.waitForTimeout(500);
     await openTab(win, "Adjust");
-    const f = field(win, "Brightness");
+    const f = field(win, "Brilliance"); // Adjust › Basic names the brightness slider as CapCut does
     await f.scrollIntoViewIfNeeded();
     await f.click();
     const v0 = Number(await f.inputValue());
