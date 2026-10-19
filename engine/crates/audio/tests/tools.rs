@@ -14,6 +14,28 @@ struct Synth;
 
 struct Tones(u32);
 
+/// "synth:noisy": white-ish noise at 0.05 for ever, with a 1 kHz tone at 0.3 from 0.5 s to 1 s.
+struct Noisy(u32);
+
+impl AudioSource for Noisy {
+    fn read(&mut self, at: i64, out: &mut [f32]) -> Result<(), AudioError> {
+        for (i, f) in out.chunks_exact_mut(CHANNELS).enumerate() {
+            let n = at + i as i64;
+            let t = n as f64 / self.0 as f64;
+            let tone = if (0.5..1.0).contains(&t) { (0.3 * (2.0 * std::f64::consts::PI * 1000.0 * t).sin()) as f32 } else { 0.0 };
+            // A hash of the sample index and channel, so a seek reads the same noise.
+            let hash = |c: i64| (((n * 2 + c) as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 / (1u64 << 23) as f32 - 1.0;
+            f[0] = tone + 0.05 * hash(0);
+            f[1] = tone + 0.05 * hash(1);
+        }
+        Ok(())
+    }
+
+    fn end(&self) -> Option<i64> {
+        None
+    }
+}
+
 impl AudioSource for Tones {
     fn read(&mut self, at: i64, out: &mut [f32]) -> Result<(), AudioError> {
         for (i, f) in out.chunks_exact_mut(CHANNELS).enumerate() {
@@ -31,7 +53,9 @@ impl AudioSource for Tones {
 
 impl AudioBackend for Synth {
     fn open(&self, path: &Path, rate: u32) -> Result<Option<Box<dyn AudioSource>>, AudioError> {
-        if path.to_string_lossy().starts_with("synth:") {
+        if path.to_string_lossy() == "synth:noisy" {
+            Ok(Some(Box::new(Noisy(rate))))
+        } else if path.to_string_lossy().starts_with("synth:") {
             Ok(Some(Box::new(Tones(rate))))
         } else {
             Err(AudioError::Other("not synthetic".into()))
@@ -185,4 +209,38 @@ fn normalising_takes_a_measured_clip_to_the_target() {
     meter.push(&out);
     let got = meter.finish().integrated.unwrap();
     assert!((got + 23.0).abs() < 0.01, "{got} LUFS");
+}
+
+#[test]
+fn reduce_noise_cuts_the_floor_and_keeps_the_tone_in_playback_and_export() {
+    install();
+    let mut m = Materials::default();
+    m.effects.push(Effect { id: "d".into(), category: EffectCategory::Audio, name: "Reduce noise".into(), params: [("strength".to_string(), 70.0)].into(), builtin: Some("denoise".into()), resource: None, library: None, text_style: None });
+    let mut p = project(m, vec!["d".into()], Animated::constant(1.0));
+    p.materials.media[0].path = "synth:noisy".into();
+    let mut dry = p.clone();
+    dry.tracks[0].segments[0].attachments.clear();
+    let all = |p: Project, block: usize| {
+        let mut mixer = Mixer::new(p);
+        let mut out = Vec::new();
+        let mut buf = vec![0f32; block * CHANNELS];
+        while out.len() < 2 * RATE as usize * CHANNELS {
+            mixer.mix((out.len() / CHANNELS) as i64, &mut buf).unwrap();
+            out.extend_from_slice(&buf);
+        }
+        out.truncate(2 * RATE as usize * CHANNELS);
+        out
+    };
+    let rms = |x: &[f32], a: f64, b: f64| {
+        let s = &x[(a * RATE as f64) as usize * CHANNELS..(b * RATE as f64) as usize * CHANNELS];
+        (s.iter().map(|v| v * v).sum::<f32>() / s.len() as f32).sqrt()
+    };
+    let (raw, playback, export) = (all(dry, 1024), all(p.clone(), 1024), all(p, 4096));
+    // The noise-only stretch after the tone: down by well over 15 dB. The tone's: within 1 dB.
+    let floor = 20.0 * (rms(&raw, 1.3, 1.9) / rms(&playback, 1.3, 1.9)).log10();
+    assert!(floor > 15.0, "the floor dropped {floor} dB");
+    let tone = 20.0 * (rms(&playback, 0.65, 0.9) / rms(&raw, 0.65, 0.9)).log10();
+    assert!(tone.abs() < 1.0, "the tone moved {tone} dB");
+    // The same whatever the block size: playback and export agree.
+    assert_eq!(playback, export);
 }

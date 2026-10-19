@@ -674,7 +674,7 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
         .chain(ADJUST_KEYS.iter())
         // The draft's own adjustments, a filter bar's strength, the colour and compositing
         // fields, and the Audio tab's.
-        .chain(["draftAdjustments", "masks", "intensity", "color", "blendMode", "chroma", "canvas", "flip", "audioEffects", "loudness", "channel", "beats"].iter())
+        .chain(["draftAdjustments", "masks", "intensity", "color", "blendMode", "chroma", "canvas", "flip", "audioEffects", "denoise", "loudness", "channel", "beats"].iter())
         .filter_map(|k| clip.get(*k).map(|v| (k.to_string(), v.clone())))
         .collect();
     clip.insert(

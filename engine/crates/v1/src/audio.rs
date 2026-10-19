@@ -8,6 +8,9 @@
 //! - `loudness`: `{enabled, target, measured?, peak?}`, CapCut's "Normalize loudness": the
 //!   clip turned to `target` LUFS from the loudness `measured` over its range (LUFS) and its
 //!   peak (dBFS), which the app measures with the engine's meter (CapCut's `loudnesses`).
+//! - `denoise`: `{enabled, strength?}`, Reduce noise (`openrip_audio::denoise`): the clip's own
+//!   noise taken out by spectral gating; `strength` 0–100 [70]. It's an audio effect of kind
+//!   `denoise` outside the `audioEffects` list, which keeps only the voice effects.
 //! - `channel`: "none", "left", "right" or "mono", the channel fill (CapCut's "Fill channel":
 //!   "left" plays the left channel on both sides; "mono" is OpenRip's own).
 //! - `beats`: `{manual?, auto?, everyBeat?, detected?}`, beat markers in seconds of the
@@ -21,12 +24,19 @@ use serde_json::{json, Map, Value};
 
 use crate::{b, f, s};
 
+/// The kind of audio effect Reduce noise is (`openrip_audio::denoise::KIND`).
+const DENOISE: &str = "denoise";
+
 fn effect_id(clip: &str, i: usize) -> MaterialId {
     MaterialId(format!("{clip}-afx-{i}"))
 }
 
 fn loudness_id(clip: &str) -> MaterialId {
     MaterialId(format!("{clip}-loudness"))
+}
+
+fn denoise_id(clip: &str) -> MaterialId {
+    MaterialId(format!("{clip}-denoise"))
 }
 
 fn channels_id(clip: &str) -> MaterialId {
@@ -40,7 +50,8 @@ fn beats_id(clip: &str) -> MaterialId {
 /// Replace the segment's voice effects with the app's list. A "draft" entry keeps the draft
 /// effect it names (if the segment has it).
 pub(crate) fn set_effects(clip: &str, value: Option<&Value>, materials: &mut Materials, attachments: &mut Vec<MaterialId>) {
-    let was: Vec<MaterialId> = attachments.iter().filter(|a| materials.effects.iter().any(|e| &e.id == *a && e.category == EffectCategory::Audio)).cloned().collect();
+    let own = denoise_id(clip);
+    let was: Vec<MaterialId> = attachments.iter().filter(|a| materials.effects.iter().any(|e| &e.id == *a && e.id != own && e.category == EffectCategory::Audio)).cloned().collect();
     attachments.retain(|a| !was.contains(a));
     let ours = format!("{clip}-afx-");
     materials.effects.retain(|e| !e.id.0.starts_with(&ours));
@@ -69,6 +80,24 @@ pub(crate) fn set_effects(clip: &str, value: Option<&Value>, materials: &mut Mat
         });
         attachments.push(effect_id(clip, i));
     }
+}
+
+/// Replace the segment's Reduce noise with the app's.
+pub(crate) fn set_denoise(clip: &str, value: Option<&Value>, materials: &mut Materials, attachments: &mut Vec<MaterialId>) {
+    attachments.retain(|a| a != &denoise_id(clip));
+    materials.remove(&denoise_id(clip));
+    let Some(v) = value.filter(|v| v.is_object() && b(v, "enabled")) else { return };
+    materials.effects.push(Effect {
+        id: denoise_id(clip),
+        category: EffectCategory::Audio,
+        name: "Reduce noise".into(),
+        params: [("strength".to_string(), f(v, "strength", 70.0))].into_iter().collect(),
+        builtin: Some(DENOISE.into()),
+        resource: None,
+        library: None,
+        text_style: None,
+    });
+    attachments.push(denoise_id(clip));
 }
 
 /// Replace the segment's loudness normalisation with the app's.
@@ -119,6 +148,7 @@ pub(crate) fn set_beats(clip: &str, value: Option<&Value>, materials: &mut Mater
 /// All four, for a new clip of the app's own.
 pub(crate) fn attach(clip_id: &str, clip: &Value, materials: &mut Materials, attachments: &mut Vec<MaterialId>) {
     set_effects(clip_id, clip.get("audioEffects"), materials, attachments);
+    set_denoise(clip_id, clip.get("denoise"), materials, attachments);
     set_loudness(clip_id, clip.get("loudness"), materials, attachments);
     set_channel(clip_id, clip.get("channel"), materials, attachments);
     set_beats(clip_id, clip.get("beats"), materials, attachments);
@@ -132,13 +162,15 @@ pub(crate) fn emit(project: &Project, seg: &Segment, clip: &mut Map<String, Valu
     let effects: Vec<Value> = seg
         .attachments
         .iter()
-        .filter_map(|id| m.effects.iter().find(|e| &e.id == id && e.category == EffectCategory::Audio))
+        .filter_map(|id| m.effects.iter().find(|e| &e.id == id && e.id != denoise_id(&seg.id) && e.category == EffectCategory::Audio))
         .map(|e| match (&e.resource, &e.builtin) {
             (None, Some(ty)) => json!({ "type": ty, "name": e.name, "params": e.params }),
             _ => json!({ "type": "draft", "id": e.id.0, "name": e.name }),
         })
         .collect();
     clip.insert("audioEffects".into(), Value::Array(effects));
+    let denoise = m.effects.iter().find(|e| e.id == denoise_id(&seg.id) && attached(&e.id));
+    clip.insert("denoise".into(), denoise.map_or(Value::Null, |e| json!({ "enabled": true, "strength": e.params.get("strength").copied().unwrap_or(70.0) })));
     let loud = m.loudness.iter().find(|l| attached(&l.id));
     clip.insert("loudness".into(), loud.map_or(Value::Null, |l| json!({ "enabled": l.enabled, "target": l.target as f64, "measured": l.measured.map(|v| v as f64), "peak": l.peak as f64 })));
     let fill = m.channels.iter().find(|c| attached(&c.id)).map_or(ChannelFill::None, |c| c.fill);
@@ -197,7 +229,14 @@ mod tests {
         assert_eq!(out["loudness"]["measured"], -18.5);
         assert_eq!(out["beats"]["manual"], json!([1.5, 0.25]));
         // Empty fields take them off; the draft's effect goes when the list leaves it out.
-        attach("c", &json!({"audioEffects": [], "loudness": null, "channel": "none", "beats": null}), &mut m, &mut att);
+        // Reduce noise is an effect of its own, outside the voice effects.
+        attach("c", &json!({"audioEffects": [], "denoise": {"enabled": true, "strength": 40}}), &mut m, &mut att);
+        assert_eq!(att, vec![MaterialId::from("other"), denoise_id("c")]);
+        let mut out = Map::new();
+        p.materials = m.clone();
+        emit(&p, &Segment { attachments: att.clone(), ..seg.clone() }, &mut out);
+        assert_eq!((out["audioEffects"].as_array().unwrap().len(), out["denoise"]["strength"].as_f64()), (0, Some(40.0)));
+        attach("c", &json!({"audioEffects": [], "loudness": null, "channel": "none", "beats": null, "denoise": null}), &mut m, &mut att);
         assert_eq!(att, vec![MaterialId::from("other")]);
         assert!(m.effects.iter().all(|e| e.id != effect_id("c", 1)));
     }

@@ -567,6 +567,9 @@ fn engine_segment(clip: &Value, engine: &Value, ty: &str, clock: &Clock, world: 
         if differs("audioEffects") {
             audio::set_effects(&id, clip.get("audioEffects"), materials, &mut seg.attachments);
         }
+        if differs("denoise") {
+            audio::set_denoise(&id, clip.get("denoise"), materials, &mut seg.attachments);
+        }
         if differs("loudness") {
             audio::set_loudness(&id, clip.get("loudness"), materials, &mut seg.attachments);
         }

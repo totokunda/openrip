@@ -17,6 +17,7 @@
 //! normalisation) and beat detection ([`beats`], for beat markers).
 
 pub mod beats;
+pub mod denoise;
 #[cfg(feature = "ffmpeg")]
 mod decode;
 pub mod fx;
@@ -201,6 +202,21 @@ impl Mixer {
         self.reversed.clear();
         self.voices.clear();
         self.project = project;
+        self.warm_noise_profiles();
+    }
+
+    /// Read the noise of every clip with Reduce noise on now (it's kept by file and range), so
+    /// playback doesn't stall on it at the clip's first block.
+    fn warm_noise_profiles(&self) {
+        let p = &self.project;
+        for seg in p.tracks.iter().flat_map(|t| &t.segments) {
+            let on = seg.attachments.iter().any(|id| p.materials.effects.iter().any(|e| &e.id == id && e.builtin.as_deref() == Some(denoise::KIND)));
+            let Some(media) = p.materials.media.iter().find(|m| m.id == seg.material).filter(|_| on) else { continue };
+            if let Ok(Some(mut source)) = open_audio(Path::new(&media.path), self.rate) {
+                let range = seg.source.unwrap_or_default();
+                denoise::profile_of(&media.path, source.as_mut(), self.rate, sample_at(range.start, self.rate), sample_at(range.duration, self.rate));
+            }
+        }
     }
 
     /// Mix the timeline into `out` (interleaved stereo) starting at sample `start`.
@@ -434,10 +450,23 @@ impl Mixer {
             if matches!(self.voices.get(&seg.id), Some(None)) {
                 return None;
             }
-            let effects: Vec<openrip_model::Effect> = seg.attachments.iter().filter_map(|id| audio(id)).cloned().collect();
+            let mut effects: Vec<openrip_model::Effect> = seg.attachments.iter().filter_map(|id| audio(id)).cloned().collect();
+            // Reduce noise first, on the clip's sound as it is.
+            effects.sort_by_key(|e| e.builtin.as_deref() != Some(denoise::KIND));
+            let media = self.project.materials.media.iter().find(|m| m.id == seg.material).map(|m| m.path.clone()).unwrap_or_default();
             let mut chains = Vec::new();
             for effect in &effects {
                 let (what, chain) = match (&effect.resource, &effect.builtin) {
+                    (None, Some(kind)) if kind == denoise::KIND => {
+                        // The noise of the range the clip plays, read from its source.
+                        let range = seg.source.unwrap_or_default();
+                        let (from, n) = (sample_at(range.start, self.rate), sample_at(range.duration, self.rate));
+                        let strength = effect.params.get("strength").copied().filter(|v| v.is_finite()).unwrap_or(70.0) as f32 / 100.0;
+                        match denoise::profile_of(&media, decoder, self.rate, from, n) {
+                            Some(p) if strength > 0.0 => (kind.clone(), Ok(fx::Chain::series(vec![Box::new(denoise::Denoiser::new(p, strength))], 1.0, self.rate))),
+                            _ => continue,
+                        }
+                    }
                     (Some(bundle), _) => (bundle.clone(), fx::Chain::load(Path::new(bundle), &effect.params, self.rate)),
                     (None, Some(kind)) => (kind.clone(), voice::builtin(kind, &effect.params, self.rate)),
                     (None, None) => continue,
