@@ -775,7 +775,7 @@ impl PreviewEngine {
         out.extend(passes.into_iter().map(|p| (marker.clone(), Pixels::Effect(p))));
         out.push((marker.clone(), Pixels::End));
         let still = crate::transition::Shot::STILL;
-        out.push((marker, Pixels::Mix(mix_pixels(&crate::transition::Mix { outgoing: Some(still), incoming: None, mask: crate::transition::Mask::All }, w, h))));
+        out.push((marker, Pixels::Mix(mix_pixels(&crate::transition::Mix { outgoing: Some(still), incoming: None, mask: crate::transition::Mask::All }, w, h, None))));
     }
 
     /// The canvas fill of a clip on the main track (the lowest video track), unless it's
