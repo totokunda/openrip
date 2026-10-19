@@ -258,7 +258,6 @@ export const addStock = async (item: StockItem, opts: { startFrame?: number } = 
     useViewportStore.getState().setAspectRatio({ width: Math.round(width), height: Math.round(height), id: `${Math.round(width / g)}:${Math.round(height / g)}` });
   }
   useClipStore.getState().addClip(clip as never);
-  controls.setSelectedClipIds([clip.clipId]);
   useStockLibrary.getState().setPreview(null);
   return clip.clipId;
 };

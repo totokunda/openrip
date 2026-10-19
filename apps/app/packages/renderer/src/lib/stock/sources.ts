@@ -248,7 +248,7 @@ export const normalizeCommons = (page: any, kind: StockKind): StockItem | null =
 /** A tile from one NASA search result (`collection.items[i]`). Its file is found when it is downloaded. */
 export const normalizeNasa = (item: any, kind: StockKind): StockItem | null => {
   const d = item?.data?.[0];
-  if (!d || typeof d.nasa_id !== "string" || d.media_type !== kind) return null;
+  if (!d || typeof d.nasa_id !== "string" || d.media_type !== (kind === "video" ? "video" : "image")) return null;
   const links: any[] = Array.isArray(item.links) ? item.links : [];
   const thumb = https((links.find((l) => l?.rel === "preview") ?? links.find((l) => l?.render === "image"))?.href);
   if (!thumb) return null;

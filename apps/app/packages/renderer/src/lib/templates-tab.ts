@@ -78,14 +78,10 @@ export const insertTemplate = async (t: TemplateEntry): Promise<number> => {
   // The first clips in a project set its canvas (as the first video does).
   if (empty && doc.settings?.aspectRatio) useViewportStore.getState().setAspectRatio(doc.settings.aspectRatio);
   // One set: one step of the undo history.
-  useClipStore.setState({
-    clips: merged.clips,
-    timelines: resolveOverlapsTimelines(merged.timelines),
-    assets: merged.assets,
-    clipDuration: merged.clips.reduce((end, c) => Math.max(end, Number((c as any).endFrame) || 0), 0),
-  });
-  const after = useClipStore.getState();
-  after._updateZoomLevel(after.clips, after.clipDuration);
+  const clipDuration = merged.clips.reduce((end, c) => Math.max(end, Number((c as any).endFrame) || 0), 0);
+  // The timeline's zoom first: it looks at the clips there still are (none, in an empty project).
+  useClipStore.getState()._updateZoomLevel(merged.clips, clipDuration);
+  useClipStore.setState({ clips: merged.clips, timelines: resolveOverlapsTimelines(merged.timelines), assets: merged.assets, clipDuration });
   controls.setSelectedClipIds(merged.ids);
   useTemplatesTab.getState().setPreview(null);
   return merged.ids.length;

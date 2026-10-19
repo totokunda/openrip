@@ -37,13 +37,13 @@ const Card: React.FC<{ t: TemplateEntry; active: boolean; busy: string | null; o
   const working = busy === t.id;
   const circle = "h-[22px] px-1.5 rounded-full bg-black/65 hover:bg-black/85 text-white flex items-center justify-center gap-1 text-[10.5px] disabled:opacity-50";
   return (
-    <div className="flex flex-col min-w-0" data-testid="templates-card" data-template-id={t.id} data-name={t.name}>
+    <div className="flex flex-col min-w-0" data-testid="tpltab-card" data-template-id={t.id} data-name={t.name}>
       <div
         role="button"
         tabIndex={0}
         aria-pressed={active}
         aria-label={t.name}
-        data-testid="templates-tile"
+        data-testid="tpltab-tile"
         onClick={() => setPreview(preview?.id === t.id ? null : t)}
         onKeyDown={(e) => e.key === "Enter" && setPreview(preview?.id === t.id ? null : t)}
         onMouseEnter={() => setHover(true)}
@@ -51,7 +51,7 @@ const Card: React.FC<{ t: TemplateEntry; active: boolean; busy: string | null; o
         className={cn("relative w-full aspect-[9/14] rounded-[4px] bg-[#0d0d0f] overflow-hidden cursor-pointer select-none outline-none", active && "ring-[1.5px] ring-brand-accent")}
       >
         {cover ? <img src={cover} alt="" draggable={false} className="absolute inset-0 w-full h-full object-contain" /> : <LuLayoutTemplate className="absolute inset-0 m-auto w-7 h-7 text-[#3a3a3e]" />}
-        <span className="absolute left-1.5 right-1.5 bottom-1.5 text-[11px] leading-none text-white tabular-nums drop-shadow-[0_0_2px_rgba(0,0,0,0.9)]" data-testid="templates-meta">
+        <span className="absolute left-1.5 right-1.5 bottom-1.5 text-[11px] leading-none text-white tabular-nums drop-shadow-[0_0_2px_rgba(0,0,0,0.9)]" data-testid="tpltab-meta">
           {t.clipCount} clip{t.clipCount === 1 ? "" : "s"} | {clock(t.durationUs / 1e6)}
         </span>
         {(hover || working) && (
@@ -59,7 +59,7 @@ const Card: React.FC<{ t: TemplateEntry; active: boolean; busy: string | null; o
             <button
               type="button"
               title="Add to this project at the playhead"
-              data-testid="templates-use"
+              data-testid="tpltab-use"
               disabled={!!busy}
               onClick={(e) => {
                 e.stopPropagation();
@@ -72,7 +72,7 @@ const Card: React.FC<{ t: TemplateEntry; active: boolean; busy: string | null; o
             <button
               type="button"
               title="Start a new project from it"
-              data-testid="templates-new"
+              data-testid="tpltab-new"
               disabled={!!busy}
               onClick={(e) => {
                 e.stopPropagation();
@@ -85,7 +85,7 @@ const Card: React.FC<{ t: TemplateEntry; active: boolean; busy: string | null; o
           </div>
         )}
       </div>
-      <div className="mt-1.5 text-[11.5px] leading-tight text-brand-light/60 truncate" title={t.name} data-testid="templates-name">
+      <div className="mt-1.5 text-[11.5px] leading-tight text-brand-light/60 truncate" title={t.name} data-testid="tpltab-name">
         {t.name}
       </div>
     </div>
@@ -139,11 +139,11 @@ const TemplatesMenu: React.FC<{ part?: string }> = ({ part = "all" }) => {
   };
 
   return (
-    <div className="h-full flex flex-col" data-testid="templates-view">
+    <div className="h-full flex flex-col" data-testid="tpltab-view">
       <div className="px-3.5 pt-3 pb-3 shrink-0 flex flex-row items-center gap-1.5">
         <label className="flex-1 min-w-0 h-[26px] flex flex-row items-center gap-1.5 px-2.5 rounded-[4px] bg-brand border border-transparent focus-within:border-[#515151]">
           <LuSearch className="w-3.5 h-3.5 text-[#949494] shrink-0" />
-          <input data-testid="templates-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search for templates" className="flex-1 min-w-0 bg-transparent text-[12px] text-brand-lighter placeholder:text-[#6c6c6c] outline-none" />
+          <input data-testid="tpltab-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search for templates" className="flex-1 min-w-0 bg-transparent text-[12px] text-brand-lighter placeholder:text-[#6c6c6c] outline-none" />
           {query && (
             <button type="button" aria-label="Clear search" onClick={() => setQuery("")} className="w-3.5 h-3.5 rounded-full bg-[#6c6c6c] text-brand flex items-center justify-center hover:bg-[#8a8a8a]">
               <LuX className="w-2.5 h-2.5" />
@@ -151,7 +151,7 @@ const TemplatesMenu: React.FC<{ part?: string }> = ({ part = "all" }) => {
           )}
         </label>
         <Select value={shape} onValueChange={(v) => setOrientation(v as Orientation)} disabled={part !== "all"}>
-          <SelectTrigger size="sm" aria-label="Shape" data-testid="templates-shape" className="!h-[26px] w-[52px] shrink-0 px-1.5 gap-0.5 text-[12px] bg-transparent border-0 text-[#949494] hover:text-brand-light [&>svg:last-child]:w-3">
+          <SelectTrigger size="sm" aria-label="Shape" data-testid="tpltab-shape" className="!h-[26px] w-[52px] shrink-0 px-1.5 gap-0.5 text-[12px] bg-transparent border-0 text-[#949494] hover:text-brand-light [&>svg:last-child]:w-3">
             <LuListFilter className="w-3.5 h-3.5" />
           </SelectTrigger>
           <SelectContent className="bg-brand-background text-brand-light font-poppins z-[101] dark">
@@ -166,7 +166,7 @@ const TemplatesMenu: React.FC<{ part?: string }> = ({ part = "all" }) => {
       <ScrollArea className="flex-1 min-h-0">
         <div className="flex flex-col pl-3.5 pr-3 pb-8 text-left">
           {items == null ? null : items.length === 0 ? (
-            <div data-testid="templates-empty" className="flex flex-col items-center gap-3 px-3 py-14 text-center">
+            <div data-testid="tpltab-empty" className="flex flex-col items-center gap-3 px-3 py-14 text-center">
               <LuLayoutTemplate className="w-6 h-6 text-brand-light/35" />
               <h3 className="text-[12px] font-medium text-brand-light/85">No templates yet</h3>
               <p className="text-[11px] leading-relaxed text-brand-light/50 max-w-[260px]">
@@ -174,13 +174,13 @@ const TemplatesMenu: React.FC<{ part?: string }> = ({ part = "all" }) => {
               </p>
             </div>
           ) : shown.length === 0 ? (
-            <p data-testid="templates-none" className="text-[12px] text-[#6c6c6c] leading-snug py-6">
+            <p data-testid="tpltab-none" className="text-[12px] text-[#6c6c6c] leading-snug py-6">
               No template matches.
             </p>
           ) : (
             <>
               <h3 className="text-[12.5px] text-brand-light leading-none mb-3">{part === "all" ? "Your templates" : part[0].toUpperCase() + part.slice(1)}</h3>
-              <div data-testid="templates-grid" className="grid grid-cols-2 gap-x-2.5 gap-y-3">
+              <div data-testid="tpltab-grid" className="grid grid-cols-2 gap-x-2.5 gap-y-3">
                 {shown.map((t) => (
                   <Card key={t.id} t={t} active={preview?.id === t.id} busy={busy} onUse={use} onNew={fresh} />
                 ))}

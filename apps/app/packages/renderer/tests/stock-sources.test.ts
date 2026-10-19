@@ -167,6 +167,9 @@ test("NASA: a result is a tile under NASA's guidelines, its file found when down
   assert.equal(t.url, "nasa-asset:GSFC_20140421_EarthOrbit_m11525");
   assert.equal(t.thumb, "https://images-assets.nasa.gov/video/x/x~thumb.jpg");
   assert.equal(normalizeNasa(item, "photo"), null);
+  const pic = { data: [{ nasa_id: "PIA1", title: "A", media_type: "image" }], links: [{ href: "http://images-assets.nasa.gov/image/PIA1/PIA1~thumb.jpg", rel: "preview" }] };
+  assert.equal(normalizeNasa(pic, "photo")?.kind, "photo");
+  assert.equal(normalizeNasa(pic, "video"), null);
   assert.deepEqual(
     nasaPick(["http://a/x~orig.mov", "http://a/x~mobile.mp4", "http://a/x~medium.mp4", "http://a/x.vtt"], "video"),
     "https://a/x~medium.mp4",
