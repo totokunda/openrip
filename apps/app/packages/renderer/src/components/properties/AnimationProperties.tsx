@@ -36,6 +36,11 @@ const CAPTION_STYLES = [
   { value: "none", label: "Whole text" },
   { value: "caption_word_color", label: "Three words, spoken one highlighted" },
   { value: "caption_one_word", label: "One word at a time" },
+  // OpenRip's own, for captions made from speech (engine/crates/playback/src/caption.rs).
+  { value: "orip_highlight", label: "Whole line, word highlighted" },
+  { value: "orip_karaoke", label: "Whole line, filling as it's said" },
+  { value: "orip_pop", label: "Words appear as they're said" },
+  { value: "orip_boxed", label: "Whole line, word on a box" },
 ];
 
 const NONE = "none";

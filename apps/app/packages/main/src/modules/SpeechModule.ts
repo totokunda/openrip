@@ -37,15 +37,16 @@ type SpeechAddon = {
 
 export type SpeechRequest = {
   modelPath: string;
-  language: string | null;
-  audioPath: string | null;
-  projectJson: string | null;
+  // Optional ones are left out when empty: the addon takes undefined, not null, for them.
+  language?: string;
+  audioPath?: string;
+  projectJson?: string;
   startUs: number;
-  durationUs: number | null;
+  durationUs?: number;
   removeFillers: boolean;
   highlightKeywords: boolean;
-  maxChars: number | null;
-  maxLines: number | null;
+  maxChars?: number;
+  maxLines?: number;
 };
 
 export type SpeechResult = {
@@ -201,15 +202,15 @@ export class SpeechModule implements AppModule {
         const audio = ask.audioPath ? (ask.audioPath.startsWith("file://") ? fileURLToPath(ask.audioPath) : ask.audioPath) : null;
         const value = await a.transcribeSpeech(job, {
           modelPath: fileOf(m),
-          language: ask.language && ask.language !== "auto" ? ask.language : null,
-          audioPath: projectJson ? null : audio,
-          projectJson,
+          language: ask.language && ask.language !== "auto" ? ask.language : undefined,
+          audioPath: projectJson ? undefined : (audio ?? undefined),
+          projectJson: projectJson ?? undefined,
           startUs: Math.round(ask.startSec * 1e6),
-          durationUs: ask.durationSec == null ? null : Math.round(ask.durationSec * 1e6),
+          durationUs: ask.durationSec == null ? undefined : Math.round(ask.durationSec * 1e6),
           removeFillers: ask.removeFillers,
           highlightKeywords: ask.highlightKeywords,
-          maxChars: ask.maxChars ?? null,
-          maxLines: ask.maxLines ?? null,
+          maxChars: ask.maxChars ?? undefined,
+          maxLines: ask.maxLines ?? undefined,
         });
         return { ok: true, value };
       } catch (e) {

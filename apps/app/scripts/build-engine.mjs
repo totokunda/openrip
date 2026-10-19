@@ -12,6 +12,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { alignLinkedit } from "./align-linkedit.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appDir = join(here, "..");
@@ -77,6 +78,8 @@ if (!existsSync(libPath)) {
 }
 const dest = join(outDir, "openrip_node.node");
 copyFileSync(libPath, dest);
+// The loader needs the string table 8-byte aligned, which the linker doesn't always leave.
+if (process.platform === "darwin" && alignLinkedit(dest)) console.log("[build-engine] aligned the string table");
 // Only system libraries and frameworks: nothing from Homebrew or another local install.
 if (process.platform === "darwin") {
   const linked = execFileSync("otool", ["-L", dest], { encoding: "utf8" })

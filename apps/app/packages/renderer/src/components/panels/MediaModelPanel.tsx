@@ -33,6 +33,7 @@ import StickersMenu, { stickerSections } from "../menus/StickersMenu";
 import AudioMenu, { type AudioSection } from "../menus/AudioMenu";
 import PendingMenu, { type Pending } from "../menus/PendingMenu";
 import CaptionsMenu from "../menus/CaptionsMenu";
+import { useAutoCaptionsFocus } from "@/lib/autocaptions";
 import { PRESET_CATEGORIES } from "../menus/TextMenu";
 
 interface MediaModelPanelProps {
@@ -86,9 +87,13 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
   // Stickers, then Shapes.
   stickers: [...stickerSections(), { id: "shapes", label: "Shapes" }],
   effects: [{ id: "effects", label: "Video effects" }],
+  // CapCut's column without AI packaging and AI emojis: Auto captions (a local speech model),
+  // Templates, Auto lyrics, Add captions (the file import).
   captions: [
-    { id: "add", label: "Add captions" },
+    { id: "auto", label: "Auto captions" },
     { id: "templates", label: "Templates" },
+    { id: "lyrics", label: "Auto lyrics" },
+    { id: "add", label: "Add captions" },
   ],
   adjustment: [{ id: "adjustment", label: "Adjustment" }],
   templates: [{ id: "templates", label: "Templates" }],
@@ -187,6 +192,11 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   const section = useSidebarStore((s) => s.section) ?? "media";
   const openSection = useSidebarStore((s) => s.openSection);
   const [picked, setPicked] = useState<Partial<Record<SidebarSection, string>>>({});
+  // The clip menu's Generate captions opens Auto captions (lib/autocaptions.ts).
+  const autoFocus = useAutoCaptionsFocus((f) => f.tick);
+  useEffect(() => {
+    if (autoFocus > 0) setPicked((p) => ({ ...p, captions: useAutoCaptionsFocus.getState().kind === "lyrics" ? "lyrics" : "auto" }));
+  }, [autoFocus]);
   const tabsRef = useRef<HTMLElement | null>(null);
   const overflow = useOverflow(tabsRef);
   const scrollTabs = (dx: number) => tabsRef.current?.scrollBy({ left: dx, behavior: "smooth" });

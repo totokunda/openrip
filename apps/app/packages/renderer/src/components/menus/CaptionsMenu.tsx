@@ -5,14 +5,16 @@ import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { CAPTION_STYLES, applyCaptionStyle, captionStyle, exportCaptions, importCaptionFile, pickAndImportCaptions, useCaptionsStore } from "@/lib/caption-actions";
 import { cn } from "@/lib/utils";
-import TextLook from "./TextLook";
+import AutoCaptionsMenu from "./AutoCaptionsMenu";
+import CaptionStyleTile from "./CaptionStyleTile";
+import { CAPTION_KINDS } from "@/lib/caption-presets";
 
 /**
  * The Captions tab, in CapCut's layout (docs/plan/capcut-ui-spec.md §6.11): "add" is Add
  * captions (a subtitle file, .srt or .vtt, read onto its own captions track in the chosen
  * style; the files brought in so far; the timeline's texts written out as .srt), "templates"
- * the caption styles (OpenRip's own looks). Captions come from files only: no speech
- * recognition.
+ * the caption styles (OpenRip's own looks, with the word-by-word ones), "auto" and "lyrics" the
+ * speech-to-captions panels (AutoCaptionsMenu: a local Whisper model).
  */
 
 /** The accent "+" in a circle, as CapCut's import buttons have it. */
@@ -49,6 +51,8 @@ const CaptionsMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
     </p>
   );
 
+  if (part === "auto" || part === "lyrics") return <AutoCaptionsMenu kind={part === "lyrics" ? "lyrics" : "captions"} />;
+
   if (part === "templates") {
     return (
       <ScrollArea className="h-full">
@@ -56,8 +60,11 @@ const CaptionsMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
           <p className="text-[12px] leading-snug text-[#949494] text-left">
             {selectedText ? "Applies to every caption on the selected caption's track, and to captions you import next." : "Captions you import get this style. Select a caption to restyle its whole track."}
           </p>
+          {[{ kind: undefined, label: "Basic" }, ...CAPTION_KINDS].map((group) => (
+          <React.Fragment key={group.label}>
+          <h3 className="text-[12px] font-semibold text-brand-light">{group.label}</h3>
           <div className="grid gap-x-4 gap-y-[24px]" style={{ gridTemplateColumns: "repeat(auto-fill, 86px)" }}>
-            {CAPTION_STYLES.map((s) => (
+            {CAPTION_STYLES.filter((c) => c.kind === group.kind).map((s) => (
               <div key={s.id} className="flex flex-col gap-1.5 w-[86px] min-w-0">
                 <button
                   type="button"
@@ -73,12 +80,14 @@ const CaptionsMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
                     styleId === s.id ? "outline outline-[1.5px] outline-brand-accent" : "hover:bg-brand-button",
                   )}
                 >
-                  <TextLook look={s.props} text="Caption" size={17} />
+                  <CaptionStyleTile style={s} />
                 </button>
                 <span className="text-[12px] leading-none text-[#949494] truncate text-left">{s.name}</span>
               </div>
             ))}
           </div>
+          </React.Fragment>
+          ))}
         </div>
       </ScrollArea>
     );

@@ -27,6 +27,8 @@ export default async (ctx) => {
   ctx.map ??= await rulerMap(win);
   await seek(win, ctx.map, 0.5);
   await win.locator("[data-testid=assets-tab-captions]").click();
+  // The column opens on Auto captions; the file import is Add captions.
+  await win.locator("[data-testid=assets-section-add]").click();
   await win.waitForTimeout(400);
   await shot("cio1-add-captions");
   await win.locator("[data-testid=caption-style]").selectOption("yellow");

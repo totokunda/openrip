@@ -1,6 +1,5 @@
 import React from "react";
 import { LuCheck, LuChevronDown } from "react-icons/lu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox, Toggle } from "@/components/properties/controls";
 import { CAPTION_STYLES, useCaptionsStore } from "@/lib/caption-actions";
@@ -110,7 +109,7 @@ const AutoCaptionsMenu: React.FC<{ kind: AutoKind }> = ({ kind }) => {
 
   return (
     <div className="h-full flex flex-col" data-testid={kind === "lyrics" ? "auto-lyrics" : "auto-captions"}>
-      <ScrollArea className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar">
         <div className="flex flex-col gap-5 p-3 pb-4 text-left">
           <div className="flex flex-col gap-2">
             <span className="text-[13px] font-semibold text-brand-lighter">Spoken language</span>
@@ -205,7 +204,7 @@ const AutoCaptionsMenu: React.FC<{ kind: AutoKind }> = ({ kind }) => {
             </p>
           )}
         </div>
-      </ScrollArea>
+      </div>
 
       <div className="shrink-0 h-[52px] px-3 border-t border-brand-divider flex flex-row items-center justify-between gap-3">
         {busy ? (
