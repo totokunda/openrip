@@ -320,7 +320,13 @@ export type EngineExportRequest = {
   codec: string;
   /** Bits per second. */
   bitrate: number;
+  /** Hold the bit rate to `bitrate` (a custom one) rather than the encoder's average. */
+  exactBitrate?: boolean;
   audio: boolean;
+  /** What is written: the video (the default), the project's sound alone in `audioFormat`, or a GIF `shortSide` px tall. */
+  kind?: "video" | "audio" | "gif";
+  audioFormat?: string;
+  shortSide?: number;
 };
 
 /**
@@ -349,11 +355,29 @@ export function parseBitrate(value: string | number): number {
   return Math.round(n * (m[2].toLowerCase() === "m" ? 1e6 : m[2].toLowerCase() === "k" ? 1e3 : 1));
 }
 
+/**
+ * The snapshot with only one clip in it, moved to the start: what exporting a single clip
+ * writes (its own length, its effects and animations, its sound). Clips of the same group stay
+ * with it.
+ */
+function soloClip<T>(snapshot: T, clipId: string): T {
+  const timeline = (snapshot as any)?.timeline;
+  const all: any[] = Array.isArray(timeline?.clips) ? timeline.clips : [];
+  const clip = all.find((c) => c?.clipId === clipId);
+  if (!clip) return snapshot;
+  const keep = all.filter((c) => c === clip || (clip.groupId && c.groupId === clip.groupId));
+  const from = Math.min(...keep.map((c) => c.startFrame));
+  const moved = keep.map((c) => ({ ...c, startFrame: c.startFrame - from, endFrame: c.endFrame - from }));
+  const ids = new Set(moved.map((c) => c.timelineId));
+  const tracks = (Array.isArray(timeline.tracks) ? timeline.tracks : []).filter((t: any) => ids.has(t.timelineId));
+  return { ...(snapshot as any), timeline: { ...timeline, tracks, clips: moved, markers: [] }, editorState: { ...(snapshot as any).editorState, duration: Math.max(...moved.map((c) => c.endFrame)) } };
+}
+
 /** Export the open project with the engine (the snapshot the preview gets, with originals). */
-export async function engineExportProject(request: EngineExportRequest, onProgress: (ratio: number) => void): Promise<EngineExportResult> {
+export async function engineExportProject(request: EngineExportRequest, onProgress: (ratio: number) => void, clipId?: string): Promise<EngineExportResult> {
   const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any);
   if (!snap) return { ok: false, error: "no project open" };
-  const snapshot = await withOriginalMedia(snap.snapshot);
+  const snapshot = await withOriginalMedia(clipId ? soloClip(snap.snapshot, clipId) : snap.snapshot);
   await registerBundledFonts();
   const off = onEngineExportProgress((done, total) => onProgress(total > 0 ? done / total : 0));
   try {

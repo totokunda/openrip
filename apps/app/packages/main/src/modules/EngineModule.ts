@@ -58,6 +58,10 @@ export type EngineAddon = {
   /** Render the frame at `timeUs` at `width`×`height` and save it as a PNG at `path`. */
   exportStill(timeUs: number, width: number, height: number, path: string): Promise<{ width: number; height: number; bytes: number }>;
   exportProject(json: string, path: string, options: EngineExportOptions): Promise<{ frames: number; seconds: number; skippedLayers: number }>;
+  /** The project's sound alone: format "wav", "flac", "mp3" or "aac" (written as M4A). */
+  exportAudio?(json: string, path: string, format: string): Promise<{ frames: number; seconds: number; skippedLayers: number }>;
+  /** The project as a looping GIF, `shortSide` px on its shorter side. */
+  exportGif?(json: string, path: string, shortSide: number, fps: number): Promise<{ frames: number; seconds: number; skippedLayers: number }>;
   exportProgress(): { done: number; total: number };
   cancelExport(): void;
   setThumbnailCacheDir(dir: string): void;
@@ -133,7 +137,8 @@ export type AnalysisResult<T> = { ok: true; value: T } | { ok: false; cancelled?
 /** A frame from the engine's thumbnailer: RGBA, `width * height * 4` bytes. */
 export type Thumbnail = { index: number; timeUs: number; exact: boolean; width: number; height: number; rgba: Buffer };
 
-export type EngineExportOptions = { width: number; height: number; fps: number; codec: string; bitrate: number; audio: boolean };
+/** `kind` picks the output: a video (the default), the sound alone (`audioFormat`) or a GIF (`shortSide`, `fps`). `exactBitrate` holds a custom bit rate. */
+export type EngineExportOptions = { kind?: "video" | "audio" | "gif"; width: number; height: number; fps: number; codec: string; bitrate: number; exactBitrate?: boolean; audio: boolean; audioFormat?: string; shortSide?: number };
 
 export type ExportResult =
   | { ok: true; frames: number; seconds: number; skippedLayers: number }
@@ -606,7 +611,16 @@ export class EngineModule implements AppModule {
         }
       }, 200);
       try {
-        const r = await engine.exportProject(json, path, options);
+        if (options.kind === "audio") {
+          if (!engine.exportAudio) return { ok: false, error: "this engine can't export sound alone; rebuild it" };
+          return { ok: true, ...(await engine.exportAudio(json, path, options.audioFormat ?? "wav")) };
+        }
+        if (options.kind === "gif") {
+          if (!engine.exportGif) return { ok: false, error: "this engine can't export GIFs; rebuild it" };
+          return { ok: true, ...(await engine.exportGif(json, path, options.shortSide ?? 240, options.fps || 15)) };
+        }
+        const { kind: _kind, audioFormat: _audioFormat, shortSide: _shortSide, ...video } = options;
+        const r = await engine.exportProject(json, path, video);
         return { ok: true, ...r };
       } catch (e) {
         const why = message(e);

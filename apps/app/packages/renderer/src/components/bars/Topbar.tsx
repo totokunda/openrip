@@ -21,25 +21,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useLayoutConfigStore, type AppLayoutId } from "@/lib/layout-config";
-import { useViewportStore } from "@/lib/viewport";
 import { LayoutIcon } from "./LayoutIcon";
-import ExportModal, { ExportSettings } from "@/components/dialogs/ExportModal";
-import { ProgressBar } from "@/components/common/ProgressBar";
-import {
-  ExportClip,
-  exportSequenceCancellable,
-  ExportCancelledError,
-} from "@app/export-renderer";
-import { useClipStore } from "@/lib/clip";
-import { useControlsStore } from "@/lib/control";
-import type { AnyClipProps, GroupClipProps } from "@/lib/types";
-import { prepareExportClipsForValue } from "@/lib/prepareExportClips";
-import { sortClipsForStacking } from "@/lib/clipOrdering";
-import { cancelEngineExport, engineExportProject, engineExports, parseBitrate } from "@/lib/engine-preview";
+import ExportModal from "@/components/dialogs/ExportModal";
+import { useExportRun } from "@/lib/export-run";
 import { toast } from "sonner";
-import { revealPathInFolder, writeFileBuffer } from "@app/preload";
+import { ProgressBar } from "@/components/common/ProgressBar";
+import { useClipStore } from "@/lib/clip";
+import type { AnyClipProps, GroupClipProps } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { exportFinished } from "@/lib/export-finished";
 import { onCommand } from "@/lib/commands";
 import { CapCutImportDialog } from "../dialogs/CapCutImportDialog";
 import { createAndOpenProject, goHome, openProject } from "@/lib/project-actions";
@@ -54,29 +43,22 @@ const TopBar: React.FC<TopBarProps> = () => {
   const setLayout = useLayoutConfigStore((s) => s.setLayout);
   const resetLayout = useLayoutConfigStore((s) => s.resetLayout);
   const [layoutOpen, setLayoutOpen] = useState(false);
-  const aspectRatio = useViewportStore((s) => s.aspectRatio);
   const [exportOpen, setExportOpen] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState<number | null>(null);
+  const exportPhase = useExportRun((s) => s.phase);
+  const exportProgress = useExportRun((s) => s.ratio);
+  const isExporting = exportPhase === "running";
   const projects = useProjectsStore((s) => s.projects);
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);
   const addProject = useProjectsStore((s) => s.addProject);
-  const getAssetById = useClipStore((s) => s.getAssetById);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const updateProject = useProjectsStore((s) => s.updateProject);
 
   const [projectNameDraft, setProjectNameDraft] = useState("");
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
 
-  const [cancelExportFn, setCancelExportFn] = useState<(() => void) | null>(
-    null,
-  );
   const clips = useClipStore((s) => s.clips);
   const timelines = useClipStore((s) => s.timelines);
   const getClipsForGroup = useClipStore((s) => s.getClipsForGroup);
-  const getClipsByType = useClipStore((s) => s.getClipsByType);
-  const getClipPositionScore = useClipStore((s) => s.getClipPositionScore);
-  const fps = useControlsStore((s) => s.fps);
 
   const handleCommitProjectName = async () => {
     if (!activeProject) return;
@@ -89,187 +71,6 @@ const TopBar: React.FC<TopBarProps> = () => {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("Failed to update project name", e);
-    }
-  };
-
-  const handleExport = async (settings: ExportSettings) => {
-    const ext =
-      settings.kind === "image"
-        ? settings.imageFormat
-        : settings.format;
-    const outpath = `${settings.path}/${settings.name}.${ext}`;
-
-    // Derive pixel dimensions from the chosen resolution and the editor rect ratio.
-    // In the editor we compute rectWidth/rectHeight as:
-    //   rectWidth  = BASE_LONG_SIDE * (aspectRatio.width / aspectRatio.height)
-    //   rectHeight = BASE_LONG_SIDE
-    // so the effective ratio is rectWidth / rectHeight = aspectRatio.width / aspectRatio.height.
-    const base = Math.max(1, settings.resolution || 0);
-    const rawRatio = aspectRatio.width / aspectRatio.height;
-    const ratio = Number.isFinite(rawRatio) && rawRatio > 0 ? rawRatio : 1;
-
-    // The resolution sets the short side, as in CapCut (1080P portrait is 1080×1920); the
-    // long side follows the project's ratio. Encoders want even sizes.
-    const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
-    const heightPx = ratio >= 1 ? even(base) : even(base / ratio);
-    const widthPx = ratio >= 1 ? even(base * ratio) : even(base);
-
-    const preserveAlpha = !!settings.preserveAlpha;
-
-    setIsExporting(true);
-    setExportProgress(0);
-
-    // H.264/HEVC video goes through the Rust engine when its preview is on: CapCut's
-    // compositing, VideoToolbox encoding and the engine's mix.
-    if (engineExports(settings) && settings.kind === "video") {
-      setCancelExportFn(() => () => void cancelEngineExport());
-      try {
-        const r = await engineExportProject(
-          { path: outpath, width: widthPx, height: heightPx, fps, codec: settings.codec, bitrate: parseBitrate(settings.bitrate), audio: settings.includeAudio },
-          (ratio) => setExportProgress(ratio),
-        );
-        if (r.ok) {
-          toast("Export completed", { description: outpath });
-          exportFinished(outpath);
-          try {
-            await revealPathInFolder(outpath);
-          } catch (e) {
-            console.error("Failed to reveal export path", e);
-          }
-        } else if (!r.cancelled) {
-          toast("Export failed", { description: r.error });
-          console.error("[engine] export failed:", r.error);
-        }
-      } finally {
-        setIsExporting(false);
-        setExportProgress(null);
-        setCancelExportFn(null);
-      }
-      return;
-    }
-
-    try {
-      // Prepare export-ready clips (attach filters, normalize paths, etc.).
-      const preparedClips: ExportClip[] = [];
-      let contentClips = sortClipsForStacking(
-        clips as AnyClipProps[],
-        timelines,
-      );
-      // filter clips with non visible timelines
-      contentClips = contentClips.filter((clip) => {
-        const timeline = timelines.find(
-          (t) => t.timelineId === clip.timelineId,
-        );
-        return !timeline?.hidden;
-      });
-
-      for (const clip of contentClips) {
-        if (clip.type === "filter") continue; // filters become applicators, not standalone content
-        const prepared = prepareExportClipsForValue(
-          clip as AnyClipProps,
-          {
-            aspectRatio,
-            getAssetById,
-            getClipsForGroup,
-            getClipsByType,
-            getClipPositionScore,
-            timelines,
-          },
-          {
-            clearMasks: false,
-            applyCentering: false,
-            dimensionsFrom: "aspect",
-          },
-        );
-        preparedClips.push(...prepared.exportClips);
-      }
-
-
-      const { promise, cancel } = exportSequenceCancellable({
-        mode: settings.kind === "image" ? "image" : "video",
-        filename: outpath,
-        includeAudio: settings.kind === "video" ? settings.includeAudio : false,
-        clips: preparedClips,
-        fps: fps,
-        width: widthPx,
-        height: heightPx,
-        ...(settings.kind === "video"
-          ? {
-              encoderOptions: {
-                format: settings.format,
-                codec: settings.codec,
-                bitrate: settings.bitrate,
-                alpha: preserveAlpha,
-              },
-              audioOptions: {
-                format: settings.audioFormat ?? "mp3",
-              },
-            }
-          : {
-              imageFrame: settings.frame,
-              imageMimeType:
-                settings.imageFormat === "jpeg"
-                  ? "image/jpeg"
-                  : settings.imageFormat === "webp"
-                    ? "image/webp"
-                    : "image/png",
-            }),
-        backgroundColor: preserveAlpha ? undefined : "#000000",
-        onProgress: ({ ratio }) => {
-          setIsExporting(true);
-          setExportProgress(typeof ratio === "number" ? ratio : 0);
-        },
-        ...(settings.kind === "video"
-          ? {
-              onDone: async () => {
-                toast("Export completed", {
-                  description: outpath,
-                });
-                exportFinished(outpath);
-                // Best-effort: open the exported file location for the user.
-                try {
-                  await revealPathInFolder(outpath);
-                } catch (e) {
-                  // eslint-disable-next-line no-console
-                  console.error("Failed to reveal export path", e);
-                }
-              },
-            }
-          : {}),
-      });
-
-      setCancelExportFn(() => cancel);
-
-      const result = await promise;
-
-      if (settings.kind === "image") {
-        const blob = result instanceof Blob ? result : new Blob();
-        const buffer = new Uint8Array(await blob.arrayBuffer());
-        await writeFileBuffer(outpath, buffer);
-        toast("Export completed", { description: outpath });
-        exportFinished(outpath);
-        try {
-          await revealPathInFolder(outpath);
-        } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error("Failed to reveal export path", e);
-        }
-      }
-    } catch (err) {
-      if (
-        err instanceof ExportCancelledError ||
-        (err as any)?.name === "ExportCancelledError"
-      ) {
-        // Export was cancelled by the user; do not treat as an error or show a completion toast.
-      } else {
-        // Swallow other errors; the user can retry.
-        // Optionally log for debugging.
-        console.error(err);
-      }
-    } finally {
-      setIsExporting(false);
-      setExportProgress(null);
-      setCancelExportFn(null);
     }
   };
 
@@ -519,18 +320,7 @@ const TopBar: React.FC<TopBarProps> = () => {
         </div>
       </div>
 
-      <ExportModal
-        open={exportOpen}
-        onOpenChange={setExportOpen}
-        onExport={handleExport}
-        isExporting={isExporting}
-        exportProgress={exportProgress}
-        onCancelExport={() => {
-          if (cancelExportFn) {
-            cancelExportFn();
-          }
-        }}
-      />
+      <ExportModal open={exportOpen} onOpenChange={setExportOpen} />
     </div>
   );
 };

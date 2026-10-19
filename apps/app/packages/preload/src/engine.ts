@@ -164,7 +164,8 @@ export function onEngineEnded(cb: (atUs: number, token: number) => void): () => 
   return () => ipcRenderer.off("engine:ended", listener);
 }
 
-export type EngineExportOptions = { width: number; height: number; fps: number; codec: string; bitrate: number; audio: boolean };
+/** `kind` picks the output: a video (the default), the sound alone (`audioFormat`) or a GIF (`shortSide`, `fps`). `exactBitrate` holds a custom bit rate. */
+export type EngineExportOptions = { kind?: "video" | "audio" | "gif"; width: number; height: number; fps: number; codec: string; bitrate: number; exactBitrate?: boolean; audio: boolean; audioFormat?: string; shortSide?: number };
 
 export type EngineExportResult =
   | { ok: true; frames: number; seconds: number; skippedLayers: number }

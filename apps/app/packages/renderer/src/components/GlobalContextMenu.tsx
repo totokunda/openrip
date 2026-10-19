@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useContextMenuStore, type ContextMenuItem } from "@/lib/context-menu";
 import { LuCheck, LuChevronRight } from "react-icons/lu";
@@ -10,17 +10,10 @@ import type { KeyframePreset } from "@/lib/types";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { cn } from "@/lib/utils";
-import { useViewportStore } from "@/lib/viewport";
-import type { AnyClipProps, ImageClipProps, VideoClipProps } from "@/lib/types";
-import { prepareExportClipsForValue } from "@/lib/prepareExportClips";
-import { getMediaInfoCached } from "@/lib/media/utils";
-import { exportSequence, exportClip } from "@app/export-renderer";
-import { saveImageToPath } from "@app/preload";
+import type { AnyClipProps } from "@/lib/types";
 import { useMarkerEditorStore } from "@/components/timeline/Markers";
 import { dockPanel, popOutPanel } from "@/lib/panel-windows";
-import ClipExportModal, {
-  ClipExportSettings,
-} from "@/components/dialogs/ClipExportModal";
+import ExportModal from "@/components/dialogs/ExportModal";
 
 const Key: React.FC<{ text: string }> = ({ text }) => (
   <span className="text-[12px] text-[#949494] tracking-wide">{text}</span>
@@ -85,20 +78,12 @@ const GlobalContextMenu: React.FC = () => {
   const view = doc.defaultView ?? window;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const clipsStore = useClipStore();
-  const timelines = useClipStore((s) => s.timelines);
-  const getClipsForGroup = useClipStore((s) => s.getClipsForGroup);
-  const getClipsByType = useClipStore((s) => s.getClipsByType);
-  const getClipPositionScore = useClipStore((s) => s.getClipPositionScore);
-  const fps = useControlsStore((s) => s.fps);
-  const aspectRatio = useViewportStore((s) => s.aspectRatio);
   const getAssetById = useClipStore((s) => s.getAssetById);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportKind, setExportKind] = useState<
     "audio" | "image" | "video" | null
   >(null);
   const [exportClipId, setExportClipId] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState<number | null>(null);
 
   const getDefaultNameForClip = (
     clip: AnyClipProps | null | undefined,
@@ -162,258 +147,6 @@ const GlobalContextMenu: React.FC = () => {
     if (rect.top < 0) ny += -rect.top;
     if (nx !== position.x || ny !== position.y) setPosition({ x: nx, y: ny });
   }, [shouldShowMenu, position.x, position.y, setPosition, view]);
-
-  const handleExport = useCallback(
-    async (settings: ClipExportSettings) => {
-      if (!exportClipId || !exportKind) return;
-      let clip = {...(clipsStore.getClipById(exportClipId) as
-        | AnyClipProps
-        | undefined)} as AnyClipProps;
-      if (!clip) return;
-
-      const likeImage = clip.type === "image"
-      const likeVideo = clip.type === "video"
-
-
-      const basePath = settings.path.trim();
-      const baseName = settings.name.trim();
-      if (!basePath || !baseName) return;
-
-      let extension = "";
-      if (settings.kind === "audio" && settings.audioFormat) {
-        extension = settings.audioFormat;
-      } else if (settings.kind === "image" && settings.imageFormat) {
-        extension =
-          settings.imageFormat === "jpeg" ? "jpg" : settings.imageFormat;
-      } else if (settings.kind === "video" && settings.videoFormat) {
-        extension = settings.videoFormat;
-      }
-      const outpath = `${basePath}/${baseName}${extension ? `.${extension}` : ""}`;
-
-      try {
-        setExporting(true);
-        setExportProgress(0);
-
-        if (settings.kind === "audio") {
-          const audioClip = { ...(clip as any) };
-          await exportSequence({
-            mode: "audio",
-            clips: [audioClip as any],
-            fps,
-            filename: outpath,
-            audioOptions: {
-              format: settings.audioFormat ?? "mp3",
-            },
-            onProgress: ({ ratio }) => {
-              setExportProgress(typeof ratio === "number" ? ratio : 0);
-            },
-          });
-        } else if (settings.kind === "video") {
-          const baseH = settings.resolution ?? 1080;
-          // Derive aspect ratio from the clip's native media dimensions when possible.
-          let nativeW = 0;
-          let nativeH = 0;
-          if (likeImage) {
-            const info = getMediaInfoCached(
-              (clip as ImageClipProps).assetId,
-            );
-            nativeW = info?.image?.width ?? 0;
-            nativeH = info?.image?.height ?? 0;
-          } else if (likeVideo) {
-            const info = getMediaInfoCached(
-              (clip as VideoClipProps).assetId,
-            );
-            nativeW = info?.video?.displayWidth ?? 0;
-            nativeH = info?.video?.displayHeight ?? 0;
-          }
-
-          const fallbackAspect =
-            aspectRatio && aspectRatio.height > 0
-              ? aspectRatio.width / aspectRatio.height
-              : 16 / 9;
-          const aspect =
-            nativeW > 0 && nativeH > 0 ? nativeW / nativeH : fallbackAspect;
-
-          const targetH = baseH;
-          const targetW = Math.max(1, Math.round(targetH * aspect));
-
-          const prepared = prepareExportClipsForValue(
-            clip as AnyClipProps,
-            {
-              aspectRatio,
-              getAssetById,
-              getClipsForGroup,
-              getClipsByType,
-              getClipPositionScore,
-              timelines,
-            },
-            {
-              clearMasks: false,
-              applyCentering: true,
-              useOriginalTransform: true,
-              dimensionsFrom: "clip",
-              target: { width: targetW, height: targetH },
-            },
-          );
-
-          const { exportClips } = prepared;
-
-
-          const videoEncoderOptions: any = {
-            format: settings.videoFormat ?? "mp4",
-            codec: (settings.videoFormat === "webm" ? "vp9" : "h264") as any,
-            bitrate: "8000k",
-            resolution: { width: targetW, height: targetH },
-          };
-
-          if (exportClips.length === 1) {
-            await exportClip({
-              mode: "video",
-              clip: exportClips[0],
-              fps,
-              width: targetW,
-              height: targetH,
-              encoderOptions: videoEncoderOptions,
-              backgroundColor: "#000000",
-              filename: outpath,
-              onProgress: ({ ratio }) => {
-                setExportProgress(typeof ratio === "number" ? ratio : 0);
-              },
-            });
-          } else {
-            await exportSequence({
-              mode: "video",
-              clips: exportClips,
-              fps,
-              width: targetW,
-              height: targetH,
-              encoderOptions: videoEncoderOptions,
-              backgroundColor: "#000000",
-              filename: outpath,
-              onProgress: ({ ratio }) => {
-                setExportProgress(typeof ratio === "number" ? ratio : 0);
-              },
-            });
-          }
-        } else if (settings.kind === "image") {
-          const baseH = settings.resolution ?? 1080;
-          // Derive aspect ratio from the clip's native media dimensions when possible.
-          let nativeW = 0;
-          let nativeH = 0;
-          if (likeImage) {
-            const info = getMediaInfoCached(
-              (clip as ImageClipProps).assetId,
-            );
-            nativeW = info?.image?.width ?? 0;
-            nativeH = info?.image?.height ?? 0;
-          } else if (likeVideo) {
-            const info = getMediaInfoCached(
-              (clip as VideoClipProps).assetId,
-            );
-            nativeW = info?.video?.displayWidth ?? 0;
-            nativeH = info?.video?.displayHeight ?? 0;
-          }
-
-          const fallbackAspect =
-            aspectRatio && aspectRatio.height > 0
-              ? aspectRatio.width / aspectRatio.height
-              : 16 / 9;
-          const aspect =
-            nativeW > 0 && nativeH > 0 ? nativeW / nativeH : fallbackAspect;
-
-          const targetH = baseH;
-          const targetW = Math.max(1, Math.round(targetH * aspect));
-
- 
-          const prepared = prepareExportClipsForValue(
-            clip as AnyClipProps,
-            {
-              aspectRatio,
-              getAssetById,
-              getClipsForGroup,
-              getClipsByType,
-              getClipPositionScore,
-              timelines,
-            },
-            {
-              clearMasks: false,
-              applyCentering: false,
-              useOriginalTransform: true,
-              dimensionsFrom: "clip",
-              target: { width: targetW, height: targetH },
-            },
-          );
-
-          const { exportClips } = prepared;
-          const frame =
-            likeVideo || clip.type === "group"
-              ? ((clip as any).selectedFrame ?? 0)
-              : 0;
-
-       
-          if (exportClips.length === 1) {
-            const result = await exportClip({
-              mode: "image",
-              width: targetW,
-              height: targetH,
-              imageFrame: frame,
-              clip: exportClips[0],
-              backgroundColor: "#000000",
-              encoderOptions: {
-                resolution: { width: targetW, height: targetH },
-              },
-              fps,
-              onProgress: ({ ratio }) => {
-                setExportProgress(typeof ratio === "number" ? ratio : 0);
-              },
-            });
-
-
-            if (result instanceof Blob) {
-              const buf = new Uint8Array(await result.arrayBuffer());
-              await saveImageToPath(buf, outpath);
-            }
-          } else {
-            const result = await exportSequence({
-              mode: "image",
-              width: targetW,
-              height: targetH,
-              imageFrame: frame,
-              clips: exportClips,
-              fps,
-              onProgress: ({ ratio }) => {
-                setExportProgress(typeof ratio === "number" ? ratio : 0);
-              },
-            });
-
-            if (result instanceof Blob) {
-              const buf = new Uint8Array(await result.arrayBuffer());
-              await saveImageToPath(buf, outpath);
-            }
-          }
-        }
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error(e);
-      } finally {
-        setExporting(false);
-        setExportProgress(null);
-        setExportModalOpen(false);
-      }
-    },
-    [
-      exportClipId,
-      exportKind,
-      clipsStore,
-      fps,
-      aspectRatio,
-      getClipsForGroup,
-      getClipsByType,
-      getClipPositionScore,
-      timelines,
-      setExportProgress,
-    ],
-  );
 
   const onSelect = (action: string, value?: string) => {
     if (action === "none") return;
@@ -586,21 +319,15 @@ const GlobalContextMenu: React.FC = () => {
           </div>,
           doc.body,
         )}
-      {exportKind && (
-        <ClipExportModal
+      {exportKind && exportClipId && (
+        <ExportModal
           open={exportModalOpen}
-          kind={exportKind}
-          defaultName={getDefaultNameForClip(
-            exportClipId
-              ? (clipsStore.getClipById(exportClipId) as
-                  | AnyClipProps
-                  | undefined)
-              : undefined,
-          )}
           onOpenChange={setExportModalOpen}
-          onExport={handleExport}
-          isExporting={exporting}
-          exportProgress={exportProgress}
+          scope={{
+            clipId: exportClipId,
+            kind: exportKind,
+            name: getDefaultNameForClip(clipsStore.getClipById(exportClipId) as AnyClipProps | undefined),
+          }}
         />
       )}
     </>

@@ -1216,21 +1216,21 @@ References: `31-dialogs/016-export-video-settings.png` to `026-export-caption-fo
 | Feature | CapCut reference | OpenRip |
 |---|---|---|
 | Export dialog with Name and Export to + folder | `016-export-video-settings.png` | has |
-| Cover preview with "Edit cover" | `016-export-video-settings.png`, `027-cover-frame-selector.png` | the editor is there: `openCoverEditor()` in `lib/cover.ts`; the export dialog's preview and button are not (ExportModal) |
+| Cover preview with "Edit cover" | `016-export-video-settings.png`, `027-cover-frame-selector.png` | has (the project's cover; Edit cover opens the cover editor, `openCoverEditor()` in `lib/cover.ts`) |
 | Export timeline (choose which timeline) | `016-export-video-settings.png` | missing (one timeline per project) |
-| Video section on/off (export audio only) | `016-export-video-settings.png`, `023-export-audio-gif-captions.png` | missing |
-| Resolution: 480P, 720P, 1080P, 2K, 4K, 8K | `017-export-resolution-menu.png` | has (no 8K) |
-| Bit rate: Lower, Recommended, Higher | `018-export-bitrate-menu.png` | has (Low, Medium, High) |
-| Bit rate › Custom (Kbps) | `019-export-custom-bitrate.png` | missing |
+| Video section on/off (export audio only) | `016-export-video-settings.png`, `023-export-audio-gif-captions.png` | has (each section has its checkbox; off greys its rows) |
+| Resolution: 480P, 720P, 1080P, 2K, 4K, 8K | `017-export-resolution-menu.png` | has (8K is listed; the hardware encoder may refuse it) |
+| Bit rate: Lower, Recommended, Higher | `018-export-bitrate-menu.png` | has (5 000 / 8 000 / 11 000 Kbps at 1080P 24 fps, scaled by size and rate) |
+| Bit rate › Custom (Kbps) | `019-export-custom-bitrate.png` | has (held to within 10% by a constant-rate encode) |
 | Codec: H.264, HEVC (with one-line descriptions) | `020-export-codec-menu.png` | has |
-| Codec: HEVC with alpha, ProRes 422 / LT / HQ | `020-export-codec-menu.png` | partly (ProRes only, no variants; alpha only for images) |
-| Format: mp4, mov | `021-export-format-menu.png` | has (also webm, mkv) |
-| Frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `022-export-frame-rate-menu.png` | missing |
-| Color space (shown, follows the project) | `016-export-video-settings.png` | missing |
-| Audio section: MP3, WAV, AAC, FLAC | `023-export-audio-gif-captions.png`, `024-export-audio-format-menu.png` | partly (WAV/MP3 for the muxed mix only) |
-| Export GIF: 240P, 320P, 640P | `023-export-audio-gif-captions.png`, `025-export-gif-resolution-menu.png` | missing |
-| Export captions: SRT, TXT, UTF-8 | `023-export-audio-gif-captions.png`, `026-export-caption-format-menu.png` | missing |
-| Footer: duration and estimated file size | `016-export-video-settings.png` | missing |
+| Codec: HEVC with alpha, ProRes 422 / LT / HQ | `020-export-codec-menu.png` | missing (the engine writes H.264 and HEVC) |
+| Format: mp4, mov | `021-export-format-menu.png` | has |
+| Frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `022-export-frame-rate-menu.png` | has (the engine renders at the chosen rate) |
+| Color space (shown, follows the project) | `016-export-video-settings.png` | has (Rec. 709 SDR, read-only) |
+| Audio section: MP3, WAV, AAC, FLAC | `023-export-audio-gif-captions.png`, `024-export-audio-format-menu.png` | has (sound-only files by the engine; AAC is an .m4a) |
+| Export GIF: 240P, 320P, 640P | `023-export-audio-gif-captions.png`, `025-export-gif-resolution-menu.png` | has (15 fps, 256 colours a frame) |
+| Export captions: SRT, TXT, UTF-8 | `023-export-audio-gif-captions.png`, `026-export-caption-format-menu.png` | has (the timeline's texts) |
+| Footer: duration and estimated file size | `016-export-video-settings.png` | has (bit rate × length, live) |
 
 Out of scope: Sync exported videos to space, Check copyright, premium markers on GIF and caption options.
 
