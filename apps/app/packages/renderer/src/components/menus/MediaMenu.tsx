@@ -12,7 +12,8 @@ import {
   LuList,
 } from "react-icons/lu";
 import { toast } from "sonner";
-import { TbFileUpload, TbFolderUp } from "react-icons/tb";
+import { useDndMonitor, useDroppable } from "@dnd-kit/core";
+import { TbDots, TbFileUpload, TbFolder, TbFolderUp, TbPencil, TbTrash } from "react-icons/tb";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import Item, { MediaItem } from "@/components/media/Item";
 
@@ -55,6 +56,10 @@ import { useShellStore } from "@/lib/shell";
 import { preferences } from "@/lib/preferences";
 import { linkMissingInFolder, linkToMedia } from "@/lib/relink";
 import { useRecordPanel } from "@/components/record/RecordPanel";
+import { addMediaAtPlayhead, type MediaRange } from "@/lib/media/add";
+import { useMediaFolders, type MediaFolder } from "@/lib/media/folders";
+import { ensureFullMediaStats } from "@/lib/media/utils";
+import { splitScenes } from "@/lib/analysis";
 
 /** The library's grid or list, kept between sessions. */
 const LAYOUT_KEY = "openrip:media-layout";
@@ -146,7 +151,7 @@ const fetchMediaInfos = async (list: ConvertedMediaItem[], folderUuid?: string) 
 
 // ===== Filtering & Sorting helpers (outside component) =====
 type MediaType = "video" | "image" | "audio";
-type SortKey = "name" | "duration" | "date";
+type SortKey = "name" | "duration" | "date" | "created" | "type";
 type SortOrder = "asc" | "desc";
 
 const filterMediaItems = (
@@ -161,6 +166,9 @@ const nameComparator = (a: MediaItem, b: MediaItem) =>
   a.name.toLowerCase().localeCompare(b.name.toLowerCase());
 const dateComparator = (a: MediaItem, b: MediaItem) =>
   (a.dateAddedMs ?? 0) - (b.dateAddedMs ?? 0);
+const createdComparator = (a: MediaItem, b: MediaItem) => (a.createdMs ?? a.dateAddedMs ?? 0) - (b.createdMs ?? b.dateAddedMs ?? 0);
+const TYPE_ORDER: Record<string, number> = { video: 0, image: 1, audio: 2 };
+const typeComparator = (a: MediaItem, b: MediaItem) => (TYPE_ORDER[a.type] ?? 3) - (TYPE_ORDER[b.type] ?? 3) || nameComparator(a, b);
 const durationComparator = (
   a: MediaItem,
   b: MediaItem,
@@ -192,6 +200,12 @@ const sortMediaItems = (
     case "date":
       cmp = dateComparator;
       break;
+    case "created":
+      cmp = createdComparator;
+      break;
+    case "type":
+      cmp = typeComparator;
+      break;
     case "name":
     default:
       cmp = nameComparator;
@@ -207,6 +221,119 @@ const sortMediaItems = (
 //   open: boolean;
 //   onOpenChange: (open: boolean) => void;
 // }
+
+/** A folder on the grid: a drop target for cards, opened by a click; Rename and Delete in its menu. */
+const FolderCard: React.FC<{
+  folder: MediaFolder;
+  count: number;
+  row: boolean;
+  renaming: boolean;
+  onOpen: () => void;
+  onStartRename: () => void;
+  onCommitRename: (name: string) => void;
+  onCancelRename: () => void;
+  onDelete: () => void;
+}> = ({ folder, count, row, renaming, onOpen, onStartRename, onCommitRename, onCancelRename, onDelete }) => {
+  const { setNodeRef, isOver } = useDroppable({ id: `folder:${folder.id}` });
+  const [menu, setMenu] = useState(false);
+  const [name, setName] = useState(folder.name);
+  useEffect(() => {
+    if (renaming) setName(folder.name);
+  }, [renaming, folder.name]);
+  return (
+    <div
+      ref={setNodeRef}
+      data-testid="media-folder"
+      data-name={folder.name}
+      data-folder={folder.id}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu(true);
+      }}
+      className={cn("group rounded-[4px]", row ? "flex items-center gap-2.5 p-1 hover:bg-brand-light/5" : "w-[120px]")}
+    >
+      <div className={cn("relative", row && "w-[46px] shrink-0")}>
+        <button
+          type="button"
+          data-testid="media-folder-open"
+          title={folder.name}
+          onClick={onOpen}
+          className={cn(
+            "rounded-[4px] bg-brand-background-light flex items-center justify-center text-[#949494] cursor-pointer group-hover:text-brand-light",
+            isOver && "ring-[1.5px] ring-brand-accent bg-brand-button",
+            row ? "w-[46px] h-[30px]" : "w-[120px] h-[80px]",
+          )}
+        >
+          <TbFolder className={row ? "w-5 h-5" : "w-10 h-10"} stroke="1.3" />
+          {!row && (
+            <span data-testid="media-folder-count" className="absolute top-1 right-1.5 text-[10.5px] text-brand-light tabular-nums [text-shadow:0_0_3px_rgba(0,0,0,0.9)]">
+              {count}
+            </span>
+          )}
+        </button>
+        <DropdownMenu open={menu} onOpenChange={setMenu}>
+          <div className="absolute top-2 left-2 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity" title="Actions">
+            <DropdownMenuTrigger className="bg-black/50 cursor-pointer hover:bg-black/70 duration-300 text-white p-1 rounded">
+              <TbDots className="w-4 h-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="dark w-40 flex flex-col text-brand-light bg-brand-background font-poppins">
+              <DropdownMenuItem className="py-1 rounded" data-testid="media-folder-rename" onClick={onStartRename}>
+                <TbPencil className="w-3.5 h-3.5" />
+                <span className="text-[11px]">Rename</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className="py-1 rounded" data-testid="media-folder-delete" onClick={onDelete}>
+                <TbTrash className="w-3.5 h-3.5" />
+                <span className="text-[11px]">Delete</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </div>
+        </DropdownMenu>
+      </div>
+      {renaming ? (
+        <div className={cn(row ? "flex-1 min-w-0" : "pt-1.5")}>
+          <input
+            autoFocus
+            data-testid="media-folder-name"
+            value={name}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => onCommitRename(name)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onCommitRename(name);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onCancelRename();
+              }
+            }}
+            className="w-full h-6 text-[10.5px] text-brand-light/90 px-2 py-0.5 rounded bg-[#121212] border border-[#515151] outline-none"
+          />
+        </div>
+      ) : (
+        <div title={folder.name} className={cn("px-0 text-[11.5px] text-[#949494] text-start whitespace-nowrap overflow-hidden", row ? "flex-1 min-w-0 truncate" : "pt-1 truncate")}>
+          {folder.name}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** The crumb that takes cards back out of an open folder (a drop target) and goes up a level. */
+const RootCrumb: React.FC<{ onClick: () => void }> = ({ onClick }) => {
+  const { setNodeRef, isOver } = useDroppable({ id: "folder:root" });
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      data-testid="media-folder-up"
+      onClick={onClick}
+      className={cn("px-1 -mx-1 rounded-[3px] text-[#949494] hover:text-brand-light cursor-pointer", isOver && "ring-[1.5px] ring-brand-accent text-brand-light")}
+    >
+      Media
+    </button>
+  );
+};
 
 const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   const queryClient = useQueryClient();
@@ -225,6 +352,14 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [search, setSearch] = useState("");
+  // The cards picked (a click; ⌘ or ⇧ adds), the part of each video the In/Out handles chose,
+  // and the folders (lib/media/folders.ts).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [ranges, setRanges] = useState<Record<string, MediaRange>>({});
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
+  const folders = useMediaFolders((s) => s.folders);
+  const openFolder = useMediaFolders((s) => s.open);
+  const modsRef = useRef(false);
   const [layout, setLayoutState] = useState<"grid" | "list">(() => {
     try {
       return window.localStorage.getItem(LAYOUT_KEY) === "list" ? "list" : "grid";
@@ -254,6 +389,10 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   const mediaLibraryVersion = useMediaLibraryVersion();
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const folderUuid = activeProject?.folderUuid;
+  useEffect(() => {
+    void useMediaFolders.getState().load(folderUuid ?? null);
+    setSelected(new Set());
+  }, [folderUuid]);
 
   const mediaQueryKey = useMemo(
     () => ["media", "converted", folderUuid ?? null] as const,
@@ -274,7 +413,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         const result = infoResults[idx];
         if (it.missing) {
           // A file that's gone has no info to read: the card says so (Link to media).
-          results.push({ name: it.name, type: it.type, absPath: it.absPath, assetUrl: it.assetUrl, dateAddedMs: it.dateAddedMs, missing: true, target: it.target });
+          results.push({ name: it.name, type: it.type, absPath: it.absPath, assetUrl: it.assetUrl, dateAddedMs: it.dateAddedMs, createdMs: it.createdMs, missing: true, target: it.target });
         } else if (result.status === "fulfilled") {
           results.push({
             name: it.name,
@@ -282,6 +421,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             absPath: it.absPath,
             assetUrl: it.assetUrl,
             dateAddedMs: it.dateAddedMs,
+            createdMs: it.createdMs,
             mediaInfo: result.value,
             hasProxy: it.hasProxy,
             isPlayableCopy: it.isPlayableCopy,
@@ -360,6 +500,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             absPath: it.absPath,
             assetUrl: it.assetUrl,
             dateAddedMs: it.dateAddedMs,
+            createdMs: it.createdMs,
             mediaInfo: result.value,
             hasProxy: it.hasProxy,
             isPlayableCopy: it.isPlayableCopy,
@@ -455,6 +596,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             absPath: it.absPath,
             assetUrl: it.assetUrl,
             dateAddedMs: it.dateAddedMs,
+            createdMs: it.createdMs,
             mediaInfo: result.value,
             hasProxy: it.hasProxy,
             isPlayableCopy: it.isPlayableCopy,
@@ -574,6 +716,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
     try {
       const folderUuid = activeProject?.folderUuid;
       await renameMediaPair(originalName, unique, folderUuid);
+      useMediaFolders.getState().renameItem(originalName, unique);
       toast.success(`Renamed to ${unique}`, {
         position: "bottom-right",
         duration: 3000,
@@ -637,6 +780,12 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
       try {
         const folderUuid = activeProject?.folderUuid;
         await deleteMediaPair(name, folderUuid);
+        useMediaFolders.getState().removeItem(name);
+        setSelected((prev) => {
+          const next = new Set(prev);
+          next.delete(name);
+          return next;
+        });
         toast.success(`Deleted ${name}`, {
           position: "bottom-right",
           duration: 3000,
@@ -735,6 +884,61 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
     [folderUuid, mediaQueryKey, queryClient],
   );
 
+  // The hover "+" and Split scenes: the card (the chosen part of it) at the playhead.
+  const addItem = useCallback(
+    async (item: MediaItem, scenes = false) => {
+      const range = ranges[item.name];
+      const id = await addMediaAtPlayhead(item, range ? { range } : {});
+      if (!id) {
+        toast.error(`${item.name} couldn't be added`, { position: "bottom-right", duration: 3000, style: { width: "fit-content" } });
+        return;
+      }
+      if (item.type !== "image") void ensureFullMediaStats(item.assetUrl);
+      if (scenes) await splitScenes(id);
+    },
+    [ranges],
+  );
+
+  // New folder with selected item: the picked cards (or this one) in a folder named by the user.
+  const newFolderWith = useCallback(
+    (item: MediaItem) => {
+      const names = selected.has(item.name) ? [...selected] : [item.name];
+      const id = useMediaFolders.getState().create(names);
+      setSelected(new Set());
+      setRenamingFolder(id);
+    },
+    [selected],
+  );
+
+  // A press on a card let go where it began is a click (the app's drags start on a press and
+  // swallow the click); one let go on a folder moves the picked cards into it.
+  useDndMonitor({
+    onDragEnd: (e) => {
+      const d = e.active?.data?.current as Partial<MediaItem> | undefined;
+      if (!d?.name || !d.absPath || (d.type !== "video" && d.type !== "image" && d.type !== "audio")) return;
+      const moved = Math.hypot(e.delta.x, e.delta.y);
+      const over = String(e.over?.id ?? "");
+      if (moved > 3 && over.startsWith("folder:")) {
+        const to = over === "folder:root" ? null : over.slice("folder:".length);
+        const names = selected.has(d.name) ? [...selected] : [d.name];
+        useMediaFolders.getState().move(names, to);
+        setSelected(new Set());
+        return;
+      }
+      if (moved > 3) return;
+      const name = d.name;
+      setSelected((prev) => {
+        if (modsRef.current) {
+          const next = new Set(prev);
+          if (next.has(name)) next.delete(name);
+          else next.add(name);
+          return next;
+        }
+        return prev.size === 1 && prev.has(name) ? prev : new Set([name]);
+      });
+    },
+  });
+
   // removed old inline thumbnail implementations in favor of memoized MediaThumb above
   // Prefetch durations lazily when sorting by duration
   useEffect(() => {
@@ -767,6 +971,24 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
     const f = filterMediaItems(items, selectedTypes).filter((it) => !q || it.name.toLowerCase().includes(q));
     return sortMediaItems(f, sortKey, sortOrder, durationCache);
   }, [items, selectedTypes, sortKey, sortOrder, durationCache, search]);
+
+  const folderOfName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of folders) for (const n of f.items) m.set(n, f.id);
+    return m;
+  }, [folders]);
+  const filtering = search.trim() !== "" || selectedTypes.size > 0;
+  // A search looks through every folder; otherwise the open folder's cards, or the ones in none.
+  const shownItems = useMemo(
+    () => (search.trim() ? displayItems : displayItems.filter((it) => (openFolder ? folderOfName.get(it.name) === openFolder : !folderOfName.has(it.name)))),
+    [displayItems, search, openFolder, folderOfName],
+  );
+  const itemNames = useMemo(() => new Set(items.map((it) => it.name)), [items]);
+  const shownFolders = useMemo(
+    () => (openFolder || filtering ? [] : [...folders].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))),
+    [folders, openFolder, filtering],
+  );
+  const open = folders.find((f) => f.id === openFolder);
 
   // The home screen's Import media: the picker opens as soon as the new project's library shows.
   const importOnOpen = useShellStore((s) => s.importOnOpen);
@@ -882,10 +1104,31 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
               <LuArrowUpDown className="w-3.5 h-3.5" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className={cn(menuSurface, "w-[155px]")}>
+          <DropdownMenuContent align="end" className={cn(menuSurface, "w-[165px]")}>
             {/* Sort key (mutually exclusive via checkboxes) */}
             <DropdownMenuCheckboxItem
               className={menuCheck}
+              data-testid="sort-date"
+              checked={sortKey === "date"}
+              onCheckedChange={(checked) => {
+                if (checked) setSortKey("date");
+              }}
+            >
+              Time imported
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              className={menuCheck}
+              data-testid="sort-created"
+              checked={sortKey === "created"}
+              onCheckedChange={(checked) => {
+                if (checked) setSortKey("created");
+              }}
+            >
+              Time created
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              className={menuCheck}
+              data-testid="sort-name"
               checked={sortKey === "name"}
               onCheckedChange={(checked) => {
                 if (checked) setSortKey("name");
@@ -895,21 +1138,23 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               className={menuCheck}
+              data-testid="sort-type"
+              checked={sortKey === "type"}
+              onCheckedChange={(checked) => {
+                if (checked) setSortKey("type");
+              }}
+            >
+              Type
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              className={menuCheck}
+              data-testid="sort-duration"
               checked={sortKey === "duration"}
               onCheckedChange={(checked) => {
                 if (checked) setSortKey("duration");
               }}
             >
               Duration
-            </DropdownMenuCheckboxItem>
-            <DropdownMenuCheckboxItem
-              className={menuCheck}
-              checked={sortKey === "date"}
-              onCheckedChange={(checked) => {
-                if (checked) setSortKey("date");
-              }}
-            >
-              Date Added
             </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator />
             {/* Sort order (mutually exclusive via checkboxes) */}
@@ -920,7 +1165,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
                 if (checked) setSortOrder("asc");
               }}
             >
-              Ascending
+              {sortKey === "date" || sortKey === "created" ? "Oldest first" : "Ascending"}
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               className={menuCheck}
@@ -929,7 +1174,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
                 if (checked) setSortOrder("desc");
               }}
             >
-              Descending
+              {sortKey === "date" || sortKey === "created" ? "Newest first" : "Descending"}
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -1014,7 +1259,13 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
         )}
         {/* Keep showing the grid even while background reloads happen. */}
         {items.length > 0 && (
-          <ScrollArea className="h-full px-3 pb-3 pt-1 dark">
+          <ScrollArea
+            className="h-full px-3 pb-3 pt-1 dark"
+            onPointerDownCapture={(e) => {
+              modsRef.current = e.metaKey || e.ctrlKey || e.shiftKey;
+              if (!(e.target as HTMLElement).closest('[data-testid="media-card"],[data-testid="media-folder"],button,input')) setSelected(new Set());
+            }}
+          >
             {missingItems.length > 0 && (
               <div data-testid="media-missing-bar" className="mt-2 mb-1 rounded-[4px] bg-[#3a1d1f] px-2.5 py-2 text-left text-[12px] text-[#e5898c] flex flex-row items-center gap-2">
                 <span className="flex-1 min-w-0">
@@ -1030,14 +1281,44 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
                 </button>
               </div>
             )}
-            <div className="text-[12px] text-brand-light text-left pt-2 pb-2">{heading}</div>
+            {open ? (
+              <div data-testid="media-breadcrumb" className="text-[12px] text-brand-light text-left pt-2 pb-2 flex items-center gap-1.5">
+                <RootCrumb onClick={() => useMediaFolders.getState().setOpen(null)} />
+                <span className="text-[#6c6c6c]">›</span>
+                <span data-testid="media-folder-title" className="truncate">
+                  {open.name}
+                </span>
+              </div>
+            ) : (
+              <div className="text-[12px] text-brand-light text-left pt-2 pb-2">{heading}</div>
+            )}
             <div
               className={cn("grid w-full", layout === "grid" ? "gap-x-4 gap-y-3" : "gap-0.5")}
               style={{
                 gridTemplateColumns: layout === "grid" ? "repeat(auto-fill, 120px)" : "1fr",
               }}
             >
-              {displayItems.map((item) => (
+              {shownFolders.map((f) => (
+                <FolderCard
+                  key={f.id}
+                  folder={f}
+                  count={f.items.filter((n) => itemNames.has(n)).length}
+                  row={layout === "list"}
+                  renaming={renamingFolder === f.id}
+                  onOpen={() => {
+                    setSelected(new Set());
+                    useMediaFolders.getState().setOpen(f.id);
+                  }}
+                  onStartRename={() => setRenamingFolder(f.id)}
+                  onCommitRename={(name) => {
+                    useMediaFolders.getState().rename(f.id, name);
+                    setRenamingFolder(null);
+                  }}
+                  onCancelRename={() => setRenamingFolder(null)}
+                  onDelete={() => useMediaFolders.getState().remove(f.id)}
+                />
+              ))}
+              {shownItems.map((item) => (
                 <Item
                   key={item.name}
                   item={item}
@@ -1060,9 +1341,39 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
                   added={onTimeline.has(item.assetUrl)}
                   layout={layout === "list" ? "row" : "card"}
                   onRelink={(it) => void linkToMedia({ name: it.name, target: it.target ?? it.name })}
+                  selected={selected.has(item.name)}
+                  range={ranges[item.name] ?? null}
+                  onRange={(it, r) =>
+                    setRanges((prev) => {
+                      const next = { ...prev };
+                      if (r) next[it.name] = r;
+                      else delete next[it.name];
+                      return next;
+                    })
+                  }
+                  onAdd={(it) => void addItem(it)}
+                  onNewFolder={newFolderWith}
+                  onSplitScenes={(it) => void addItem(it, true)}
                 />
               ))}
             </div>
+            {shownItems.length === 0 && shownFolders.length === 0 && (
+              <div data-testid="media-empty-state" className="flex flex-col items-center gap-1.5 pt-16 text-center">
+                {filtering ? (
+                  <>
+                    <LuSearch className="w-6 h-6 text-[#6c6c6c]" />
+                    <span className="text-[13px] text-brand-lighter">No results found</span>
+                    <span className="text-[12px] text-[#6c6c6c]">{search.trim() ? `Nothing matches “${search.trim()}”.` : "No media of this type."}</span>
+                  </>
+                ) : (
+                  <>
+                    <TbFolder className="w-7 h-7 text-[#6c6c6c]" stroke="1.3" />
+                    <span className="text-[13px] text-brand-lighter">This folder is empty</span>
+                    <span className="text-[12px] text-[#6c6c6c]">Drag media here to keep it in this folder.</span>
+                  </>
+                )}
+              </div>
+            )}
           </ScrollArea>
         )}
         {isDragging && (

@@ -11,14 +11,17 @@ import {
 import {
   TbDots,
   TbFileText,
+  TbFolderPlus,
   TbFolderOpen,
+  TbScissors,
   TbLink,
   TbPencil,
   TbTrash,
   TbVideo,
   TbVideoOff,
 } from "react-icons/tb";
-import { LuLoaderCircle, LuUnlink } from "react-icons/lu";
+import { LuLoaderCircle, LuPlus, LuUnlink } from "react-icons/lu";
+import type { MediaRange } from "@/lib/media/add";
 
 interface DeleteAlertDialogProps {
   onDelete: () => void;
@@ -101,7 +104,11 @@ export type MediaItem = {
   assetUrl: string;
   originalAssetUrl?: string;
   dateAddedMs?: number;
+  /** When the file itself was made (dateAddedMs is when it was imported). */
+  createdMs?: number;
   mediaInfo?: MediaInfo;
+  /** Set while a card is dragged: only this part of the media goes on the timeline. */
+  range?: MediaRange;
   fillCanvas?: boolean;
   hasProxy?: boolean;
   /** The proxy is a playable copy of a format this app can't decode (ProRes): keep it. */
@@ -140,7 +147,71 @@ interface ItemProps {
   layout?: "card" | "row";
   /** Link to media: pick the file a missing card should show. */
   onRelink?: (item: MediaItem) => void;
+  /** The card is selected (outlined; a video's In/Out handles show). */
+  selected?: boolean;
+  /** The part of a video the In/Out handles chose (null: all of it). */
+  range?: MediaRange | null;
+  onRange?: (item: MediaItem, range: MediaRange | null) => void;
+  /** The hover "+": add the card (the chosen range of it) at the playhead. */
+  onAdd?: (item: MediaItem) => void;
+  /** Menu: New folder with selected item. */
+  onNewFolder?: (item: MediaItem) => void;
+  /** Menu: Split scenes (a video added and cut at its shot changes). */
+  onSplitScenes?: (item: MediaItem) => void;
 }
+
+const minutesSeconds = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+
+/**
+ * The In/Out handles on a selected video card: two bars at the thumbnail's edges that drag to
+ * choose a part of the video; what is outside them is dimmed. "+" or a drag then takes only
+ * that part. Pressing a handle doesn't start the card's own drag.
+ */
+const RangeHandles: React.FC<{ duration: number; range: MediaRange | null; onChange: (r: MediaRange | null) => void }> = ({ duration, range, onChange }) => {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const inF = range ? range.inSec / duration : 0;
+  const outF = range ? range.outSec / duration : 1;
+  // A part is at least a tenth of a second (or the whole of a shorter video).
+  const gap = Math.min(0.1, duration / 2);
+  const begin = (which: "in" | "out") => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    let cur = { inSec: range?.inSec ?? 0, outSec: range?.outSec ?? duration };
+    const move = (ev: PointerEvent) => {
+      const t = Math.max(0, Math.min(1, (ev.clientX - rect.left) / Math.max(1, rect.width))) * duration;
+      cur = which === "in" ? { inSec: Math.min(t, cur.outSec - gap), outSec: cur.outSec } : { inSec: cur.inSec, outSec: Math.max(t, cur.inSec + gap) };
+      onChange(cur.inSec <= 0.0005 && cur.outSec >= duration - 0.0005 ? null : cur);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const bar = "absolute top-0 bottom-0 w-[7px] bg-brand-accent cursor-ew-resize flex items-center justify-center";
+  return (
+    <div ref={ref} data-testid="media-range" data-in={range?.inSec ?? 0} data-out={range?.outSec ?? duration} className="absolute inset-0 z-20 pointer-events-none">
+      <div className="absolute top-0 bottom-0 left-0 bg-black/60" style={{ width: `${inF * 100}%` }} />
+      <div className="absolute top-0 bottom-0 right-0 bg-black/60" style={{ width: `${(1 - outF) * 100}%` }} />
+      <div className="absolute inset-y-0 border-y-2 border-brand-accent" style={{ left: `${inF * 100}%`, right: `${(1 - outF) * 100}%` }} />
+      <div data-testid="media-range-in" onPointerDown={begin("in")} className={cn(bar, "rounded-l-[4px] pointer-events-auto")} style={{ left: `${inF * 100}%` }}>
+        <span className="w-px h-3 bg-white/80" />
+      </div>
+      <div data-testid="media-range-out" onPointerDown={begin("out")} className={cn(bar, "rounded-r-[4px] pointer-events-auto")} style={{ left: `calc(${outF * 100}% - 7px)` }}>
+        <span className="w-px h-3 bg-white/80" />
+      </div>
+      {range && (
+        <span data-testid="media-range-length" className="absolute left-2 bottom-1 text-[10px] leading-none text-brand-light tabular-nums [text-shadow:0_0_3px_rgba(0,0,0,0.9)]">
+          {minutesSeconds(range.outSec - range.inSec)}
+        </span>
+      )}
+    </div>
+  );
+};
 
 function fileURLToPathInWorker(raw: string): string {
   try {
@@ -387,13 +458,19 @@ const Item: React.FC<ItemProps> = ({
   added = false,
   layout = "card",
   onRelink,
+  selected = false,
+  range = null,
+  onRange,
+  onAdd,
+  onNewFolder,
+  onSplitScenes,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const row = layout === "row";
   return (
     <Draggable
       id={item.name}
-      data={item}
+      data={range ? { ...item, range } : item}
       disabled={
         isOpen ||
         renamingItem === item.name ||
@@ -406,6 +483,7 @@ const Item: React.FC<ItemProps> = ({
         key={item.name}
         data-testid="media-card"
         data-name={item.name}
+        data-selected={selected ? "true" : undefined}
         data-missing={item.missing ? "true" : undefined}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -424,6 +502,7 @@ const Item: React.FC<ItemProps> = ({
             className={cn(
               // CapCut's card: a fixed 120×80 thumbnail, the media letterboxed on a raised fill.
               "overflow-hidden rounded-[4px] bg-brand-background-light relative group-hover:ring-1 group-hover:ring-brand-light/20",
+              selected && "ring-[1.5px] ring-brand-accent group-hover:ring-brand-accent",
               row ? "w-[46px] h-[30px]" : "w-[120px] h-[80px]",
               {
                 "opacity-50": isCreatingProxy,
@@ -442,6 +521,29 @@ const Item: React.FC<ItemProps> = ({
               >
                 <LuUnlink className={row ? "w-3.5 h-3.5" : "w-6 h-6"} />
                 {!row && <span className="text-[11px] font-medium">Media missing</span>}
+              </button>
+            )}
+            {selected && !row && !item.missing && item.type === "video" && (item.mediaInfo?.duration ?? 0) > 0.2 && (
+              <RangeHandles duration={item.mediaInfo!.duration!} range={range} onChange={(r) => onRange?.(item, r)} />
+            )}
+            {!item.missing && !isCreatingProxy && (
+              <button
+                type="button"
+                data-testid="media-add"
+                title="Add to the timeline"
+                aria-label={`Add ${item.name} to the timeline`}
+                // The card's drag starts on a press: the button keeps its own.
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAdd?.(item);
+                }}
+                className={cn(
+                  "absolute z-30 w-[18px] h-[18px] rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer",
+                  row ? "right-1 bottom-1 w-[14px] h-[14px]" : "right-1 bottom-1",
+                )}
+              >
+                <LuPlus className="w-3 h-3" />
               </button>
             )}
             {added && !row && (
@@ -481,7 +583,7 @@ const Item: React.FC<ItemProps> = ({
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="start"
-                className="dark w-40 flex flex-col text-brand-light bg-brand-background font-poppins"
+                className="dark w-52 flex flex-col text-brand-light bg-brand-background font-poppins"
               >
                 {item.type === "video" && !item.isPlayableCopy && !item.missing && (
                   <>
@@ -509,6 +611,17 @@ const Item: React.FC<ItemProps> = ({
                     <DropdownMenuSeparator />
                   </>
                 )}
+                {item.type === "video" && !item.missing && (
+                  <DropdownMenuItem className="py-1 rounded" data-testid="media-split-scenes" onClick={() => onSplitScenes?.(item)}>
+                    <TbScissors className="w-3.5 h-3.5" />
+                    <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">Split scenes</span>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem className="py-1 rounded" data-testid="media-new-folder" onClick={() => onNewFolder?.(item)}>
+                  <TbFolderPlus className="w-3.5 h-3.5" />
+                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">New folder with selected item</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="py-1 rounded"
                   onClick={() => startRename(item)}

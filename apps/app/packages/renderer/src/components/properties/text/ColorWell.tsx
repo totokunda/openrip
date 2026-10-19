@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useStoredList } from "@/lib/user-store";
 import { LuChevronDown, LuChevronUp, LuPipette, LuPlus } from "react-icons/lu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -57,14 +58,8 @@ const PRESET_COLORS = [
 const MY_COLORS_KEY = "openrip:my-colors";
 const MY_COLORS_MAX = 39;
 
-const readMyColors = (): string[] => {
-  try {
-    const v = JSON.parse(localStorage.getItem(MY_COLORS_KEY) ?? "[]");
-    return Array.isArray(v) ? v.filter((c): c is string => typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c)) : [];
-  } catch {
-    return [];
-  }
-};
+const parseMyColors = (v: unknown): string[] | undefined =>
+  Array.isArray(v) ? v.filter((c): c is string => typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c)) : undefined;
 
 /** A pointer drag over an element, reporting where it is as fractions of the element's box. */
 const useDrag = (onMove: (x: number, y: number) => void) => {
@@ -89,8 +84,13 @@ const ColorPicker: React.FC<{ value: string; onChange: (hex: string) => void }> 
   // The hue survives greys and black (where the colour itself has none).
   const [hsv, setHsv] = useState<Hsv>(() => rgbToHsv(hexToRgb(value)));
   const [format, setFormat] = useState<"hex" | "rgb">("hex");
-  const [palette, setPalette] = useState<"mine" | "presets">(() => (readMyColors().length ? "mine" : "presets"));
-  const [mine, setMine] = useState<string[]>(readMyColors);
+  const [palette, setPalette] = useState<"mine" | "presets">("presets");
+  const [mine, setMine] = useStoredList<string>("my-colours", MY_COLORS_KEY, parseMyColors);
+  // The saved colours show first once they have been read.
+  useEffect(() => {
+    if (mine.length) setPalette((p) => (p === "presets" ? "mine" : p));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mine.length > 0]);
   const [hexText, setHexText] = useState(value.replace("#", "").toUpperCase());
   const lastSent = useRef(value.toLowerCase());
 
@@ -225,9 +225,6 @@ const ColorPicker: React.FC<{ value: string; onChange: (hex: string) => void }> 
             onClick={() => {
               const next = [value.toLowerCase(), ...mine.filter((c) => c !== value.toLowerCase())].slice(0, MY_COLORS_MAX);
               setMine(next);
-              try {
-                localStorage.setItem(MY_COLORS_KEY, JSON.stringify(next));
-              } catch {}
             }}
             className="w-4 h-4 rounded-[3px] bg-brand-background-light text-brand-lighter flex items-center justify-center hover:bg-brand-button"
           >

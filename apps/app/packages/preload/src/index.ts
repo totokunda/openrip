@@ -68,6 +68,8 @@ export { stickersCached, stickerDownload, stickerStore } from "./stickers.js";
 export type { StickerFile } from "./stickers.js";
 // Media > Yours > My presets (the main process's ClipPresetsModule)
 export { clipPresetsRead, clipPresetsWrite } from "./presets.js";
+// Favourites and recent searches, in the user data folder (the main process UserStoreModule)
+export { userStoreRead, userStoreSet } from "./userstore.js";
 // The Audio tab's Music and Sound effects libraries (Openverse)
 export { musicSearch, musicState, musicDownload, musicFavorite } from "./music.js";
 export type { MusicKind, MusicLicense, MusicTrack, MusicSearch, MusicSearchResult, MusicFile } from "./music.js";

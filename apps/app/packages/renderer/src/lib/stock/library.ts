@@ -4,6 +4,7 @@
 // app data (`<userData>/stock/`), then imported into the project's media like any other file; its
 // licence, author and source address go into the asset (`asset.credit`, lib/credits.ts).
 import { create } from "zustand";
+import { loadStored, saveStored, parseList } from "../user-store";
 import { importMediaPaths, listConvertedMedia, stockCached, stockDownload, stockSearch } from "@app/preload";
 import type { AssetCredit, VideoClipProps, ImageClipProps } from "../types";
 import { SOURCE_NAMES, type StockItem, type StockKind } from "./sources";
@@ -34,14 +35,7 @@ export const searchFor = (category: string, kind: StockKind, typed: string): str
 };
 
 const FAVOURITES = "openrip.stock-favorites";
-const readFavourites = (): StockItem[] => {
-  try {
-    const v = JSON.parse(localStorage.getItem(FAVOURITES) ?? "[]");
-    return Array.isArray(v) ? v.filter((x) => x && typeof x.id === "string" && typeof x.url === "string") : [];
-  } catch {
-    return [];
-  }
-};
+const STORE_KEY = "favourites.stock";
 
 type StockLibrary = {
   kind: StockKind;
@@ -83,15 +77,11 @@ export const useStockLibrary = create<StockLibrary>((set, get) => ({
   cached: {},
   downloading: [],
   failed: {},
-  favourites: readFavourites(),
+  favourites: [],
   toggleFavourite: (item) => {
     const now = get().favourites;
     const next = now.some((x) => x.id === item.id) ? now.filter((x) => x.id !== item.id) : [...now, item];
-    try {
-      localStorage.setItem(FAVOURITES, JSON.stringify(next));
-    } catch {
-      // storage can be blocked; the favourites last the session
-    }
+    saveStored(STORE_KEY, next);
     set({ favourites: next });
   },
   preview: null,
@@ -261,3 +251,7 @@ export const addStock = async (item: StockItem, opts: { startFrame?: number } = 
   useStockLibrary.getState().setPreview(null);
   return clip.clipId;
 };
+
+void loadStored(STORE_KEY, FAVOURITES, parseList<StockItem>((x) => x && typeof x.id === "string" && typeof x.url === "string")).then(
+  (v) => v && useStockLibrary.setState((s) => ({ favourites: [...v, ...s.favourites.filter((f) => !v.some((x) => x.id === f.id))] })),
+);

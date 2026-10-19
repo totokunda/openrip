@@ -18,6 +18,7 @@ import {
   type AudioEffectPreset,
 } from "@/lib/audio-effects";
 import { cn } from "@/lib/utils";
+import { parseStrings, useStoredList } from "@/lib/user-store";
 
 /**
  * The Audio tab's Voice changer, as CapCut's Voice filters (docs/plan/capcut-ui-spec.md §6.19,
@@ -35,22 +36,50 @@ const presetOf = (e: AudioEffect | undefined): AudioEffectPreset | undefined =>
   e && e.type !== "draft" ? AUDIO_EFFECT_PRESETS.find((p) => p.effect.type === e.type && p.name === e.name) : undefined;
 
 /** A filter tile: 60×60 on the raised fill, its name inside, the selected one outlined. */
-const Tile: React.FC<{ label: string; selected: boolean; onClick: () => void; testId: string; tag?: string }> = ({ label, selected, onClick, testId, tag }) => (
-  <button
-    type="button"
-    data-testid={testId}
-    aria-pressed={selected}
-    title={label}
-    onClick={onClick}
-    className={cn(
-      "relative w-[60px] h-[60px] shrink-0 rounded-[6px] bg-brand-background-light flex items-center justify-center px-[3px] text-center text-[11px] leading-[13px] text-brand-lighter hover:bg-brand-button transition-colors",
-      selected && "outline outline-[1.5px] outline-brand-accent -outline-offset-[1.5px]",
+const Tile: React.FC<{ label: string; selected: boolean; onClick: () => void; testId: string; tag?: string; favourite?: boolean; onFavourite?: () => void }> = ({
+  label,
+  selected,
+  onClick,
+  testId,
+  tag,
+  favourite,
+  onFavourite,
+}) => (
+  <div className="group relative w-[60px] h-[60px] shrink-0">
+    <button
+      type="button"
+      data-testid={testId}
+      aria-pressed={selected}
+      title={label}
+      onClick={onClick}
+      className={cn(
+        "relative w-full h-full rounded-[6px] bg-brand-background-light flex items-center justify-center px-[3px] text-center text-[11px] leading-[13px] text-brand-lighter hover:bg-brand-button transition-colors",
+        selected && "outline outline-[1.5px] outline-brand-accent -outline-offset-[1.5px]",
+      )}
+    >
+      {/* Names wrap between words only, as CapCut's ("PA Announcer"). */}
+      <span className="line-clamp-3 [overflow-wrap:normal] [word-break:keep-all]">{label}</span>
+      {tag && <span className="absolute top-1 left-1 px-1 rounded-[2px] bg-black/50 text-[9px] leading-[12px] text-brand-light">{tag}</span>}
+    </button>
+    {onFavourite && (
+      <button
+        type="button"
+        data-testid={`${testId}-favourite`}
+        aria-pressed={!!favourite}
+        title={favourite ? "Remove from Favorites" : "Add to Favorites"}
+        aria-label={favourite ? "Remove from Favorites" : "Add to Favorites"}
+        onClick={onFavourite}
+        className={cn(
+          "absolute right-[3px] bottom-[3px] w-4 h-4 rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80",
+          favourite ? "text-brand-accent" : "text-white opacity-0 group-hover:opacity-100",
+        )}
+      >
+        <svg width="10" height="10" viewBox="0 0 12 12" fill={favourite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round">
+          <path d="M6 1.2 7.5 4.4l3.5.5-2.5 2.4.6 3.5L6 9.1 2.9 10.8l.6-3.5L1 4.9l3.5-.5z" />
+        </svg>
+      </button>
     )}
-  >
-    {/* Names wrap between words only, as CapCut's ("PA Announcer"). */}
-    <span className="line-clamp-3 [overflow-wrap:normal] [word-break:keep-all]">{label}</span>
-    {tag && <span className="absolute top-1 left-1 px-1 rounded-[2px] bg-black/50 text-[9px] leading-[12px] text-brand-light">{tag}</span>}
-  </button>
+  </div>
 );
 
 /** A chip: 24 px pill, raised; the selected one a step lighter with the primary text. */
@@ -72,7 +101,9 @@ const VoiceChangerProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
   const clip = useClipStore((s) => s.getClipById(clipId)) as AudioClipProps | undefined;
   const updateClip = useClipStore((s) => s.updateClip);
   const [query, setQuery] = useState("");
-  const [group, setGroup] = useState<AudioEffectGroup | "all">("all");
+  const [group, setGroup] = useState<AudioEffectGroup | "all" | "favorites">("all");
+  const [favourites, setFavourites] = useStoredList<string>("favourites.voice-filters", null, parseStrings);
+  const toggleFavourite = (id: string) => setFavourites(favourites.includes(id) ? favourites.filter((x) => x !== id) : [...favourites, id]);
   const [toAll, setToAll] = useState(false);
 
   const effects = clip?.audioEffects ?? [];
@@ -82,8 +113,8 @@ const VoiceChangerProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return AUDIO_EFFECT_PRESETS.filter((p) => (group === "all" || p.group === group) && (!q || p.name.toLowerCase().includes(q)));
-  }, [query, group]);
+    return AUDIO_EFFECT_PRESETS.filter((p) => (group === "all" || (group === "favorites" ? favourites.includes(p.id) : p.group === group)) && (!q || p.name.toLowerCase().includes(q)));
+  }, [query, group, favourites]);
 
   if (!clip) return null;
 
@@ -149,20 +180,33 @@ const VoiceChangerProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
 
       <div className="mt-3 flex flex-row flex-wrap gap-1.5">
         <Chip label="All" selected={group === "all"} onClick={() => setGroup("all")} />
+        <Chip label="Favorites" selected={group === "favorites"} onClick={() => setGroup("favorites")} />
         {AUDIO_EFFECT_GROUPS.map((g) => (
           <Chip key={g.id} label={g.name} selected={group === g.id} onClick={() => setGroup(g.id)} />
         ))}
       </div>
 
-      <div className="mt-4 text-[12px] text-brand-light">{group === "all" ? "All" : AUDIO_EFFECT_GROUPS.find((g) => g.id === group)?.name}</div>
+      <div className="mt-4 text-[12px] text-brand-light">{group === "all" ? "All" : group === "favorites" ? "Favorites" : AUDIO_EFFECT_GROUPS.find((g) => g.id === group)?.name}</div>
       <div data-testid="voice-tiles" className="mt-2 grid grid-cols-[repeat(auto-fill,60px)] gap-x-[18px] gap-y-4">
-        <Tile label="None" testId="voice-none" selected={effects.length === 0} onClick={() => commit(clearAudioEffects(now()))} />
-        {draft && <Tile label={draft.name || "Voice filter"} tag="Draft" testId="voice-draft" selected onClick={() => {}} />}
+        {group !== "favorites" && <Tile label="None" testId="voice-none" selected={effects.length === 0} onClick={() => commit(clearAudioEffects(now()))} />}
+        {draft && group !== "favorites" && <Tile label={draft.name || "Voice filter"} tag="Draft" testId="voice-draft" selected onClick={() => {}} />}
         {shown.map((p) => (
-          <Tile key={p.id} label={p.name} testId={`voice-${p.id}`} selected={picked?.id === p.id} onClick={() => commit(applyPreset(now(), p.id))} />
+          <Tile
+            key={p.id}
+            label={p.name}
+            testId={`voice-${p.id}`}
+            selected={picked?.id === p.id}
+            onClick={() => commit(applyPreset(now(), p.id))}
+            favourite={favourites.includes(p.id)}
+            onFavourite={() => toggleFavourite(p.id)}
+          />
         ))}
       </div>
-      {shown.length === 0 && <p className="mt-6 text-center text-[12px] text-[#6c6c6c]">No voice filter matches “{query}”.</p>}
+      {shown.length === 0 && (
+        <p data-testid="voice-empty" className="mt-6 text-center text-[12px] text-[#6c6c6c]">
+          {group === "favorites" && !query.trim() ? "No favorites yet. Hover a voice filter and click its star to keep it here." : `No voice filter matches “${query}”.`}
+        </p>
+      )}
       {/* Several effects stacked (OpenRip's own, or a draft's): the first one is shown. */}
       {effects.length > 1 && (
         <p className="mt-4 text-[12px] text-[#949494]">

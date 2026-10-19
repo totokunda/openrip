@@ -1,21 +1,14 @@
-// The Effects tab's own state: favourites (kept in the browser's storage), the effect being
+// The Effects tab's own state: favourites (kept in the user data folder), the effect being
 // previewed (shown by the engine without touching the project), and adding an effect: as a bar
 // at the playhead, or onto one clip. A preview is never saved or exported: engine-preview.ts
 // adds it to the engine's copy of the project only.
 import { create } from "zustand";
+import { loadStored, saveStored, parseStrings } from "../user-store";
 import type { ClipEffect, FilterClipProps } from "../types";
 import { defaultEffectParams, effectDef, loadEffectCatalog, type EffectDef } from "./catalog";
 
 const KEY = "openrip.effect-favorites";
-
-const readFavourites = (): string[] => {
-  try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? "[]");
-    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-};
+const STORE_KEY = "favourites.effects";
 
 type EffectLibrary = {
   favourites: string[];
@@ -26,20 +19,18 @@ type EffectLibrary = {
 };
 
 export const useEffectLibrary = create<EffectLibrary>((set, get) => ({
-  favourites: readFavourites(),
+  favourites: [],
   toggleFavourite: (id) => {
     const now = get().favourites;
     const next = now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
-    try {
-      localStorage.setItem(KEY, JSON.stringify(next));
-    } catch {
-      // storage can be blocked; the favourites last the session
-    }
+    saveStored(STORE_KEY, next);
     set({ favourites: next });
   },
   preview: null,
   setPreview: (preview) => set({ preview }),
 }));
+
+void loadStored(STORE_KEY, KEY, parseStrings).then((v) => v && useEffectLibrary.setState((s) => ({ favourites: [...new Set([...v, ...s.favourites])] })));
 
 /** The bar a tile makes: the fields of a filter-track clip drawing the effect (also what a tile dropped on the timeline gets). */
 export const effectClipFields = (def: EffectDef): Partial<FilterClipProps> => ({

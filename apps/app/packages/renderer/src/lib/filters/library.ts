@@ -1,23 +1,16 @@
-// The Filters tab's own state: favourites (kept in the browser's storage), the filter being
+// The Filters tab's own state: favourites (kept in the user data folder), the filter being
 // previewed (shown by the engine without touching the project), and adding one at the
 // playhead. A preview is never saved or exported: engine-preview.ts adds it to the engine's
 // copy of the project only.
 import { create } from "zustand";
+import { loadStored, saveStored, parseStrings } from "../user-store";
 import type { Filter, FilterClipProps } from "../types";
 
 const KEY = "openrip.filter-favorites";
+const STORE_KEY = "favourites.filters";
 
 /** A filter's identity across categories. */
 export const filterKey = (f: Pick<Filter, "id" | "category">) => `${f.category}/${f.id}`;
-
-const readFavourites = (): string[] => {
-  try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? "[]");
-    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-};
 
 type FilterLibrary = {
   favourites: string[];
@@ -28,21 +21,19 @@ type FilterLibrary = {
 };
 
 export const useFilterLibrary = create<FilterLibrary>((set, get) => ({
-  favourites: readFavourites(),
+  favourites: [],
   toggleFavourite: (f) => {
     const k = filterKey(f);
     const now = get().favourites;
     const next = now.includes(k) ? now.filter((x) => x !== k) : [...now, k];
-    try {
-      localStorage.setItem(KEY, JSON.stringify(next));
-    } catch {
-      // storage can be blocked; the favourites last the session
-    }
+    saveStored(STORE_KEY, next);
     set({ favourites: next });
   },
   preview: null,
   setPreview: (preview) => set({ preview }),
 }));
+
+void loadStored(STORE_KEY, KEY, parseStrings).then((v) => v && useFilterLibrary.setState((s) => ({ favourites: [...new Set([...v, ...s.favourites])] })));
 
 /** The filter clip a tile makes (the same fields a tile dropped on the timeline gets). */
 export const filterClipFields = (f: Filter): Partial<FilterClipProps> => ({

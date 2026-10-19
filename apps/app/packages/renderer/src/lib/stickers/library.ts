@@ -5,6 +5,7 @@
 // timeline. A sticker's file is fetched the first time it's used, into the user's app data,
 // and the engine draws the clip from that file.
 import { create } from "zustand";
+import { loadStored, saveStored, parseStrings } from "../user-store";
 import { stickerDownload, stickerStore, stickersCached } from "@app/preload";
 import type { StickerClipProps } from "../types";
 
@@ -67,14 +68,7 @@ export const parseManifest = (m: Manifest): { stickers: Sticker[]; categories: s
 };
 
 const FAVOURITES = "openrip.sticker-favorites";
-const readFavourites = (): string[] => {
-  try {
-    const v = JSON.parse(localStorage.getItem(FAVOURITES) ?? "[]");
-    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-};
+const STORE_KEY = "favourites.stickers";
 
 type StickerLibrary = {
   stickers: Sticker[];
@@ -100,15 +94,11 @@ export const useStickerLibrary = create<StickerLibrary>((set, get) => ({
   cached: {},
   loading: [],
   failed: {},
-  favourites: readFavourites(),
+  favourites: [],
   toggleFavourite: (id) => {
     const now = get().favourites;
     const next = now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
-    try {
-      localStorage.setItem(FAVOURITES, JSON.stringify(next));
-    } catch {
-      // storage can be blocked; the favourites last the session
-    }
+    saveStored(STORE_KEY, next);
     set({ favourites: next });
   },
   preview: null,
@@ -278,3 +268,5 @@ export const addSticker = async (s: Sticker, opts: { startFrame?: number; center
   useStickerLibrary.getState().setPreview(null);
   return clip.clipId;
 };
+
+void loadStored(STORE_KEY, FAVOURITES, parseStrings).then((v) => v && useStickerLibrary.setState((s) => ({ favourites: [...new Set([...v, ...s.favourites])] })));

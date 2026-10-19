@@ -609,6 +609,17 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         return;
       }
 
+      // A card let go on a folder of the Media tab goes into it (MediaMenu moves it), not onto the timeline.
+      if (String(event.over?.id ?? "").startsWith("folder:")) {
+        setActiveMediaItem(null);
+        setGhostTimelineId(null);
+        setGhostStartEndFrame(0, 0);
+        setGhostX(0);
+        setHoveredTimelineId(null);
+        setIsDragging(false);
+        return;
+      }
+
       if (
         data?.type === "image" ||
         data?.type === "video" ||
@@ -967,16 +978,26 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       let height: number | undefined = undefined;
       let width: number | undefined = undefined;
 
+      // A card with In/Out handles set brings only that part (trimmed at both ends).
+      const dragRange = (data as MediaItem).range;
+      const rangeFrames = (duration: number, fps: number) => {
+        if (!dragRange || !(duration > 0)) return Math.round(duration * fps);
+        const a = Math.max(0, Math.min(dragRange.inSec, duration));
+        const b = Math.max(a, Math.min(dragRange.outSec, duration));
+        trimStart = Math.round(a * fps);
+        trimEnd = Math.max(0, Math.round((duration - b) * fps));
+        return Math.round((b - a) * fps);
+      };
       if (data.type === "video") {
         const duration = mediaInfo?.duration ?? 0;
         const fps = controlStore.fps; // Use project fps for clip duration
         height = mediaInfo?.video?.displayHeight;
         width = mediaInfo?.video?.displayWidth;
-        numFrames = Math.round(duration * fps);
+        numFrames = rangeFrames(duration, fps);
       } else if (data.type === "audio") {
         const duration = mediaInfo?.duration ?? 0;
         const fps = controlStore.fps;
-        numFrames = Math.round(duration * fps);
+        numFrames = rangeFrames(duration, fps);
       } else if (data.type === "image") {
         numFrames = imageDurationFrames(controlStore.fps);
         trimEnd = -Infinity;

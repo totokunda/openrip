@@ -3,6 +3,7 @@
 // previews with the engine (so a tile and the player show what an export draws); and keep the
 // favourites. The stores are loaded when a function needs them, so the pure files stay testable.
 import { create } from "zustand";
+import { loadStored, saveStored, parseStrings } from "./user-store";
 import { engineProjectPreviews } from "@app/preload";
 import { DESIGN_CANVAS, templateLayout, templatePlacement, type TextTemplate } from "./text-templates.ts";
 import type { AnyClipProps } from "./types";
@@ -55,14 +56,7 @@ export const addTemplate = async (template: TextTemplate, opts: { startFrame?: n
 
 const FAVOURITES_KEY = "openrip:text-template-favourites";
 
-const readFavourites = (): string[] => {
-  try {
-    const v = JSON.parse(localStorage.getItem(FAVOURITES_KEY) ?? "[]");
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-};
+const STORE_KEY = "favourites.text-templates";
 
 /** The templates starred in the library, and the one clicked to preview in the player. */
 export const useTemplateLibrary = create<{
@@ -71,20 +65,18 @@ export const useTemplateLibrary = create<{
   preview: TextTemplate | null;
   setPreview: (t: TextTemplate | null) => void;
 }>((set, get) => ({
-  favourites: readFavourites(),
+  favourites: [],
   toggleFavourite: (id) => {
     const now = get().favourites;
     const next = now.includes(id) ? now.filter((f) => f !== id) : [...now, id];
-    try {
-      localStorage.setItem(FAVOURITES_KEY, JSON.stringify(next));
-    } catch {
-      // storage can be blocked; the favourites last the session
-    }
+    saveStored(STORE_KEY, next);
     set({ favourites: next });
   },
   preview: null,
   setPreview: (preview) => set({ preview }),
 }));
+
+void loadStored(STORE_KEY, FAVOURITES_KEY, parseStrings).then((v) => v && useTemplateLibrary.setState((s) => ({ favourites: [...new Set([...v, ...s.favourites])] })));
 
 // ---- previews ---------------------------------------------------------------------------------
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useStoredList, parseStrings } from "@/lib/user-store";
 import { LuCheck, LuSearch, LuStar } from "react-icons/lu";
 import { IoCaretDown } from "react-icons/io5";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -16,14 +17,6 @@ import { Stepper } from "./controls";
 
 const FAVORITES_KEY = "openrip:favorite-fonts";
 
-const readFavorites = (): string[] => {
-  try {
-    const v = JSON.parse(localStorage.getItem(FAVORITES_KEY) ?? "[]");
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-};
 
 type Filter = "all" | "bundled" | "system";
 
@@ -33,7 +26,7 @@ const FontPicker: React.FC<{ value: string; onChange: (family: string) => void }
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [favorites, setFavorites] = useState<string[]>(readFavorites);
+  const [favorites, setFavorites] = useStoredList<string>("favourites.fonts", FAVORITES_KEY, parseStrings);
   const bundled = useFontsStore((s) => s.bundled);
   const system = useFontsStore((s) => s.system);
   const recent = useFontsStore((s) => s.recent);
@@ -64,9 +57,6 @@ const FontPicker: React.FC<{ value: string; onChange: (family: string) => void }
   const toggleFavorite = (family: string) => {
     const next = favorites.includes(family) ? favorites.filter((f) => f !== family) : [...favorites, family];
     setFavorites(next);
-    try {
-      localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
-    } catch {}
   };
 
   const q = query.trim().toLowerCase();

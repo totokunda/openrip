@@ -8,6 +8,7 @@
 import { create } from "zustand";
 import type { AnyClipProps, ClipColor, FilterClipProps } from "./types";
 import { isNeutralColor } from "./color";
+import { loadStored, saveStored } from "./user-store";
 
 /** Whether a clip is an adjustment layer. */
 export const isAdjustmentLayer = (clip: { type?: string } | null | undefined): boolean => clip?.type === "filter" && !!(clip as FilterClipProps).adjustment;
@@ -21,21 +22,9 @@ export type ImportedLut = { path: string; name: string };
 const PRESETS_KEY = "openrip.adjustment-presets";
 const LUTS_KEY = "openrip.adjustment-luts";
 
-const read = <T>(key: string): T[] => {
-  try {
-    const v = JSON.parse(localStorage.getItem(key) ?? "[]");
-    return Array.isArray(v) ? v : [];
-  } catch {
-    return [];
-  }
-};
-const write = (key: string, value: unknown) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // storage can be blocked; they last the session
-  }
-};
+const PRESETS_STORE = "adjustment-presets";
+const LUTS_STORE = "adjustment-luts";
+const write = (key: string, value: unknown) => saveStored(key === PRESETS_KEY ? PRESETS_STORE : LUTS_STORE, value);
 
 const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v ?? null));
 
@@ -53,8 +42,8 @@ type AdjustmentLibrary = {
 };
 
 export const useAdjustmentLibrary = create<AdjustmentLibrary>((set, get) => ({
-  presets: read<AdjustmentPreset>(PRESETS_KEY),
-  luts: read<ImportedLut>(LUTS_KEY),
+  presets: [],
+  luts: [],
   preview: null,
   setPreview: (preview) => set({ preview }),
   savePreset: (color, name) => {
@@ -93,6 +82,14 @@ export const useAdjustmentLibrary = create<AdjustmentLibrary>((set, get) => ({
     set({ luts: next });
   },
 }));
+
+const parseObjects = <T>(v: unknown): T[] | undefined => (Array.isArray(v) ? (v.filter((x) => x && typeof x === "object") as T[]) : undefined);
+void loadStored(PRESETS_STORE, PRESETS_KEY, parseObjects<AdjustmentPreset>).then(
+  (v) => v && useAdjustmentLibrary.setState((s) => ({ presets: [...v, ...s.presets.filter((p) => !v.some((q) => q.id === p.id))] })),
+);
+void loadStored(LUTS_STORE, LUTS_KEY, parseObjects<ImportedLut>).then(
+  (v) => v && useAdjustmentLibrary.setState((s) => ({ luts: [...v, ...s.luts.filter((l) => !v.some((m) => m.path === l.path))] })),
+);
 
 /** A LUT file's display name: its file name without the extension. */
 export const lutName = (path: string) => (path.split(/[\\/]/).pop() ?? path).replace(/\.[^.]+$/, "");

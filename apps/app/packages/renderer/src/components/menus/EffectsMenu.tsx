@@ -5,6 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { addEffectBar, useEffectLibrary } from "@/lib/effects/library";
 import { effectLoop, effectStill, LOOP_FPS, PREVIEW_SIZE, useEffectCatalog, type EffectCatalog, type EffectDef, type PreviewFrame } from "@/lib/effects/catalog";
 import { cn } from "@/lib/utils";
+import { RecentSearches, useRecentSearches } from "./RecentSearches";
 
 /** What an effect tile drags as (the timeline and the player's clips take it). */
 export type EffectDrag = { type: "effect-preset"; effectId: string; name: string };
@@ -171,6 +172,8 @@ const EffectsMenu: React.FC<{ part?: string }> = ({ part = "all" }) => {
   const preview = useEffectLibrary((s) => s.preview);
   const setPreview = useEffectLibrary((s) => s.setPreview);
   const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
+  const recent = useRecentSearches("effects");
 
   // A preview lasts while the tab shows.
   useEffect(() => () => useEffectLibrary.getState().setPreview(null), []);
@@ -215,6 +218,14 @@ const EffectsMenu: React.FC<{ part?: string }> = ({ part = "all" }) => {
             data-testid="effects-search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => {
+              setFocused(false);
+              recent.add(query);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") recent.add(query);
+            }}
             placeholder="Search effects"
             className="flex-1 min-w-0 bg-transparent text-[12px] text-brand-lighter placeholder:text-[#6c6c6c] outline-none"
           />
@@ -233,6 +244,10 @@ const EffectsMenu: React.FC<{ part?: string }> = ({ part = "all" }) => {
       </div>
       <ScrollArea className="flex-1 min-h-0">
         <div className="flex flex-col pl-3.5 pr-3 pb-8 text-left">
+          {focused && !q && recent.list.length > 0 ? (
+            <RecentSearches list={recent.list} onPick={setQuery} onRemove={recent.remove} onClear={recent.clear} />
+          ) : (
+            <>
           {heading && (
             <h3 className="text-[12.5px] text-brand-light leading-none mb-3" data-testid="effects-heading">
               {heading}
@@ -248,6 +263,8 @@ const EffectsMenu: React.FC<{ part?: string }> = ({ part = "all" }) => {
                 <EffectTile key={e.id} def={e} active={preview === e.id} favourite={favourites.includes(e.id)} />
               ))}
             </div>
+          )}
+            </>
           )}
         </div>
       </ScrollArea>

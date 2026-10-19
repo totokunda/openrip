@@ -30,6 +30,8 @@ export type ConvertedMediaItem = {
   assetUrl: string;
   originalAssetUrl?: string;
   dateAddedMs: number;
+  /** When the file itself was made (the library's link was made when it was imported: dateAddedMs). */
+  createdMs?: number;
   type: ClipType;
   hasProxy?: boolean;
   /**
@@ -230,6 +232,16 @@ async function listConvertedMedia(
       continue;
     }
 
+    let createdMs = dateAddedMs;
+    if (brokenTarget == null) {
+      try {
+        const st = await fsp.stat(originalAbsPath);
+        createdMs = st.birthtime?.getTime?.() || st.mtime?.getTime?.() || dateAddedMs;
+      } catch {
+        // keep the import time
+      }
+    }
+
     const originalAssetUrl = pathToFileURL(originalAbsPath).href;
     const assetUrl = pathToFileURL(absPath).href;
     const type: ConvertedMediaItem["type"] = VIDEO_EXTS.has(ext)
@@ -246,6 +258,7 @@ async function listConvertedMedia(
       assetUrl,
       originalAssetUrl,
       dateAddedMs,
+      createdMs,
       type,
       hasProxy,
       isPlayableCopy,

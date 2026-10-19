@@ -21,6 +21,7 @@ import { appMenu } from "./modules/AppMenu.js";
 import { stickerLibraryModule } from "./modules/StickerLibraryModule.js";
 import { musicLibraryModule } from "./modules/MusicLibraryModule.js";
 import { clipPresetsModule } from "./modules/ClipPresetsModule.js";
+import { userStoreModule } from "./modules/UserStoreModule.js";
 import { stockLibraryModule } from "./modules/StockLibraryModule.js";
 import { app } from "electron";
 
@@ -53,6 +54,8 @@ export async function initApp(initConfig: AppInitConfig) {
     .init(musicLibraryModule())
     // Media > Yours > My presets: the saved clip presets
     .init(clipPresetsModule())
+    // Favourites and recent searches of the libraries, kept in the user data folder
+    .init(userStoreModule())
     // The Media tab's stock Library: searches of openly licensed sources and the downloads
     .init(stockLibraryModule())
     .init(appMenu())

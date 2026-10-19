@@ -9,6 +9,7 @@ import { useClipStore } from "@/lib/clip";
 import { applyTransition, cutForSelection, offeredTransitions, projectBlink, takesTransition } from "@/lib/transitions";
 import type { VideoClipProps } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useTransitionFavourites } from "@/lib/transition-favourites";
 
 /** What a transition card carries when dragged onto a cut (TimelineEditor drops it). */
 export type TransitionDrag = { type: "transition"; transition: string };
@@ -20,6 +21,8 @@ export type TransitionDrag = { type: "transition"; transition: string };
  */
 const TransitionCard: React.FC<{ t: BuiltinTransition; active: boolean; canAdd: boolean; onAdd: () => void }> = ({ t, active, canAdd, onAdd }) => {
   const [hover, setHover] = useState(false);
+  const favourite = useTransitionFavourites((s) => s.favourites.includes(t.type));
+  const toggleFavourite = useTransitionFavourites((s) => s.toggle);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `transition:${t.type}`,
     data: { type: "transition", transition: t.type } satisfies TransitionDrag,
@@ -45,6 +48,24 @@ const TransitionCard: React.FC<{ t: BuiltinTransition; active: boolean; canAdd: 
       >
         <TransitionPreview kind={t.type} playing={hover} />
         {hover && (
+          <div className="absolute right-1 bottom-1 flex items-center gap-1">
+          <button
+            type="button"
+            title={favourite ? "Remove from Favorites" : "Add to Favorites"}
+            aria-label={favourite ? "Remove from Favorites" : "Add to Favorites"}
+            aria-pressed={favourite}
+            data-testid={`transition-favourite-${t.type}`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFavourite(t.type);
+            }}
+            className={cn("w-[18px] h-[18px] rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80", favourite ? "text-brand-accent" : "text-white")}
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill={favourite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round">
+              <path d="M6 1.2 7.5 4.4l3.5.5-2.5 2.4.6 3.5L6 9.1 2.9 10.8l.6-3.5L1 4.9l3.5-.5z" />
+            </svg>
+          </button>
           <button
             type="button"
             title={canAdd ? `Add ${t.name}` : "Select a clip first"}
@@ -56,10 +77,18 @@ const TransitionCard: React.FC<{ t: BuiltinTransition; active: boolean; canAdd: 
               e.stopPropagation();
               if (canAdd) onAdd();
             }}
-            className="absolute right-1 bottom-1 w-[18px] h-[18px] rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-[18px] h-[18px] rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <LuPlus className="w-3 h-3" />
           </button>
+          </div>
+        )}
+        {!hover && favourite && (
+          <span className="absolute right-1 bottom-1 w-[18px] h-[18px] rounded-full bg-black/60 text-brand-accent flex items-center justify-center pointer-events-none" data-testid="transition-favourite-mark">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round">
+              <path d="M6 1.2 7.5 4.4l3.5.5-2.5 2.4.6 3.5L6 9.1 2.9 10.8l.6-3.5L1 4.9l3.5-.5z" />
+            </svg>
+          </span>
         )}
       </div>
       <span className={cn("text-[12px] leading-none truncate text-left", active ? "text-brand-light" : "text-[#949494]")}>{t.name}</span>
@@ -96,8 +125,10 @@ const TransitionMenu: React.FC<{ category?: string }> = ({ category }) => {
     },
   });
   const offered = offeredTransitions(blink);
-  const shown = category ? offered.filter((t) => t.category === category) : offered;
-  const heading = category ?? "Transitions";
+  const favourites = useTransitionFavourites((s) => s.favourites);
+  const isFavourites = category === "favorites";
+  const shown = isFavourites ? offered.filter((t) => favourites.includes(t.type)) : category ? offered.filter((t) => t.category === category) : offered;
+  const heading = isFavourites ? "Favorites" : (category ?? "Transitions");
 
   const note = target
     ? null
@@ -110,6 +141,11 @@ const TransitionMenu: React.FC<{ category?: string }> = ({ category }) => {
       <div className="flex flex-col pl-3.5 pr-3 pt-[13px] pb-8 text-left">
         <h3 className="text-[12.5px] text-brand-light leading-none mb-3">{heading}</h3>
         {note && <p className="text-[11.5px] text-[#6c6c6c] leading-snug mb-3">{note}</p>}
+        {isFavourites && shown.length === 0 && (
+          <p className="text-[12px] text-[#6c6c6c] leading-snug py-6" data-testid="transitions-empty">
+            No favorites yet. Hover a transition and click its star to keep it here.
+          </p>
+        )}
         <div className="grid gap-x-4 gap-y-[18px]" style={{ gridTemplateColumns: "repeat(auto-fill, 86px)" }}>
           {shown.map((t) => (
             <TransitionCard key={t.type} t={t} active={current === t.type} canAdd={!!target} onAdd={() => target && applyTransition(target, t.type)} />

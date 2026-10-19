@@ -299,7 +299,7 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   const effectCatalog = useEffectCatalog();
   const sections =
     section === "transitions"
-      ? transitionCategories(blink).map((c) => ({ id: c, label: c, under: "Transitions" }))
+      ? [{ id: "favorites", label: "Favorites" }, ...transitionCategories(blink).map((c) => ({ id: c, label: c, under: "Transitions" }))]
       : section === "filters"
         ? filterSections(filters)
         : section === "effects"
@@ -307,7 +307,7 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
           : SECTIONS[section];
   // Filters opens on All (Favorites is the first item, as CapCut's, but starts empty).
   // Filters and Effects open on All, Stickers on Trending.
-  const sub = picked[section] ?? (section === "filters" || section === "effects" ? "all" : section === "stickers" ? "cat:Trending" : sections?.[0]?.id) ?? "";
+  const sub = picked[section] ?? (section === "filters" || section === "effects" ? "all" : section === "stickers" ? "cat:Trending" : section === "transitions" ? sections?.[1]?.id : sections?.[0]?.id) ?? "";
 
   const content = () => {
     switch (section) {
