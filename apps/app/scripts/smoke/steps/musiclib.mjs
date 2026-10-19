@@ -128,7 +128,7 @@ export default async (ctx) => {
     const credit = doc1.assets[clip?.assetId]?.credit;
     check(
       `its asset keeps title, author, licence and source (${JSON.stringify(credit)})`,
-      credit?.title === "Sunrise Anthem" && credit?.author === "Fixture Artist" && credit?.license === "by" && credit?.licenseVersion === "3.0" && !!credit?.licenseUrl && /\/music\/1$/.test(credit?.sourceUrl ?? ""),
+      credit?.title === "Sunrise Anthem" && credit?.author === "Fixture Artist" && credit?.license === "CC BY 3.0" && credit?.attributionRequired === true && credit?.kind === "music" && !!credit?.licenseUrl && /\/music\/1$/.test(credit?.sourceUrl ?? ""),
     );
     check("the row says it's added", (await row(win, "Sunrise Anthem").innerText()).includes("Added"));
     const withTone = await exportAs("ml-tone");
@@ -189,14 +189,14 @@ export default async (ctx) => {
     await dialog.locator('input[placeholder="/path/to/export"]').fill(outDir);
     await dialog.getByRole("button", { name: "Export", exact: true }).click();
     await until(win, async () => (await win.locator("[data-testid=export-done-title]").count()) > 0, 120000);
-    const credits = win.locator("[data-testid=audio-credits]");
-    check("the Export dialog's finished screen has Audio credits", (await credits.count()) === 1 && (await win.locator("[data-testid=export-done-title]").count()) === 1);
-    const list = await win.locator("[data-testid=audio-credit]").evaluateAll((els) => els.map((e) => e.textContent));
+    const credits = win.locator("[data-testid=export-credits]");
+    check("the Export dialog's finished screen has the Credits", (await credits.count()) === 1 && (await win.locator("[data-testid=export-done-title]").count()) === 1);
+    const list = await win.locator("[data-testid=export-credit]").evaluateAll((els) => els.map((e) => e.textContent));
     check(`it lists each library track in the project (${list.join(" | ")})`, list.length === 2 && list.some((t) => /Sunrise Anthem/.test(t) && /Fixture Artist/.test(t) && /CC BY 3\.0/.test(t)) && list.some((t) => /Quiet Hours/.test(t) && /CC0/.test(t)));
-    const pasted = await win.locator("[data-testid=audio-credits-text]").inputValue();
+    const pasted = await win.locator("[data-testid=export-credits-text]").inputValue();
     check(
       `the text to paste has title, author, licence and links (${JSON.stringify(pasted)})`,
-      /"Sunrise Anthem" by Fixture Artist \(http[^)]*\), CC BY 3\.0 \(https:\/\/creativecommons\.org\/licenses\/by\/3\.0\/\), http\S*\/music\/1/.test(pasted) && /"Quiet Hours".*\(no credit required\)/.test(pasted),
+      /"Sunrise Anthem" by Fixture Artist, CC BY 3\.0 \(https:\/\/creativecommons\.org\/licenses\/by\/3\.0\/\), via [^:]+: http\S*\/music\/1/.test(pasted) && /"Quiet Hours".*CC0/.test(pasted),
     );
     await shot("ml-8-credits");
     await win.keyboard.press("Escape");

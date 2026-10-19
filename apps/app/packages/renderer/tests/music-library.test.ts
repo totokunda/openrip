@@ -1,10 +1,11 @@
 // Tests for the Audio tab's Music and Sound effects libraries: the licence filter and the
 // Openverse request (packages/main/src/modules/musicLibraryCore.ts) and the credits text a CC BY
-// attribution needs (src/lib/music-credits.ts). `node --test tests/` in packages/renderer.
+// attribution needs (src/lib/music-credits.ts, lib/credits.ts). `node --test tests/` in packages/renderer.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ALLOWED_LICENSES, Pacer, allowedHost, isAllowedLicense, licenseLink, searchKey, searchUrl, toTrack } from "../../main/src/modules/musicLibraryCore.ts";
-import { creditLine, creditOf, creditsText, licenseLabel, needsCredit, projectCredits } from "../src/lib/music-credits.ts";
+import { creditOf, licenseLabel, needsCredit, sourceName } from "../src/lib/music-credits.ts";
+import { collectCredits, creditLine, creditsText } from "../src/lib/credits.ts";
 
 const raw = (over: Record<string, unknown> = {}) => ({
   id: "eab8a6e2-0ac8-4615-9e0d-ebde30523783",
@@ -124,44 +125,36 @@ const credit = (over: Record<string, unknown> = {}) =>
     ...over,
   });
 
-test("a CC BY credit line has the title, the author, the licence and the links", () => {
+test("a CC BY track's credit has the title, the author, the licence and the links", () => {
   const c = credit();
-  assert.equal(licenseLabel(c), "CC BY 3.0");
-  assert.equal(needsCredit(c), true);
+  assert.equal(c.license, "CC BY 3.0");
+  assert.equal(c.attributionRequired, true);
+  assert.equal(c.kind, "music");
+  assert.equal(c.sourceName, "Freesound");
   assert.equal(
     creditLine(c),
-    '"Funky Day" by SoundForYou (https://freesound.org/people/Kinoton), CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/), https://freesound.org/people/Kinoton/sounds/351256',
+    '"Funky Day" by SoundForYou, CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/), via Freesound: https://freesound.org/people/Kinoton/sounds/351256',
   );
-  // A track without an author page still names the author.
-  assert.match(creditLine(credit({ authorUrl: undefined })), /^"Funky Day" by SoundForYou, CC BY 3\.0 /);
 });
 
 test("a CC0 or Public Domain track is listed and marked as needing no credit", () => {
   const c = creditOf(toTrack(raw(), "sfx")!);
-  assert.equal(needsCredit(c), false);
-  assert.match(creditLine(c), /CC0 1\.0 \(https:\/\/creativecommons\.org\/publicdomain\/zero\/1\.0\/\).*\(no credit required\)$/);
+  assert.equal(needsCredit({ license: "cc0" }), false);
+  assert.equal(c.attributionRequired, false);
+  assert.equal(c.kind, "sound");
+  assert.equal(c.license, "CC0 1.0");
   assert.equal(licenseLabel({ license: "pdm" }), "Public Domain Mark");
+  assert.equal(sourceName("wikimedia_audio"), "Wikimedia Audio");
 });
 
-test("the credits text has Music and Sound effects, credit-needing tracks first, and is empty with none", () => {
-  assert.equal(creditsText([]), "");
-  const text = creditsText([
-    creditOf(toTrack(raw(), "sfx")!),
-    credit(),
-    creditOf(toTrack(raw({ id: "11111111-2222-3333-4444-555555555555", title: "Click", license: "by", license_version: "4.0", license_url: "https://creativecommons.org/licenses/by/4.0/" }), "sfx")!),
-  ]);
-  const lines = text.split("\n");
-  assert.equal(lines[0], "Music");
-  assert.match(lines[1], /^"Funky Day" by SoundForYou/);
-  assert.equal(lines[2], "");
-  assert.equal(lines[3], "Sound effects");
-  assert.match(lines[4], /^"Click" by Kinoton.*CC BY 4\.0/, "the one that needs a credit comes first");
-  assert.match(lines[5], /^"Deep Whoosh #1".*no credit required/);
-});
-
-test("a project's credits are each track once, from its assets", () => {
+test("the credits text has Music and Sound effects, and a project's credits are each track once", () => {
   const a = credit();
-  const credits = projectCredits({ x: { credit: a }, y: { credit: a }, z: {}, w: { credit: creditOf(toTrack(raw({ id: "99999999-2222-3333-4444-555555555555" }), "sfx")!) } });
+  const sfx = creditOf(toTrack(raw({ id: "99999999-2222-3333-4444-555555555555" }), "sfx")!);
+  const credits = collectCredits({ x: { credit: a }, y: { credit: a }, z: {}, w: { credit: sfx } });
   assert.deepEqual(credits.map((c) => c.title), ["Funky Day", "Deep Whoosh #1"]);
-  assert.deepEqual(projectCredits(undefined), []);
+  const lines = creditsText(credits).split("\n");
+  assert.equal(lines[0], "Music:");
+  assert.match(lines[1], /^- "Funky Day" by SoundForYou/);
+  assert.equal(lines[3], "Sound effects:");
+  assert.match(lines[4], /^- "Deep Whoosh #1".*CC0 1\.0/);
 });

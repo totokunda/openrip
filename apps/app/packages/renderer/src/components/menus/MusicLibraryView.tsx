@@ -20,7 +20,7 @@ const timeOf = (s: number) => {
 
 /** Text for a licence on hover: what it is and what it asks. */
 const licenceTitle = (t: MusicTrack) =>
-  `${licenseLabel(t)}${needsCredit(t) ? ": free to use in your videos, including commercial ones, with a credit (see Audio credits)" : ": free to use in your videos with no credit required"}`;
+  `${licenseLabel(t)}${needsCredit(t) ? ": free to use in your videos, including commercial ones, with a credit (Export lists it)" : ": free to use in your videos with no credit required"}`;
 
 /**
  * CapCut's library row: 48 px on a 60 px pitch, the raised fill, a 32 px cover (the track's own

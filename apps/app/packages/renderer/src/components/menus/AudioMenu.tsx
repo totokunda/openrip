@@ -164,7 +164,7 @@ const AudioMenu: React.FC<{ section: AudioSection; onOpen?: (section: AudioSecti
   const { data, isLoading } = useProjectSounds();
   const assets = useClipStore((s) => s.assets);
   const onTimeline = useMemo(() => new Set(Object.values(assets).map((a) => a?.path)), [assets]);
-  const credited = useMemo(() => new Set(Object.values(assets).flatMap((a) => (a?.credit ? [a.credit.id] : []))), [assets]);
+  const credited = useMemo(() => new Set(Object.values(assets).flatMap((a) => (a?.credit?.id ? [a.credit.id] : []))), [assets]);
   const openVoiceover = useVoiceoverPanel((s) => s.setOpen);
   const [importing, setImporting] = useState(false);
   const run = (kind: "video" | "audio") => async () => {

@@ -15,7 +15,7 @@ export const creditLine = (c: AssetCredit): string => {
   return `"${c.title}"${by}, ${licence}, via ${via}`;
 };
 
-const sameCredit = (a: AssetCredit, b: AssetCredit) => a.title === b.title && (a.author ?? "") === (b.author ?? "") && a.license === b.license && a.sourceName === b.sourceName && (a.sourceUrl ?? "") === (b.sourceUrl ?? "");
+const sameCredit = (a: AssetCredit, b: AssetCredit) => (a.id && b.id ? a.id === b.id : a.title === b.title && (a.author ?? "") === (b.author ?? "") && a.license === b.license && a.sourceName === b.sourceName && (a.sourceUrl ?? "") === (b.sourceUrl ?? ""));
 
 /** The credits of the assets given, each once (the same item added twice is one credit), in the order they were added. */
 export const collectCredits = (assets: Record<string, Pick<Asset, "credit"> | undefined> | Array<Pick<Asset, "credit">>): AssetCredit[] => {

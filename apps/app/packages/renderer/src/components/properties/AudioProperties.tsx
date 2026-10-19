@@ -10,7 +10,7 @@ import { clearKeyframes, editProperty, hasKeyframes, keyframeAt, localFrame, nex
 import { assetOfClip, mediaSecondsOf, setNormalize, soundSeparated } from "@/lib/audio-tools";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { ClipLicense } from "@/components/dialogs/AudioCredits";
+import { ClipLicense } from "@/components/dialogs/ExportCredits";
 
 /**
  * The Audio tab's Basic sub-tab, as CapCut's (docs/plan/capcut-ui-spec.md §6.19,

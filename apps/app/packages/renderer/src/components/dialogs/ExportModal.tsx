@@ -18,7 +18,7 @@ import { useViewportStore } from "@/lib/viewport";
 import { useProjectsStore } from "@/lib/projects";
 import { getMediaInfoCached } from "@/lib/media/utils";
 import { pickMediaPaths } from "@app/preload";
-import { AudioCredits } from "./AudioCredits";
+import { ExportCredits } from "./ExportCredits";
 import type { VideoClipProps } from "@/lib/types";
 import {
   AUDIO_FORMATS,
@@ -259,7 +259,7 @@ const ProgressView: React.FC<{ onBack: () => void; onClose: () => void; name: st
             ))}
           </div>
           {/* The library tracks in the project and their credits, to paste into the description. */}
-          <AudioCredits />
+          <ExportCredits />
         </>
       )}
       {run.phase === "failed" && (

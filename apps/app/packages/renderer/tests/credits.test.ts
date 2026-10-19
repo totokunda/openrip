@@ -32,6 +32,8 @@ test("credits are collected from the assets that carry one, each once", () => {
   assert.deepEqual(list.map((c) => c.title), ["Waterfall in Huascarán", "Mountain"]);
   assert.deepEqual(collectCredits([{ credit: song }, {}]), [song]);
   assert.deepEqual(collectCredits({}), []);
+  // A library track is the same track by its id, whatever else changed.
+  assert.equal(collectCredits([{ credit: { ...song, id: "t1" } }, { credit: { ...song, id: "t1", title: "Calm (edit)" } }, { credit: { ...song, id: "t2" } }]).length, 2);
 });
 
 test("only CC BY credits are required", () => {

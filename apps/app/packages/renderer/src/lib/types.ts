@@ -288,9 +288,12 @@ export type MediaClipProps = VideoClipProps | ImageClipProps;
 
 /**
  * Where an openly licensed asset came from, kept with it (lib/credits.ts lists them for the
- * project). `kind` is what it is; `attributionRequired` is true for CC BY, which asks for credit.
+ * project): the Media tab's stock Library and the Audio tab's Music and Sound effects. `kind` is
+ * what it is; `attributionRequired` is true for CC BY, which asks for credit.
  */
 export type AssetCredit = {
+  /** The library's id for the item, when it has one (music and sound tracks). */
+  id?: string;
   kind: "video" | "photo" | "music" | "sound";
   title: string;
   author?: string;
@@ -298,7 +301,7 @@ export type AssetCredit = {
   /** "CC0", "Public domain", "CC BY 4.0". */
   license: string;
   licenseUrl?: string;
-  /** "Wikimedia Commons", "Openverse". */
+  /** "Wikimedia Commons", "Openverse", "Freesound". */
   sourceName: string;
   sourceUrl?: string;
   attributionRequired: boolean;

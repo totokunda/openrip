@@ -49,7 +49,7 @@ export default async (ctx) => {
   const doc = await savedProject(win, udDir);
   const clip = doc.timeline.clips.find((c) => c.type === "audio");
   const credit = doc.assets[clip?.assetId]?.credit;
-  check(`+ adds it with its credit (${JSON.stringify(credit)})`, !!clip && credit?.title === title && ["cc0", "pdm", "by"].includes(credit?.license) && /^https?:\/\//.test(credit?.sourceUrl ?? "") && !!credit?.author);
+  check(`+ adds it with its credit (${JSON.stringify(credit)})`, !!clip && credit?.title === title && /^(CC0|Public Domain Mark|CC BY)/.test(credit?.license ?? "") && typeof credit?.attributionRequired === "boolean" && /^https?:\/\//.test(credit?.sourceUrl ?? "") && !!credit?.author);
   await shot("mr-3-added");
   return report();
 };
