@@ -74,6 +74,8 @@ interface PropertiesSliderProps {
   origin?: number;
   /** The track's paint (a colour slider's gradient). */
   track?: string;
+  /** Several clips with different values: the field shows "-" until it's edited. */
+  mixed?: boolean;
 }
 
 const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
@@ -93,6 +95,7 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
   end,
   origin,
   track,
+  mixed,
 }) => {
   const [tempValue, setTempValue] = useState(value.toFixed(toFixed));
   const [isFocused, setIsFocused] = useState(false);
@@ -109,7 +112,7 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
     const numericValue = tempValue.replace(/[^0-9.-]/g, "");
     const numValue = Number(numericValue);
     const currentDisplay = value.toFixed(toFixed);
-    if (tempValue === currentDisplay) return; // No change, skip
+    if (tempValue === currentDisplay && !mixed) return; // No change, skip
 
     if (!isNaN(numValue) && isFinite(numValue)) {
       const oldValue = lastValueRef.current;
@@ -196,9 +199,11 @@ const PropertiesSlider: React.FC<PropertiesSliderProps> = ({
               disabled && "opacity-50 cursor-not-allowed",
             )}
             value={
-              renderInput
-                ? renderInput(tempValue)
-                : isFocused
+              mixed && !isFocused
+                ? "-"
+                : renderInput
+                  ? renderInput(tempValue)
+                  : isFocused
                   ? tempValue
                   : tempValue + (suffix || "")
             }

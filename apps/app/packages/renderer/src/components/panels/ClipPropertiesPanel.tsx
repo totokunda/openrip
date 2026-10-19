@@ -6,11 +6,8 @@ import { soundSeparated } from '@/lib/audio-tools'
 import React, { useMemo, useEffect } from 'react'
 import { getMediaInfoCached } from '@/lib/media/utils'
 import DurationProperties from '../properties/DurationProperties'
-import PositionProperties from '../properties/PositionProperties'
-import LayoutProperties from '../properties/LayoutProperties'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import AppearanceProperties from '../properties/AppearanceProperties'
 import VideoBasicProperties from '../properties/VideoBasicProperties'
 import ChromaKeyProperties from '../properties/ChromaKeyProperties'
 import AdjustBasic from '../properties/adjust/AdjustBasic'
@@ -31,13 +28,14 @@ import SpeedProperties from '../properties/SpeedProperties'
 import FilterProperties from '../properties/FilterProperties'
 import EffectProperties, { ClipEffectsProperties } from '../properties/EffectProperties'
 import ShapeProperties from '../properties/ShapeProperties'
-import { TransformSection } from '../properties/VideoBasicProperties'
+import { BlendSection, TransformSection } from '../properties/VideoBasicProperties'
 import { ImageClipProps, VideoClipProps } from '@/lib/types'
 import { useInspectorStore } from '@/lib/inspector'
 import TrackingProperties from '../properties/TrackingProperties'
 import TemplateProperties from '../properties/TemplateProperties'
 import OpticalFlowProperties from '../properties/OpticalFlowProperties'
 import { DeflickerProperties, DenoiseProperties, MotionBlurProperties, StabilizeProperties } from '../properties/EnhanceProperties'
+import { multiTabs, type InspectorSection, type InspectorTab } from '../properties/multi/multiTabs'
 
 /**
  * The inspector for the selected clip (the last one selected), grouped as CapCut groups it:
@@ -46,20 +44,7 @@ import { DeflickerProperties, DenoiseProperties, MotionBlurProperties, Stabilize
  * one of the existing property panels.
  */
 
-interface Section {
-  id: string;
-  label: string;
-  content: React.ReactNode;
-  /** Fills the tab's height and scrolls itself (for a footer pinned at the bottom). */
-  own?: boolean;
-}
-
-interface InspectorTab {
-  id: string;
-  label: string;
-  /** Shown as sub-tabs when there's more than one. */
-  sections: Section[];
-}
+type Section = InspectorSection;
 
 const stack = (...parts: React.ReactNode[]) => (
   <div className="min-w-0 divide-y divide-brand-divider">{parts}</div>
@@ -86,11 +71,13 @@ const ClipPropertiesPanel: React.FC = () => {
     return false;
   }, [type, separated, (clip as VideoClipProps | ImageClipProps)?.assetId]);
 
+  // Several clips selected: CapCut's Properties tab, or its Video, Speed and Adjust for videos.
+  const multi = selectedClipIds.length > 1;
+  const allClips = useClipStore((s) => (multi ? s.clips : null));
+
   const tabs = useMemo<InspectorTab[]>(() => {
     if (!clip) return [];
-    const position = <PositionProperties key="position" clipId={clipId} />;
-    const layout = <LayoutProperties key="layout" clipId={clipId} />;
-    const appearance = <AppearanceProperties key="appearance" clipId={clipId} />;
+    if (multi && allClips) return multiTabs(selectedClipIds, clipId, allClips);
     const duration = (label: string): InspectorTab => ({
       id: 'duration',
       label,
@@ -170,7 +157,7 @@ const ClipPropertiesPanel: React.FC = () => {
             id: 'text',
             label: 'Text',
             sections: [
-              { id: 'basic', label: 'Basic', content: <TextBasicProperties clipId={clipId} transform={stack(position, layout, appearance)} /> },
+              { id: 'basic', label: 'Basic', content: <TextBasicProperties clipId={clipId} transform={stack(<TransformSection key="transform" clipId={clipId} />, <BlendSection key="blend" clipId={clipId} />)} /> },
               { id: 'effects', label: 'Effects', content: <TextEffectsProperties clipId={clipId} /> },
             ],
           },
@@ -241,7 +228,7 @@ const ClipPropertiesPanel: React.FC = () => {
       default:
         return [duration('Duration')];
     }
-  }, [clip, clipId, type, hasAudio, separated, selectedLineId]);
+  }, [clip, clipId, type, hasAudio, separated, selectedLineId, multi, selectedClipIds, multi ? allClips : null]);
 
   // A selected line or mask brings up its tab.
   useEffect(() => {

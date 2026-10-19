@@ -227,7 +227,7 @@ export const TransformSection: React.FC<{ clipId: string }> = ({ clipId }) => {
 };
 
 /** Blend: CapCut's eleven modes and the opacity (keyframeable). */
-const BlendSection: React.FC<{ clipId: string }> = ({ clipId }) => {
+export const BlendSection: React.FC<{ clipId: string }> = ({ clipId }) => {
   const clip = useClipStore((s) => s.getClipById(clipId)) as Media | undefined;
   if (!clip) return null;
   const reset = () => {

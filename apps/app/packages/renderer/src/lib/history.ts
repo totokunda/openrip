@@ -48,6 +48,8 @@ let future: Entry[] = [];
 let present: Doc | null = null;
 /** While a state is being put back: its own changes aren't edits. */
 let restoring = false;
+/** Whether a state is being put back (an undo or redo): what the stores do then isn't an edit to follow. */
+export const isRestoring = () => restoring;
 /** Inside withoutHistory. */
 let folding = 0;
 

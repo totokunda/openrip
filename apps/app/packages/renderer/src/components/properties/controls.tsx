@@ -147,7 +147,9 @@ export const NumberField: React.FC<{
   label: string;
   className?: string;
   disabled?: boolean;
-}> = ({ value, onChange, prefix, unit = "", step = 1, min = -Infinity, max = Infinity, digits = 0, label, className, disabled }) => {
+  /** Several clips with different values: the field shows "-" until it's edited. */
+  mixed?: boolean;
+}> = ({ value, onChange, prefix, unit = "", step = 1, min = -Infinity, max = Infinity, digits = 0, label, className, disabled, mixed }) => {
   const shown = Number.isFinite(value) ? value.toFixed(digits) : "0";
   const [text, setText] = useState(shown);
   const [focused, setFocused] = useState(false);
@@ -156,7 +158,7 @@ export const NumberField: React.FC<{
   }, [shown, focused]);
   const commit = () => {
     const n = Number(text.replace(/[^0-9.+-]/g, ""));
-    if (text.trim() !== "" && Number.isFinite(n) && n.toFixed(digits) !== shown) onChange(Math.min(max, Math.max(min, n)));
+    if (text.trim() !== "" && Number.isFinite(n) && (mixed || n.toFixed(digits) !== shown)) onChange(Math.min(max, Math.max(min, n)));
     else setText(shown);
   };
   const nudge = (d: number) => !disabled && onChange(Math.min(max, Math.max(min, Number(shown) + d)));
@@ -167,10 +169,10 @@ export const NumberField: React.FC<{
         <input
           aria-label={label}
           disabled={disabled}
-          value={focused ? text : `${shown}${unit}`}
+          value={focused ? text : mixed ? "-" : `${shown}${unit}`}
           onFocus={() => {
             setFocused(true);
-            setText(shown);
+            setText(mixed ? "" : shown);
           }}
           onChange={(e) => setText(e.target.value)}
           onBlur={() => {
