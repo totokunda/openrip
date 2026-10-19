@@ -6,6 +6,7 @@ import { useControlsStore } from "@/lib/control";
 import { CAPTION_STYLES, applyCaptionStyle, captionStyle, exportCaptions, importCaptionFile, pickAndImportCaptions, useCaptionsStore } from "@/lib/caption-actions";
 import { cn } from "@/lib/utils";
 import AutoCaptionsMenu, { GenerateFooter } from "./AutoCaptionsMenu";
+import TranscriptMenu from "./TranscriptMenu";
 import CaptionStyleTile from "./CaptionStyleTile";
 import { CAPTION_KINDS } from "@/lib/caption-presets";
 
@@ -54,6 +55,8 @@ const CaptionsMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
       {message}
     </p>
   );
+
+  if (part === "transcript") return <TranscriptMenu />;
 
   if (part === "auto" || part === "lyrics") return <AutoCaptionsMenu kind={part === "lyrics" ? "lyrics" : "captions"} />;
 

@@ -108,7 +108,7 @@ const run = async (ctx, stop) => {
   await win.locator("[data-testid=assets-tab-captions]").click();
   await win.waitForTimeout(500);
   const labels = await win.locator("nav[aria-label=Sections] button").allInnerTexts();
-  check(`the Captions column: ${labels.join(" / ")}`, labels.join("|") === "Auto captions|Templates|Auto lyrics|Add captions");
+  check(`the Captions column: ${labels.join(" / ")}`, labels.join("|") === "Auto captions|Templates|Auto lyrics|Transcript|Add captions");
   check("Auto captions has no style row: the styles are under Templates, as in CapCut", (await win.locator("[data-testid=auto-style-strip]").count()) === 0);
   check("opens on Auto captions", (await win.locator("[data-testid=auto-captions]").count()) === 1);
   const text = await win.locator("[data-testid=auto-captions]").innerText();

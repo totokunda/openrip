@@ -20,6 +20,8 @@ import {
   type SpeechStatus,
 } from "@app/preload";
 import { captionClips, type Cue } from "./captions";
+import { rememberTranscript } from "./transcript";
+import { wordsOfCaptions } from "./transcript-edit";
 import { captionStyle, useCaptionsStore } from "./caption-actions";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
@@ -167,6 +169,57 @@ export async function deleteModel(id: string) {
   useAutoCaptions.setState({ status });
 }
 
+/**
+ * Make sure the chosen model is here, downloading it first (progress in the store). Resolves
+ * to its id, or null when the engine can't recognize speech or the download stopped.
+ */
+export async function ensureModel(): Promise<string | null> {
+  const store = useAutoCaptions;
+  const status = store.getState().status ?? (await refreshSpeechStatus());
+  if (!status.available) {
+    store.setState({ message: "This build of the engine can't recognize speech." });
+    return null;
+  }
+  const modelId = modelInUse(store.getState());
+  if (!status.models.find((m) => m.id === modelId)?.installed) {
+    if (!(await downloadModel(modelId))) return null;
+    if (cancelled) return null;
+  }
+  return modelId;
+}
+
+/** Recognize `ask`, its progress in the store (and Cancel working). */
+export async function runSpeech(ask: SpeechAsk) {
+  const job = nextJob++;
+  currentJob = job;
+  const timer = setInterval(() => {
+    void speechProgress(job).then((p) => {
+      if (p != null && currentJob === job) useAutoCaptions.setState({ progress: p / 100 });
+    });
+  }, 150);
+  try {
+    return await speechTranscribe(job, ask);
+  } finally {
+    clearInterval(timer);
+    currentJob = null;
+  }
+}
+
+/** Start a run (Generate, Transcript): false while another is under way; the cancel flag is reset. */
+export function beginSpeechRun(phase: "downloading" | "working" = "downloading", kind: AutoKind = "captions"): boolean {
+  const store = useAutoCaptions;
+  if (store.getState().phase !== "idle") return false;
+  cancelled = false;
+  store.setState({ phase, progress: 0, message: null, kind });
+  return true;
+}
+
+/** A run's end: the panel is idle again. */
+export const endSpeechRun = () => useAutoCaptions.setState({ phase: "idle", progress: 0 });
+
+/** Whether Cancel was pressed during the run. */
+export const speechCancelled = () => cancelled;
+
 /** The canvas in world units, as the preview lays it out. */
 const worldCanvas = () => {
   const { aspectRatio } = useViewportStore.getState();
@@ -222,16 +275,8 @@ export async function generateCaptions(kind: AutoKind = "captions"): Promise<num
   cancelled = false;
   store.setState({ phase: "downloading", progress: 0, message: null, kind });
   try {
-    let status = store.getState().status ?? (await refreshSpeechStatus());
-    if (!status.available) {
-      store.setState({ message: "This build of the engine can't recognize speech." });
-      return null;
-    }
-    const modelId = modelInUse(store.getState());
-    if (!status.models.find((m) => m.id === modelId)?.installed) {
-      if (!(await downloadModel(modelId))) return null;
-      if (cancelled) return null;
-    }
+    const modelId = await ensureModel();
+    if (!modelId) return null;
     store.setState({ phase: "working", progress: 0 });
 
     const fps = useControlsStore.getState().fps || 30;
@@ -276,23 +321,15 @@ export async function generateCaptions(kind: AutoKind = "captions"): Promise<num
       }
     }
 
-    const job = nextJob++;
-    currentJob = job;
-    const timer = setInterval(() => {
-      void speechProgress(job).then((p) => {
-        if (p != null && currentJob === job) store.setState({ progress: p / 100 });
-      });
-    }, 150);
-    let answer;
-    try {
-      answer = await speechTranscribe(job, ask);
-    } finally {
-      clearInterval(timer);
-      currentJob = null;
-    }
+    const answer = await runSpeech(ask);
     if (!answer.ok) {
       if (!answer.cancelled) store.setState({ message: `Couldn't generate captions: ${answer.error ?? "unknown error"}` });
       return null;
+    }
+    // The words stay with the media for Transcript (a run that left the fillers out isn't the whole speech).
+    if (clip && simple && !fillerWords) {
+      const asset = useClipStore.getState().getAssetById(clip.assetId);
+      if (asset) rememberTranscript(asset.id, wordsOfCaptions(answer.value.captions, ask.startSec), [ask.startSec, ask.startSec + (ask.durationSec ?? 0)], answer.value.language, modelId);
     }
     const cues = answer.value.captions.map((c) => cueOf(c, scale));
     if (cues.length === 0) {

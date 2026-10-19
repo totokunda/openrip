@@ -312,6 +312,16 @@ export type AssetCredit = {
   attributionRequired: boolean;
 };
 
+/** One recognized word: its text and where it is in the media, seconds. */
+export type TranscriptWord = { t: string; s: number; e: number };
+
+/**
+ * What a local speech model heard in a media file (lib/transcript.ts): the words with their
+ * times in the media, and which stretches of the media (`covered`, seconds, sorted and apart)
+ * were listened to. A clip's trims and speed map the words onto the timeline.
+ */
+export type Transcript = { language: string; model: string; words: TranscriptWord[]; covered: [number, number][] };
+
 export type Asset = {
   id: string;
   type: 'video' | 'image' | 'audio';
@@ -320,6 +330,8 @@ export type Asset = {
   height?: number;
   duration: number;
   thumbnail?: string;
+  /** The words the media says, once Transcript (or Auto captions) has listened. */
+  transcript?: Transcript;
   /** Set for stock-library (and other openly licensed) assets. */
   credit?: AssetCredit;
 }

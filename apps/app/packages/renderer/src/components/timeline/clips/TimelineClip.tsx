@@ -59,6 +59,7 @@ import { analysisMenuItems } from "@/lib/analysis";
 import { enhanceMenuItems, withEnhance } from "@/lib/enhance";
 import { attributeMenuItems } from "@/lib/clip-presets";
 import { captionMenuItems } from "@/lib/autocaptions";
+import { transcriptMenuItems } from "@/lib/transcript";
 import { useViewportStore } from "@/lib/viewport";
 import { useContextMenuStore, ContextMenuItem } from "@/lib/context-menu";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -1284,6 +1285,8 @@ const TimelineClip: React.FC<
         ...withEnhance(analysisMenuItems(clip, targetIds.length), enhanceMenuItems(targetIds)),
         // Generate captions: the Auto captions panel for this clip (lib/autocaptions.ts).
         ...captionMenuItems(clip, targetIds.length),
+        // Transcript: the clip's words to edit the video by (lib/transcript.ts).
+        ...transcriptMenuItems(clip, targetIds.length),
         {
           id: "split",
           label: "Split at Playhead",

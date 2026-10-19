@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   TbDots,
+  TbFileText,
   TbFolderOpen,
   TbLink,
   TbPencil,
@@ -42,6 +43,7 @@ import {
 } from "@/lib/media/timeline";
 import Draggable from "@/components/dnd/Draggable";
 import { revealMediaFile } from "@app/preload";
+import { openTranscriptForPath } from "@/lib/transcript";
 
 /** A long name cut in the middle, so its start and its extension both show ("abc…xyz.mp4"). */
 const middle = (name: string, max: number) => {
@@ -516,6 +518,18 @@ const Item: React.FC<ItemProps> = ({
                     Rename
                   </span>
                 </DropdownMenuItem>
+                {item.type !== "image" && !item.missing && (
+                  <DropdownMenuItem
+                    className="py-1 rounded"
+                    data-testid="media-transcript"
+                    onClick={() => openTranscriptForPath(item.assetUrl)}
+                  >
+                    <TbFileText className="w-3.5 h-3.5" />
+                    <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">
+                      Transcript
+                    </span>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="py-1 rounded"

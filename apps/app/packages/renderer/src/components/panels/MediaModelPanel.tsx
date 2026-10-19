@@ -39,6 +39,7 @@ import PresetsMenu from "../menus/PresetsMenu";
 import TemplatesMenu, { templateSections } from "../menus/TemplatesMenu";
 import CaptionsMenu, { captionTemplateSections } from "../menus/CaptionsMenu";
 import { useAutoCaptionsFocus } from "@/lib/autocaptions";
+import { useTranscript } from "@/lib/transcript";
 import { PRESET_CATEGORIES } from "../menus/TextMenu";
 import { TEMPLATE_SECTIONS } from "../menus/TextTemplatesMenu";
 
@@ -95,11 +96,13 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
   stickers: [...stickerSections(), { id: "shapes", label: "Shapes" }],
   effects: [{ id: "effects", label: "Video effects" }],
   // CapCut's column without AI packaging and AI emojis: Auto captions (a local speech model),
-  // Templates (the caption styles by kind), Auto lyrics, Add captions (the file import).
+  // Templates (the caption styles by kind), Auto lyrics, Transcript (the clip's words, to edit by),
+  // Add captions (the file import).
   captions: [
     { id: "auto", label: "Auto captions" },
     ...captionTemplateSections,
     { id: "lyrics", label: "Auto lyrics" },
+    { id: "transcript", label: "Transcript" },
     { id: "add", label: "Add captions" },
   ],
   adjustment: adjustmentSections,
@@ -279,6 +282,11 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
   useEffect(() => {
     if (autoFocus > 0) setPicked((p) => ({ ...p, captions: useAutoCaptionsFocus.getState().kind === "lyrics" ? "lyrics" : "auto" }));
   }, [autoFocus]);
+  // The clip menu's and the media card's Transcript opens its panel.
+  const transcriptFocus = useTranscript((f) => f.tick);
+  useEffect(() => {
+    if (transcriptFocus > 0) setPicked((p) => ({ ...p, captions: "transcript" }));
+  }, [transcriptFocus]);
   const tabsRef = useRef<HTMLElement | null>(null);
   const overflow = useOverflow(tabsRef);
   const scrollTabs = (dx: number) => tabsRef.current?.scrollBy({ left: dx, behavior: "smooth" });

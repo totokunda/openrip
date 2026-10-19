@@ -513,7 +513,8 @@ const computeAssetSignature = (assets: unknown): string => {
     .sort()
     .map((id) => {
       const a = rec[id];
-      return [id, a?.type, a?.path];
+      // A transcript heard (or heard more of) is saved too.
+      return [id, a?.type, a?.path, a?.transcript?.words?.length, a?.transcript?.covered?.length];
     });
   return safeStringify(reduced);
 };
