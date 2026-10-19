@@ -95,6 +95,11 @@ impl Output {
             if (*(*out.fmt).oformat).flags & ff::AVFMT_GLOBALHEADER != 0 {
                 (*e).flags |= ff::AV_CODEC_FLAG_GLOBAL_HEADER as i32;
             }
+            if o.exact_bitrate {
+                // macOS 13 or newer; older systems refuse the open, which then fails.
+                let key = CString::new("constant_bit_rate").unwrap();
+                ff::av_opt_set_int((*e).priv_data, key.as_ptr(), 1, 0);
+            }
             check("avcodec_open2", ff::avcodec_open2(e, codec, std::ptr::null_mut()))?;
             out.stream = ff::avformat_new_stream(out.fmt, std::ptr::null());
             check("avcodec_parameters_from_context", ff::avcodec_parameters_from_context((*out.stream).codecpar, e))?;

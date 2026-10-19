@@ -11,6 +11,9 @@
 //! ([`Picture::Rgba`]) for other desktops, MediaCodec with an input surface on Android,
 //! WebCodecs `VideoEncoder` on the web.
 //!
+//! Also written here: audio-only files (WAV, FLAC, MP3, AAC: `audio_file.rs`) and GIFs
+//! (`gif.rs`), from the same mix and renderer.
+//!
 //! Audio is mixed at CapCut's export rate (44.1 kHz stereo) in step with the video and
 //! encoded as AAC-LC.
 
@@ -21,8 +24,15 @@ use openrip_model::{FrameRate, Micros, Project};
 use openrip_playback::{FrameReport, PreviewEngine, PreviewError};
 use openrip_render::RgbaImage;
 
+#[cfg(feature = "ffmpeg")]
+mod aac_file;
+mod audio_file;
+mod gif;
 #[cfg(all(feature = "ffmpeg", target_vendor = "apple"))]
 mod videotoolbox;
+
+pub use audio_file::{export_audio, AudioFormat};
+pub use gif::{export_gif, gif_size, GifOptions};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
@@ -50,6 +60,10 @@ pub struct ExportOptions {
     pub codec: Codec,
     /// Bits per second.
     pub bitrate: u64,
+    /// Hold the bit rate to what was asked (a constant rate: the encoder neither undershoots on
+    /// easy pictures nor overshoots on hard ones) instead of its average target. Used for the
+    /// dialog's custom bit rate.
+    pub exact_bitrate: bool,
     /// Mix and encode the audio (AAC-LC, 44.1 kHz stereo, like CapCut's exports).
     pub audio: bool,
 }

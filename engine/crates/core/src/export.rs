@@ -25,6 +25,8 @@ pub struct ExportOptions {
     pub codec: Codec,
     /// Bits per second.
     pub bitrate: f64,
+    /// Hold the bit rate to the one asked (a custom bit rate), not the encoder's average.
+    pub exact_bitrate: bool,
     pub audio: bool,
 }
 
@@ -66,6 +68,19 @@ impl ExportControl {
         ExportProgress { done: self.done.load(Ordering::Relaxed), total: self.total.load(Ordering::Relaxed) }
     }
 
+    fn reset(&self) {
+        self.done.store(0, Ordering::Relaxed);
+        self.total.store(0, Ordering::Relaxed);
+        self.cancel.store(false, Ordering::Relaxed);
+    }
+
+    /// Record progress; whether to go on.
+    fn step(&self, done: u64, total: u64) -> bool {
+        self.done.store(done, Ordering::Relaxed);
+        self.total.store(total, Ordering::Relaxed);
+        !self.cancel.load(Ordering::Relaxed)
+    }
+
     /// Stop the running export: it returns an error ("cancelled") and the unfinished file is
     /// removed.
     pub fn cancel(&self) {
@@ -83,15 +98,29 @@ pub fn export_project(json: &str, path: &Path, o: &ExportOptions, control: &Expo
         fps: openrip_model::FrameRate::from_f64(o.fps),
         codec: o.codec,
         bitrate: o.bitrate.max(100_000.0) as u64,
+        exact_bitrate: o.exact_bitrate,
         audio: o.audio,
     };
-    control.done.store(0, Ordering::Relaxed);
-    control.total.store(0, Ordering::Relaxed);
-    control.cancel.store(false, Ordering::Relaxed);
-    let s = openrip_export::export(project, path, &options, |done, total| {
-        control.done.store(done, Ordering::Relaxed);
-        control.total.store(total, Ordering::Relaxed);
-        !control.cancel.load(Ordering::Relaxed)
-    })?;
+    control.reset();
+    let s = openrip_export::export(project, path, &options, |done, total| control.step(done, total))?;
+    Ok(ExportResult { frames: s.frames, seconds: s.seconds, skipped_layers: s.skipped_layers })
+}
+
+/// Export only the project's sound to `path` as `format` ("wav", "flac", "mp3" or "aac", which
+/// writes an M4A). Progress is the seconds mixed of the total.
+pub fn export_audio(json: &str, path: &Path, format: &str, control: &ExportControl) -> Result<ExportResult> {
+    let (project, _) = parse_project_json(json)?;
+    let format = openrip_export::AudioFormat::named(format).ok_or_else(|| openrip_export::ExportError::Other(format!("unknown audio format {format:?}")))?;
+    control.reset();
+    let s = openrip_export::export_audio(project, path, format, |done, total| control.step(done, total))?;
+    Ok(ExportResult { frames: s.frames, seconds: s.seconds, skipped_layers: s.skipped_layers })
+}
+
+/// Export the project as a looping GIF whose shorter side is `short_side` pixels, `fps` frames
+/// a second.
+pub fn export_gif(json: &str, path: &Path, short_side: u32, fps: f64, control: &ExportControl) -> Result<ExportResult> {
+    let (project, _) = parse_project_json(json)?;
+    control.reset();
+    let s = openrip_export::export_gif(project, path, &openrip_export::GifOptions { short_side, fps }, |done, total| control.step(done, total))?;
     Ok(ExportResult { frames: s.frames, seconds: s.seconds, skipped_layers: s.skipped_layers })
 }

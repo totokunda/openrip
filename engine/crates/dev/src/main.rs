@@ -721,7 +721,7 @@ fn export_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mbps: f64 = opt("--mbps").map(|m| m.parse()).transpose()?.unwrap_or(10.0);
     let duration = project.duration().as_secs_f64();
     let audio = !args.iter().any(|a| a == "--no-audio");
-    let o = openrip_export::ExportOptions { width: w, height: h, fps, codec, bitrate: (mbps * 1e6) as u64, audio };
+    let o = openrip_export::ExportOptions { width: w, height: h, fps, codec, bitrate: (mbps * 1e6) as u64, exact_bitrate: false, audio };
     println!("exporting {:.1} s at {w}x{h} {:.3} fps, {codec:?} {mbps} Mbps", duration, fps.as_f64());
     let stats = openrip_export::export(project, Path::new(&args[2]), &o, |n, total| {
         if n % 60 == 0 || n == total {

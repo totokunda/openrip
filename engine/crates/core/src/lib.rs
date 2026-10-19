@@ -13,6 +13,7 @@
 //! - [`measure_loudness`] and [`Recorder`]: a clip's loudness for loudness normalisation, and
 //!   voiceover recording from the microphone (behind the audio input seam).
 //! - [`export_project`]: render and encode a project, with progress and cancel.
+//! - [`export_audio`], [`export_gif`]: the sound alone as WAV/FLAC/MP3/AAC, and a looping GIF.
 //! - [`capcut_to_app`]: a CapCut draft converted to the app's project document.
 //! - [`register_fonts`] / [`font_families`]: the client's fonts (the app's bundled web
 //!   fonts) for text, and the families text can be drawn in.
@@ -38,7 +39,7 @@ use openrip_playback::PreviewError;
 pub use analysis::{auto_adjust, color_stats, detect_scenes, AnalysisControl, AutoAdjust, ColorStats, CutKind, Look, MatchOn, Moments, SceneCut, SceneOptions, Sliders};
 pub use audio::{measure_loudness, set_audio_input, Level, Loudness, Recorder, Recording, ToneInput};
 pub use capcut::{capcut_to_app, AppProjectFromDraft};
-pub use export::{codec_named, export_project, Codec, ExportControl, ExportOptions, ExportProgress, ExportResult};
+pub use export::{codec_named, export_audio, export_gif, export_project, Codec, ExportControl, ExportOptions, ExportProgress, ExportResult};
 pub use fonts::{font_face, font_families, register_fonts, FontFace, FontFamily};
 pub use openrip_model::{Micros, Project};
 /// The Adjust sliders (the draft's −1…1), for a [`Look`].

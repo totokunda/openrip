@@ -445,6 +445,8 @@ pub struct ExportOptions {
     pub codec: String,
     /// Bits per second.
     pub bitrate: f64,
+    /// Hold the bit rate to the one asked (the dialog's custom bit rate).
+    pub exact_bitrate: Option<bool>,
     pub audio: bool,
 }
 
@@ -486,8 +488,52 @@ impl Task for ExportTask {
 #[napi]
 pub fn export_project(json: String, path: String, options: ExportOptions) -> AsyncTask<ExportTask> {
     let o = options;
-    let options = openrip_core::ExportOptions { width: o.width, height: o.height, fps: o.fps, codec: openrip_core::codec_named(&o.codec), bitrate: o.bitrate, audio: o.audio };
+    let options = openrip_core::ExportOptions { width: o.width, height: o.height, fps: o.fps, codec: openrip_core::codec_named(&o.codec), bitrate: o.bitrate, exact_bitrate: o.exact_bitrate.unwrap_or(false), audio: o.audio };
     AsyncTask::new(ExportTask { json, path, options })
+}
+
+/// What a sound-only or GIF export does.
+pub enum SideExport {
+    Audio { format: String },
+    Gif { short_side: u32, fps: f64 },
+}
+
+pub struct SideExportTask {
+    json: String,
+    path: String,
+    what: SideExport,
+}
+
+impl Task for SideExportTask {
+    type Output = openrip_core::ExportResult;
+    type JsValue = ExportResult;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let path = Path::new(&self.path);
+        match &self.what {
+            SideExport::Audio { format } => openrip_core::export_audio(&self.json, path, format, &EXPORT),
+            SideExport::Gif { short_side, fps } => openrip_core::export_gif(&self.json, path, *short_side, *fps, &EXPORT),
+        }
+        .map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, s: Self::Output) -> Result<ExportResult> {
+        Ok(ExportResult { frames: s.frames as f64, seconds: s.seconds, skipped_layers: s.skipped_layers as f64 })
+    }
+}
+
+/// Export only the project's sound to `path`: `format` is "wav", "flac", "mp3" or "aac" (an
+/// M4A). Progress and `cancelExport()` work as for `exportProject` (the progress is seconds).
+#[napi]
+pub fn export_audio(json: String, path: String, format: String) -> AsyncTask<SideExportTask> {
+    AsyncTask::new(SideExportTask { json, path, what: SideExport::Audio { format } })
+}
+
+/// Export the project as a looping GIF, `shortSide` pixels on its shorter side, `fps` frames a
+/// second. Progress and `cancelExport()` work as for `exportProject`.
+#[napi]
+pub fn export_gif(json: String, path: String, short_side: u32, fps: f64) -> AsyncTask<SideExportTask> {
+    AsyncTask::new(SideExportTask { json, path, what: SideExport::Gif { short_side, fps } })
 }
 
 /// The running (or last) export's progress, in frames.

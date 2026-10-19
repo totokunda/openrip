@@ -14,11 +14,15 @@ openrip-playback.workspace = true
 openrip-audio.workspace = true
 openrip-render.workspace = true
 thiserror.workspace = true
+gif = "0.13"
+color_quant = "1"
+flacenc = "0.5.1"
+mp3lame-encoder = { version = "0.2.5", optional = true }
 
 [features]
 default = ["ffmpeg"]
 # The encoder (VideoToolbox through FFmpeg on Apple platforms), and decoding through FFmpeg.
-ffmpeg = ["dep:ffmpeg-sys-next", "dep:objc2-core-foundation", "dep:objc2-core-video", "openrip-playback/ffmpeg", "openrip-audio/ffmpeg"]
+ffmpeg = ["dep:ffmpeg-sys-next", "dep:objc2-core-foundation", "dep:objc2-core-video", "openrip-playback/ffmpeg", "openrip-audio/ffmpeg", "dep:mp3lame-encoder"]
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFNumber", "CFString", "CFBase"], optional = true }
@@ -31,4 +35,8 @@ serde_json.workspace = true
 
 [[test]]
 name = "export"
+required-features = ["ffmpeg"]
+
+[[test]]
+name = "formats"
 required-features = ["ffmpeg"]
