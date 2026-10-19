@@ -29,9 +29,9 @@ import {
 } from "./_settings.mjs";
 
 const EXPECTED = {
-  draft: { on: ["saveTo", "cache", "cacheSize"], off: ["screenRecording", "presetPath"] },
+  draft: { on: ["saveTo", "screenRecording", "cache", "cacheSize", "presetPath"], off: [] },
   edit: { on: ["stepMany", "adjustMany", "imageDuration", "targetLoudness", "frameRate", "timeCode", "exportSound"], off: ["scrubAudio", "linkage", "arrangeLayers"] },
-  performance: { on: ["encodeDecode", "autoOptimization", "proxyPath", "proxySize", "engine"], off: ["proxy", "renderCache", "renderCacheSize", "autoClear", "autoRender"] },
+  performance: { on: ["encodeDecode", "autoOptimization", "proxyPath", "proxySize", "renderCache", "renderCacheSize", "autoClear", "engine"], off: ["proxy", "autoRender"] },
   general: { on: ["language", "notification", "update"], off: [] },
 };
 // CapCut's rows that need its cloud or an account.
@@ -112,7 +112,7 @@ export default async (ctx) => {
     const { on, off } = EXPECTED[id];
     const missing = [...on, ...off].filter((r) => !ids.includes(r));
     const wrong = rows.filter((r) => off.includes(r.id) !== r.disabled).map((r) => r.id);
-    const noNote = rows.filter((r) => r.disabled && !r.note && !["renderCache", "renderCacheSize", "autoClear"].includes(r.id)).map((r) => r.id);
+    const noNote = rows.filter((r) => r.disabled && !r.note).map((r) => r.id);
     const panel = await win.locator(`[data-testid=settings-panel-${id}]`).innerText();
     check(
       `${id}: its rows in order, the ones OpenRip can't do yet disabled with a note, no cloud rows`,
