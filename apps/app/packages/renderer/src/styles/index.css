@@ -166,28 +166,39 @@ input {
   clip-path: inset(0 50% 0 0); /* Hides right half */
 }
 
-/* Custom scrollbar styles */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
+/*
+ * The app's scrollbar, on every scroll container: a thin, faint thumb on no track. (.custom-scrollbar
+ * is the same look, kept for the places that name it.) A container that hides its scrollbar
+ * (scrollbar-width: none, or ::-webkit-scrollbar hidden) does so with a class, which wins over
+ * these, and Radix's ScrollArea hides the native one under its own.
+ */
+*,
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(227, 227, 227, 0.2) transparent;
 }
 
+*::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner,
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 
+*::-webkit-scrollbar-thumb,
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: rgba(227, 227, 227, 0.1);
   border-radius: 4px;
 }
 
+*::-webkit-scrollbar-thumb:hover,
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(227, 227, 227, 0.2);
-}
-
-/* Firefox */
-.custom-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(227, 227, 227, 0.2) transparent;
 }
 
 @keyframes ripple {
