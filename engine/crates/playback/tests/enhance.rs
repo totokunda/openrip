@@ -199,3 +199,42 @@ fn tracking_survives_noise_and_flicker() {
     eprintln!("tracked right: {good} of {}", a.motions.len());
     assert!(good as f64 > 0.9 * a.motions.len() as f64, "{good} of {}", a.motions.len());
 }
+
+/// What each setting costs per frame on a real clip, sequentially as playback asks (run by
+/// hand: `OPENRIP_COST_CLIP=/path/clip.mov cargo test --release -p openrip-playback --test
+/// enhance cost -- --ignored --nocapture`). Frames are drawn at 540x960 into a readback.
+#[test]
+#[ignore]
+fn cost_per_frame() {
+    let Some(path) = std::env::var_os("OPENRIP_COST_CLIP").map(PathBuf::from) else { return };
+    enhance::forget(path.to_str().unwrap());
+    enhance::analyse(&path, Micros(0), None, &mut |_, _| true).unwrap();
+    let mut p = project(&path, None);
+    p.canvas = openrip_model::Canvas { width: 540, height: 960 };
+    let all = |e: Option<Enhance>| {
+        let mut q = p.clone();
+        q.materials.media[0].enhance = e;
+        q
+    };
+    let cases: Vec<(&str, Option<Enhance>)> = vec![
+        ("off", None),
+        ("stabilize", Some(Enhance { stabilize: Some(StabilizeLevel::Recommended), ..Default::default() })),
+        ("denoise", Some(Enhance { denoise: Some(0.5), ..Default::default() })),
+        ("deflicker", Some(Enhance { deflicker: true, ..Default::default() })),
+        ("motion blur", Some(Enhance { motion_blur: Some(0.5), ..Default::default() })),
+        ("all", Some(Enhance { stabilize: Some(StabilizeLevel::Recommended), denoise: Some(0.5), deflicker: true, motion_blur: Some(0.5) })),
+    ];
+    for (name, e) in cases {
+        let mut engine = PreviewEngine::new(all(e)).unwrap();
+        let fps = FrameRate::new(24, 1);
+        for k in 0..6 {
+            engine.render_image(fps.frame_start(k) + Micros(500), 540, 960).unwrap();
+        }
+        let t0 = std::time::Instant::now();
+        let n = 48;
+        for k in 6..6 + n {
+            engine.render_image(fps.frame_start(k) + Micros(500), 540, 960).unwrap();
+        }
+        eprintln!("{name}: {:.1} ms a frame", t0.elapsed().as_secs_f64() * 1000.0 / n as f64);
+    }
+}
