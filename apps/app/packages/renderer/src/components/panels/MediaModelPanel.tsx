@@ -1,21 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { IconType } from "react-icons";
-import {
-  LuFilm,
-  LuMusic,
-  LuType,
-  LuSticker,
-  LuSparkles,
-  LuArrowLeftRight,
-  LuCaptions,
-  LuSlidersHorizontal,
-  LuLayoutTemplate,
-  LuChevronDown,
-  LuChevronLeft,
-  LuChevronRight,
-  LuChevronUp,
-} from "react-icons/lu";
-import { MdPhotoFilter } from "react-icons/md";
+import { LuChevronDown, LuChevronLeft, LuChevronRight, LuChevronUp } from "react-icons/lu";
+import { MdOutlineSubtitles, MdSubtitles } from "react-icons/md";
+import { PiSlidersHorizontal, PiSlidersHorizontalFill } from "react-icons/pi";
+import { RiDiscFill, RiDiscLine, RiMagicFill, RiMagicLine, RiVideoFill, RiVideoLine } from "react-icons/ri";
+import { TbFilters, TbFiltersFilled, TbHourglassEmpty, TbHourglassFilled, TbSticker, TbTemplate, TbTextSize } from "react-icons/tb";
 import { PanelShell, panelHeaderHandlers } from "./PanelShell";
 import { cn } from "@/lib/utils";
 import { useSidebarStore } from "@/lib/sidebar";
@@ -54,18 +43,28 @@ interface MediaModelPanelProps {
   detached?: boolean;
 }
 
+// Outline glyphs from open icon sets (Remix, Tabler, Phosphor, Material) chosen for their
+// likeness to CapCut's tab row, each with a filled form for the selected tab, as CapCut does.
+// Glyphs with no filled form fill their own outline.
+const filled =
+  (Icon: IconType): IconType =>
+  (props) => <Icon {...props} fill="currentColor" />;
+const turned =
+  (Icon: IconType): IconType =>
+  ({ className, ...props }) => <Icon {...props} className={cn(className, "rotate-90")} />;
+
 /** The left panel's tabs, in CapCut's order. */
-const TABS: { section: SidebarSection; title: string; icon: IconType }[] = [
-  { section: "media", title: "Media", icon: LuFilm },
-  { section: "audio", title: "Audio", icon: LuMusic },
-  { section: "text", title: "Text", icon: LuType },
-  { section: "stickers", title: "Stickers", icon: LuSticker },
-  { section: "effects", title: "Effects", icon: LuSparkles },
-  { section: "transitions", title: "Transitions", icon: LuArrowLeftRight },
-  { section: "captions", title: "Captions", icon: LuCaptions },
-  { section: "filters", title: "Filters", icon: MdPhotoFilter },
-  { section: "adjustment", title: "Adjustment", icon: LuSlidersHorizontal },
-  { section: "templates", title: "Templates", icon: LuLayoutTemplate },
+const TABS: { section: SidebarSection; title: string; icon: IconType; selectedIcon: IconType }[] = [
+  { section: "media", title: "Media", icon: RiVideoLine, selectedIcon: RiVideoFill },
+  { section: "audio", title: "Audio", icon: RiDiscLine, selectedIcon: RiDiscFill },
+  { section: "text", title: "Text", icon: TbTextSize, selectedIcon: TbTextSize },
+  { section: "stickers", title: "Stickers", icon: TbSticker, selectedIcon: filled(TbSticker) },
+  { section: "effects", title: "Effects", icon: RiMagicLine, selectedIcon: RiMagicFill },
+  { section: "transitions", title: "Transitions", icon: turned(TbHourglassEmpty), selectedIcon: turned(TbHourglassFilled) },
+  { section: "captions", title: "Captions", icon: MdOutlineSubtitles, selectedIcon: MdSubtitles },
+  { section: "filters", title: "Filters", icon: TbFilters, selectedIcon: TbFiltersFilled },
+  { section: "adjustment", title: "Adjustment", icon: PiSlidersHorizontal, selectedIcon: PiSlidersHorizontalFill },
+  { section: "templates", title: "Templates", icon: TbTemplate, selectedIcon: filled(TbTemplate) },
 ];
 
 /**
@@ -363,7 +362,9 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
           style={{ scrollbarWidth: "none" }}
           className="h-full flex items-stretch px-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
         >
-          {TABS.map(({ section: s, title, icon: Icon }) => (
+          {TABS.map(({ section: s, title, icon, selectedIcon }) => {
+            const Icon = section === s ? selectedIcon : icon;
+            return (
             <button
               key={s}
               type="button"
@@ -371,14 +372,17 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
               aria-pressed={section === s}
               onClick={() => openSection(s)}
               className={cn(
-                "shrink-0 min-w-[49px] flex flex-col items-center justify-center gap-1 px-1 transition-colors cursor-pointer",
+                // CapCut's tabs are at least 49 px with ~10 px between the longest labels; SF Pro
+                // is wider than its UI font, so a little more room each side keeps them apart.
+                "shrink-0 min-w-[50px] flex flex-col items-center justify-center gap-[5px] px-[6px] transition-colors cursor-pointer",
                 section === s ? "text-brand-accent" : "text-brand-light hover:text-brand-lighter",
               )}
             >
-              <Icon className="w-[17px] h-[17px]" />
-              <span className="text-[12px] font-medium leading-none whitespace-nowrap">{title}</span>
+              <Icon className="w-[18px] h-[18px]" />
+              <span className="text-[11px] font-semibold leading-none whitespace-nowrap">{title}</span>
             </button>
-          ))}
+            );
+          })}
         </nav>
         {overflow.left && (
           <button type="button" aria-label="Earlier tabs" onClick={() => scrollTabs(-160)} className="absolute left-1 top-1/2 -translate-y-1/2 w-3 h-[19px] rounded-[3px] bg-brand-button text-[#cccccc] flex items-center justify-center">

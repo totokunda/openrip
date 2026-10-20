@@ -3,8 +3,10 @@
 // Auto snapping, Linkage, then Zoom to fit after a divider). Each is its own small component without props, styled like
 // the toolbar's other buttons, its tooltip naming its shortcut, so any toolbar can place them.
 import React from "react";
-import { TbArrowBarToLeft, TbArrowBarToRight, TbArrowsHorizontal, TbSeparatorVertical, TbSnowflake, TbTransform } from "react-icons/tb";
-import { LuCheck, LuChevronLeft, LuChevronRight, LuFlipHorizontal2, LuHistory, LuLink, LuMagnet, LuPlus, LuMousePointer2, LuRotateCw, LuScissors, LuScan, LuShield } from "react-icons/lu";
+import { TbArrowBarToLeft, TbArrowBarToRight, TbBracketsContainEnd, TbBracketsContainStart, TbFlipVertical, TbPentagon, TbPlus, TbPointer, TbRotateClockwise, TbRulerMeasure, TbScissors, TbSnowflake } from "react-icons/tb";
+import { MdOutlineLink } from "react-icons/md";
+import { RiAlignItemVerticalCenterLine, RiCollapseHorizontalLine, RiDragDropLine } from "react-icons/ri";
+import { LuCheck, LuChevronLeft, LuChevronRight, LuHistory } from "react-icons/lu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { freezeAtPlayhead, freezeTarget, reverseTarget, toggleReverse } from "@/lib/timeline-motion";
 import { rotate90, toggleFlip } from "@/lib/transform-presets";
@@ -44,7 +46,7 @@ export const DeleteLeftButton = () => {
   const disabled = !useCanTrim();
   return (
     <div title={useShortcutTitle("Delete left", "deleteLeft")} className={buttonClass(disabled)} onClick={() => !disabled && deleteToPlayhead("left")}>
-      <TbArrowBarToLeft className="text-brand-light h-4 w-4" />
+      <TbBracketsContainEnd className="text-brand-light h-[19px] w-[19px]" />
     </div>
   );
 };
@@ -53,7 +55,7 @@ export const DeleteRightButton = () => {
   const disabled = !useCanTrim();
   return (
     <div title={useShortcutTitle("Delete right", "deleteRight")} className={buttonClass(disabled)} onClick={() => !disabled && deleteToPlayhead("right")}>
-      <TbArrowBarToRight className="text-brand-light h-4 w-4" />
+      <TbBracketsContainStart className="text-brand-light h-[19px] w-[19px]" />
     </div>
   );
 };
@@ -62,7 +64,7 @@ export const AddMarkerButton = () => {
   const disabled = useClipStore((s) => s.clips.length === 0);
   return (
     <div title={useShortcutTitle("Add marker", "addMarker")} className={buttonClass(disabled)} onClick={() => !disabled && addMarkerAtPlayhead()}>
-      <LuShield className="text-brand-light h-4 w-4" />
+      <TbPentagon className="text-brand-light h-[19px] w-[19px] rotate-180" />
     </div>
   );
 };
@@ -76,7 +78,7 @@ export const AddMenuButton = () => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger title="Add" data-testid="tool-add" className="h-7 w-7 flex items-center justify-center text-brand-light opacity-80 hover:opacity-100 outline-none">
-        <LuPlus className="h-4 w-4" />
+        <TbPlus className="h-[19px] w-[19px]" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className={cn(menuContent, "w-[190px]")}>
         {TRACK_TYPES.map((t) => (
@@ -123,7 +125,7 @@ export const MagnetToggle = () => {
   const mainLocked = useClipStore((s) => !!mainTrackOf(s.timelines)?.locked);
   return (
     <Toggle title={useShortcutTitle("Main track magnet", "magnet")} on={magnet} disabled={mainLocked} onClick={() => setMagnet(!magnet)}>
-      <LuMagnet className="h-3.5 w-3.5" />
+      <RiCollapseHorizontalLine className="h-[19px] w-[19px]" />
     </Toggle>
   );
 };
@@ -133,7 +135,7 @@ export const SnappingToggle = () => {
   const setSnapping = useControlsStore((s) => s.setSnapping);
   return (
     <Toggle title={useShortcutTitle("Auto snapping", "snapping")} on={snapping} onClick={() => setSnapping(!snapping)}>
-      <TbSeparatorVertical className="h-4 w-4" />
+      <RiAlignItemVerticalCenterLine className="h-[19px] w-[19px]" />
     </Toggle>
   );
 };
@@ -145,7 +147,7 @@ export const LinkageToggle = () => {
   return (
     <div className="flex items-center">
       <Toggle title={useShortcutTitle("Linkage", "linkage")} on={linkage} onClick={() => setLinkage(!linkage)}>
-        <LuLink data-testid="tool-linkage" className="h-3.5 w-3.5" />
+        <MdOutlineLink data-testid="tool-linkage" className="h-[19px] w-[19px]" />
       </Toggle>
       <DropdownMenu>
         <DropdownMenuTrigger data-testid="tool-linkage-menu" title="Linkage options" className="h-[23px] w-3 flex items-center justify-center text-brand-light/70 hover:text-brand-light outline-none">
@@ -167,7 +169,7 @@ export const ZoomToFitButton = () => {
   const fitted = useControlsStore((c) => c.zoomLevel === c.minZoomLevel);
   return (
     <Toggle title={useShortcutTitle("Zoom timeline to fit", "zoomToFit")} on={fitted && !disabled} disabled={disabled} onClick={toggleZoomToFit}>
-      <TbArrowsHorizontal data-testid="tool-zoomfit" className="h-4 w-4" />
+      <TbRulerMeasure data-testid="tool-zoomfit" className="h-[19px] w-[19px]" />
     </Toggle>
   );
 };
@@ -193,15 +195,15 @@ export const SelectionToolMenu = () => {
         data-tool={tool}
         className="relative h-7 w-7 flex items-center justify-center text-brand-light opacity-80 hover:opacity-100 outline-none"
       >
-        {tool === "split" ? <LuScissors className="h-4 w-4 text-brand-accent" /> : <LuMousePointer2 className="h-4 w-4" />}
+        {tool === "split" ? <TbScissors className="h-[19px] w-[19px] text-brand-accent" /> : <TbPointer className="h-[19px] w-[19px]" />}
         <span className="absolute right-[3px] bottom-[3px] w-0 h-0 border-l-[4px] border-l-transparent border-b-[4px] border-b-brand-light" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className={cn(menuContent, "w-[190px]")}>
         <DropdownMenuItem data-testid="sel-select" className={cn(menuRow, tool === "select" && "bg-brand-hover")} onClick={() => setTool("select")}>
-          <LuMousePointer2 className="w-4 h-4 text-[#cbcbcb]" /> Select <span className={menuKey}>{hint("selectMode")}</span>
+          <TbPointer className="w-4 h-4 text-[#cbcbcb]" /> Select <span className={menuKey}>{hint("selectMode")}</span>
         </DropdownMenuItem>
         <DropdownMenuItem data-testid="sel-split" className={cn(menuRow, tool === "split" && "bg-brand-hover")} onClick={() => setTool("split")}>
-          <LuScissors className="w-4 h-4 text-[#cbcbcb]" /> Split <span className={menuKey}>{hint("splitMode")}</span>
+          <TbScissors className="w-4 h-4 text-[#cbcbcb]" /> Split <span className={menuKey}>{hint("splitMode")}</span>
         </DropdownMenuItem>
         <DropdownMenuItem data-testid="sel-left" className={menuRow} onClick={() => selectBeside("left")}>
           <TbArrowBarToLeft className="w-4 h-4 text-[#cbcbcb]" /> Select leftward <span className={menuKey}>{hint("selectLeft")}</span>
@@ -227,7 +229,7 @@ export const PreviewAxisToggle = () => {
   return (
     <div className="flex items-center">
       <Toggle title={useShortcutTitle("Preview axis", "previewAxis")} on={on} onClick={() => setOn(!on)}>
-        <LuScan data-testid="tool-previewaxis" className="h-3.5 w-3.5" />
+        <RiDragDropLine data-testid="tool-previewaxis" className="h-[19px] w-[19px]" />
       </Toggle>
       <DropdownMenu>
         <DropdownMenuTrigger data-testid="tool-previewaxis-menu" title="Preview axis options" className="h-[23px] w-3 flex items-center justify-center text-brand-light/70 hover:text-brand-light outline-none">
@@ -276,7 +278,7 @@ export const TransformToolsMenu = () => {
         data-testid="tool-transform"
         className={cn("relative h-7 w-7 flex items-center justify-center text-brand-light opacity-60 hover:opacity-100 outline-none", disabled && "opacity-30 cursor-not-allowed hover:opacity-30")}
       >
-        <TbTransform className="h-4 w-4" />
+        <TbFlipVertical className="h-[19px] w-[19px]" />
         {/* The corner triangle that says it opens a menu. */}
         <span className="absolute right-[3px] bottom-[3px] w-0 h-0 border-l-[4px] border-l-transparent border-b-[4px] border-b-brand-light" />
       </DropdownMenuTrigger>
@@ -289,10 +291,10 @@ export const TransformToolsMenu = () => {
           {reversible?.reverse && <LuCheck className="ml-auto w-3.5 h-3.5 text-brand-accent" />}
         </DropdownMenuItem>
         <DropdownMenuItem data-testid="tool-mirror" className={row} disabled={!visual} onClick={() => visual && updateClip(visual.clipId, toggleFlip(visual, "horizontal"))}>
-          <LuFlipHorizontal2 className="w-4 h-4 text-[#cbcbcb]" /> Mirror
+          <TbFlipVertical className="w-4 h-4 text-[#cbcbcb]" /> Mirror
         </DropdownMenuItem>
         <DropdownMenuItem data-testid="tool-rotate" className={row} disabled={!visual} onClick={() => visual && updateClip(visual.clipId, rotate90(visual, 1))}>
-          <LuRotateCw className="w-4 h-4 text-[#cbcbcb]" /> Rotate
+          <TbRotateClockwise className="w-4 h-4 text-[#cbcbcb]" /> Rotate
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

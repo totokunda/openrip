@@ -31,24 +31,33 @@ import { initEnginePreview } from "@/lib/engine-preview";
 import { initHistory } from "@/lib/history";
 import { useShellStore } from "@/lib/shell";
 import HomeScreen from "./home/HomeScreen";
+import { HOME_PAGE_BG } from "./home/shared";
 import AppDialogs from "./dialogs/AppDialogs";
 import { initPreferences } from "@/lib/preferences";
 import { initKeymap } from "@/lib/keymap";
 
-/** The window while the projects (first) or a project (later) are loading. */
-const Loading: React.FC<{ title: string; note: string }> = ({ title, note }) => (
-  <main className="w-full h-screen flex flex-col bg-brand-background-dark text-center font-poppins">
-    <div className="relative flex-1 overflow-hidden">
-      <div className="relative z-10 h-full w-full flex flex-col items-center justify-center gap-5">
-        <div className="text-[12px] text-brand-light/50">{title}</div>
-        <div className="text-2xl font-semibold tracking-tight text-brand-light">OpenRip</div>
-        <div className="h-9 w-9 rounded-full border-2 border-brand-light/15 border-t-brand-accent-shade animate-spin" />
-        <p className="max-w-sm text-[11px] text-brand-light/40 leading-relaxed">{note}</p>
-      </div>
-    </div>
-    <Toaster />
-  </main>
-);
+/**
+ * The window while the projects (first) or a project (later) are loading. CapCut has no splash:
+ * its windows open straight away, so this is only the screen's own background — the home page's
+ * or the editor's — with a small spinner if the wait goes on past half a second.
+ */
+const Loading: React.FC<{ screen: "home" | "editor" }> = ({ screen }) => {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 500);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <main
+      data-testid="app-loading"
+      className={cn("w-full h-screen flex items-center justify-center", screen === "editor" && "bg-brand-background-dark")}
+      style={screen === "home" ? { background: HOME_PAGE_BG } : undefined}
+    >
+      {slow && <div aria-label="Loading" className="h-6 w-6 rounded-full border-2 border-brand-light/10 border-t-brand-light/50 animate-spin" />}
+      <Toaster />
+    </main>
+  );
+};
 
 /** The dragged picture measured without the move between windows (lib/panel-windows.ts). */
 const overlayMeasuring = { dragOverlay: { measure: dragOverlayRect(getClientRect) } };
@@ -206,7 +215,7 @@ const App: React.FC = () => {
   };
 
   if (!ready) {
-    return <Loading title="Preparing workspace" note="Loading projects and initializing timeline..." />;
+    return <Loading screen={view === "home" ? "home" : "editor"} />;
   }
   if (view === "home") {
     return (
@@ -218,7 +227,7 @@ const App: React.FC = () => {
     );
   }
   if (!projectsLoaded || !activeProject) {
-    return <Loading title="Opening project" note={activeProject?.name ?? ""} />;
+    return <Loading screen="editor" />;
   }
 
   return (

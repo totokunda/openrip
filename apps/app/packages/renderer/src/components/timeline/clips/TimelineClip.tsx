@@ -1482,7 +1482,8 @@ const TimelineClip: React.FC<
           },
           { id: "mirror", items: mirrorItems },
           { id: "range", items: rangeItems },
-          { id: "render", items: renderItems },
+          // CapCut's sticker menu ends at Range (25-sticker-context-menu): no Render there.
+          { id: "render", items: stickers.length > 0 ? [] : renderItems },
         ],
       });
     }

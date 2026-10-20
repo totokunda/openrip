@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
-import { LuCheck, LuChevronDown, LuChevronUp, LuMic } from "react-icons/lu";
+import { LuCheck, LuChevronDown, LuChevronUp } from "react-icons/lu";
+import { TbMicrophone } from "react-icons/tb";
 import { recordFake, voiceoverAsk, voiceoverBegin, voiceoverEnd, voiceoverSaveTake, voiceoverStatus } from "@app/preload";
 import type { VoiceoverStatus } from "@app/preload";
 import { useClipStore } from "@/lib/clip";
@@ -64,7 +65,7 @@ export const VoiceoverButton: React.FC = () => {
         open ? "bg-black/40 text-brand-accent" : "text-brand-light/70 hover:text-brand-light",
       )}
     >
-      <LuMic className="h-4 w-4" />
+      <TbMicrophone className="h-[19px] w-[19px]" />
       {live && <span className="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-[#e5484d]" />}
     </button>
   );

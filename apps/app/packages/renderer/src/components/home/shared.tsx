@@ -103,6 +103,9 @@ const ContextMenu: React.FC<{ x: number; y: number; items: MenuItem[]; onClose: 
   );
 };
 
+/** The home screen's page: barely off black, with the accent's hue at the top. */
+export const HOME_PAGE_BG = "linear-gradient(180deg, #110d15 0%, #0b0a0d 40%, #090909 100%)";
+
 /** The home screen's drop-down menus and their rows. */
 export const homeMenu = "dark p-1 bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] text-brand-light";
 export const homeMenuRow = "dark h-8 px-2.5 gap-2.5 rounded-[4px] text-[13px] cursor-pointer focus:bg-brand-hover";

@@ -5,18 +5,16 @@ import {
   TbPlus,
   TbMinus,
 } from "react-icons/tb";
-import { TbRewindForward5 } from "react-icons/tb";
+import { TbArrowBackUp, TbArrowForwardUp, TbCrop, TbRewindForward5, TbTrash } from "react-icons/tb";
 import { FaCirclePause, FaCirclePlay } from "react-icons/fa6";
-import { FiTrash } from "react-icons/fi";
 import { CgMergeVertical } from "react-icons/cg";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
 import { useCallback, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { MAX_DURATION } from "@/lib/settings";
-import { LuSquareSplitVertical, LuCrop, LuUndo2, LuRedo2 } from "react-icons/lu";
+import { LuSquareSplitHorizontal, LuSquareSplitVertical } from "react-icons/lu";
 import { getMediaInfoCached } from "@/lib/media/utils";
-import { PiSplitHorizontal } from "react-icons/pi";
 import { CropDialog } from "@/components/dialogs/CropDialog";
 import { useState } from "react";
 import { undo, redo, useHistoryStore } from "@/lib/history";
@@ -254,7 +252,7 @@ const SplitButton = () => {
       )}
       onClick={handleSplit}
     >
-      <PiSplitHorizontal className=" text-brand-light h-4 w-4" />
+      <LuSquareSplitHorizontal className=" text-brand-light h-[19px] w-[19px]" />
     </div>
   );
 };
@@ -280,7 +278,7 @@ const TrashButton = () => {
       )}
       onClick={handleDelete}
     >
-      <FiTrash className=" text-brand-light h-4 w-4" />
+      <TbTrash className=" text-brand-light h-[19px] w-[19px]" />
     </div>
   );
 };
@@ -362,7 +360,7 @@ const SeparateButton = () => {
       )}
       onClick={handleSeparate}
     >
-      <LuSquareSplitVertical className=" text-brand-light h-4 w-4" />
+      <LuSquareSplitVertical className=" text-brand-light h-[19px] w-[19px]" />
     </div>
   );
 };
@@ -403,7 +401,7 @@ const CropButton = () => {
           disabled && "opacity-30 cursor-not-allowed hover:opacity-30",
         )}
       >
-        <LuCrop className=" text-brand-light h-4 w-4" />
+        <TbCrop className=" text-brand-light h-[19px] w-[19px]" />
       </div>
       <CropDialog open={isDialogOpen} onOpenChange={setIsDialogOpen} clip={selectedClip ?? null} />
     </>
@@ -422,7 +420,7 @@ const UndoButton = () => {
       )}
       onClick={() => !disabled && undo()}
     >
-      <LuUndo2 className=" text-brand-light h-4 w-4" />
+      <TbArrowBackUp className=" text-brand-light h-[19px] w-[19px]" />
     </div>
   );
 };
@@ -438,7 +436,7 @@ const RedoButton = () => {
       )}
       onClick={() => !disabled && redo()}
     >
-      <LuRedo2 className=" text-brand-light h-4 w-4" />
+      <TbArrowForwardUp className=" text-brand-light h-[19px] w-[19px]" />
     </div>
   );
 };

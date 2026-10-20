@@ -36,7 +36,7 @@ import { LibraryPage } from "./LibraryPage";
 import { TemplatesPage } from "./TemplatesPage";
 import { getAppInfo, revealPathInFolder } from "@app/preload";
 import { CapCutDraftsPage } from "./CapCutDraftsPage";
-import { editedLabel, homeMenu as menu, homeMenuRow as menuRow, homeTool, lengthLabel, middle } from "./shared";
+import { editedLabel, HOME_PAGE_BG, homeMenu as menu, homeMenuRow as menuRow, homeTool, lengthLabel, middle } from "./shared";
 import { useT } from "@/lib/i18n";
 import {
   DropdownMenu,
@@ -66,7 +66,7 @@ const VIEW_KEY = "openrip:home-view";
 // instead of CapCut's cyan: a page barely off black with the accent's hue, cards a step
 // lighter, a bright banner with near-black type, and a dark saturated tint of the accent for
 // the wide first card.
-const PAGE_BG = "linear-gradient(180deg, #110d15 0%, #0b0a0d 40%, #090909 100%)";
+const PAGE_BG = HOME_PAGE_BG;
 const BANNER_BG =
   "radial-gradient(120% 170% at 50% -30%, rgba(255,255,255,0.30), rgba(255,255,255,0) 55%), linear-gradient(100deg, #c9a8e4 0%, #ba93dd 52%, #a77ecc 100%)";
 const BANNER_TEXT = "#0d0b10";

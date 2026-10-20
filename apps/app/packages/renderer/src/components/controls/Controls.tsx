@@ -1,4 +1,4 @@
-import { FiMinusCircle, FiPlusCircle } from "react-icons/fi";
+import { TbZoomIn, TbZoomOut } from "react-icons/tb";
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -108,12 +108,12 @@ const TimelineZoom = () => {
 
   return (
     <div className="flex items-center  gap-x-2 justify-center transition-opacity duration-300">
-      <FiMinusCircle
+      <TbZoomOut
         onClick={() => {
           if (zoomLevel === 1 || !hasClips) return;
           setZoom(zoomLevel - 1);
         }}
-        className={cn("text-brand-light/70 h-4 w-4 duration-300", {
+        className={cn("text-brand-light/80 h-[18px] w-[18px] duration-300", {
           "opacity-60": zoomLevel === 1 || !hasClips,
           "opacity-100": zoomLevel > 1 && hasClips,
           "cursor-not-allowed": zoomLevel === 1 || !hasClips,
@@ -168,12 +168,12 @@ const TimelineZoom = () => {
           }}
         />
       </div>
-      <FiPlusCircle
+      <TbZoomIn
         onClick={() => {
           if (zoomLevel >= 10 || !hasClips) return;
           setZoom(zoomLevel + 1);
         }}
-        className={cn("text-brand-light/70 h-4 w-4 duration-300", {
+        className={cn("text-brand-light/80 h-[18px] w-[18px] duration-300", {
           "opacity-100": zoomLevel < 10 && hasClips,
           "opacity-60": zoomLevel >= 10 || !hasClips,
           "cursor-not-allowed": zoomLevel >= 10 || !hasClips,
