@@ -610,11 +610,11 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 
 | Area | Has | Partly | Missing |
 |---|---:|---:|---:|
-| 6.1 App menu bar (macOS) | 14 | 0 | 1 |
+| 6.1 App menu bar (macOS) | 15 | 0 | 0 |
 | 6.2 Home screen | 15 | 1 | 0 |
 | 6.3 Settings and shortcuts | 28 | 5 | 2 |
 | 6.4 Editor top bar and layout | 8 | 0 | 0 |
-| 6.5 Left panel: Media | 20 | 0 | 3 |
+| 6.5 Left panel: Media | 21 | 0 | 2 |
 | 6.6 Left panel: Audio | 4 | 0 | 0 |
 | 6.7 Left panel: Text | 4 | 1 | 0 |
 | 6.8 Left panel: Stickers | 3 | 0 | 0 |
@@ -638,12 +638,12 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.26 Timeline toolbar | 20 | 2 | 0 |
 | 6.27 Timeline tracks, clips, ruler | 24 | 0 | 0 |
 | 6.28 Context menus | 19 | 1 | 1 |
-| 6.29 Export dialog | 15 | 0 | 1 |
+| 6.29 Export dialog | 16 | 0 | 0 |
 | 6.30 Other dialogs | 6 | 0 | 0 |
 | 6.31 Classic-algorithm features brought into scope (2026-10-18) | 12 | 0 | 0 |
-| **Total (353 in-scope features)** | **330** | **15** | **8** |
+| **Total (353 in-scope features)** | **333** | **15** | **5** |
 
-Re-audited 2026-10-19 against main 8d265833: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (329 has, 16 partly, 8 missing of 353; 93.2% strict, 95.5% with partly as half). Before it (audited against ab4960fe) the table read 289 / 36 / 28 of 353 (81.9% strict, 87.0% with partly as half). Before that (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows. Since then: Settings › Edit › Linkage settings works in the editor (330 has, 15 partly, 8 missing).
+Re-audited 2026-10-19 against main 8d265833: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (329 has, 16 partly, 8 missing of 353; 93.2% strict, 95.5% with partly as half). Before it (audited against ab4960fe) the table read 289 / 36 / 28 of 353 (81.9% strict, 87.0% with partly as half). Before that (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows. Since then: Settings › Edit › Linkage settings works in the editor, and a project holds several timelines (File › New timeline, New timeline with selected item, the Export timeline menu): 333 has, 15 partly, 5 missing (94.3%).
 
 ### 6.1 App menu bar (macOS)
 
@@ -660,7 +660,7 @@ Captured from Home, so editor-only items show disabled (see §7).
 | App menu › More › Third-party copyright (licences view) | `007-more-submenu.png`, `31-dialogs/006-third-party-copyright.png` | has (OpenRip's npm and Cargo notices, made from the lockfiles at build time) |
 | App menu › Quit ⌘Q | `002-capcut-menu.png` | has |
 | File › New Project ⌘N | `004-file-menu.png`, `008-editor-file-menu.png` | has (File menu item and ⌘N) |
-| File › New timeline (several timelines per project) | `008-editor-file-menu.png` | missing |
+| File › New timeline (several timelines per project) | `008-editor-file-menu.png` | has (switch, rename, duplicate and delete from the player title's timeline menu) |
 | File › Import ⌘I | `004-file-menu.png` | has (File menu item and ⌘I) |
 | File › Export ⌘E | `004-file-menu.png` | has (File menu item and ⌘E) |
 | Edit › Undo ⌘Z, Redo ⇧⌘Z | `005-edit-menu.png` | has |
@@ -778,7 +778,7 @@ Screenshots are in `05-left-media/` unless a path says otherwise.
 | Card menu: Rename, Delete, Open file location | `006-media-item-context-menu.png` | has |
 | Card menu: Create/Cancel file proxy | `006-media-item-context-menu.png` | has |
 | Card menu: New folder with selected item (bins/folders) | `006-media-item-context-menu.png` | has |
-| Card menu: New timeline with selected item (several timelines per project) | `006-media-item-context-menu.png` | missing |
+| Card menu: New timeline with selected item (several timelines per project) | `006-media-item-context-menu.png` | has |
 | Card menu: Export selected clips | `006-media-item-context-menu.png` | missing |
 | Card menu: Create multi-camera clip | `006-media-item-context-menu.png` | missing |
 | Card menu: Link to media (relink missing files) | `006-media-item-context-menu.png` | has (Link to media on a missing card, and link missing in a folder; harness relink) |
@@ -1220,7 +1220,7 @@ References: `31-dialogs/016-export-video-settings.png` to `026-export-caption-fo
 |---|---|---|
 | Export dialog with Name and Export to + folder | `016-export-video-settings.png` | has |
 | Cover preview with "Edit cover" | `016-export-video-settings.png`, `027-cover-frame-selector.png` | has (the project's cover; Edit cover opens the cover editor, `openCoverEditor()` in `lib/cover.ts`) |
-| Export timeline (choose which timeline) | `016-export-video-settings.png` | missing (one timeline per project) |
+| Export timeline (choose which timeline) | `016-export-video-settings.png` | has (a menu when the project has several timelines) |
 | Video section on/off (export audio only) | `016-export-video-settings.png`, `023-export-audio-gif-captions.png` | has (each section has its checkbox; off greys its rows) |
 | Resolution: 480P, 720P, 1080P, 2K, 4K, 8K | `017-export-resolution-menu.png` | has (8K is listed; the hardware encoder may refuse it) |
 | Bit rate: Lower, Recommended, Higher | `018-export-bitrate-menu.png` | has (5 000 / 8 000 / 11 000 Kbps at 1080P 24 fps, scaled by size and rate) |
