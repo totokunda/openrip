@@ -135,6 +135,22 @@ try {
   console.warn(`[third-party-notices] filter photo credits not read (${String(e.message ?? e).split("\n")[0]})`);
 }
 
+// ---- Filter colour tables (the Filters tab) ----
+// The Hald CLUTs in public/filters (the clut-filters repository) are the film simulation
+// collection published with RawTherapee, under CC BY-SA 4.0.
+packages.push({
+  name: "Film simulation colour tables (Filters tab)",
+  version: "",
+  source: "assets",
+  license: "CC-BY-SA-4.0",
+  text: [
+    "The Filters tab's colour lookup tables (Hald CLUTs, packages/renderer/public/filters) come from the film simulation collection published with RawTherapee by Pat David and contributors.",
+    "Licensed under the Creative Commons Attribution-ShareAlike 4.0 International licence: https://creativecommons.org/licenses/by-sa/4.0/",
+    "Source: https://rawpedia.rawtherapee.com/Film_Simulation",
+    "OpenRip ships them unmodified apart from resizing (512 px and 1728 px versions); adapted versions of the tables are shared under the same licence.",
+  ].join("\n\n"),
+});
+
 // ---- Bundled sources ----
 // The shader transitions are the gl-transitions collection (MIT, two BSD): their notices are in
 // the folder with the shaders.
