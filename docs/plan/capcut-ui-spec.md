@@ -612,7 +612,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 |---|---:|---:|---:|
 | 6.1 App menu bar (macOS) | 15 | 0 | 0 |
 | 6.2 Home screen | 15 | 1 | 0 |
-| 6.3 Settings and shortcuts | 28 | 5 | 2 |
+| 6.3 Settings and shortcuts | 29 | 5 | 1 |
 | 6.4 Editor top bar and layout | 8 | 0 | 0 |
 | 6.5 Left panel: Media | 21 | 0 | 2 |
 | 6.6 Left panel: Audio | 4 | 0 | 0 |
@@ -635,15 +635,15 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.23 Inspector: adjustment layer (also the video Adjust tab) | 11 | 0 | 0 |
 | 6.24 Inspector: caption clip | 4 | 0 | 0 |
 | 6.25 Inspector: multiple selection and compound clips | 4 | 2 | 0 |
-| 6.26 Timeline toolbar | 20 | 2 | 0 |
+| 6.26 Timeline toolbar | 21 | 1 | 0 |
 | 6.27 Timeline tracks, clips, ruler | 24 | 0 | 0 |
 | 6.28 Context menus | 19 | 1 | 1 |
 | 6.29 Export dialog | 16 | 0 | 0 |
 | 6.30 Other dialogs | 6 | 0 | 0 |
 | 6.31 Classic-algorithm features brought into scope (2026-10-18) | 12 | 0 | 0 |
-| **Total (353 in-scope features)** | **333** | **15** | **5** |
+| **Total (353 in-scope features)** | **335** | **14** | **4** |
 
-Re-audited 2026-10-19 against main 8d265833: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (329 has, 16 partly, 8 missing of 353; 93.2% strict, 95.5% with partly as half). Before it (audited against ab4960fe) the table read 289 / 36 / 28 of 353 (81.9% strict, 87.0% with partly as half). Before that (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows. Since then: Settings › Edit › Linkage settings works in the editor, and a project holds several timelines (File › New timeline, New timeline with selected item, the Export timeline menu): 333 has, 15 partly, 5 missing (94.3%).
+Re-audited 2026-10-19 against main 8d265833: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (329 has, 16 partly, 8 missing of 353; 93.2% strict, 95.5% with partly as half). Before it (audited against ab4960fe) the table read 289 / 36 / 28 of 353 (81.9% strict, 87.0% with partly as half). Before that (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows. Since then: Settings › Edit › Linkage settings works in the editor, and a project holds several timelines (File › New timeline, New timeline with selected item, the Export timeline menu): 333 has, 15 partly, 5 missing (94.3%). Then audio while scrubbing and Preview axis's video and audio: 335 has, 14 partly, 4 missing.
 
 ### 6.1 App menu bar (macOS)
 
@@ -710,7 +710,7 @@ Screenshots are in `02-settings/` unless a path says otherwise.
 | Edit › Adjust value many N units | `005-edit.png` | has (↑ / ↓ in the inspector's value fields, ⇧ for N) |
 | Edit › Image duration (s or frames) | `005-edit.png`, `009-edit-image-duration-unit.png` | has |
 | Edit › Target loudness: −23, −14, −12 LUFS | `006-edit-target-loudness.png` | has (the Audio tab's Normalize loudness and the clip menu use it) |
-| Edit › Play audio while scrubbing | `005-edit.png` | missing (the row shows disabled) |
+| Edit › Play audio while scrubbing | `005-edit.png` | has (off by default, as CapCut's; short faded snippets while dragging or stepping the playhead) |
 | Edit › Linkage settings | `010-edit-linkage-settings.png` | has (in the editor its Settings button opens the timeline's Linkage settings; on Home, with no timeline, it's disabled) |
 | Edit › Arrange layers by default | `005-edit.png` | missing (the row shows disabled) |
 | Edit › Default frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `007-edit-frame-rate.png` | has (a new project's) |
@@ -1140,7 +1140,7 @@ Screenshots are in `30-timeline-toolbar/` unless a path says otherwise.
 | Main-track magnet (ripple the main track) | `03-editor-overview/003-base-timeline-built.png` | has (harness tlmagnet) |
 | Auto snap toggle | `03-editor-overview/003-base-timeline-built.png` | has |
 | Linkage toggle and Linkage settings (which overlay types move/delete with main-track clips) | `31-dialogs/038-linkage-settings.png` | has |
-| Preview axis (hover-scrub preview; video and audio, or video only) | `027-preview-axis-menu.png` | partly (video only; the video-and-audio choice is disabled) |
+| Preview axis (hover-scrub preview; video and audio, or video only) | `027-preview-axis-menu.png` | has |
 | Zoom to fit | `037-timeline-fit-toggles-off.png` | has (⇧Z too) |
 | Zoom range from 30 s majors down to single frames | `035-timeline-zoom-minimum.png`, `036-timeline-zoom-maximum.png` | partly (zoom levels 1-10, down to 5 frames across; not single frames) |
 | Zoom out, slider, zoom in | `03-editor-overview/003-base-timeline-built.png` | has |
