@@ -612,9 +612,9 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 |---|---:|---:|---:|
 | 6.1 App menu bar (macOS) | 15 | 0 | 0 |
 | 6.2 Home screen | 15 | 1 | 0 |
-| 6.3 Settings and shortcuts | 29 | 5 | 1 |
+| 6.3 Settings and shortcuts | 30 | 5 | 0 |
 | 6.4 Editor top bar and layout | 8 | 0 | 0 |
-| 6.5 Left panel: Media | 21 | 0 | 2 |
+| 6.5 Left panel: Media | 22 | 0 | 1 |
 | 6.6 Left panel: Audio | 4 | 0 | 0 |
 | 6.7 Left panel: Text | 4 | 1 | 0 |
 | 6.8 Left panel: Stickers | 3 | 0 | 0 |
@@ -625,7 +625,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.13 Left panel: Adjustment | 3 | 0 | 0 |
 | 6.14 Left panel: Templates | 1 | 0 | 0 |
 | 6.15 Player | 13 | 0 | 0 |
-| 6.16 Inspector: project (nothing selected) | 8 | 3 | 0 |
+| 6.16 Inspector: project (nothing selected) | 9 | 2 | 0 |
 | 6.17 Inspector: video clip | 40 | 0 | 0 |
 | 6.18 Inspector: photo clip | (see 6.17) | | |
 | 6.19 Inspector: audio clip | 7 | 0 | 0 |
@@ -641,9 +641,9 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.29 Export dialog | 16 | 0 | 0 |
 | 6.30 Other dialogs | 6 | 0 | 0 |
 | 6.31 Classic-algorithm features brought into scope (2026-10-18) | 12 | 0 | 0 |
-| **Total (353 in-scope features)** | **337** | **13** | **3** |
+| **Total (353 in-scope features)** | **340** | **12** | **1** |
 
-Re-audited 2026-10-19 against main 8d265833: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (329 has, 16 partly, 8 missing of 353; 93.2% strict, 95.5% with partly as half). Before it (audited against ab4960fe) the table read 289 / 36 / 28 of 353 (81.9% strict, 87.0% with partly as half). Before that (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows. Since then: Settings › Edit › Linkage settings works in the editor, and a project holds several timelines (File › New timeline, New timeline with selected item, the Export timeline menu): 333 has, 15 partly, 5 missing (94.3%). Then audio while scrubbing and Preview axis's video and audio: 335 has, 14 partly, 4 missing. Then the Render menu and pre-render cache (and compound Pre-process): 337 has, 13 partly, 3 missing.
+Re-audited 2026-10-19 against main 8d265833: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (329 has, 16 partly, 8 missing of 353; 93.2% strict, 95.5% with partly as half). Before it (audited against ab4960fe) the table read 289 / 36 / 28 of 353 (81.9% strict, 87.0% with partly as half). Before that (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows. Since then: Settings › Edit › Linkage settings works in the editor, and a project holds several timelines (File › New timeline, New timeline with selected item, the Export timeline menu): 333 has, 15 partly, 5 missing (94.3%). Then audio while scrubbing and Preview axis's video and audio: 335 has, 14 partly, 4 missing. Then the Render menu and pre-render cache (and compound Pre-process): 337 has, 13 partly, 3 missing. Then Arrange layers (Settings default and the one-way project switch) and the media card's Export selected clips: 340 has, 12 partly, 1 missing (96.3%).
 
 ### 6.1 App menu bar (macOS)
 
@@ -712,7 +712,7 @@ Screenshots are in `02-settings/` unless a path says otherwise.
 | Edit › Target loudness: −23, −14, −12 LUFS | `006-edit-target-loudness.png` | has (the Audio tab's Normalize loudness and the clip menu use it) |
 | Edit › Play audio while scrubbing | `005-edit.png` | has (off by default, as CapCut's; short faded snippets while dragging or stepping the playhead) |
 | Edit › Linkage settings | `010-edit-linkage-settings.png` | has (in the editor its Settings button opens the timeline's Linkage settings; on Home, with no timeline, it's disabled) |
-| Edit › Arrange layers by default | `005-edit.png` | missing (the row shows disabled) |
+| Edit › Arrange layers by default | `005-edit.png` | has (new projects start with free layer order; unchecked, they keep tracks in bands by kind) |
 | Edit › Default frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `007-edit-frame-rate.png` | has (a new project's) |
 | Edit › Time code: HH:MM:SS+frame or HH:MM:SS:FF | `008-edit-time-code.png` | has (the player, the marker box, the project's length; the two differ at 29.97 and 59.94) |
 | Edit › Sound when export completes | `005-edit.png` | has |
@@ -779,7 +779,7 @@ Screenshots are in `05-left-media/` unless a path says otherwise.
 | Card menu: Create/Cancel file proxy | `006-media-item-context-menu.png` | has |
 | Card menu: New folder with selected item (bins/folders) | `006-media-item-context-menu.png` | has |
 | Card menu: New timeline with selected item (several timelines per project) | `006-media-item-context-menu.png` | has |
-| Card menu: Export selected clips | `006-media-item-context-menu.png` | missing |
+| Card menu: Export selected clips | `006-media-item-context-menu.png` | has (one file per selected card, with its In/Out range) |
 | Card menu: Create multi-camera clip | `006-media-item-context-menu.png` | missing |
 | Card menu: Link to media (relink missing files) | `006-media-item-context-menu.png` | has (Link to media on a missing card, and link missing in a folder; harness relink) |
 | Subprojects library (compound clips you can reuse) | `012-subprojects-empty.png` | has |
@@ -933,7 +933,7 @@ Screenshots are in `17-inspector-project/` unless a path says otherwise.
 | Project settings › Save to (project folder) | `001-project-settings-details.png` | has (moves the projects folder) |
 | Project settings › Imported media: Copy media to project / Stay in original location | `001-project-settings-details.png` | has |
 | Project settings › Color space: Rec. 709 SDR, Rec. 2020 SDR, Rec. 2100 HLG, Rec. 2100 PQ | `002-color-space-dropdown.png` | partly (only Rec. 709 SDR; the rest disabled with a note) |
-| Project settings › Arrange layers (one-way) | `001-project-settings-details.png` | partly (shown on, disabled with a note) |
+| Project settings › Arrange layers (one-way) | `001-project-settings-details.png` | has (off keeps tracks in bands by kind; turning it on frees the order and can't be undone, as CapCut's) |
 | Project settings › Aspect ratio list | `004-aspect-ratio-dropdown.png` | has |
 | Project settings › Resolution: Adapted, Custom | `006-resolution-dropdown.png` | has (Custom is W × H fields) |
 | Project settings › Frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `007-frame-rate-dropdown.png` | has |
