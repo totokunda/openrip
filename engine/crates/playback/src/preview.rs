@@ -426,6 +426,14 @@ pub struct PreviewEngine {
     /// The canvas colour of the frame gathered last: its main-track clip's canvas fill, if
     /// it's a colour, else black.
     background: [u8; 3],
+    /// Take frames from the pre-rendered chunks where there are valid ones (see
+    /// `render_cache`); on only for the engines that show a preview.
+    use_render_cache: bool,
+    /// The timeline's chunks and their keys for the current project, made when first needed.
+    chunk_plan: Option<std::sync::Arc<crate::render_cache::Plan>>,
+    /// The chunk file open for reading: its key, the cache's generation when it was opened
+    /// and its decoder.
+    chunk_reader: Option<(u64, u64, Decoder)>,
 }
 
 impl PreviewEngine {
@@ -467,7 +475,91 @@ impl PreviewEngine {
             preview_surface: false,
             transparent: false,
             background: [0, 0, 0],
+            use_render_cache: false,
+            chunk_plan: None,
+            chunk_reader: None,
         })
+    }
+
+    /// Show pre-rendered chunks in place of compositing where a valid one covers the frame
+    /// (preview surfaces and `render_image_cached`; stills and exports always composite).
+    pub fn use_render_cache(&mut self, on: bool) {
+        self.use_render_cache = on;
+        self.chunk_reader = None;
+    }
+
+    /// The pre-rendered frame at `t`, if the cache has a valid chunk for it.
+    fn cached_frame(&mut self, t: Micros) -> Option<VideoFrame> {
+        if !self.use_render_cache || self.transparent || self.measure_only {
+            return None;
+        }
+        let cache = crate::render_cache::RenderCache::global();
+        if !cache.enabled() || cache.is_empty() {
+            return None;
+        }
+        let plan = match &self.chunk_plan {
+            Some(p) => p.clone(),
+            None => {
+                let p = std::sync::Arc::new(cache.plan(&self.project));
+                self.chunk_plan = Some(p.clone());
+                p
+            }
+        };
+        let miss = |me: &mut Self| {
+            let _ = me;
+            cache.count(false);
+            None
+        };
+        let Some(chunk) = plan.chunk_at(t) else { return miss(self) };
+        let Some(key) = chunk.key else { return miss(self) };
+        let generation = cache.generation();
+        if self.chunk_reader.as_ref().is_none_or(|r| r.0 != key || r.1 != generation) {
+            self.chunk_reader = None;
+            let Some(entry) = cache.lookup(key) else { return miss(self) };
+            let Some(path) = cache.path_of(key).map(|p| p.with_file_name(&entry.file)) else { return miss(self) };
+            match open_video(&path, &DecoderOptions { cache_bytes: 16 << 20, ..Default::default() }) {
+                Ok(d) => self.chunk_reader = Some((key, generation, d)),
+                Err(_) => {
+                    cache.remove(key);
+                    return miss(self);
+                }
+            }
+        }
+        // The file's frame times are the frame starts counted from its own 0; a millisecond in
+        // keeps the frame at the start itself.
+        let local = Micros(plan.fps.frame_start(plan.fps.frame_of(t) - chunk.first).0 + 1000);
+        match self.chunk_reader.as_mut().map(|r| r.2.frame_at(local)) {
+            Some(Ok(Some(frame))) => {
+                cache.count(true);
+                Some(frame)
+            }
+            _ => {
+                self.chunk_reader = None;
+                cache.remove(key);
+                miss(self)
+            }
+        }
+    }
+
+    /// The layer that shows a pre-rendered frame: the whole canvas.
+    fn cached_layer(frame: &VideoFrame, w: u32, h: u32) -> Layer<'_> {
+        Layer::from_model(Source::Video(frame), [w, h], [0.0, 0.0], [1.0, 1.0], 0.0)
+    }
+
+    /// Like [`PreviewEngine::render_image`], but from a pre-rendered chunk where a valid one
+    /// covers the frame; says whether it did (tests, and checking what a chunk looks like).
+    pub fn render_image_cached(&mut self, t: Micros, width: u32, height: u32) -> Result<(RgbaImage, FrameReport, bool), PreviewError> {
+        let was = self.use_render_cache;
+        self.use_render_cache = true;
+        let cached = self.cached_frame(t);
+        self.use_render_cache = was;
+        match cached {
+            Some(f) => {
+                let img = self.compositor.render(width, height, [0, 0, 0], &[Self::cached_layer(&f, width, height)]);
+                Ok((img, FrameReport { layers: 1, missing: Vec::new() }, true))
+            }
+            None => self.render_image(t, width, height).map(|(i, r)| (i, r, false)),
+        }
     }
 
     pub fn project(&self) -> &Project {
@@ -481,6 +573,7 @@ impl PreviewEngine {
         let keep: Vec<String> = self.decoders.keys().filter(|id| self.media_path(id).is_some_and(|path| Some(path) == media_path(&old, id))).cloned().collect();
         self.decoders.retain(|id, _| keep.contains(id));
         self.compound_tracks.clear();
+        self.chunk_plan = None;
         self.failed.clear(); // files may have been relinked
         self.scrub.forget_failures();
     }
@@ -547,6 +640,10 @@ impl PreviewEngine {
         let (w, h) = (target.width(), target.height());
         let t0 = std::time::Instant::now();
         self.preview_surface = true;
+        if let Some(frame) = self.cached_frame(t) {
+            self.compositor.render_into(target, [0, 0, 0], &[Self::cached_layer(&frame, w, h)])?;
+            return Ok(FrameReport { layers: 1, missing: Vec::new() });
+        }
         let (pixels, report) = self.gather(t, w, h);
         let t1 = std::time::Instant::now();
         let layers = self.layers(&pixels, t, w, h);

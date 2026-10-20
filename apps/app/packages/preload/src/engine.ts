@@ -314,7 +314,7 @@ window.addEventListener("unhandledrejection", (e) => {
 // canvas (the DOM is shared between worlds; a VideoFrame can't cross the bridge) and tells
 // the page with a DOM event.
 try {
-  sharedTexture.setSharedTextureReceiver(async ({ importedSharedTexture }, meta: { timeUs: number; width: number; height: number }) => {
+  sharedTexture.setSharedTextureReceiver(async ({ importedSharedTexture }, meta: { timeUs: number; width: number; height: number; renderMs?: number }) => {
     try {
       const canvas = document.getElementById(ENGINE_FRAME_CANVAS_ID) as HTMLCanvasElement | null;
       if (canvas) {
@@ -385,4 +385,55 @@ export function engineProjectPreviews(
   crop: number[] | null = null,
 ): Promise<{ width: number; height: number; rgba: Uint8Array }[]> {
   return ipcRenderer.invoke("engine:project-previews", json, times, width, height, crop);
+}
+
+// ---- Render (pre-rendered chunks of the timeline) ----
+
+/** Whether this platform can pre-render, and the bytes the rendered chunks take. */
+export function engineRenderCacheInfo(): Promise<{ available: boolean; bytes: number }> {
+  return ipcRenderer.invoke("engine:render-cache-info");
+}
+
+export type EnginePrerenderResult = { ok: true; rendered: number; reused: number; frames: number; seconds: number } | { ok: false; cancelled?: boolean; error?: string };
+
+/** Render the chunks overlapping `startUs`..`endUs` (the whole timeline when null) that aren't rendered yet. */
+export function enginePrerender(startUs: number | null, endUs: number | null): Promise<EnginePrerenderResult> {
+  return ipcRenderer.invoke("engine:prerender", startUs, endUs);
+}
+
+/** Stop the running pre-render (its promise resolves with `cancelled`; the chunks finished stay). */
+export function enginePrerenderCancel(): Promise<void> {
+  return ipcRenderer.invoke("engine:prerender-cancel");
+}
+
+/** Called with frames done and total while a pre-render runs. Returns an unsubscribe. */
+export function onEnginePrerenderProgress(cb: (done: number, total: number) => void): () => void {
+  const listener = (_e: unknown, done: number, total: number) => cb(done, total);
+  ipcRenderer.on("engine:prerender-progress", listener);
+  return () => ipcRenderer.off("engine:prerender-progress", listener);
+}
+
+/** The time ranges (µs, [start, end]) of the open project that are rendered and still valid. */
+export function engineRenderedRanges(): Promise<[number, number][]> {
+  return ipcRenderer.invoke("engine:rendered-ranges");
+}
+
+/** Delete every rendered chunk (Render › Delete rendering cache). */
+export function engineDeleteRenderCache(): Promise<void> {
+  return ipcRenderer.invoke("engine:render-cache-delete");
+}
+
+/** Called when rendered chunks were deleted from outside the timeline (Settings › Clear). Returns an unsubscribe. */
+export function onEngineRenderCacheChanged(cb: () => void): () => void {
+  const listener = () => cb();
+  ipcRenderer.on("engine:render-cache-changed", listener);
+  return () => ipcRenderer.off("engine:render-cache-changed", listener);
+}
+
+/** For tests: preview frames taken from rendered chunks and frames composited so far, and a switch to show composited frames only. */
+export function engineRenderCacheStats(): Promise<{ hits: number; misses: number }> {
+  return ipcRenderer.invoke("engine:render-cache-stats");
+}
+export function engineSetRenderCacheEnabled(on: boolean): Promise<void> {
+  return ipcRenderer.invoke("engine:render-cache-enabled", on);
 }

@@ -64,6 +64,8 @@ export interface ContextMenuItem {
   value?: string;
   /** A submenu, opened beside the row as it's hovered (CapCut's ›). */
   children?: ContextMenuItem[];
+  /** A dividing line above the row (in a submenu). */
+  separatorBefore?: boolean;
   /** Done when picked, in place of the menu's handling of `action` (then "custom"). */
   run?: () => void;
 }

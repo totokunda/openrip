@@ -47,6 +47,7 @@ import { useViewportStore } from "@/lib/viewport";
 import { insertionFrame, mainTrackOf, mainTrackPreview } from "@/lib/timeline-edit";
 import { layoutTracks, trackAt, trackDy, trackView } from "@/lib/timeline-view";
 import { MarkerEditor, MarkerFlags, RangeBand } from "./Markers";
+import RenderedBar from "./RenderedBar";
 import { RULER_HEIGHT, TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { bladeFrame, frameAtStageX, stageXOfFrame } from "@/lib/timeline-tools";
 import { applyTransition, cutsOn, useTransitionDropStore } from "@/lib/transitions";
@@ -1629,6 +1630,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                       }}
                     />
                     <RangeBand stageWidth={dimensions.stageWidth} startPadding={TIME_ZERO_X} stageHeight={dimensions.stageHeight} />
+                    <RenderedBar stageWidth={dimensions.stageWidth} startPadding={TIME_ZERO_X} />
                     <MarkerFlags stageWidth={dimensions.stageWidth} startPadding={TIME_ZERO_X} />
                   </Layer>
                   {/* Snap guideline overlay */}

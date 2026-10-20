@@ -27,6 +27,7 @@ pub mod pattern;
 pub mod pipeline;
 mod player;
 pub mod preview;
+pub mod render_cache;
 mod scan;
 mod scrub;
 mod server;
@@ -44,6 +45,7 @@ pub use pipeline::{Clock, PipelineStats, PreviewPipeline, RenderedFrame, Surface
 pub use output::{audio_output, set_audio_output, AudioOutput, OutputStream};
 pub use player::{Player, PlayerError, ScrubStats};
 pub use preview::{FrameReport, PreviewEngine, PreviewError};
+pub use render_cache::RenderCache;
 pub use server::{Delivered, FrameServer, Quality, SeekMode, ServerStats};
 pub use thumbs::{Pass, Thumb, Thumbnailer};
 pub use waveform::waveform;

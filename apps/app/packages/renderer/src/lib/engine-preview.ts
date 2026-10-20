@@ -34,6 +34,7 @@ import { useFilterLibrary } from "./filters/library";
 import { useEffectLibrary } from "./effects/library";
 import { useAdjustmentLibrary } from "./adjustment";
 import { defaultEffectParams, effectDef } from "./effects/catalog";
+import { initRender } from "./prerender";
 
 type EnginePreviewState = {
   /** The user's setting. */
@@ -67,6 +68,7 @@ const drawsNow = (s: EnginePreviewState) => s.enabled && !!s.info?.available && 
 
 /** Whether the engine draws the preview right now. */
 export const useEngineDraws = () => useEnginePreviewStore(drawsNow);
+export const engineDrawsNow = () => drawsNow(useEnginePreviewStore.getState());
 
 /**
  * The playhead frame a clip component works with. While the engine draws the preview, a
@@ -305,12 +307,23 @@ function scheduleSync(ms = 60) {
   }, ms);
 }
 
+/** Send the engine the latest edit now, and wait until it has it (before asking the engine to render the project). */
+export async function flushEngineSync(): Promise<void> {
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+  }
+  await syncNow();
+  while (syncing || syncTimer) await new Promise((r) => setTimeout(r, 20));
+}
+
 let initialized = false;
 
 /** Load the setting and engine state, and follow edits. Safe to call more than once. */
 export function initEnginePreview() {
   if (initialized) return;
   initialized = true;
+  initRender();
   void Promise.all([engineInfo(), getEnginePreviewEnabled()]).then(([info, enabled]) => {
     useEnginePreviewStore.setState({ info, enabled });
     // The engine draws text in the app's bundled fonts and lists the installed ones.

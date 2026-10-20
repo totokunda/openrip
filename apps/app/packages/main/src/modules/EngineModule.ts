@@ -71,6 +71,18 @@ export type EngineAddon = {
   /** The video codecs the platform's encoder can write (absent in engines built before it). */
   exportCodecs?(): string[];
   setThumbnailCacheDir(dir: string): void;
+  /** Render: pre-rendered chunks (absent in engines built before it). */
+  setRenderCacheDir?(dir: string): void;
+  renderCacheAvailable?(): boolean;
+  setRenderCacheEnabled?(on: boolean): void;
+  prerender?(startUs: number | null, endUs: number | null): Promise<{ rendered: number; reused: number; frames: number; seconds: number }>;
+  prerenderProgress?(): { done: number; total: number };
+  cancelPrerender?(): void;
+  /** Start, end, start, end, ... in microseconds. */
+  renderedRanges?(): number[];
+  clearRenderCache?(): void;
+  renderCacheBytes?(): number;
+  renderCacheStats?(): { hits: number; misses: number };
   /** Performance › Speed up hardware decoding (absent in engines built before it). */
   setHardwareDecoding?(on: boolean): void;
   capcutToApp(dir: string): Promise<{ json: string; name: string; missingMedia: string[]; notes: string[] }>;
@@ -249,7 +261,7 @@ async function fontFile(url: string): Promise<string | null> {
 }
 
 /** Hand a rendered surface to a window as a shared texture; the engine gets it back once released. */
-async function sendFrame(engine: EngineAddon, sender: Electron.WebContents, f: { id: number; ioSurface: Buffer; width: number; height: number; timeUs: number }) {
+async function sendFrame(engine: EngineAddon, sender: Electron.WebContents, f: { id: number; ioSurface: Buffer; width: number; height: number; timeUs: number; renderMs?: number }) {
   try {
     const imported = sharedTexture.importSharedTexture({
       textureInfo: {
@@ -262,7 +274,7 @@ async function sendFrame(engine: EngineAddon, sender: Electron.WebContents, f: {
       },
       allReferencesReleased: () => engine.release(f.id),
     });
-    await sharedTexture.sendSharedTexture({ frame: sender.mainFrame, importedSharedTexture: imported }, { timeUs: f.timeUs, width: f.width, height: f.height });
+    await sharedTexture.sendSharedTexture({ frame: sender.mainFrame, importedSharedTexture: imported }, { timeUs: f.timeUs, width: f.width, height: f.height, renderMs: f.renderMs });
     imported.release();
   } catch (e) {
     engine.release(f.id);
@@ -434,11 +446,13 @@ export class EngineModule implements AppModule {
     }
     // Exact thumbnails are kept across runs.
     if (addon) addon.setThumbnailCacheDir(join(app.getPath("userData"), "engine-thumbnails"));
+    // Pre-rendered chunks go in a folder of their own inside it, so Settings' size, Clear and Auto clear cover them.
+    if (addon) addon.setRenderCacheDir?.(join(app.getPath("userData"), "engine-thumbnails"));
     // Performance › Speed up hardware decoding, now and when it changes.
     const settings = getSettingsModule();
     addon?.setHardwareDecoding?.(settings.getPreferences().hardwareDecoding);
     settings.on("preferences-changed", (p: Preferences) => addon?.setHardwareDecoding?.(p.hardwareDecoding));
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:waveform", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still", "engine:detect-scenes", "engine:color-stats", "engine:auto-adjust", "engine:analyse-motion", "engine:motion-ready", "engine:analysis-progress", "engine:analysis-cancel"]) {
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:waveform", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still", "engine:detect-scenes", "engine:color-stats", "engine:auto-adjust", "engine:analyse-motion", "engine:motion-ready", "engine:analysis-progress", "engine:analysis-cancel", "engine:render-cache-info", "engine:prerender", "engine:prerender-cancel", "engine:rendered-ranges", "engine:render-cache-delete", "engine:render-cache-stats", "engine:render-cache-enabled"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -711,6 +725,50 @@ export class EngineModule implements AppModule {
     });
 
     ipcMain.handle("engine:export-cancel", () => addon?.cancelExport());
+
+    // Render (the Render menu): timeline ranges composited into the render cache, which the
+    // preview then plays from; progress goes to the asking window as
+    // `engine:prerender-progress` (frames done, total).
+    ipcMain.handle("engine:render-cache-info", () => {
+      try {
+        return { available: !!addon?.renderCacheAvailable?.(), bytes: addon?.renderCacheBytes?.() ?? 0 };
+      } catch {
+        return { available: false, bytes: 0 };
+      }
+    });
+    ipcMain.handle("engine:prerender", async (event, startUs: number | null, endUs: number | null) => {
+      const engine = addon;
+      if (!engine?.prerender) return { ok: false, error: "this engine can't render ahead; rebuild it" };
+      if (!engine.renderCacheAvailable?.()) return { ok: false, error: "this platform has no video encoder to render with" };
+      const sender = event.sender;
+      const timer = setInterval(() => {
+        if (!sender.isDestroyed()) {
+          const p = engine.prerenderProgress?.() ?? { done: 0, total: 0 };
+          sender.send("engine:prerender-progress", p.done, p.total);
+        }
+      }, 150);
+      try {
+        const r = await engine.prerender(startUs == null ? null : Math.round(startUs), endUs == null ? null : Math.round(endUs));
+        return { ok: true, ...r };
+      } catch (e) {
+        const why = message(e);
+        return why === "cancelled" ? { ok: false, cancelled: true } : { ok: false, error: why };
+      } finally {
+        clearInterval(timer);
+      }
+    });
+    ipcMain.handle("engine:prerender-cancel", () => addon?.cancelPrerender?.());
+    ipcMain.handle("engine:rendered-ranges", () => {
+      try {
+        const flat = addon?.renderedRanges?.() ?? [];
+        return Array.from({ length: Math.floor(flat.length / 2) }, (_, i) => [flat[i * 2], flat[i * 2 + 1]]);
+      } catch {
+        return [];
+      }
+    });
+    ipcMain.handle("engine:render-cache-delete", () => addon?.clearRenderCache?.());
+    ipcMain.handle("engine:render-cache-stats", () => addon?.renderCacheStats?.() ?? { hits: 0, misses: 0 });
+    ipcMain.handle("engine:render-cache-enabled", (_event, on: boolean) => addon?.setRenderCacheEnabled?.(!!on));
     // The codecs the Export dialog may offer beyond H.264 and HEVC: only what this platform's encoder has.
     ipcMain.handle("engine:export-codecs", (): string[] => {
       try {

@@ -31,6 +31,7 @@ mod capcut;
 mod effects;
 mod export;
 mod fonts;
+mod prerender;
 mod previews;
 mod project;
 mod session;
@@ -51,6 +52,7 @@ pub use fonts::{font_face, font_families, register_fonts, FontFace, FontFamily};
 pub use openrip_model::{Micros, Project};
 /// The Adjust sliders (the draft's −1…1), for a [`Look`].
 pub use openrip_render::Adjust;
+pub use prerender::{clear_render_cache, prerender_project, render_cache_available, render_cache_bytes, render_cache_stats, rendered_ranges, set_render_cache_dir, set_render_cache_enabled, PrerenderResult};
 pub use previews::ProjectPreviews;
 pub use project::{load_project, parse_project_json, ProjectInfo, Source, TextBlock};
 pub use session::{DisplayFrame, FrameHandle, FrameJob, Image, RenderedFrame, Renderer, Session, Surface};

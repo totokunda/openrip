@@ -1522,3 +1522,130 @@ pub fn transcribe_speech(job: u32, request: SpeechRequest) -> AsyncTask<SpeechTa
     speech_jobs().lock().unwrap().insert(job, control.clone());
     AsyncTask::new(SpeechTask { job, control, request })
 }
+
+// ---- pre-rendering (the Render menu) ---------------------------------------------
+
+/// The running pre-render's progress (frames), and a request to stop it.
+static PRERENDER: ExportControl = ExportControl::new();
+
+/// Keep rendered chunks and their index under `dir` (the app's cache folder); the index an
+/// earlier run left there is read, so chunks still valid are reused.
+#[napi]
+pub fn set_render_cache_dir(dir: String) {
+    openrip_core::set_render_cache_dir(Path::new(&dir));
+}
+
+/// Whether this platform can pre-render (there is a video encoder, and a cache folder).
+#[napi]
+pub fn render_cache_available() -> bool {
+    openrip_core::render_cache_available()
+}
+
+/// Show pre-rendered chunks in the preview (the default) or only composited frames.
+#[napi]
+pub fn set_render_cache_enabled(on: bool) {
+    openrip_core::set_render_cache_enabled(on);
+}
+
+#[napi(object)]
+pub struct PrerenderResult {
+    /// Chunks rendered now, and chunks of the range already rendered.
+    pub rendered: u32,
+    pub reused: u32,
+    pub frames: f64,
+    pub seconds: f64,
+}
+
+pub struct PrerenderTask {
+    project: openrip_core::Project,
+    range: Option<(i64, i64)>,
+}
+
+impl Task for PrerenderTask {
+    type Output = openrip_core::PrerenderResult;
+    type JsValue = PrerenderResult;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        openrip_core::prerender_project(self.project.clone(), self.range, &PRERENDER).map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, r: Self::Output) -> Result<PrerenderResult> {
+        Ok(PrerenderResult { rendered: r.rendered, reused: r.reused, frames: r.frames as f64, seconds: r.seconds })
+    }
+}
+
+/// Render the chunks of the open project that overlap `startUs`..`endUs` (the whole timeline
+/// when both are omitted) and are not rendered yet, on a worker thread. Rejects with
+/// "cancelled" after `cancelPrerender()`; the chunks finished stay.
+#[napi]
+pub fn prerender(start_us: Option<i64>, end_us: Option<i64>) -> Result<AsyncTask<PrerenderTask>> {
+    let project = session().lock().unwrap().as_ref().map(|s| s.project().clone()).ok_or_else(|| err(openrip_core::Error::NoProject))?;
+    let range = match (start_us, end_us) {
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => None,
+    };
+    Ok(AsyncTask::new(PrerenderTask { project, range }))
+}
+
+#[napi]
+pub fn prerender_progress() -> ExportProgress {
+    let p = PRERENDER.progress();
+    ExportProgress { done: p.done as f64, total: p.total as f64 }
+}
+
+#[napi]
+pub fn cancel_prerender() {
+    PRERENDER.cancel();
+}
+
+/// The time ranges of the open project that are rendered and still valid, flattened as
+/// start, end, start, end, … (µs).
+#[napi]
+pub fn rendered_ranges() -> Result<Vec<f64>> {
+    let guard = session().lock().unwrap();
+    let project = guard.as_ref().ok_or_else(|| err(openrip_core::Error::NoProject))?.project();
+    Ok(openrip_core::rendered_ranges(project).into_iter().flat_map(|(a, b)| [a as f64, b as f64]).collect())
+}
+
+/// Delete every rendered chunk.
+#[napi]
+pub fn clear_render_cache() {
+    openrip_core::clear_render_cache();
+}
+
+/// Bytes the rendered chunks take.
+#[napi]
+pub fn render_cache_bytes() -> f64 {
+    openrip_core::render_cache_bytes() as f64
+}
+
+#[napi(object)]
+pub struct CachedImage {
+    pub width: u32,
+    pub height: u32,
+    /// Straight-alpha RGBA bytes.
+    pub data: Buffer,
+    /// The frame came from a rendered chunk (else it was composited).
+    pub cached: bool,
+}
+
+/// Like `renderImage`, but from a rendered chunk where one covers the frame (tests).
+#[napi]
+pub fn render_image_cached(time_us: i64, width: u32, height: u32) -> Result<CachedImage> {
+    let renderer = session().lock().unwrap().as_ref().map(Session::renderer).ok_or_else(|| err(openrip_core::Error::NoProject))?;
+    let (img, cached) = renderer.render_image_cached(Micros(time_us), width, height).map_err(err)?;
+    Ok(CachedImage { width: img.width, height: img.height, data: Buffer::from(img.data), cached })
+}
+
+#[napi(object)]
+pub struct RenderCacheStats {
+    /// Preview frames taken from rendered chunks, and composited while the cache held some.
+    pub hits: f64,
+    pub misses: f64,
+}
+
+#[napi]
+pub fn render_cache_stats() -> RenderCacheStats {
+    let (hits, misses) = openrip_core::render_cache_stats();
+    RenderCacheStats { hits: hits as f64, misses: misses as f64 }
+}

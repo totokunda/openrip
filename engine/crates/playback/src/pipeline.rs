@@ -75,6 +75,7 @@ impl PreviewPipeline {
     pub fn new(project: Project, width: u32, height: u32) -> Result<Self, PreviewError> {
         let fps = project.fps;
         let mut engine = PreviewEngine::new(project)?;
+        engine.use_render_cache(true);
         let shared = Arc::new(Shared {
             state: Mutex::new(State { mode: Mode::Paused { want: None }, fps, size: (width, height), project: None, last: None, ready: VecDeque::new(), free: Vec::new(), next: None, generation: 0, quit: false, stats: Default::default() }),
             cond: Condvar::new(),

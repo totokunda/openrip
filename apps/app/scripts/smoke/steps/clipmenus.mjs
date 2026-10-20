@@ -1,8 +1,8 @@
 // The clip menu's Edit and Range submenus and the range itself (after import timeline newtext;
 // `CLIP_NAME=IMG_9079 OPENRIP_ENGINE_MUTE=1`). ⌘B at 3 s and 7 s cuts the main track into A, B, C.
 //   menu      B's menu: Edit › Freeze, Reverse, Mirror, Rotate, Crop; Export selected clips;
-//             Range › Select by clip (⇧X), Deselect (greyed with no range); no Render (nothing to
-//             back it: the rendering cache holds thumbnails and analyses, not pre-rendered frames)
+//             Range › Select by clip (⇧X), Deselect (greyed with no range); Render (its items are
+//             checked in the render step)
 //   edit      Edit › Mirror flips B (saved `flip`, the engine's frame changes), Rotate turns it
 //             90°, each undone and redone; Crop opens the crop dialog on it
 //   range     Range › Select by clip: the ruler shows a band over B's span, Deselect clears it;
@@ -89,7 +89,7 @@ export default async (ctx) => {
   await select(ctx, await saved(B), B.clipId, 5.5);
   await openMenu(B);
   let all = await rows();
-  check("B's menu has Export selected clips, Range and Edit, no Render", ["Export selected clips", "Range", "Edit"].every((n) => all.includes(n)) && !all.includes("Render") && !all.some((t) => /^Export as/.test(t)), JSON.stringify(all.filter((t) => t.length < 40).slice(0, 40)));
+  check("B's menu has Export selected clips, Range, Render and Edit", ["Export selected clips", "Range", "Render", "Edit"].every((n) => all.includes(n)) && !all.some((t) => /^Export as/.test(t)), JSON.stringify(all.filter((t) => t.length < 40).slice(0, 40)));
   await hover("Edit");
   all = await rows();
   check("Edit has Freeze, Reverse, Mirror, Rotate, Crop", ["Freeze", "Reverse", "Mirror", "Rotate", "Crop"].every((n) => all.includes(n)), JSON.stringify(all.filter((t) => ["Freeze", "Reverse", "Mirror", "Rotate", "Crop"].includes(t))));

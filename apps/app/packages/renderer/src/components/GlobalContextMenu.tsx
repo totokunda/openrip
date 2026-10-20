@@ -78,7 +78,10 @@ const MenuRow: React.FC<{
           className={cn("absolute -top-1 w-max min-w-[160px] p-1 rounded-[8px] border-[0.5px] border-black bg-brand-header shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)]", subFit.left ? "right-full mr-1" : "left-full ml-1")}
         >
           {sub.map((c) => (
-            <MenuRow key={c.id} item={c} ticked={subTicked} onSelect={onSelect} open={false} setOpen={() => {}} />
+            <React.Fragment key={c.id}>
+              {c.separatorBefore && <div className="my-1 h-px bg-black/60" />}
+              <MenuRow item={c} ticked={subTicked} onSelect={onSelect} open={false} setOpen={() => {}} />
+            </React.Fragment>
           ))}
         </div>
       )}

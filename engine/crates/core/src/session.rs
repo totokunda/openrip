@@ -50,6 +50,12 @@ impl Renderer {
         let (img, _) = self.0.lock().unwrap().render_image(time, width, height)?;
         Ok(Image { width: img.width, height: img.height, data: img.data })
     }
+
+    /// Like `render_image`, but from a pre-rendered chunk where one covers the frame (says whether it did).
+    pub fn render_image_cached(&self, time: Micros, width: u32, height: u32) -> Result<(Image, bool)> {
+        let (img, _, cached) = self.0.lock().unwrap().render_image_cached(time, width, height)?;
+        Ok((Image { width: img.width, height: img.height, data: img.data }, cached))
+    }
 }
 
 impl Image {
@@ -81,7 +87,8 @@ impl Session {
     pub fn open(project: Project, source: Source) -> Result<(Session, ProjectInfo)> {
         let info = ProjectInfo::of(&project, source);
         let player = Player::new(project.clone()).ok().map(Arc::new);
-        let engine = PreviewEngine::new(project.clone())?;
+        let mut engine = PreviewEngine::new(project.clone())?;
+        engine.use_render_cache(true);
         let session = Session {
             project,
             engine: Renderer(Arc::new(Mutex::new(engine))),

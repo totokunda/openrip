@@ -6,6 +6,7 @@ import { EventEmitter } from "node:events";
 import { promises as fsp } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getEngine } from "./EngineModule.js";
 
 /**
  * The app's preferences, as the Settings window edits them (CapCut's Draft, Edit, Performance
@@ -190,6 +191,18 @@ export class SettingsModule extends EventEmitter implements AppModule {
     return join(app.getPath("userData"), "engine-thumbnails");
   }
 
+  /** The rendered chunks are about to be deleted from the folder: the engine forgets them, and the timelines stop showing them as rendered. */
+  forgetRenderedChunks(): void {
+    getEngine()?.clearRenderCache?.();
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        win.webContents.send("engine:render-cache-changed");
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   /** Performance › Auto clear: the oldest files of the rendering cache go once it's over its limit. */
   async trimRenderCache(): Promise<void> {
     const gb = this.getPreferences().renderCacheMaxGb;
@@ -319,6 +332,7 @@ export class SettingsModule extends EventEmitter implements AppModule {
       return total;
     });
     ipcMain.handle("settings:clear-cache", async () => {
+      this.forgetRenderedChunks();
       for (const dir of this.cacheDirs()) await prune(dir);
       let total = 0;
       for (const dir of this.cacheDirs()) total += await sizeOf(dir);
@@ -326,6 +340,7 @@ export class SettingsModule extends EventEmitter implements AppModule {
     });
     ipcMain.handle("settings:render-cache", async () => ({ dir: this.renderCacheDir(), bytes: await sizeOf(this.renderCacheDir()) }));
     ipcMain.handle("settings:clear-render-cache", async () => {
+      this.forgetRenderedChunks();
       await prune(this.renderCacheDir());
       return sizeOf(this.renderCacheDir());
     });

@@ -59,6 +59,7 @@ import { rotate90, toggleFlip } from "@/lib/transform-presets";
 import { rangeByClip } from "@/lib/timeline-shortcuts";
 import { OPEN_CROP_EVENT } from "@/lib/crop";
 import { openRangeExport } from "@/lib/export-scope";
+import { deleteRenderingCache, renderTimeline } from "@/lib/prerender";
 import BeatMarkers from "./BeatMarkers";
 import { projectBeatPoints, soundMenuItems } from "@/lib/audio-tools";
 import { analysisMenuItems } from "@/lib/analysis";
@@ -1288,6 +1289,14 @@ const TimelineClip: React.FC<
           disabled: targetIds.length !== 1,
           run: () => void openCompound(currentClipId),
         });
+        // Render the compound's span (CapCut's Pre-process compound clip).
+        otherCommands.push({
+          id: "preprocess-compound",
+          label: "Pre-process compound clip",
+          action: "custom",
+          disabled: targetIds.length !== 1,
+          run: () => void renderTimeline({ start: clip?.startFrame ?? 0, end: clip?.endFrame ?? 0 }),
+        });
       }
 
       // CapCut's Edit ›: Freeze (at the playhead, when it's on the clip) and Reverse on a video;
@@ -1412,6 +1421,20 @@ const TimelineClip: React.FC<
           ],
         },
       ];
+      // Render ›: pre-render the timeline (lib/prerender.ts). In and Out need a range.
+      const renderItems: ContextMenuItem[] = [
+        {
+          id: "render",
+          label: "Render",
+          action: "none",
+          children: [
+            { id: "render-whole", label: "Whole timeline", action: "custom", run: () => void renderTimeline("whole") },
+            { id: "render-in", label: "In", action: "custom", disabled: !range, run: () => void renderTimeline("in") },
+            { id: "render-out", label: "Out", action: "custom", disabled: !range, run: () => void renderTimeline("out") },
+            { id: "render-delete", label: "Delete rendering cache", action: "custom", separatorBefore: true, run: () => void deleteRenderingCache() },
+          ],
+        },
+      ];
       // Copy/paste attributes and Save preset (lib/clip-presets.ts).
       const attributeItems = attributeMenuItems(clip, targetIds);
       // Save preset after Group, as CapCut orders them, then Export selected clips: the selected
@@ -1459,6 +1482,7 @@ const TimelineClip: React.FC<
           },
           { id: "mirror", items: mirrorItems },
           { id: "range", items: rangeItems },
+          { id: "render", items: renderItems },
         ],
       });
     }

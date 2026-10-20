@@ -21,6 +21,7 @@ const MissingMediaWatcher: React.FC = () => {
   return null;
 };
 import AnalysisPill from "@/components/timeline/AnalysisPill";
+import RenderPill from "@/components/timeline/RenderPill";
 import { useProjectsStore } from "@/lib/projects";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/react-query/queryClient";
@@ -267,6 +268,7 @@ const App: React.FC = () => {
       <GlobalContextMenu />
       <AppDialogs />
       <AnalysisPill />
+      <RenderPill />
       <MissingMediaWatcher />
       <RecordPanel />
       {/* The dragged picture, in the timeline's window (it can have one of its own). */}

@@ -69,14 +69,14 @@ impl ExportControl {
         ExportProgress { done: self.done.load(Ordering::Relaxed), total: self.total.load(Ordering::Relaxed) }
     }
 
-    fn reset(&self) {
+    pub(crate) fn reset(&self) {
         self.done.store(0, Ordering::Relaxed);
         self.total.store(0, Ordering::Relaxed);
         self.cancel.store(false, Ordering::Relaxed);
     }
 
     /// Record progress; whether to go on.
-    fn step(&self, done: u64, total: u64) -> bool {
+    pub(crate) fn step(&self, done: u64, total: u64) -> bool {
         self.done.store(done, Ordering::Relaxed);
         self.total.store(total, Ordering::Relaxed);
         !self.cancel.load(Ordering::Relaxed)

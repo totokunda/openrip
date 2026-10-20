@@ -28,10 +28,12 @@ use openrip_render::RgbaImage;
 mod aac_file;
 mod audio_file;
 mod gif;
+mod prerender;
 #[cfg(all(feature = "ffmpeg", target_vendor = "apple"))]
 mod videotoolbox;
 
 pub use audio_file::{export_audio, AudioFormat};
+pub use prerender::{available as prerender_available, cache_codec, prerender, PrerenderStats};
 pub use gif::{export_gif, gif_size, GifOptions};
 
 #[derive(Debug, thiserror::Error)]

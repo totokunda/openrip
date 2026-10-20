@@ -20,6 +20,7 @@ png = "0.18"
 # Stickers: animated and still WebP, and SVG drawn to a bitmap (both pure Rust, no system libraries).
 image-webp = "0.2"
 resvg = { version = "0.48", default-features = false }
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
