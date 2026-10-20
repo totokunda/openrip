@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { app, ipcMain, nativeImage } from "electron";
+import { getSettingsModule } from "./SettingsModule.js";
 
 type Frames = { width: number; height: number; data: Buffer }[];
 
@@ -128,7 +129,7 @@ export class TilePreviews {
 
   /** `engine-thumbnails/tile-previews`, inside the rendering cache Settings counts and clears. */
   private dir(): string {
-    return join(app.getPath("userData"), "engine-thumbnails", "tile-previews");
+    return join(getSettingsModule().renderCacheDir(), "tile-previews");
   }
 
   /** The tile's pictures, from the cache or drawn now (one at a time); null without the engine or the clips. */

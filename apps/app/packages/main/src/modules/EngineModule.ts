@@ -448,13 +448,19 @@ export class EngineModule implements AppModule {
       console.warn(`[engine] not available (${info.error}); using the app's own preview`);
     }
     // Exact thumbnails are kept across runs.
-    if (addon) addon.setThumbnailCacheDir(join(app.getPath("userData"), "engine-thumbnails"));
-    // Pre-rendered chunks go in a folder of their own inside it, so Settings' size, Clear and Auto clear cover them.
-    if (addon) addon.setRenderCacheDir?.(join(app.getPath("userData"), "engine-thumbnails"));
-    // Performance › Speed up hardware decoding, now and when it changes.
+    // (Performance › Rendering cache location: the folder the user chose, else one in the user data.)
     const settings = getSettingsModule();
+    if (addon) addon.setThumbnailCacheDir(settings.renderCacheDir());
+    // Pre-rendered chunks go in a folder of their own inside it, so Settings' size, Clear and Auto clear cover them.
+    if (addon) addon.setRenderCacheDir?.(settings.renderCacheDir());
+    // Performance › Speed up hardware decoding, now and when it changes.
     addon?.setHardwareDecoding?.(settings.getPreferences().hardwareDecoding);
     settings.on("preferences-changed", (p: Preferences) => addon?.setHardwareDecoding?.(p.hardwareDecoding));
+    // The rendering cache moved: the engine keeps its files in the new folder from now on.
+    settings.on("render-cache-moved", (dir: string) => {
+      addon?.setThumbnailCacheDir(dir);
+      addon?.setRenderCacheDir?.(dir);
+    });
     for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:waveform", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still", "engine:detect-scenes", "engine:color-stats", "engine:auto-adjust", "engine:analyse-motion", "engine:motion-ready", "engine:analysis-progress", "engine:analysis-cancel", "engine:render-cache-info", "engine:prerender", "engine:prerender-cancel", "engine:rendered-ranges", "engine:render-cache-delete", "engine:render-cache-stats", "engine:render-cache-enabled"]) {
       try {
         ipcMain.removeHandler(channel);

@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import {
   checkForAppUpdates,
   clearCache,
+  clearProxies,
   clearRenderCache,
   downloadAppUpdate,
   getAppPaths,
@@ -29,6 +30,7 @@ import { CACHE_AGES, FRAME_RATES, TARGET_LOUDNESS, usePreferencesStore, type Pre
 import { LANGUAGES, useT } from "@/lib/i18n";
 import { useEnginePreviewStore } from "@/lib/engine-preview";
 import { refreshProjects } from "@/lib/project-actions";
+import { bumpMediaLibraryVersion } from "@/lib/media/library";
 import { useShellStore } from "@/lib/shell";
 import { Check, Choice, Divider, Help, NotYet, PathField, Radio, Row, SizeClear, SmallButton, Stepper, Tip, Toggle } from "./controls";
 
@@ -64,7 +66,7 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
   const [proxyBytes, setProxyBytes] = useState<number | null>(null);
   const [mediaDir, setMediaDir] = useState("");
   const [presetsDefault, setPresetsDefault] = useState("");
-  const [renderCache, setRenderCache] = useState<{ dir: string; bytes: number | null }>({ dir: "", bytes: null });
+  const [renderCache, setRenderCache] = useState<{ dir: string; defaultDir?: string; bytes: number | null }>({ dir: "", bytes: null });
   const [update, setUpdate] = useState<AppUpdateState | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -305,21 +307,43 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
         </div>
       </Row>
       <Divider />
-      <Row id="proxy" label={t("settings.proxy")} disabled>
-        <Check checked={false} disabled>
+      <Row id="proxy" label={t("settings.proxy")}>
+        <Check testId="settings-proxy" checked={draft.proxyDefault} onChange={(v) => set("proxyDefault", v)}>
           {t("settings.proxy.check")}
         </Check>
-        <NotYet>{t("settings.proxy.note")}</NotYet>
+        <Help muted>{t("settings.proxy.note")}</Help>
       </Row>
       <Row id="proxyPath" label={t("settings.proxyPath")}>
         <PathField testId="settings-proxy-path" value={mediaDir} disabled title={t("settings.proxyPath.note")} />
         <Help muted>{t("settings.proxyPath.note")}</Help>
       </Row>
       <Row id="proxySize" label={t("settings.proxySize")}>
-        <SizeClear testId="settings-proxy-size" bytes={proxyBytes} disabled title={t("settings.proxySize.clear")} />
+        <SizeClear
+          testId="settings-proxy-size"
+          bytes={proxyBytes}
+          title={t("settings.proxySize.clear")}
+          onClear={async () => {
+            setProxyBytes(null);
+            setProxyBytes(await clearProxies());
+            bumpMediaLibraryVersion();
+          }}
+        />
       </Row>
       <Row id="renderCache" label={t("settings.renderCache")}>
-        <PathField testId="settings-render-cache-path" value={renderCache.dir} disabled title={t("settings.renderCache.fixed")} />
+        <div className="flex items-center gap-1">
+          <PathField
+            testId="settings-render-cache-path"
+            value={draft.renderCacheDir || renderCache.defaultDir || renderCache.dir}
+            title={t("settings.chooseFolder")}
+            onPick={async () => {
+              const dir = await pickFolder({ title: t("settings.renderCache"), defaultPath: draft.renderCacheDir || renderCache.dir || undefined });
+              if (dir) set("renderCacheDir", dir);
+            }}
+          />
+          <SmallButton testId="settings-render-cache-default" disabled={!draft.renderCacheDir} onClick={() => set("renderCacheDir", "")}>
+            {t("settings.pathDefault")}
+          </SmallButton>
+        </div>
         <Help muted>{t("settings.renderCache.fixed")}</Help>
       </Row>
       <Row id="renderCacheSize" label={t("settings.renderCacheSize")}>
@@ -342,10 +366,10 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
         </div>
         <Help muted>{t("settings.autoClear.help", { n: draft.renderCacheMaxGb })}</Help>
       </Row>
-      <Row id="autoRender" label={t("settings.autoRender")} disabled>
-        <Toggle on={false} disabled />
+      <Row id="autoRender" label={t("settings.autoRender")}>
+        <Toggle on={draft.autoRender} onChange={(v) => set("autoRender", v)} testId="settings-auto-render" />
         <Help muted>{t("settings.autoRender.help")}</Help>
-        <NotYet>{t("settings.renderCache.note")}</NotYet>
+        <Help muted>{t("settings.renderCache.note")}</Help>
       </Row>
       <Divider />
       <Row id="engine" label={t("settings.engine")}>

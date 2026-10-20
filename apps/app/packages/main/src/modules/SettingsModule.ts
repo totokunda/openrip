@@ -4,7 +4,7 @@ import Store from "electron-store";
 import { BrowserWindow, Notification, app, dialog, ipcMain } from "electron";
 import { EventEmitter } from "node:events";
 import { promises as fsp } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getEngine } from "./EngineModule.js";
 
@@ -59,6 +59,12 @@ export interface Preferences {
   scrubAudio: boolean;
   /** Edit › Arrange layers: a new project starts with free layer order (Project settings' Arrange layers). */
   arrangeLayers: boolean;
+  /** Performance › Proxy: a project's Proxy switch starts on (a project's own choice, kept in the user store, wins). */
+  proxyDefault: boolean;
+  /** Performance › Rendering cache location ("": `<userData>/engine-thumbnails`). */
+  renderCacheDir: string;
+  /** Performance › Auto render: idle stretches of the timeline are rendered into the cache in the background. */
+  autoRender: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -86,6 +92,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   linkageOff: [],
   scrubAudio: false,
   arrangeLayers: true,
+  proxyDefault: true,
+  renderCacheDir: "",
+  autoRender: false,
 };
 
 interface Settings {
@@ -191,7 +200,31 @@ export class SettingsModule extends EventEmitter implements AppModule {
 
   /** The engine's rendering cache: timeline thumbnails and the analyses it keeps per file. */
   renderCacheDir(): string {
+    return this.getPreferences().renderCacheDir || this.defaultRenderCacheDir();
+  }
+
+  defaultRenderCacheDir(): string {
     return join(app.getPath("userData"), "engine-thumbnails");
+  }
+
+  /**
+   * Performance › Rendering cache location changed: the files in the old folder move to the new
+   * one (the engine then reads and writes there), so nothing rendered is lost. A folder inside
+   * the other (or the same one) isn't moved into.
+   */
+  async moveRenderCache(oldDir: string, newDir: string): Promise<void> {
+    const inside = (a: string, b: string) => a === b || a.startsWith(b + sep);
+    if (inside(newDir, oldDir) || inside(oldDir, newDir)) return;
+    getEngine()?.cancelPrerender?.();
+    try {
+      await fsp.mkdir(newDir, { recursive: true });
+      await fsp.cp(oldDir, newDir, { recursive: true, force: true });
+      await prune(oldDir);
+    } catch (e) {
+      console.warn("[settings] moving the rendering cache failed:", e instanceof Error ? e.message : e);
+    }
+    this.emit("render-cache-moved", newDir);
+    this.forgetRenderedChunks();
   }
 
   /** The rendered chunks are about to be deleted from the folder: the engine forgets them, and the timelines stop showing them as rendered. */
@@ -247,6 +280,7 @@ export class SettingsModule extends EventEmitter implements AppModule {
     }
     if (before.cacheAutoDelete !== next.cacheAutoDelete || before.cacheMaxAgeDays !== next.cacheMaxAgeDays) void this.pruneCacheByAge();
     if (before.renderCacheMaxGb !== next.renderCacheMaxGb) void this.trimRenderCache();
+    if (before.renderCacheDir !== next.renderCacheDir) void this.moveRenderCache(before.renderCacheDir || this.defaultRenderCacheDir(), next.renderCacheDir || this.defaultRenderCacheDir());
     return next;
   }
 
@@ -268,7 +302,7 @@ export class SettingsModule extends EventEmitter implements AppModule {
    */
   cacheDirs(): string[] {
     const userData = app.getPath("userData");
-    return [join(userData, "engine-thumbnails"), join(userData, "media", "previews"), join(userData, "apex-export-cache")];
+    return [this.renderCacheDir(), join(userData, "media", "previews"), join(userData, "apex-export-cache")];
   }
 
   async pruneCacheByAge(): Promise<void> {
@@ -288,6 +322,38 @@ export class SettingsModule extends EventEmitter implements AppModule {
       // no media yet
     }
     return total + (await sizeOf(join(media, "proxy")));
+  }
+
+  /**
+   * Performance › Proxy size's bin: every proxy goes (the playable copies of videos the app can't
+   * decode stay: they stand in for the original). Resolves with what's left.
+   */
+  async clearProxies(): Promise<number> {
+    const media = join(app.getPath("userData"), "media");
+    const dirs = [join(media, "proxy")];
+    try {
+      for (const e of await fsp.readdir(media)) dirs.push(join(media, e, "proxy"));
+    } catch {
+      // no media yet
+    }
+    for (const dir of dirs) {
+      let names: string[] = [];
+      try {
+        names = await fsp.readdir(dir);
+      } catch {
+        continue;
+      }
+      for (const n of names) if (n.endsWith("_proxy.mp4") || n.endsWith("_proxy.mp4.part.mp4")) await fsp.rm(join(dir, n), { force: true }).catch(() => {});
+    }
+    try {
+      const indexPath = join(media, ".proxy-index.json");
+      const index = JSON.parse(await fsp.readFile(indexPath, "utf8")) as Record<string, string>;
+      const kept = Object.fromEntries(Object.entries(index).filter(([, v]) => !v.endsWith("_proxy.mp4")));
+      await fsp.writeFile(indexPath, JSON.stringify(kept, null, 2), "utf8");
+    } catch {
+      // no index
+    }
+    return this.proxySize();
   }
 
   private registerHandlers() {
@@ -341,13 +407,14 @@ export class SettingsModule extends EventEmitter implements AppModule {
       for (const dir of this.cacheDirs()) total += await sizeOf(dir);
       return total;
     });
-    ipcMain.handle("settings:render-cache", async () => ({ dir: this.renderCacheDir(), bytes: await sizeOf(this.renderCacheDir()) }));
+    ipcMain.handle("settings:render-cache", async () => ({ dir: this.renderCacheDir(), defaultDir: this.defaultRenderCacheDir(), bytes: await sizeOf(this.renderCacheDir()) }));
     ipcMain.handle("settings:clear-render-cache", async () => {
       this.forgetRenderedChunks();
       await prune(this.renderCacheDir());
       return sizeOf(this.renderCacheDir());
     });
     ipcMain.handle("settings:proxy-size", () => this.proxySize());
+    ipcMain.handle("settings:clear-proxies", () => this.clearProxies());
     ipcMain.handle("settings:paths", () => ({
       userData: app.getPath("userData"),
       media: join(app.getPath("userData"), "media"),

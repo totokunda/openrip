@@ -11,7 +11,9 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { engineDeleteRenderCache, engineRenderCacheInfo, engineRenderedRanges, enginePrerender, enginePrerenderCancel, onEnginePrerenderProgress, onEngineRenderCacheChanged } from "@app/preload";
+import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
+import { preferences, usePreferencesStore } from "./preferences";
 import { engineDrawsNow, flushEngineSync, useEnginePreviewStore } from "./engine-preview";
 import type { Range } from "./range";
 
@@ -55,19 +57,19 @@ function spansOf(scope: RenderScope, range: Range | null, fps: number, durationU
 }
 
 /** Render (Whole timeline / In / Out, or an explicit span in frames); progress in `useRenderStore`. */
-export async function renderTimeline(scope: RenderScope | Range): Promise<void> {
+export async function renderTimeline(scope: RenderScope | Range, quiet = false): Promise<void> {
   if (useRenderStore.getState().running) {
-    toast("Rendering is already running");
+    if (!quiet) toast("Rendering is already running");
     return;
   }
   if (!engineDrawsNow()) {
-    toast("Rendering needs the engine preview (Settings › Performance)");
+    if (!quiet) toast("Rendering needs the engine preview (Settings › Performance)");
     return;
   }
   const info = await engineRenderCacheInfo();
   useRenderStore.setState({ available: info.available });
   if (!info.available) {
-    toast("Rendering isn't available here: this platform has no video encoder to write the rendered parts with");
+    if (!quiet) toast("Rendering isn't available here: this platform has no video encoder to write the rendered parts with");
     return;
   }
   const controls = useControlsStore.getState();
@@ -98,8 +100,54 @@ export async function renderTimeline(scope: RenderScope | Range): Promise<void> 
   useRenderStore.setState({ running: null });
   await refreshRendered();
   if (failed) toast.error(failed);
-  else if (cancelled) toast("Rendering cancelled");
-  else toast(rendered > 0 ? "Rendering finished" : "Already rendered");
+  else if (!quiet) {
+    if (cancelled) toast("Rendering cancelled");
+    else toast(rendered > 0 ? "Rendering finished" : "Already rendered");
+  }
+}
+
+/** How long the timeline stays unedited, and not playing, before Auto render starts. */
+export const AUTO_RENDER_IDLE_MS = 4000;
+
+/**
+ * Settings › Performance › Auto render: once the project has been left alone for a few seconds
+ * (no edit, not playing), the range between the In and Out points (the whole timeline with none)
+ * is rendered into the cache in the background, quietly, with the Render pill showing progress.
+ * An edit stops it (the finished chunks stay) and it starts again when the editing pauses; chunks
+ * already rendered are reused, so asking again costs nothing.
+ */
+function initAutoRender(): void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const arm = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (!preferences().autoRender) return;
+    timer = setTimeout(() => {
+      timer = null;
+      const controls = useControlsStore.getState();
+      if (!preferences().autoRender || controls.isPlaying || useRenderStore.getState().running) return;
+      void renderTimeline(controls.range ?? "whole", true);
+    }, AUTO_RENDER_IDLE_MS);
+  };
+  // An edit interrupts and waits (the engine's own version counter also moves when a render
+  // starts, so it isn't what's watched).
+  useClipStore.subscribe((s, p) => {
+    if (s.clips === p.clips && s.timelines === p.timelines && s.assets === p.assets) return;
+    if (preferences().autoRender && useRenderStore.getState().running) cancelRender();
+    arm();
+  });
+  useEnginePreviewStore.subscribe((s, p) => {
+    if (s.enabled !== p.enabled || s.info?.available !== p.info?.available) arm();
+  });
+  useControlsStore.subscribe((s, p) => {
+    if (s.isPlaying !== p.isPlaying || s.range !== p.range) arm();
+  });
+  usePreferencesStore.subscribe((s, p) => {
+    if (s.prefs.autoRender === p.prefs.autoRender) return;
+    if (!s.prefs.autoRender && useRenderStore.getState().running) cancelRender();
+    arm();
+  });
+  arm();
 }
 
 /** Stop the running render (the parts finished stay rendered). */
@@ -133,6 +181,7 @@ export function initRender(): void {
     if (s.info?.available && !p.info?.available) void engineRenderCacheInfo().then((i) => useRenderStore.setState({ available: i.available }));
   });
   onEngineRenderCacheChanged(later);
+  initAutoRender();
   // The frame rate sets how times become frames.
   useControlsStore.subscribe((s, p) => {
     if (s.fps !== p.fps) later();

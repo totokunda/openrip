@@ -8,7 +8,7 @@ import { useClipStore } from "./clip";
 import { zoomFit, zoomIn, zoomOut } from "./player-zoom";
 import { usePlayerStore } from "./player";
 import { useControlsStore } from "./control";
-import { MIN_DURATION } from "./settings";
+import { zoomDuration, zoomLevelFor } from "./zoom";
 import type { ZoomLevel } from "./types";
 import { isClipLocked } from "./timeline-edit";
 import { useKeyframeGraphStore } from "./timeline-keyframes";
@@ -28,15 +28,25 @@ import { shuttle, shuttleRate, stopShuttle } from "./shuttle";
 /** The zoom level before Zoom to fit, which a second press goes back to. */
 let beforeFit: number | null = null;
 
-/** Zoom to fit (Shift+Z): the whole timeline in view; pressed again, back to the zoom it was. */
+/** Whether the whole timeline is in view (the window is the timeline). */
+export const isFitted = (c: { timelineDuration: [number, number]; totalTimelineFrames: number }): boolean =>
+  c.timelineDuration[0] <= 0 && c.timelineDuration[1] - c.timelineDuration[0] >= c.totalTimelineFrames;
+
+/**
+ * Zoom to fit (Shift+Z): the whole timeline in view, at the zoom level nearest (the slider's
+ * lowest ends two minutes wide, wider than a short timeline); pressed again, back to the zoom it was.
+ */
 export function toggleZoomToFit() {
   const c = useControlsStore.getState();
-  if (c.zoomLevel === c.minZoomLevel && beforeFit != null && beforeFit !== c.minZoomLevel) {
+  if (isFitted(c) && beforeFit != null) {
     zoomTimelineTo(beforeFit);
     beforeFit = null;
   } else {
-    if (c.zoomLevel !== c.minZoomLevel) beforeFit = c.zoomLevel;
-    zoomTimelineTo(c.minZoomLevel);
+    if (!isFitted(c)) beforeFit = c.zoomLevel;
+    const total = Math.max(1, c.totalTimelineFrames);
+    c.setFocusAnchorRatio(total > 0 ? Math.min(1, Math.max(0, c.focusFrame / total)) : 0.5);
+    c.setTimelineDuration(0, total);
+    c.setZoomLevel(zoomLevelFor(total, c.minZoomLevel, c.maxZoomLevel, total, c.fps || 24) as ZoomLevel);
   }
 }
 import { copySelectedAttributes, pasteSelectedAttributes } from "./clip-presets";
@@ -48,12 +58,8 @@ import { copySelectedAttributes, pasteSelectedAttributes } from "./clip-presets"
 export function zoomTimelineTo(level: number) {
   const c = useControlsStore.getState();
   const clamped = Math.max(c.minZoomLevel, Math.min(c.maxZoomLevel, Math.round(level)));
-  // Level 1 spans the whole timeline's baseline and the last level MIN_DURATION frames.
-  const maxDuration = Math.max(1, c.totalTimelineFrames);
-  const minDuration = Math.max(1, Math.min(MIN_DURATION, maxDuration));
-  const steps = Math.max(1, c.maxZoomLevel - c.minZoomLevel);
-  const t = (clamped - c.minZoomLevel) / steps;
-  const duration = Math.max(minDuration, Math.min(maxDuration, Math.round(maxDuration * Math.pow(minDuration / maxDuration, t))));
+  // Level 1 spans the whole timeline (two minutes when it's shorter) and the last level a few frames.
+  const duration = zoomDuration(clamped, c.minZoomLevel, c.maxZoomLevel, c.totalTimelineFrames, c.fps || 24);
   let start = Math.round(c.focusFrame - c.focusAnchorRatio * duration);
   start = Math.max(0, Math.min(start, Math.max(0, c.totalTimelineFrames - duration)));
   c.setFocusAnchorRatio(duration > 0 ? (c.focusFrame - start) / duration : 0.5);

@@ -1,5 +1,35 @@
 import type { ZoomLevel } from "./types.ts";
 
+/** Zoomed all the way out, the window is this long (CapCut's: about two minutes fill the view) when the timeline is shorter. */
+export const OVERVIEW_SECONDS = 120;
+/** Zoomed all the way in, the window is this many frames. */
+export const CLOSEST_FRAMES = 5;
+
+/**
+ * The window (frames) zoom `level` shows, from the widest (level `min`: the whole timeline of
+ * `total` frames, or two minutes when that is longer) down to `CLOSEST_FRAMES` (level `max`).
+ */
+export const zoomDuration = (level: number, min: number, max: number, total: number, fps: number): number => {
+  const widest = Math.max(1, total, Math.round(OVERVIEW_SECONDS * Math.max(1, fps)));
+  const closest = Math.min(CLOSEST_FRAMES, widest);
+  const t = (Math.min(max, Math.max(min, level)) - min) / Math.max(1, max - min);
+  return Math.max(closest, Math.min(widest, Math.round(widest * Math.pow(closest / widest, t))));
+};
+
+/** The zoom level whose window is nearest `width` frames. */
+export const zoomLevelFor = (width: number, min: number, max: number, total: number, fps: number): number => {
+  let best = min;
+  let diff = Infinity;
+  for (let l = min; l <= max; l++) {
+    const d = Math.abs(zoomDuration(l, min, max, total, fps) - width);
+    if (d < diff) {
+      diff = d;
+      best = l;
+    }
+  }
+  return best;
+};
+
 interface ZoomLevelConfig {
   minorTickInterval: number;
   majorTickInterval: number;

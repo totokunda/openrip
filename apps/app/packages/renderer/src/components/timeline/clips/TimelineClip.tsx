@@ -101,6 +101,7 @@ import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 import { useIsMissing } from "@/lib/media/missing";
 import { canReplaceClip, replaceClip, revealClipFile } from "@/lib/replace-clip";
+import { canTrimClip, useTrimClip } from "@/lib/trim-clip";
 import { isCompound } from "@/lib/compound";
 import { canGroup } from "@/lib/bundle";
 import { openCompound } from "@/lib/compound-edit";
@@ -1369,7 +1370,7 @@ const TimelineClip: React.FC<
         disabled: isGroup,
         run: () => useClipStore.getState().setClipsDeactivated(targetIds),
       });
-      // More clip actions ▸ Replace clip, Trim clip (not here yet), Open file location.
+      // More clip actions ▸ Replace clip, Trim clip, Open file location.
       if (targetIds.length === 1 && canReplaceClip(clip)) {
         clipActions.push({
           id: "more-actions",
@@ -1377,7 +1378,7 @@ const TimelineClip: React.FC<
           action: "none",
           children: [
             { id: "replace-clip", label: "Replace clip", action: "custom", run: () => void replaceClip(clip.clipId) },
-            { id: "trim-clip", label: "Trim clip", action: "custom", disabled: true },
+            { id: "trim-clip", label: "Trim clip", action: "custom", disabled: !canTrimClip(clip), run: () => useTrimClip.getState().open(clip.clipId) },
             { id: "open-file-location", label: "Open file location", action: "custom", run: () => void revealClipFile(clip.clipId) },
           ],
         });

@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { useCopyMedia } from "@/lib/media/copy-mode";
+import { useProxyMode } from "@/lib/media/proxy-mode";
 import { useProjectsStore } from "@/lib/projects";
 import { useViewportStore } from "@/lib/viewport";
 import { useControlsStore } from "@/lib/control";
@@ -31,6 +32,8 @@ const EmptyPropertiesPanel: React.FC = () => {
   const setProjectSettingsOpen = useShellStore((s) => s.setProjectSettingsOpen);
   const timeCodeStyle = usePreference("timeCode");
   const copyMedia = useCopyMedia((s) => !!s.byProject[project?.folderUuid ?? "_"]);
+  const proxyDefault = usePreference("proxyDefault");
+  const proxyOn = useProxyMode((s) => s.byProject[project?.folderUuid ?? "_"]?.on ?? proxyDefault);
   // A project made in this session (new, or from a CapCut draft) learns its file from the list.
   useEffect(() => {
     if (project && !project.filePath) void refreshProjects();
@@ -58,7 +61,7 @@ const EmptyPropertiesPanel: React.FC = () => {
       ],
       ["Imported media:", copyMedia ? "Copy media to project" : "Stay in original location"],
       ["Arrange layers:", arrangeLayers ? "Turned on" : "Turned off"],
-      ["Proxy:", "Turned off"],
+      ["Proxy:", proxyOn ? "Turned on" : "Turned off"],
       ["Media used:", String(mediaCount)],
     ],
     [

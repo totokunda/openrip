@@ -45,6 +45,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   linkageOff: [],
   scrubAudio: false,
   arrangeLayers: true,
+  proxyDefault: true,
+  renderCacheDir: "",
+  autoRender: false,
 };
 
 /** CapCut's choices for the rows with a menu. */

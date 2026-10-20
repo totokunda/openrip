@@ -40,6 +40,12 @@ export interface Preferences {
   scrubAudio: boolean;
   /** Edit › Arrange layers: a new project starts with free layer order. */
   arrangeLayers: boolean;
+  /** Performance › Proxy: a project's Proxy switch starts on. */
+  proxyDefault: boolean;
+  /** Performance › Rendering cache location ("": the default folder). */
+  renderCacheDir: string;
+  /** Performance › Auto render. */
+  autoRender: boolean;
 }
 
 function getPreferences(): Promise<Preferences> {
@@ -72,7 +78,7 @@ function clearCache(): Promise<number> {
 }
 
 /** Performance › Rendering cache: its folder and size, and clearing it (resolves with what's left). */
-function getRenderCache(): Promise<{ dir: string; bytes: number }> {
+function getRenderCache(): Promise<{ dir: string; defaultDir: string; bytes: number }> {
   return ipcRenderer.invoke("settings:render-cache");
 }
 function clearRenderCache(): Promise<number> {
@@ -82,6 +88,11 @@ function clearRenderCache(): Promise<number> {
 /** Performance › Proxy size: the proxies and playable copies in every project's media folder. */
 function getProxySize(): Promise<number> {
   return ipcRenderer.invoke("settings:proxy-size");
+}
+
+/** Performance › Proxy size's bin: remove every proxy (resolves with the bytes left). */
+function clearProxies(): Promise<number> {
+  return ipcRenderer.invoke("settings:clear-proxies");
 }
 
 function getAppPaths(): Promise<{ userData: string; media: string; presets: string }> {
@@ -132,6 +143,7 @@ export {
   getRenderCache,
   clearRenderCache,
   getProxySize,
+  clearProxies,
   getAppPaths,
   getProjectsDir,
   setProjectsDir,

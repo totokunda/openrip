@@ -89,6 +89,7 @@ const SECTIONS: Partial<Record<SidebarSection, { id: string; label: string; unde
   text: [
     { id: "add", label: "Add text" },
     // The text styles saved from a text's Save as preset (kept in the user data folder).
+    { id: "yours:favorites", label: "Favorites", under: "Yours" },
     { id: "yours:presets", label: "Presets", under: "Yours" },
     ...PRESET_CATEGORIES.map((c) => ({ id: `presets:${c}`, label: c, under: "Presets" })),
     ...TEMPLATE_SECTIONS,

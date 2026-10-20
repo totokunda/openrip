@@ -17,7 +17,8 @@ import { ASPECT_ID_ORIGINAL, PROJECT_ASPECTS, adaptedSize, currentCanvasSize, MA
 import { ratioBox } from "@/lib/aspect-presets";
 import { refreshProjects, renameProject } from "@/lib/project-actions";
 import { copyMediaFor, setCopyMedia } from "@/lib/media/copy-mode";
-import { Choice, Divider, NotYet, PathField, Radio, Row, Stepper, Tip, Toggle } from "./settings/controls";
+import { proxyHeightFor, proxyOnFor, setProxyMode, type ProxyHeight } from "@/lib/media/proxy-mode";
+import { Choice, Divider, PathField, Radio, Row, Stepper, Tip, Toggle } from "./settings/controls";
 
 type Tab = "details" | "performance";
 
@@ -47,6 +48,8 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
   const [clipSeconds, setClipSeconds] = useState(defaultClipLength || 5);
   const [copyMedia, setCopyMediaDraft] = useState(false);
   const [arrange, setArrange] = useState(true);
+  const [proxy, setProxy] = useState(false);
+  const [proxyHeight, setProxyHeight] = useState<ProxyHeight>(720);
   const [busy, setBusy] = useState(false);
 
   // Each opening starts from the project's values.
@@ -61,6 +64,8 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
     setClipSeconds(defaultClipLength || 5);
     setCopyMediaDraft(copyMediaFor(project?.folderUuid));
     setArrange(arrangeOn);
+    setProxy(proxyOnFor(project?.folderUuid));
+    setProxyHeight(proxyHeightFor(project?.folderUuid));
     void getProjectsDir().then((r) => {
       setDir(r.dir);
       setSavedDir(r.dir);
@@ -137,6 +142,10 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
       if (copyMedia !== copyMediaFor(project?.folderUuid)) {
         const n = await setCopyMedia(project?.folderUuid, copyMedia);
         if (copyMedia) toast(n > 0 ? `Copied ${n} media file${n === 1 ? "" : "s"} into the project` : "New imports are copied into the project");
+      }
+      if (proxy !== proxyOnFor(project?.folderUuid) || proxyHeight !== proxyHeightFor(project?.folderUuid)) {
+        setProxyMode(project?.folderUuid, { on: proxy, height: proxyHeight });
+        toast(proxy ? "Proxy is on: editing plays the proxies; exports use the originals" : "Proxy is off: editing plays the original media");
       }
       if (arrange && !arrangeOn) {
         useClipStore.getState().enableArrangeLayers();
@@ -256,22 +265,22 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
 
   const performanceTab = (
     <div className={cn(well, "py-6")}>
-      <Row id="proxy" label="Proxy" disabled>
-        <Toggle on={false} disabled testId="ps-proxy" />
+      <Row id="proxy" label="Proxy">
+        <Toggle on={proxy} onChange={setProxy} testId="ps-proxy" />
+        <p className="text-[12px] leading-[16px] text-[#7a7a7a]">On, editing plays low-resolution proxies (made from a media card's menu, or when video above 1080p is imported). Exports always use the original media.</p>
       </Row>
-      <Row id="proxyResolution" label="Resolution" disabled>
+      <Row id="proxyResolution" label="Resolution" disabled={!proxy}>
         <Choice
           testId="ps-proxy-resolution"
           width={264}
-          disabled
-          value="720"
+          disabled={!proxy}
+          value={String(proxyHeight)}
           options={[
             { value: "720", label: "720P" },
             { value: "540", label: "540P" },
           ]}
-          onChange={() => {}}
+          onChange={(v) => setProxyHeight(v === "540" ? 540 : 720)}
         />
-        <NotYet>OpenRip plays the original media through its engine, so proxies aren't used.</NotYet>
       </Row>
     </div>
   );

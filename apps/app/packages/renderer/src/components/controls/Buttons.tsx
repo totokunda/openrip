@@ -13,9 +13,11 @@ import { useClipStore } from "@/lib/clip";
 import { useCallback, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { MAX_DURATION } from "@/lib/settings";
+import { isFitted } from "@/lib/timeline-shortcuts";
 import { LuSquareSplitHorizontal, LuSquareSplitVertical } from "react-icons/lu";
 import { getMediaInfoCached } from "@/lib/media/utils";
 import { CropDialog } from "@/components/dialogs/CropDialog";
+import { TrimClipDialog } from "@/components/dialogs/TrimClipDialog";
 import { useState } from "react";
 import { undo, redo, useHistoryStore } from "@/lib/history";
 import { mainTrackOf } from "@/lib/timeline-edit";
@@ -124,7 +126,8 @@ const ExtendTimelineButton: React.FC<{ numSeconds?: number }> = ({
   numSeconds = 15,
 }) => {
   const {
-    zoomLevel,
+    timelineDuration,
+    totalTimelineFrames,
     fps,
     incrementTotalTimelineFrames,
     shiftTimelineDuration,
@@ -133,15 +136,19 @@ const ExtendTimelineButton: React.FC<{ numSeconds?: number }> = ({
   } = useControlsStore();
   const { clips } = useClipStore();
   const hasClips = clips.length > 0;
-  const disabled = !hasClips || zoomLevel !== 1;
+  const fitted = isFitted({ timelineDuration, totalTimelineFrames });
+  const disabled = !hasClips || !fitted;
   const handleExtendTimeline = useCallback(() => {
+    if (disabled) return;
     const increment = fps * numSeconds; // 15 second at 24fps default
-    if (zoomLevel === 1) {
+    if (fitted) {
       incrementTotalTimelineFrames(increment);
       setFocusFrame(focusFrame + increment);
       shiftTimelineDuration(increment);
     }
   }, [
+    disabled,
+    fitted,
     fps,
     numSeconds,
     incrementTotalTimelineFrames,
@@ -167,7 +174,6 @@ const ReduceTimelineButton: React.FC<{ numSeconds?: number }> = ({
 }) => {
   const {
     timelineDuration,
-    zoomLevel,
     fps,
     decrementTotalTimelineFrames,
     totalTimelineFrames,
@@ -180,13 +186,13 @@ const ReduceTimelineButton: React.FC<{ numSeconds?: number }> = ({
   const disabled =
     totalTimelineFrames <= MAX_DURATION ||
     totalTimelineFrames - fps * numSeconds < clipDuration ||
-    zoomLevel !== 1 ||
+    !isFitted({ timelineDuration, totalTimelineFrames }) ||
     !hasClips;
 
   const handleReduceTimeline = useCallback(() => {
     if (disabled) return;
     const decrement = fps * numSeconds; // 15 second at 24fps default
-    if (zoomLevel === 1) {
+    if (!disabled) {
       const timelineEndFrame = timelineDuration[1];
       decrementTotalTimelineFrames(decrement);
       setFocusFrame(focusFrame - decrement);
@@ -196,7 +202,8 @@ const ReduceTimelineButton: React.FC<{ numSeconds?: number }> = ({
       }
     }
   }, [
-    zoomLevel,
+    disabled,
+    totalTimelineFrames,
     fps,
     numSeconds,
     timelineDuration,
@@ -404,6 +411,7 @@ const CropButton = () => {
         <TbCrop className=" text-brand-light h-[19px] w-[19px]" />
       </div>
       <CropDialog open={isDialogOpen} onOpenChange={setIsDialogOpen} clip={selectedClip ?? null} />
+      <TrimClipDialog />
     </>
   );
 };

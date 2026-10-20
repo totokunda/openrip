@@ -19,6 +19,7 @@ import {
   LuPlus,
   LuSearch,
   LuSettings,
+  LuCircleArrowUp,
   LuTrash2,
   LuUpload,
   LuCopy,
@@ -34,7 +35,7 @@ import { createAndOpenProject, deleteProjectAnywhere, duplicateProjectCopy, open
 import { TrashDialog } from "./TrashDialog";
 import { LibraryPage } from "./LibraryPage";
 import { TemplatesPage } from "./TemplatesPage";
-import { getAppInfo, revealPathInFolder } from "@app/preload";
+import { checkForAppUpdates, downloadAppUpdate, getAppInfo, getAppUpdateState, installAppUpdate, onAppUpdateEvent, revealPathInFolder, type AppUpdateState } from "@app/preload";
 import { CapCutDraftsPage } from "./CapCutDraftsPage";
 import { editedLabel, HOME_PAGE_BG, homeMenu as menu, homeMenuRow as menuRow, homeTool, lengthLabel, middle } from "./shared";
 import { useT } from "@/lib/i18n";
@@ -278,6 +279,50 @@ const ProjectRow: React.FC<CardProps & { showPath?: boolean }> = ({ project, act
       <span className="tabular-nums text-brand-light/50">{sizeLabel(project.sizeBytes)}</span>
       <span className="truncate text-brand-light/50 text-left">{editedLabel(project.lastModified)}</span>
       <ProjectMenu project={project} onOpen={onOpen} onRename={start} onDuplicate={onDuplicate} onDelete={onDelete} onTemplate={onTemplate} className="hover:bg-brand-light/10" />
+    </div>
+  );
+};
+
+/**
+ * The update indicator beside the gear, as CapCut's (01-home/010-update-tooltip.png): an arrow in
+ * a circle; hovered, a tooltip says "You're up to date" with the current version, or that a
+ * version is available (with a dot on the icon). Clicking it checks, and once a version is found
+ * downloads it, then restarts to install it: the same update the toast offers (hooks/use-update-toasts.ts).
+ */
+const UpdateIndicator: React.FC = () => {
+  const t = useT();
+  const [state, setState] = useState<AppUpdateState | null>(null);
+  const [version, setVersion] = useState("");
+  const [hover, setHover] = useState(false);
+  useEffect(() => {
+    const refresh = () => void getAppUpdateState().then(setState).catch(() => {});
+    refresh();
+    void getAppInfo().then((i) => setVersion(i.version)).catch(() => {});
+    return onAppUpdateEvent(refresh);
+  }, []);
+  const status = state?.status ?? "idle";
+  const next = (state?.updateInfo as { version?: string } | undefined)?.version;
+  const ready = status === "downloaded";
+  const available = status === "available" || status === "downloading" || ready;
+  const title = ready ? t("home.update.ready") : status === "downloading" ? t("home.update.downloading") : available ? t("home.update.available") : status === "checking" ? t("home.update.checking") : t("home.update.current");
+  const detail = available ? (next ? t("home.update.version", { version: next }) : "") + (ready ? "" : "") : t("home.update.currentVersion", { version: version || "…" });
+  const click = () => {
+    if (ready) void installAppUpdate();
+    else if (status === "available") void downloadAppUpdate();
+    else if (status !== "checking" && status !== "downloading") void checkForAppUpdates().then(() => getAppUpdateState().then(setState)).catch(() => {});
+  };
+  return (
+    <div className="relative" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <button type="button" data-testid="home-update" data-status={status} aria-label={title} onClick={click} className="relative h-6 w-6 flex items-center justify-center rounded-[4px] text-brand-light/90 hover:bg-white/[0.06] outline-none cursor-pointer">
+        <LuCircleArrowUp className="w-4 h-4" />
+        {available && <span data-testid="home-update-dot" className="absolute right-0.5 top-0.5 w-[7px] h-[7px] rounded-full bg-brand-accent" />}
+      </button>
+      {hover && (
+        <div data-testid="home-update-tip" role="tooltip" className="absolute right-0 top-full mt-2 z-50 whitespace-nowrap rounded-[4px] bg-[#111] px-3 py-2 text-left shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)]">
+          <div className="text-[13px] text-brand-light">{title}</div>
+          {detail && <div className="text-[12px] text-brand-light/70">{detail}</div>}
+        </div>
+      )}
     </div>
   );
 };
@@ -657,7 +702,8 @@ const HomeScreen: React.FC = () => {
       </aside>
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <header className="h-11 shrink-0 flex items-center justify-end px-4">
+        <header className="h-11 shrink-0 flex items-center justify-end gap-3 px-4">
+          <UpdateIndicator />
           <GearMenu />
         </header>
         <main

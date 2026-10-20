@@ -12,7 +12,7 @@ import { freezeAtPlayhead, freezeTarget, reverseTarget, toggleReverse } from "@/
 import { rotate90, toggleFlip } from "@/lib/transform-presets";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
-import { addMarkerAtPlayhead, deleteToPlayhead, selectBeside, toggleZoomToFit } from "@/lib/timeline-shortcuts";
+import { addMarkerAtPlayhead, deleteToPlayhead, isFitted, selectBeside, toggleZoomToFit } from "@/lib/timeline-shortcuts";
 import { mainTrackOf } from "@/lib/timeline-edit";
 import { trail } from "@/lib/compound";
 import { closeCompound } from "@/lib/compound-edit";
@@ -166,7 +166,7 @@ export const LinkageToggle = () => {
 export const ZoomToFitButton = () => {
   const disabled = useClipStore((s) => s.clips.length === 0);
   // On while the whole timeline is in view.
-  const fitted = useControlsStore((c) => c.zoomLevel === c.minZoomLevel);
+  const fitted = useControlsStore((c) => isFitted(c));
   return (
     <Toggle title={useShortcutTitle("Zoom timeline to fit", "zoomToFit")} on={fitted && !disabled} disabled={disabled} onClick={toggleZoomToFit}>
       <TbRulerMeasure data-testid="tool-zoomfit" className="h-[19px] w-[19px]" />

@@ -38,6 +38,8 @@ import { useEffectLibrary } from "./effects/library";
 import { useAdjustmentLibrary } from "./adjustment";
 import { defaultEffectParams, effectDef } from "./effects/catalog";
 import { initRender } from "./prerender";
+import { proxyOnFor, useProxyMode } from "./media/proxy-mode";
+import { MediaLibraryEvents } from "./media/library";
 
 type EnginePreviewState = {
   /** The user's setting. */
@@ -114,9 +116,9 @@ async function syncNow() {
   }
   syncing = true;
   try {
-    // The engine reads originals (ProRes included) where the app uses proxies or playable
-    // copies.
-    const snapshot = withAdjustmentPreview(withEffectPreview(withFilterPreview(withoutMasksWhileEditing(await withOriginalMedia(snap.snapshot)))));
+    // The engine reads originals (ProRes included) where the app uses playable copies, and
+    // the proxies while editing when the project's Proxy switch is on.
+    const snapshot = withAdjustmentPreview(withEffectPreview(withFilterPreview(withoutMasksWhileEditing(await withOriginalMedia(snap.snapshot, true)))));
     // Its text in the bundled fonts from the first frame.
     await registerBundledFonts();
     const r = await engineSyncProject(snap.projectId, snapshot);
@@ -182,15 +184,17 @@ const eachClip = (clips: any[], fn: (clip: any) => any): any[] =>
  * The snapshot with each asset's path pointing at its original file. A video whose audio was
  * detached (separateClip) uses the file as `…#video` and its audio as `…#audio`: the engine
  * reads the file itself for both, the video half silent, as the app's own preview plays them.
+ * With `proxies` (the preview while editing, never an export) a video the project has a proxy
+ * for, with the project's Proxy switch on, points at the proxy instead.
  */
-export async function withOriginalMedia<T>(snapshot: T): Promise<T> {
+export async function withOriginalMedia<T>(snapshot: T, proxies = false): Promise<T> {
   const assets = (snapshot as any)?.assets;
   if (!assets || typeof assets !== "object") return snapshot;
   const entries = Object.entries(assets as Record<string, any>).filter(([, a]) => typeof a?.path === "string");
   if (entries.length === 0) return snapshot;
   const silent = new Set(entries.filter(([, a]) => a.path.endsWith("#video")).map(([id]) => id));
   const paths = entries.map(([, a]) => a.path.replace(/#(video|audio)$/, ""));
-  const originals = await engineSourcePaths(paths);
+  const originals = await engineSourcePaths(paths, proxies && proxyOnFor(useProjectsStore.getState().getActiveProject()?.folderUuid));
   const mapped = { ...(assets as Record<string, any>) };
   entries.forEach(([id, a], i) => {
     if (originals[i] !== a.path) mapped[id] = { ...a, path: originals[i] };
@@ -354,6 +358,9 @@ export function initEnginePreview() {
     if (s.preview !== p.preview && useEnginePreviewStore.getState().enabled) scheduleSync(0);
   });
   watch(useMaskStore.subscribe as any, (s: any) => [s.tool]);
+  // A proxy made or removed, or the project's Proxy switch: the engine's files change, not the project.
+  watch(useProxyMode.subscribe as any, (s: any) => [s.byProject]);
+  watch(MediaLibraryEvents.subscribe as any, (s: any) => [s.version]);
   // Stabilize and Remove flickers draw once the engine has tracked the clip.
   watch(useMotionStore.subscribe as any, (s: any) => [s.version]);
   watch(useProjectsStore.subscribe as any, (s: any) => [s.activeProjectId, (s as any).projectsLoaded]);

@@ -20,6 +20,7 @@ import { v4 as uuidv4 } from "uuid";
 import { useControlsStore } from "./control";
 import { MediaItem } from "@/components/media/Item";
 import { AUDIO_EXTS, MIN_DURATION, VIDEO_EXTS, IMAGE_EXTS } from "./settings";
+import { zoomDuration, zoomLevelFor } from "./zoom";
 import { getMediaInfo, getMediaInfoCached } from "./media/utils";
 import { getLowercaseExtension } from "@app/preload";
 import { remapMaskWithClipTransformProportional } from "./mask/clipTransformUtils";
@@ -1186,7 +1187,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       // First clip: set zoom level 1 window to exactly the baseline width,
       // so the clip takes 60% of the timeline at zoom level 1.
       controls.setTimelineDuration(0, newTotalFrames);
-      controls.setZoomLevel(1 as any);
+      controls.setZoomLevel(zoomLevelFor(newTotalFrames, minZoomLevel, maxZoomLevel, newTotalFrames, controls.fps || 24) as any);
       return;
     }
 
@@ -1194,12 +1195,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
     // window to avoid jitter, but recalibrate the zoom level so that the
     // current window width maps to the nearest zoom step under the new baseline.
     const steps = Math.max(1, maxZoomLevel - minZoomLevel);
-    const ratio = MIN_DURATION / newTotalFrames;
-    const durations: number[] = new Array(steps + 1).fill(0).map((_, i) => {
-      const ti = i / steps;
-      const d = Math.round(newTotalFrames * Math.pow(ratio, ti));
-      return Math.max(MIN_DURATION, Math.min(newTotalFrames, d));
-    });
+    const durations: number[] = new Array(steps + 1).fill(0).map((_, i) => zoomDuration(minZoomLevel + i, minZoomLevel, maxZoomLevel, newTotalFrames, controls.fps || 24));
 
     // Keep the same window; clamp within new total if needed
     let clampedStart = currentStart;

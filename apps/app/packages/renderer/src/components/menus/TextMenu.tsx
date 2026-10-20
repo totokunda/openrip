@@ -1,5 +1,6 @@
 import React from "react";
-import { LuPlus, LuX } from "react-icons/lu";
+import { LuPlus, LuStar, LuX } from "react-icons/lu";
+import { useTextFavourites } from "@/lib/text-favourites";
 import { applyPreset, useClipPresets } from "@/lib/clip-presets";
 import { isTextStyle, savedAsPreset } from "@/lib/text-style-presets";
 import type { TextClipProps } from "@/lib/types";
@@ -55,6 +56,34 @@ const usePresetDrop = () =>
     };
   }, []);
 
+/** The star on a tile's top-left, shown on hover (kept lit when the preset is a favourite): Add to / Remove from Favorites. */
+const FavouriteStar: React.FC<{ id: string; name: string }> = ({ id, name }) => {
+  const on = useTextFavourites((s) => s.favourites.includes(id));
+  const toggle = useTextFavourites((s) => s.toggle);
+  const label = on ? "Remove from Favorites" : "Add to Favorites";
+  return (
+    <span
+      role="button"
+      tabIndex={-1}
+      title={`${label}: ${name}`}
+      aria-label={label}
+      aria-pressed={on}
+      data-testid="text-favourite"
+      data-favourite-id={id}
+      draggable={false}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        toggle(id);
+      }}
+      className={cn("absolute left-1 top-1 w-[18px] h-[18px] rounded-full bg-black/60 items-center justify-center hover:bg-black/80 cursor-pointer", on ? "flex text-brand-accent" : "hidden group-hover:flex text-white")}
+    >
+      <LuStar className="w-3 h-3" fill={on ? "currentColor" : "none"} />
+    </span>
+  );
+};
+
 /**
  * A library tile as CapCut's (docs/plan/capcut-ui-spec.md §4.5): 86×86 on `bg.raised`, its
  * name under it; hovered, a "+" at the bottom-right. Clicked, or dragged onto the timeline or
@@ -76,6 +105,7 @@ const PresetTile: React.FC<{ preset: TextPreset; label?: string; testId?: string
       className="group relative w-[86px] h-[86px] rounded-[6px] bg-brand-background-light hover:bg-brand-button flex items-center justify-center overflow-hidden px-1.5 transition-colors cursor-pointer"
     >
       {children}
+      {label !== "" && <FavouriteStar id={preset.id} name={label ?? preset.name} />}
       <span className="absolute right-1 bottom-1 w-[18px] h-[18px] rounded-full bg-black/55 text-white items-center justify-center hidden group-hover:flex">
         <LuPlus className="w-3 h-3" />
       </span>
@@ -125,6 +155,7 @@ const SavedTextStyles: React.FC = () => {
                     >
                       <TextLook look={look} text="Text" size={20} />
                     </button>
+                    <FavouriteStar id={p.id} name={p.name} />
                     <button
                       type="button"
                       aria-label={`Add a text in ${p.name}`}
@@ -169,6 +200,36 @@ const SavedTextStyles: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        )}
+      </div>
+    </ScrollArea>
+  );
+};
+
+/** Text ▸ Yours ▸ Favorites: the starred presets, built-in and saved, as tiles that add like any preset's. */
+const TextFavourites: React.FC = () => {
+  const favourites = useTextFavourites((s) => s.favourites);
+  const presets = useClipPresets((s) => s.presets);
+  const load = useClipPresets((s) => s.load);
+  React.useEffect(() => void load(), [load]);
+  const saved = presets.filter(isTextStyle).map((p) => savedAsPreset(p, "Text"));
+  const all = [...TEXT_PRESETS, ...saved];
+  const list = favourites.map((id) => all.find((p) => p.id === id)).filter((p): p is TextPreset => !!p);
+  return (
+    <ScrollArea className="h-full">
+      <div className="flex flex-col gap-3 p-3 pb-8 text-left" data-testid="text-favourites">
+        {list.length === 0 ? (
+          <p className="text-[12px] text-[#6c6c6c] leading-snug py-6 text-center" data-testid="text-favourites-empty">
+            No favorites yet. Hover a text preset and click its star to keep it here.
+          </p>
+        ) : (
+          <div className="grid gap-x-4 gap-y-[24px]" style={{ gridTemplateColumns: "repeat(auto-fill, 86px)" }}>
+            {list.map((p) => (
+              <PresetTile key={p.id} preset={p} testId={`text-favourite-${p.id}`}>
+                <TextLook look={p.props} text={p.props.text === "Default Text" || !p.props.text ? "Text" : p.props.text} size={20} />
+              </PresetTile>
+            ))}
           </div>
         )}
       </div>
@@ -256,6 +317,8 @@ const TextMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
 
   // Yours › Presets: the text styles saved from a text's Save as preset.
   if (part === "yours:presets") return <SavedTextStyles />;
+  // Yours › Favorites: the presets starred (OpenRip's own, and saved styles).
+  if (part === "yours:favorites") return <TextFavourites />;
   // Local captions: the caption file import, as Captions ▸ Add captions has it.
   if (part === "captions") return <CaptionsMenu part="add" />;
   if (part.startsWith("templates:")) return <TextTemplatesMenu part={part} />;

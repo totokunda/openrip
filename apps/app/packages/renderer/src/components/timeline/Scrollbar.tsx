@@ -34,9 +34,9 @@ const Scrollbar: React.FC<ScrollbarProps> = ({
   const { scrollbarWidth, maxScrollbarX } = useMemo(() => {
     const [startFrame, endFrame] = timelineDuration;
     const visibleDuration = endFrame - startFrame;
-    const scrollbarWidth = Math.max(
-      20,
-      (visibleDuration / totalTimelineFrames) * stageWidth,
+    const scrollbarWidth = Math.min(
+      stageWidth,
+      Math.max(20, (visibleDuration / totalTimelineFrames) * stageWidth),
     );
     const maxScrollbarX = Math.max(0, stageWidth - scrollbarWidth);
 

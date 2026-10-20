@@ -444,34 +444,39 @@ async function createProxy(
 
   const targetHeight = parseHeight(resolution);
 
+  const partPath = `${proxyPath}.part.mp4`;
   await new Promise<void>((resolve, reject) => {
     const args = [
       "-i",
       realPath,
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a?",
+      // Never larger than the original; the frame rate stays, so the engine's timing is the original's.
       "-vf",
-      `scale=-2:${targetHeight}`,
-      "-r",
-      "24",
+      `scale=-2:min(${targetHeight}\\,ih)`,
+      // Every frame a keyframe: scrubbing and playback decode one frame at a time.
       "-g",
       "1",
-      "-keyint_min",
-      "1",
-      "-sc_threshold",
-      "0",
       "-c:v",
       "libx264",
       "-preset",
-      "medium",
+      "veryfast",
       "-crf",
-      "23",
+      "24",
+      "-pix_fmt",
+      "yuv420p",
       "-c:a",
       "aac",
       "-b:a",
-      "128k",
+      "192k",
       "-ar",
       "48000",
+      "-movflags",
+      "+faststart",
       "-y",
-      proxyPath,
+      partPath,
     ];
 
     const ffmpeg = spawn(resolveFfmpegCommand("ffmpeg"), args);
@@ -483,11 +488,13 @@ async function createProxy(
 
     ffmpeg.on("close", async (code) => {
       if (code === 0) {
+        await fsp.rename(partPath, proxyPath);
         const proxyIndex = await loadProxyIndex();
         proxyIndex[fileName] = proxyFileName;
         await saveProxyIndex(proxyIndex);
         resolve();
       } else {
+        await fsp.rm(partPath, { force: true }).catch(() => {});
         reject(new Error(`FFmpeg failed with code ${code}: ${stderr}`));
       }
     });
@@ -600,24 +607,51 @@ async function removeProxy(
   }
 }
 
+/** The original file a path in a project's proxy folder stands for (by the proxy index, else by its name), or null when it isn't one. */
+function originalOfProxy(fsPath: string, byProxy: Map<string, string>): string | null {
+  const dir = dirname(fsPath);
+  if (basename(dir) !== "proxy") return null;
+  const links = symlinksDir(dirname(dir));
+  const base = basename(fsPath);
+  let original = byProxy.get(base);
+  if (!original) {
+    // The index forgot it (Cancel file proxy, then a clip still pointing at the file): find the link by name.
+    const stem = base.replace(/(_proxy|_playable)\.mp4$/, "");
+    try {
+      original = fs.readdirSync(links).find((n) => basename(n, extname(n)) === stem);
+    } catch {
+      original = undefined;
+    }
+  }
+  const originalPath = original ? join(links, original) : null;
+  return originalPath && fs.existsSync(originalPath) ? originalPath : null;
+}
+
 /**
- * The original files behind proxies and playable copies, for the Rust engine, which
- * decodes originals (ProRes included) quickly. Paths may be file URLs or plain paths and
- * come back in the same form; anything that isn't a proxy comes back unchanged.
+ * The files the Rust engine reads for these paths (file URLs or plain paths; each comes back in
+ * the form it went in). It decodes originals (ProRes included) quickly, so a proxy or playable
+ * copy becomes its original. With `useProxy` (the project's Proxy switch) a video that has a
+ * proxy plays from it instead, for editing; exports never pass it. Anything else comes back unchanged.
  */
-async function engineSourcePaths(paths: string[]): Promise<string[]> {
+async function engineSourcePaths(paths: string[], useProxy = false): Promise<string[]> {
   const proxyIndex = await loadProxyIndex();
   const byProxy = new Map(Object.entries(proxyIndex).map(([original, proxy]) => [proxy, original]));
   return paths.map((p) => {
     try {
       const isUrl = p.startsWith("file://");
       const fsPath = isUrl ? fileURLToPath(p) : p;
-      const dir = dirname(fsPath);
-      const original = byProxy.get(basename(fsPath));
-      if (!original || basename(dir) !== "proxy") return p;
-      const originalPath = join(symlinksDir(dirname(dir)), original);
-      if (!fs.existsSync(originalPath)) return p;
-      return isUrl ? pathToFileURL(originalPath).href : originalPath;
+      const original = originalOfProxy(fsPath, byProxy) ?? fsPath;
+      let out = original;
+      if (useProxy) {
+        // `original` is a link in <project>/symlinks; its proxy is in <project>/proxy.
+        const entry = proxyIndex[basename(original)];
+        if (entry && basename(dirname(original)) === "symlinks" && !entry.endsWith(PLAYABLE_SUFFIX)) {
+          const proxyPath = join(proxyDir(dirname(dirname(original))), entry);
+          if (fs.existsSync(proxyPath)) out = proxyPath;
+        }
+      }
+      if (out === fsPath) return p;
+      return isUrl ? pathToFileURL(out).href : out;
     } catch {
       return p;
     }
