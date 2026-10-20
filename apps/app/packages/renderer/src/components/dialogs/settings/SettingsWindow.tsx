@@ -29,6 +29,7 @@ import { CACHE_AGES, FRAME_RATES, TARGET_LOUDNESS, usePreferencesStore, type Pre
 import { LANGUAGES, useT } from "@/lib/i18n";
 import { useEnginePreviewStore } from "@/lib/engine-preview";
 import { refreshProjects } from "@/lib/project-actions";
+import { useShellStore } from "@/lib/shell";
 import { Check, Choice, Divider, Help, NotYet, PathField, Radio, Row, SizeClear, SmallButton, Stepper, Tip, Toggle } from "./controls";
 
 type Tab = "draft" | "edit" | "performance" | "general";
@@ -50,6 +51,9 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
   const engineEnabled = useEnginePreviewStore((s) => s.enabled);
   const engineInfo = useEnginePreviewStore((s) => s.info);
   const setEngineEnabled = useEnginePreviewStore((s) => s.setEnabled);
+  // Linkage settings belong to the open timeline: the button opens them over Settings, in the editor.
+  const inEditor = useShellStore((s) => s.view === "editor");
+  const openLinkage = useShellStore((s) => s.setLinkageOpen);
 
   const [tab, setTab] = useState<Tab>("draft");
   const [draft, setDraft] = useState<Preferences>(prefs);
@@ -241,9 +245,11 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
         <Help muted>{t("settings.scrubAudio.help")}</Help>
         <NotYet>{t("settings.scrubAudio.note")}</NotYet>
       </Row>
-      <Row id="linkage" label={t("settings.linkage")} disabled>
-        <SmallButton disabled>{t("settings.linkage.button")}</SmallButton>
-        <NotYet>{t("settings.linkage.note")}</NotYet>
+      <Row id="linkage" label={t("settings.linkage")} disabled={!inEditor}>
+        <SmallButton testId="settings-linkage" disabled={!inEditor} onClick={() => openLinkage(true)}>
+          {t("settings.linkage.button")}
+        </SmallButton>
+        {!inEditor && <NotYet>{t("settings.linkage.note")}</NotYet>}
       </Row>
       <Row id="arrangeLayers" label={t("settings.arrangeLayers")} disabled>
         <Check checked={false} disabled>

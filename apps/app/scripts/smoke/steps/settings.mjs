@@ -239,6 +239,13 @@ export default async (ctx) => {
   }
   await openSettingsFromEditor(win);
   check("Settings opens from the editor", await win.locator("[data-testid=settings-window]").isVisible(), "");
+  // In the editor, Edit › Linkage's Settings button opens the timeline's Linkage settings over Settings.
+  await settingsTab(win, "edit");
+  await win.locator("[data-testid=settings-linkage]").click();
+  await win.waitForTimeout(400);
+  check("in the editor, Edit › Linkage › Settings opens Linkage settings", await win.locator("[data-testid=linkage-dialog]").isVisible(), "");
+  await win.locator("[data-testid=linkage-cancel]").click();
+  await win.waitForTimeout(300);
   // The cache (the photo's timeline thumbnails, at least) and its bin.
   await settingsTab(win, "draft");
   await win.waitForTimeout(500);

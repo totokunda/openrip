@@ -46,7 +46,7 @@ const en = {
   "settings.scrubAudio.note": "Not in OpenRip yet: sound plays during playback only; the engine has no short-snippet playback to scrub with.",
   "settings.linkage": "Linkage",
   "settings.linkage.button": "Settings",
-  "settings.linkage.note": "Linkage moves a video and its detached audio together. Choosing which items follow the main track isn't in OpenRip yet.",
+  "settings.linkage.note": "Open a project to choose which items follow the main track's clips.",
   "settings.arrangeLayers": "Arrange layers",
   "settings.arrangeLayers.check": "Layers can be reordered in every new project by default.",
   "settings.arrangeLayers.note": "Not in OpenRip yet: a clip's layer always follows its track, so there is no free layer order to switch on.",

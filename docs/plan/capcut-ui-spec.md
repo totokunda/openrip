@@ -612,7 +612,7 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 |---|---:|---:|---:|
 | 6.1 App menu bar (macOS) | 14 | 0 | 1 |
 | 6.2 Home screen | 15 | 1 | 0 |
-| 6.3 Settings and shortcuts | 27 | 6 | 2 |
+| 6.3 Settings and shortcuts | 28 | 5 | 2 |
 | 6.4 Editor top bar and layout | 8 | 0 | 0 |
 | 6.5 Left panel: Media | 20 | 0 | 3 |
 | 6.6 Left panel: Audio | 4 | 0 | 0 |
@@ -641,9 +641,9 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.29 Export dialog | 15 | 0 | 1 |
 | 6.30 Other dialogs | 6 | 0 | 0 |
 | 6.31 Classic-algorithm features brought into scope (2026-10-18) | 12 | 0 | 0 |
-| **Total (353 in-scope features)** | **329** | **16** | **8** |
+| **Total (353 in-scope features)** | **330** | **15** | **8** |
 
-Re-audited 2026-10-19 against main 8d265833: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (329 has, 16 partly, 8 missing of 353; 93.2% strict, 95.5% with partly as half). Before it (audited against ab4960fe) the table read 289 / 36 / 28 of 353 (81.9% strict, 87.0% with partly as half). Before that (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows.
+Re-audited 2026-10-19 against main 8d265833: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (329 has, 16 partly, 8 missing of 353; 93.2% strict, 95.5% with partly as half). Before it (audited against ab4960fe) the table read 289 / 36 / 28 of 353 (81.9% strict, 87.0% with partly as half). Before that (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows. Since then: Settings › Edit › Linkage settings works in the editor (330 has, 15 partly, 8 missing).
 
 ### 6.1 App menu bar (macOS)
 
@@ -711,7 +711,7 @@ Screenshots are in `02-settings/` unless a path says otherwise.
 | Edit › Image duration (s or frames) | `005-edit.png`, `009-edit-image-duration-unit.png` | has |
 | Edit › Target loudness: −23, −14, −12 LUFS | `006-edit-target-loudness.png` | has (the Audio tab's Normalize loudness and the clip menu use it) |
 | Edit › Play audio while scrubbing | `005-edit.png` | missing (the row shows disabled) |
-| Edit › Linkage settings | `010-edit-linkage-settings.png` | partly (the Linkage settings dialog opens from the timeline toolbar; this Settings row still shows disabled) |
+| Edit › Linkage settings | `010-edit-linkage-settings.png` | has (in the editor its Settings button opens the timeline's Linkage settings; on Home, with no timeline, it's disabled) |
 | Edit › Arrange layers by default | `005-edit.png` | missing (the row shows disabled) |
 | Edit › Default frame rate: 24, 25, 29.97, 30, 50, 59.94, 60 | `007-edit-frame-rate.png` | has (a new project's) |
 | Edit › Time code: HH:MM:SS+frame or HH:MM:SS:FF | `008-edit-time-code.png` | has (the player, the marker box, the project's length; the two differ at 29.97 and 59.94) |
