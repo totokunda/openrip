@@ -15,7 +15,7 @@ use openrip_playback::PreviewEngine;
 static SERIAL: Mutex<()> = Mutex::new(());
 
 fn tmp(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name)
+    { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join(name)
 }
 
 fn have_tools() -> bool {

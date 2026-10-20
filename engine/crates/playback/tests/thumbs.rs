@@ -12,7 +12,7 @@ fn clip() -> Option<PathBuf> {
         eprintln!("ffmpeg not found; skipping");
         return None;
     }
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("thumbs-barcode.mp4");
+    let path = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("thumbs-barcode.mp4");
     if !path.exists() {
         let out = Command::new("ffmpeg")
             .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
@@ -58,7 +58,7 @@ fn quick_pass_shows_each_gops_keyframe_and_exact_pass_the_frame() {
 #[test]
 fn exact_thumbnails_come_back_from_the_disk_cache() {
     let Some(path) = clip() else { return };
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("thumb-cache");
+    let dir = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("thumb-cache");
     let _ = std::fs::remove_dir_all(&dir);
     let frames = [20, 70];
     run(&mut Thumbnailer::new(Some(dir.clone())).unwrap(), &path, &frames, Pass::Exact);

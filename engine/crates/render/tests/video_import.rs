@@ -13,7 +13,7 @@ fn clip(name: &str, pix_fmt: &str, codec: &[&str]) -> Option<PathBuf> {
     if Command::new("ffmpeg").arg("-version").output().is_err() {
         return None;
     }
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let path = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join(name);
     if !path.exists() {
         let ext = path.extension().unwrap().to_str().unwrap().to_owned();
         let tmp = path.with_extension(format!("tmp.{ext}"));
@@ -99,7 +99,7 @@ fn hlg_frames_are_tone_mapped_to_sdr() {
     if Command::new("ffmpeg").arg("-version").output().is_err() {
         return;
     }
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let dir = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d };
     let path = dir.join("hlg-greys.mov");
     if !path.exists() {
         // Left half HLG signal 0.5, right half 0.75 (10-bit limited range: 64 + 876 s).

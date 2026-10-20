@@ -79,7 +79,7 @@ fn fixtures_dir() -> Option<&'static Path> {
             eprintln!("ffmpeg not found; skipping decode tests");
             return None;
         }
-        let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("media-fixtures");
+        let dir = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("media-fixtures");
         std::fs::create_dir_all(&dir).unwrap();
         for c in clips() {
             make(&dir, &c);

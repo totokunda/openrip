@@ -12,7 +12,7 @@ const W: u32 = 64;
 const H: u32 = 36;
 
 fn png(name: &str, w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> PathBuf {
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let path = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join(name);
     let file = std::fs::File::create(&path).unwrap();
     let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
     enc.set_color(png::ColorType::Rgba);
@@ -178,7 +178,7 @@ fn blend_and_chroma_materials_reach_the_frame() {
 #[test]
 fn a_lut_on_a_clip_is_drawn() {
     let grey = still("cmp-grey5.png", [40, 80, 120]);
-    let cube = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("cmp-invert.cube");
+    let cube = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("cmp-invert.cube");
     let mut text = String::from("LUT_3D_SIZE 2\n");
     for b in 0..2 {
         for g in 0..2 {

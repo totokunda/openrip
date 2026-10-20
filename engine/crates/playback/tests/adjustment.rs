@@ -10,7 +10,7 @@ const W: u32 = 64;
 const H: u32 = 36;
 
 fn still(name: &str, rgb: [u8; 3]) -> PathBuf {
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let path = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join(name);
     let file = std::fs::File::create(&path).unwrap();
     let mut enc = png::Encoder::new(std::io::BufWriter::new(file), W, H);
     enc.set_color(png::ColorType::Rgba);

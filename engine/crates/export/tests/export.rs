@@ -16,7 +16,7 @@ fn exports_a_still_as_h264_bt709() {
     if !ffmpeg_ok() {
         return;
     }
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let dir = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d };
     let png = dir.join("export-still.png");
     let st = Command::new("ffmpeg").args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0xC03020:s=320x180", "-frames:v", "1"]).arg(&png).status().unwrap();
     assert!(st.success());

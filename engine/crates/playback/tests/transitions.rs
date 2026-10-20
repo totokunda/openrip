@@ -16,7 +16,7 @@ const H: u32 = 36;
 /// it's written under a name of its own and renamed into place: a test never reads it half
 /// written.
 fn still(name: &str, rgb: [u8; 3]) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let dir = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d };
     let path = dir.join(name);
     let part = dir.join(format!("{name}.{:?}.part", std::thread::current().id()));
     {
@@ -160,7 +160,7 @@ fn barcode() -> Option<PathBuf> {
         eprintln!("ffmpeg not found; skipping");
         return None;
     }
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("transition-barcode.mp4");
+    let path = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("transition-barcode.mp4");
     if !path.exists() {
         let out = Command::new("ffmpeg")
             .args(["-v", "error", "-y", "-f", "lavfi", "-i"])

@@ -19,7 +19,7 @@ fn clip(name: &str, fps: u32, step: u32, frames: u32) -> Option<PathBuf> {
         eprintln!("ffmpeg not found; skipping");
         return None;
     }
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let dir = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d };
     let texture = dir.join("slowmo-texture.png");
     if !texture.exists() {
         let out = Command::new("ffmpeg")

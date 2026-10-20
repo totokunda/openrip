@@ -9,7 +9,7 @@ fn tone() -> Option<PathBuf> {
     if Command::new("ffmpeg").arg("-version").output().is_err() {
         return None;
     }
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("peaks-sine-stereo.m4a");
+    let path = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("peaks-sine-stereo.m4a");
     if !path.exists() {
         // 1 kHz at the default amplitude (1/8), 1.25 s, then AAC like a phone recording.
         let st = Command::new("ffmpeg")

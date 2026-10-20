@@ -27,7 +27,7 @@ fn tone() -> Option<PathBuf> {
         eprintln!("ffmpeg not found; skipping");
         return None;
     }
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("scrub-tone.wav");
+    let path = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("scrub-tone.wav");
     if !path.exists() {
         let st = Command::new("ffmpeg").args(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=4:r=48000", "-ac", "2"]).arg(&path).status().unwrap();
         assert!(st.success());

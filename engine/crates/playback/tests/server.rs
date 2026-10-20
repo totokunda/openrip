@@ -21,7 +21,7 @@ fn make_clip() -> Option<PathBuf> {
         eprintln!("ffmpeg not found; skipping");
         return None;
     }
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let dir = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d };
     let path = dir.join("playback-barcode.mp4");
     if !path.exists() {
         let tmp = dir.join("playback-barcode.tmp.mp4");

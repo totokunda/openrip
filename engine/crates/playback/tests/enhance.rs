@@ -30,7 +30,7 @@ fn ffmpeg(args: &[&str]) -> bool {
 
 /// A texture (blurred noise) the clips are cut from.
 fn texture() -> Option<PathBuf> {
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("enhance-texture.png");
+    let path = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("enhance-texture.png");
     if !path.exists() && !ffmpeg(&["-f", "lavfi", "-i", "nullsrc=s=1400x700:d=1,geq=lum='random(1)*255':cb=128:cr=128,gblur=sigma=2.5,format=gray", "-frames:v", "1", path.to_str().unwrap()]) {
         return None;
     }
@@ -41,7 +41,7 @@ fn texture() -> Option<PathBuf> {
 /// frame number `n`), then `filter` (anything after the crop).
 fn clip(name: &str, x: &str, y: &str, filter: &str) -> Option<PathBuf> {
     let texture = texture()?;
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let path = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join(name);
     if !path.exists() {
         let vf = format!("crop={W}:{H}:x='{x}':y='{y}'{filter}");
         let ok = ffmpeg(&[

@@ -11,7 +11,7 @@ fn noise() -> Option<PathBuf> {
     if Command::new("ffmpeg").arg("-version").output().is_err() {
         return None;
     }
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("mixer-noise.wav");
+    let path = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("mixer-noise.wav");
     if !path.exists() {
         let st = Command::new("ffmpeg")
             .args(["-v", "error", "-y", "-f", "lavfi", "-i", "anoisesrc=d=3:c=white:r=48000:a=0.3:seed=7", "-ac", "2"])
@@ -88,7 +88,7 @@ fn speed_keeps_pitch_unless_asked_not_to() {
     if Command::new("ffmpeg").arg("-version").output().is_err() {
         return;
     }
-    let tone = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("mixer-tone.wav");
+    let tone = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("mixer-tone.wav");
     if !tone.exists() {
         let st = Command::new("ffmpeg").args(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=4:r=48000", "-ac", "2"]).arg(&tone).status().unwrap();
         assert!(st.success());
@@ -118,7 +118,7 @@ fn tone() -> Option<PathBuf> {
     if Command::new("ffmpeg").arg("-version").output().is_err() {
         return None;
     }
-    let tone = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("mixer-tone-8s.wav");
+    let tone = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d }.join("mixer-tone-8s.wav");
     if !tone.exists() {
         // Each test writes its own copy and moves it in (tests run at once).
         let tmp = tone.with_extension(format!("{:?}.wav", std::thread::current().id()).replace(['(', ')', ' '], ""));
