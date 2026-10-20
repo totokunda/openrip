@@ -39,6 +39,7 @@ import TrackingProperties from '../properties/TrackingProperties'
 import TemplateProperties from '../properties/TemplateProperties'
 import OpticalFlowProperties from '../properties/OpticalFlowProperties'
 import { DeflickerProperties, DenoiseProperties, MotionBlurProperties, StabilizeProperties } from '../properties/EnhanceProperties'
+import CompoundRenderNote from '../properties/CompoundRenderNote'
 import { multiTabs, type InspectorSection, type InspectorTab } from '../properties/multi/multiTabs'
 
 /**
@@ -117,16 +118,27 @@ const ClipPropertiesPanel: React.FC = () => {
     // an audio clip's own tabs.
     const audioBasic: Section = { id: 'basic', label: 'Basic', content: <AudioProperties clipId={clipId} /> };
     const voiceChanger: Section = { id: 'voice', label: 'Voice changer', content: <VoiceChangerProperties clipId={clipId} /> };
-    // A compound clip: the video inspector without what reads a file (stabilize and the rest of
-    // the clean-up, auto adjust and colour match); its Speed is the constant one (no curve, no
-    // smooth slow-mo), applied to its picture and sound.
+    // A compound clip: the video inspector. What reads a file (stabilize and the rest of the
+    // clean-up, auto adjust and colour match) reads the file the compound is rendered to on first
+    // use (lib/compound-render.ts); it has no smooth slow-mo or optical flow.
     if (isCompound(clip)) {
       return [
         {
           id: 'video',
           label: 'Video',
           sections: [
-            { id: 'basic', label: 'Basic', content: <VideoBasicProperties clipId={clipId} /> },
+            {
+              id: 'basic',
+              label: 'Basic',
+              content: stack(
+                <VideoBasicProperties key="basic" clipId={clipId} />,
+                <CompoundRenderNote key="render" clipId={clipId} />,
+                <StabilizeProperties key="stabilize" clipId={clipId} />,
+                <DenoiseProperties key="denoise" clipId={clipId} />,
+                <DeflickerProperties key="deflicker" clipId={clipId} />,
+                <MotionBlurProperties key="motion-blur" clipId={clipId} />,
+              ),
+            },
             { id: 'removebg', label: 'Remove BG', content: <ChromaKeyProperties clipId={clipId} /> },
             { id: 'mask', label: 'Mask', content: <MaskPropertiesPanel clipId={clipId} /> },
           ],
@@ -138,7 +150,7 @@ const ClipPropertiesPanel: React.FC = () => {
           id: 'adjust',
           label: 'Adjust',
           sections: [
-            { id: 'basic', label: 'Basic', content: <AdjustBasic clipId={clipId} /> },
+            { id: 'basic', label: 'Basic', content: stack(<AutoAdjust key="auto" clipId={clipId} />, <ColorMatch key="match" clipId={clipId} />, <AdjustBasic key="basic" clipId={clipId} />) },
             { id: 'hsl', label: 'HSL', content: <AdjustHsl clipId={clipId} /> },
             { id: 'curves', label: 'Curves', content: <AdjustCurves clipId={clipId} /> },
             { id: 'wheels', label: 'Color wheel', content: <AdjustWheels clipId={clipId} /> },

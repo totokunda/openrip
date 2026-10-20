@@ -879,7 +879,10 @@ fn convert_clip(
         return None;
     }
     let is_av = matches!(ty, "video" | "audio");
-    let compound = ty == "video" && clip.get("compound").is_some_and(Value::is_object);
+    // A compound clip the app has rendered (`renderedAsset`, for the clean-up and audio tools that
+    // read a media file) plays that file as a video clip: the app sends its asset as `assetId`.
+    let has_content = ty == "video" && clip.get("compound").is_some_and(Value::is_object);
+    let compound = has_content && !b(clip, "renderedAsset");
     // A compound plays its content at the clip's constant speed (its picture and sound are the
     // content's read faster or slower), or by its speed curve (`speed` is the curve's average).
     let speed = if is_av { f(clip, "speed", 1.0).clamp(0.1, 100.0) } else { 1.0 };
@@ -905,7 +908,7 @@ fn convert_clip(
     let material = match ty {
         _ if freeze.is_some() => freeze.clone().unwrap(),
         // A compound clip plays the content `build_tracks` made for it.
-        "video" if clip.get("compound").is_some_and(Value::is_object) => MaterialId(format!("{id}-compound")),
+        "video" if compound => MaterialId(format!("{id}-compound")),
         "video" | "image" | "audio" => {
             let asset = s(clip, "assetId");
             if !materials.contains(&MaterialId(asset.clone())) {
@@ -998,7 +1001,7 @@ fn convert_clip(
     if is_av {
         volume = Animated::constant(10f64.powf(f(clip, "volume", 0.0) / 20.0) as f32);
         // A compound whose sound was taken out onto an audio clip (Extract audio) plays none of its own.
-        if compound && b(clip, "audioSeparated") {
+        if has_content && b(clip, "audioSeparated") {
             volume = Animated::constant(0.0f32);
         }
         attach_fade(&id, clip, materials, &mut attachments);
@@ -2333,6 +2336,39 @@ mod tests {
         assert_eq!(seg.source.unwrap().duration.0, seg.target.duration.0 * 2);
         assert!((seg.opacity.sample(Micros(0)) - 0.8).abs() < 1e-6 && (seg.transform.scale.sample(Micros(0)).x - 0.5).abs() < 1e-6);
         assert!((seg.volume.sample(Micros(0)) - 10f32.powf(-6.0 / 20.0)).abs() < 1e-5);
+    }
+
+    /// A compound the app has rendered (`renderedAsset`) plays its asset as a video clip, so the
+    /// clean-up and audio tools have a file to read; one whose sound was taken out plays none.
+    #[test]
+    fn a_rendered_compound_plays_its_file_and_a_separated_one_is_silent() {
+        let mut d = doc();
+        let tick = |frame: i64| ((frame * 1_000_000) / 24).to_string();
+        let compound = |extra: serde_json::Value| {
+            let mut c = json!({"clipId": "cc", "type": "video", "name": "Compound 1", "timelineId": "T-media", "volume": -6.0,
+                "startTick": tick(100), "endTick": tick(148), "trimStartTick": tick(0), "trimEndTick": tick(0), "speed": 1.0, "mediaWidth": 1920, "mediaHeight": 1080,
+                "transform": {"x": 0, "y": 0, "width": 1066.6666666666667, "height": 600, "scaleX": 1, "scaleY": 1, "rotation": 0, "opacity": 100},
+                "compound": {"tracks": [{"type": "media", "timelineId": "I-media", "muted": false, "hidden": false}],
+                    "clips": [{"clipId": "iv", "type": "video", "timelineId": "I-media", "assetId": "A1", "startTick": tick(0), "endTick": tick(48), "trimStartTick": tick(0), "trimEndTick": tick(0), "mediaWidth": 1920, "mediaHeight": 1080,
+                     "transform": {"x": 0, "y": 0, "width": 1066.6666666666667, "height": 600, "scaleX": 1, "scaleY": 1, "rotation": 0, "opacity": 100}}]}});
+            c.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            c
+        };
+        let import = |c: serde_json::Value| {
+            let mut d = doc();
+            d["timeline"]["clips"].as_array_mut().unwrap().push(c);
+            import_v1_json(&d).unwrap().project
+        };
+        let seg_of = |p: &openrip_model::Project| p.tracks.iter().flat_map(|t| &t.segments).find(|s| s.id == "cc").unwrap().clone();
+        let live = import(compound(json!({})));
+        assert!(live.materials.compounds.iter().any(|c| c.id == seg_of(&live).material));
+        let rendered = import(compound(json!({"renderedAsset": true, "assetId": "A1"})));
+        assert_eq!(seg_of(&rendered).material.0, "A1");
+        assert!(seg_of(&rendered).source.is_some());
+        let silent = import(compound(json!({"audioSeparated": true})));
+        assert_eq!(seg_of(&silent).volume.sample(Micros(0)), 0.0);
+        let silent_file = import(compound(json!({"audioSeparated": true, "renderedAsset": true, "assetId": "A1"})));
+        assert_eq!(seg_of(&silent_file).volume.sample(Micros(0)), 0.0);
     }
 
     #[test]

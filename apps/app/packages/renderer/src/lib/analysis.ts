@@ -16,6 +16,7 @@ import {
   type EngineAnalysis,
 } from "@app/preload";
 import { useClipStore } from "./clip";
+import { mediaAssetOf } from "./compound-media";
 import { useControlsStore } from "./control";
 import { beginStep } from "./history";
 import {
@@ -81,12 +82,16 @@ async function call<T>(step: number, steps: number, ask: (job: number) => Promis
   }
 }
 
+/** A compound clip is rendered to its file before a tool reads it (lib/compound-render.ts); any other clip is ready. */
+const prepared = async (clipId: string | null): Promise<boolean> => (clipId ? (await import("./compound-render")).prepareMedia(clipId) : true);
+
 /** Run `work` as the analysis (none if one is running already). */
 async function exclusive<T>(kind: AnalysisKind, clipId: string | null, work: () => Promise<T>): Promise<T | null> {
   if (useAnalysisStore.getState().running) return null;
   cancelled = false;
   useAnalysisStore.setState({ running: { kind, clipId, progress: 0 } });
   try {
+    if (!(await prepared(clipId))) return null;
     return await work();
   } finally {
     useAnalysisStore.setState({ running: null });
@@ -96,7 +101,7 @@ async function exclusive<T>(kind: AnalysisKind, clipId: string | null, work: () 
 /** A clip's media and the range of it it plays. */
 const sourceOf = (clip: AnyClipProps | undefined) => {
   if (!clip || !hasColorTools(clip)) return null;
-  const asset = useClipStore.getState().getAssetById(clip.assetId);
+  const asset = mediaAssetOf(clip);
   if (!asset?.path) return null;
   const fps = useControlsStore.getState().fps || 30;
   const [start, duration] = analysisRange(clip, fps, asset.duration);
@@ -105,7 +110,7 @@ const sourceOf = (clip: AnyClipProps | undefined) => {
 
 const clipNamed = (clip: AnyClipProps | undefined) => {
   if (!clip || !hasColorTools(clip)) return undefined;
-  const path = useClipStore.getState().getAssetById(clip.assetId)?.path ?? "";
+  const path = mediaAssetOf(clip)?.path ?? "";
   return decodeURIComponent(path.split(/[\\/]/).pop()?.split("#")[0] ?? "") || undefined;
 };
 
@@ -172,6 +177,7 @@ export const splitScenes = (clipId: string) =>
  * its cache, so this returns at once when it has the range. True when it has it now.
  */
 export const trackMotion = async (clipId: string): Promise<boolean | null> => {
+  if (!(await prepared(clipId))) return false;
   const src = sourceOf(useClipStore.getState().getClipById(clipId));
   if (!src) return false;
   if (await engineMotionReady(src.path, src.start, src.duration)) return true;

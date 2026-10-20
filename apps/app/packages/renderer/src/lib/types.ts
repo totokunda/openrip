@@ -735,6 +735,14 @@ export type VideoClipProps = ClipProps &
     audioSeparated?: boolean;
     /** A compound clip's mixed sound as an asset (lib/compound-actions.ts), which Transcript reads its words from. */
     mixAssetId?: string;
+    /**
+     * A compound clip rendered to a media file (lib/compound-render.ts), for the clean-up and
+     * audio tools that read a file (Stabilize, Reduce image noise, Remove flickers, Motion blur,
+     * Normalize loudness, Reduce noise, Auto adjust): the asset, and the key of the content it
+     * was rendered from (the file is stale when the content has since changed).
+     */
+    renderedAssetId?: string;
+    renderedKey?: string;
   };
 
 export type ImageClipProps = ClipProps &

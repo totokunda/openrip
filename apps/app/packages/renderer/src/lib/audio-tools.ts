@@ -12,17 +12,15 @@ import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
 import { getMediaInfoCached } from "./media/utils";
 import { beginStep } from "./history";
+import { mediaAssetOf } from "./compound-media";
 import { consistentVolumeOffPatches, consistentVolumeOn, consistentVolumePatches, loudnessOff, normalizeLoudness, placeVoiceover, playedRange, reduceNoiseOn, setReduceNoise, targetLoudness, type ClipMeasure } from "./audio.ts";
 import { beatSnapPoints, beatsOfFile, canHaveBeats, clearBeats, knownBeatsOfFile, setAutoBeats, toggleBeatAtPlayhead, type BeatGrid } from "./beats.ts";
 
 /** The file under an asset's path: the halves a detach made (`…#video`, `…#audio`) are the file itself. */
 export const fileOf = (path: string | undefined): string => (path ?? "").replace(/#(audio|video)$/, "");
 
-/** The clip's asset (videos and audio clips have one). */
-export const assetOfClip = (clip: AnyClipProps | undefined): Asset | undefined => {
-  const id = (clip as AudioClipProps | undefined)?.assetId;
-  return id ? useClipStore.getState().assets[id] : undefined;
-};
+/** The clip's asset: a video's or an audio clip's own, or a compound clip's rendered file once it has one (lib/compound-media.ts). */
+export const assetOfClip = (clip: AnyClipProps | undefined): Asset | undefined => mediaAssetOf(clip);
 
 /** The length of the clip's media, seconds (for a reversed clip's trims); undefined until known. */
 export const mediaSecondsOf = (clip: AnyClipProps | undefined): number | undefined => {
@@ -35,7 +33,7 @@ export const mediaSecondsOf = (clip: AnyClipProps | undefined): number | undefin
 const fps = () => useControlsStore.getState().fps || 30;
 
 /** A video whose sound was detached to an audio clip (CapCut's "Audio is separated"). */
-export const soundSeparated = (clip: AnyClipProps | undefined): boolean => clip?.type === "video" && !!assetOfClip(clip)?.path.endsWith("#video");
+export const soundSeparated = (clip: AnyClipProps | undefined): boolean => clip?.type === "video" && !!assetOfClip(clip)?.path?.endsWith("#video");
 
 // ---- beats ------------------------------------------------------------------------------------
 
@@ -116,7 +114,9 @@ export const setNormalize = async (clipId: string, on: boolean): Promise<void> =
     useClipStore.getState().updateClip(clipId, loudnessOff(clip));
     return;
   }
-  const path = fileOf(assetOfClip(clip)?.path);
+  // A compound is rendered first: its sound is measured in the file.
+  if (!(await (await import("./compound-render")).prepareMedia(clipId))) return;
+  const path = fileOf(assetOfClip(useClipStore.getState().getClipById(clipId))?.path);
   if (!path) return;
   const patch = await normalizeLoudness(clip, path, fps(), engineLoudness, mediaSecondsOf(clip));
   if (useClipStore.getState().getClipById(clipId)) useClipStore.getState().updateClip(clipId, patch);

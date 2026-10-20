@@ -119,7 +119,7 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
   const fps = useControlsStore((s) => s.fps) || 30;
   const { size } = useTrack(timelineId);
   // A photo has no sound; a video whose sound was detached plays none of its own (CapCut's empty band).
-  const own = clip.type === "video" && !!asset && !asset.path.endsWith("#video");
+  const own = clip.type === "video" && !!asset && !asset.path?.endsWith("#video");
   const fileBuckets = useWaveform(own ? asset?.path : undefined);
   // A compound clip's band is the mix of its whole timeline (lib/compound-mix.ts).
   const mix = useCompoundWaveform((clip as VideoClipProps).audioSeparated ? undefined : (clip as VideoClipProps).compound);

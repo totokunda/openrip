@@ -1437,16 +1437,11 @@ const TimelineClip: React.FC<
 
       // A compound clip's menu is CapCut's own (28-inspector-compound/003), without its AI and
       // cloud rows: the sound rows read the compound's mix; the ones that read a media file
-      // (Enhance audio, Enhance visuals, Adjust color, Enhance motion) have nothing to read.
+      // (Enhance audio, Enhance visuals, Adjust color, Enhance motion) read the file the
+      // compound is rendered to on first use.
       if (compoundClip && targetIds.length === 1 && clip) {
         const id = clip.clipId;
         const separated = !!(clip as VideoClipProps).audioSeparated;
-        const none = (rowId: string, label: string, children: string[]): ContextMenuItem => ({
-          id: rowId,
-          label,
-          action: "none",
-          children: children.map((c) => ({ id: `${rowId}-${c.toLowerCase().replace(/\W+/g, "-")}`, label: c, action: "custom", disabled: true })),
-        });
         const edit: ContextMenuItem = {
           id: "edit",
           label: "Edit",
@@ -1488,7 +1483,16 @@ const TimelineClip: React.FC<
                 { id: "extract-audio", label: "Extract audio", action: "custom", shortcut: "⌃⇧S", disabled: separated, run: () => void extractCompoundAudio(id) },
               ],
             },
-            { id: "enhance", items: [none("enhance-audio", "Enhance audio", ["Normalize loudness", "Reduce noise"]), none("enhance-visuals", "Enhance visuals", ["Stabilize", "Reduce image noise", "Remove flickers"]), none("adjust-color", "Adjust color", ["Auto adjust", "Color match"]), none("enhance-motion", "Enhance motion", ["Motion blur"])] },
+            // These read a media file: a compound is rendered to one on first use (lib/compound-render.ts).
+            {
+              id: "enhance",
+              items: [
+                ...soundMenuItems(clip).map((i) => ({ ...i, disabled: separated })),
+                ...enhanceMenuItems([id]).visuals,
+                ...analysisMenuItems(clip, 1).filter((i) => i.id === "adjust-color"),
+                ...enhanceMenuItems([id]).motion,
+              ],
+            },
             {
               id: "compound",
               items: [

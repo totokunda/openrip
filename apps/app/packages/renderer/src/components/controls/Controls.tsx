@@ -11,6 +11,7 @@ import {
 } from "./Buttons";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
+import { startCompoundRenderWatcher } from "@/lib/compound-render";
 import { useDrawingStore } from "@/lib/drawing";
 import { useMaskStore } from "@/lib/mask";
 import { useViewportStore } from "@/lib/viewport";
@@ -202,6 +203,8 @@ const Controls = () => {
   const selectedIds = useControlsStore((s) => s.selectedClipIds);
   // Inside a compound clip the toolbar has no Crop, Transform or Detach audio, as CapCut's.
   const inCompound = useClipStore((s) => s.compoundStack.length > 0);
+  // A compound clip that needs its rendered file (a clean-up or audio tool is on) gets one made.
+  useEffect(() => startCompoundRenderWatcher(), []);
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;

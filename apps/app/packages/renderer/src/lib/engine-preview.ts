@@ -40,6 +40,7 @@ import { defaultEffectParams, effectDef } from "./effects/catalog";
 import { initRender } from "./prerender";
 import { proxyOnFor, useProxyMode } from "./media/proxy-mode";
 import { MediaLibraryEvents } from "./media/library";
+import { findCompound, needsRender, renderedValid } from "./compound-media";
 
 type EnginePreviewState = {
   /** The user's setting. */
@@ -204,7 +205,39 @@ export async function withOriginalMedia<T>(snapshot: T, proxies = false): Promis
   if (silent.size > 0 && Array.isArray(clips)) {
     out = { ...out, timeline: { ...out.timeline, clips: eachClip(clips, (c: any) => (silent.has(c?.assetId) ? { ...c, volume: SILENT_DB } : c)) } };
   }
-  return out;
+  return withCompoundMedia(out);
+}
+
+/**
+ * Compound clips for the engine: one whose sound was taken out (Extract audio) plays none, its
+ * volume keys too; one that needs its rendered file (a clean-up or audio tool is on) and has a
+ * current one plays that file as a video clip (`renderedAsset`, with the file's asset and size),
+ * so the engine's clean-up and loudness work on it like any clip's.
+ */
+function withCompoundMedia<T>(snapshot: T): T {
+  const s = snapshot as any;
+  const clips = s?.timeline?.clips;
+  if (!Array.isArray(clips)) return snapshot;
+  let any = false;
+  const mapped = eachClip(clips, (c: any) => {
+    if (!c?.compound) return c;
+    let out = c;
+    if (c.audioSeparated) {
+      const { volume: _keys, ...keyframes } = (c.keyframes ?? {}) as Record<string, unknown>;
+      out = { ...out, volume: SILENT_DB, keyframes };
+      any = true;
+    }
+    const live = findCompound(c.clipId);
+    if (live && needsRender(live) && renderedValid(live)) {
+      const a = s.assets?.[live.renderedAssetId!];
+      if (a) {
+        out = { ...out, assetId: a.id, renderedAsset: true, mediaWidth: a.width, mediaHeight: a.height, mediaAspectRatio: a.width && a.height ? a.width / a.height : undefined };
+        any = true;
+      }
+    }
+    return out;
+  });
+  return any ? ({ ...s, timeline: { ...s.timeline, clips: mapped } } as T) : snapshot;
 }
 
 /**

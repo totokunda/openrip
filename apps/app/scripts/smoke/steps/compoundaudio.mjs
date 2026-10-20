@@ -3,12 +3,17 @@
 // OPENRIP_ENGINE_MUTE=1). The video is made a compound (⌥G), then:
 // - Volume −6 dB on the compound: its sound 6 dB down;
 // - Fade in 2 s: the first half second nearly silent, the sound back to full by 3 s;
+// - Normalize loudness on the compound (its mix is pre-processed to a file and measured): the
+//   exported level is the measured level plus the gain shown;
+// - Reduce noise on the compound is saved and renders its file;
+// - volume keys on the compound (0 dB at 1 s, −20 dB at 4 s), then Extract audio: the sound is
+//   the audio clip's alone, not doubled by the compound (a keyed volume doesn't bring it back);
 // - a speed curve (Speed ▸ Curve ▸ a preset): the compound's length and its picture change, and
 //   the exported sound is as long as the clip.
 import { engineFrame, rulerMap, seek, settled, tab } from "./_preview.mjs";
 import { bar, checks, savedProject } from "./_anim.mjs";
 import { field, typeInto } from "./_undo.mjs";
-import { dbOf, exporter, pcm, rms } from "./_audio.mjs";
+import { dbOf, exporter, integrated, pcm, rms } from "./_audio.mjs";
 
 export default async (ctx) => {
   const { win } = ctx;
@@ -40,7 +45,8 @@ export default async (ctx) => {
   let comp = await select();
   check("the video is a compound clip", !!comp.compound);
   const begin = +comp.startTick / 1e6;
-  const plain = pcm(await exportAs("cmpa-plain"), begin, 6);
+  const plainFile = await exportAs("cmpa-plain");
+  const plain = pcm(plainFile, begin, 6);
   check(`it has sound (rms ${rms(plain).toFixed(4)})`, rms(plain) > 0.001);
 
   // Volume −6 dB.
@@ -58,6 +64,64 @@ export default async (ctx) => {
   const later = dbOf(slice(faded, 3, 5), slice(plain, 3, 5));
   check(`Fade in 2 s: the first half second is far down (${start.toFixed(1)} dB), back to full by 3 s (${later.toFixed(1)} dB)`, start < -9 && Math.abs(later) < 0.7);
   await typeInto(win, "Fade in", 0);
+
+  // Normalize loudness: the compound is rendered to a file first, then measured.
+  const inspector = win.locator("[data-testid=inspector]");
+  const normBox = inspector.locator('[role=checkbox][aria-label="Normalize loudness on"]');
+  comp = await select();
+  await tab(win, "Audio");
+  const l0 = integrated(plainFile, begin, 5);
+  await normBox.click();
+  for (let i = 0; i < 400; i++) {
+    const t = (await inspector.locator("[data-testid=loudness-state]").innerText().catch(() => "")) || "";
+    if (/LUFS target|silent/.test(t)) break;
+    await win.waitForTimeout(250);
+  }
+  await win.waitForTimeout(3000);
+  doc = await saved();
+  comp = doc.timeline.clips.find((x) => x.compound);
+  check("Normalize loudness measured the compound's mix and rendered its file", !!comp.loudness?.enabled && Number.isFinite(comp.loudness.measured) && !!comp.renderedAssetId, JSON.stringify(comp.loudness));
+  const gain = Math.min(-23 - comp.loudness.measured, -Math.min(comp.loudness.peak, 0));
+  const l1 = integrated(await exportAs("cmpa-normalized"), begin, 5);
+  check(`the export is at the measured level plus the gain (${l1.toFixed(2)} LUFS from ${l0.toFixed(2)}, gain ${gain.toFixed(2)} dB)`, Math.abs(l1 - (l0 + gain)) < 0.8);
+  await normBox.click();
+  await win.waitForTimeout(800);
+  const noiseBox = inspector.locator('[role=checkbox][aria-label="Reduce noise on"]');
+  if (await noiseBox.count()) {
+    await noiseBox.click();
+    await win.waitForTimeout(1500);
+    doc = await saved();
+    check("Reduce noise is saved on the compound", !!doc.timeline.clips.find((x) => x.compound).denoise?.enabled);
+    await noiseBox.click();
+    await win.waitForTimeout(800);
+  }
+
+  // Volume keys, then Extract audio: the compound plays none of its own sound, keys or not.
+  await seek(win, ctx.map, 1);
+  comp = await select();
+  await tab(win, "Audio");
+  const diamond = inspector.locator("[data-keyframe=volume] button[aria-pressed]");
+  await settled(win, () => diamond.click());
+  await seek(win, ctx.map, 4);
+  comp = await select();
+  await tab(win, "Audio");
+  await typeInto(win, "Volume", -20);
+  const keyed = pcm(await exportAs("cmpa-keyed"), begin, 5);
+  const keyedAt4 = dbOf(slice(keyed, 4.2, 4.9), slice(plain, 4.2, 4.9));
+  check(`the keyed volume reaches the compound's sound (${keyedAt4.toFixed(1)} dB at 4 s)`, Math.abs(keyedAt4 + 20) < 1.5);
+  doc = await saved();
+  comp = doc.timeline.clips.find((x) => x.compound);
+  const [ex, ey] = await bar(ctx, doc, comp.clipId, 2);
+  await win.mouse.click(ex, ey, { button: "right" });
+  await win.waitForTimeout(400);
+  await settled(win, () => win.locator("[data-testid=menu-extract-audio]").click());
+  await win.waitForTimeout(8000);
+  const extracted = pcm(await exportAs("cmpa-extracted"), begin, 5);
+  const earlyDiff = dbOf(slice(extracted, 0.3, 0.9), slice(keyed, 0.3, 0.9));
+  const lateDiff = dbOf(slice(extracted, 4.2, 4.9), slice(keyed, 4.2, 4.9));
+  check(`after Extract audio the sound is the audio clip's alone, not doubled (${earlyDiff.toFixed(1)} dB at 0.3 s, ${lateDiff.toFixed(1)} dB at 4 s from before)`, Math.abs(earlyDiff) < 1 && Math.abs(lateDiff) < 1.5);
+  await win.keyboard.press("Meta+z");
+  await win.waitForTimeout(1500);
 
   // Speed curve.
   comp = await select();
