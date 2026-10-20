@@ -3,7 +3,7 @@
 // The mark is OpenRip's own (the home screen's clapperboard on the lavender gradient).
 import React, { useEffect, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { LuClapperboard } from "react-icons/lu";
+import AppLogo from "@/components/common/AppLogo";
 import { getAppInfo, type AppInfo } from "@app/preload";
 import { useT } from "@/lib/i18n";
 import { useShellStore } from "@/lib/shell";
@@ -29,9 +29,7 @@ export const AboutWindow: React.FC<{ open: boolean; onOpenChange: (open: boolean
           </div>
           <div className="flex flex-col items-center pt-6 pb-5 px-6">
             <div className="relative">
-              <span className="h-[64px] w-[64px] rounded-[14px] flex items-center justify-center" style={{ background: "linear-gradient(135deg, #c9a8e4 0%, #a77ecc 100%)", color: "#1b1424" }}>
-                <LuClapperboard className="w-8 h-8" />
-              </span>
+              <AppLogo size={64} className="block" />
               <span data-testid="about-version" className="absolute -top-2 left-[52px] h-[18px] px-1.5 rounded-full bg-brand-accent text-[11px] font-semibold text-white leading-[18px] whitespace-nowrap">
                 {info ? t("about.version", { version: info.version }) : "…"}
               </span>

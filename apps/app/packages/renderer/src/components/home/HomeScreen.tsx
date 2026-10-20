@@ -46,6 +46,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import AppLogo from "@/components/common/AppLogo";
 
 /**
  * The home screen, laid out as CapCut's: a sidebar (Home, Templates, Library), a banner to
@@ -672,12 +673,7 @@ const HomeScreen: React.FC = () => {
       <aside className="w-[216px] shrink-0 flex flex-col gap-3 px-5 pt-5">
         {/* Where CapCut has its account card: OpenRip has no accounts, so it says what it is. */}
         <div className="flex items-center gap-2.5 p-3 rounded-[8px] bg-[#121115] mb-3 text-left">
-          <span
-            className="h-9 w-9 rounded-full flex items-center justify-center shrink-0"
-            style={{ background: "linear-gradient(135deg, #c9a8e4 0%, #a77ecc 100%)", color: BANNER_TEXT }}
-          >
-            <LuClapperboard className="w-[18px] h-[18px]" />
-          </span>
+          <AppLogo size={36} className="shrink-0" />
           <span className="flex flex-col min-w-0">
             <span className="text-[14px] font-semibold text-brand-lighter">OpenRip</span>
             <span className="text-[12px] text-[#8a8a8a] truncate">Video editor</span>

@@ -1,6 +1,8 @@
 import type { AppModule } from "../AppModule.js";
 import { ModuleContext } from "../ModuleContext.js";
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { AppInitConfig } from "../AppInitConfig.js";
 import { attachPanelWindows } from "./PanelWindows.js";
 
@@ -86,8 +88,13 @@ class WindowManager implements AppModule {
   }
 
   async createMainWindow(): Promise<BrowserWindow> {
+    // A packaged app takes its icon from the bundle; in development the Dock (and on Windows
+    // and Linux the window) would show Electron's, so give them the app's.
+    const icon = app.isPackaged ? undefined : devIcon();
+    if (icon && process.platform === "darwin") app.dock?.setIcon(icon);
     const browserWindow = new BrowserWindow({
       show: false,
+      ...(icon ? { icon } : {}),
       backgroundColor: "#000000",
       ...(process.platform === "win32"
         ? {
@@ -181,4 +188,15 @@ export function createWindowManagerModule(
   ...args: ConstructorParameters<typeof WindowManager>
 ) {
   return new WindowManager(...args);
+}
+
+/** apps/app/buildResources/icon.png, looked for upwards from the app path (`npm start` runs from packages/). */
+function devIcon(): string | undefined {
+  let dir = app.getAppPath();
+  for (let i = 0; i < 4; i++) {
+    const file = join(dir, "buildResources", "icon.png");
+    if (existsSync(file)) return file;
+    dir = dirname(dir);
+  }
+  return undefined;
 }
