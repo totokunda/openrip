@@ -55,7 +55,7 @@ import { useClipStore } from "@/lib/clip";
 import { createTimeline } from "@/lib/timelines";
 import { useShellStore } from "@/lib/shell";
 import { preferences } from "@/lib/preferences";
-import { AUTO_PROXY_ABOVE, proxyHeightFor, useProxyMode } from "@/lib/media/proxy-mode";
+import { AUTO_PROXY_ABOVE, proxyHeightFor, proxyOnFor, setProxyMode, useProxyMode } from "@/lib/media/proxy-mode";
 import { linkMissingInFolder, linkToMedia } from "@/lib/relink";
 import { useRecordPanel } from "@/components/record/RecordPanel";
 import { addMediaAtPlayhead, type MediaRange } from "@/lib/media/add";
@@ -822,10 +822,14 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   );
 
   const handleCreateProxy = useCallback(
-    async (item: MediaItem) => {
+    async (item: MediaItem, background = false) => {
       try {
-        setCreatingProxies((prev) => new Set(prev).add(item.name));
-        const loadingId = toast.loading("Creating proxy...", {
+        // Making a proxy by hand is asking to edit with it: the project's Proxy switch comes on.
+        if (!background && !proxyOnFor(folderUuid)) setProxyMode(folderUuid, { on: true });
+        // An automatic one (an import above 1080p) runs in the background: the card stays usable.
+        if (!background) setCreatingProxies((prev) => new Set(prev).add(item.name));
+        else setAutoBusy((n) => n + 1);
+        const loadingId = toast.loading(background ? `Making a proxy of ${item.name}…` : "Creating proxy...", {
           position: "bottom-right",
         });
         await createProxy(item.name, `${proxyHeightFor(folderUuid)}p`, folderUuid ?? undefined);
@@ -850,6 +854,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
           style: { width: "fit-content" },
         });
       } finally {
+        if (background) setAutoBusy((n) => n - 1);
         setCreatingProxies((prev) => {
           const next = new Set(prev);
           next.delete(item.name);
@@ -862,9 +867,10 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
 
   // The project's Proxy switch on: video imported above 1080p gets a proxy, one at a time, once.
   const autoProxyTried = useRef(new Set<string>());
+  const [autoBusy, setAutoBusy] = useState(0);
   const proxyOn = useProxyMode((s) => (s.byProject[folderUuid ?? "_"]?.on ?? preferences().proxyDefault));
   useEffect(() => {
-    if (!proxyOn || creatingProxies.size > 0) return;
+    if (!proxyOn || creatingProxies.size > 0 || autoBusy > 0) return;
     const next = items.find((it) => {
       const v = it.mediaInfo?.video as any;
       const [w, h] = [Number(v?.displayWidth ?? v?.width ?? 0), Number(v?.displayHeight ?? v?.height ?? 0)];
@@ -872,8 +878,8 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
     });
     if (!next) return;
     autoProxyTried.current.add(`${folderUuid ?? ""}/${next.name}`);
-    void handleCreateProxy(next);
-  }, [items, proxyOn, creatingProxies, folderUuid, handleCreateProxy]);
+    void handleCreateProxy(next, true);
+  }, [items, proxyOn, creatingProxies, autoBusy, folderUuid, handleCreateProxy]);
 
   const handleRemoveProxy = useCallback(
     async (item: MediaItem) => {

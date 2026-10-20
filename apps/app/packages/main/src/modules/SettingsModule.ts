@@ -223,13 +223,19 @@ export class SettingsModule extends EventEmitter implements AppModule {
     } catch (e) {
       console.warn("[settings] moving the rendering cache failed:", e instanceof Error ? e.message : e);
     }
+    // The engine reads the chunks and their index from the new folder.
     this.emit("render-cache-moved", newDir);
-    this.forgetRenderedChunks();
+    this.tellRenderCacheChanged();
   }
 
   /** The rendered chunks are about to be deleted from the folder: the engine forgets them, and the timelines stop showing them as rendered. */
   forgetRenderedChunks(): void {
     getEngine()?.clearRenderCache?.();
+    this.tellRenderCacheChanged();
+  }
+
+  /** The timelines ask the engine again which parts are rendered. */
+  tellRenderCacheChanged(): void {
     for (const win of BrowserWindow.getAllWindows()) {
       try {
         win.webContents.send("engine:render-cache-changed");
@@ -258,7 +264,8 @@ export class SettingsModule extends EventEmitter implements AppModule {
   getPreferences(): Preferences {
     const saved = (this.store.get("preferences") as Partial<Preferences> | undefined) ?? {};
     // OPENRIP_NO_WALKTHROUGH: the automated tests' fresh profile counts the tour as seen.
-    return { ...DEFAULT_PREFERENCES, ...saved, ...(process.env.OPENRIP_NO_WALKTHROUGH ? { walkthroughSeen: true } : {}) };
+    // OPENRIP_NO_AUTO_PROXY: and doesn't start making proxies of a 4K import by itself (the proxy steps turn the switch on).
+    return { ...DEFAULT_PREFERENCES, ...saved, ...(process.env.OPENRIP_NO_WALKTHROUGH ? { walkthroughSeen: true } : {}), ...(process.env.OPENRIP_NO_AUTO_PROXY ? { proxyDefault: false } : {}) };
   }
 
   /** Merge `patch` into the preferences, tell every window and the main process's modules. */

@@ -453,9 +453,9 @@ async function createProxy(
       "0:v:0",
       "-map",
       "0:a?",
-      // Never larger than the original; the frame rate stays, so the engine's timing is the original's.
+      // The short side is 720 (or 540), never more than the original's; the frame rate stays, so the engine's timing is the original's.
       "-vf",
-      `scale=-2:min(${targetHeight}\\,ih)`,
+      `scale=w='if(gt(iw\\,ih)\\,-2\\,min(${targetHeight}\\,iw))':h='if(gt(iw\\,ih)\\,min(${targetHeight}\\,ih)\\,-2)'`,
       // Every frame a keyframe: scrubbing and playback decode one frame at a time.
       "-g",
       "1",

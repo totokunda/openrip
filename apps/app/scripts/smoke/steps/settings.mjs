@@ -31,7 +31,7 @@ import {
 const EXPECTED = {
   draft: { on: ["saveTo", "screenRecording", "cache", "cacheSize", "presetPath"], off: [] },
   edit: { on: ["stepMany", "adjustMany", "imageDuration", "targetLoudness", "frameRate", "timeCode", "exportSound", "scrubAudio", "arrangeLayers"], off: ["linkage"] },
-  performance: { on: ["encodeDecode", "autoOptimization", "proxyPath", "proxySize", "renderCache", "renderCacheSize", "autoClear", "engine"], off: ["proxy", "autoRender"] },
+  performance: { on: ["encodeDecode", "autoOptimization", "proxy", "proxyPath", "proxySize", "renderCache", "renderCacheSize", "autoClear", "autoRender", "engine"], off: [] },
   general: { on: ["language", "notification", "update"], off: [] },
 };
 // CapCut's rows that need its cloud or an account.

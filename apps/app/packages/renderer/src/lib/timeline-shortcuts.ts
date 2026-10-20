@@ -28,9 +28,13 @@ import { shuttle, shuttleRate, stopShuttle } from "./shuttle";
 /** The zoom level before Zoom to fit, which a second press goes back to. */
 let beforeFit: number | null = null;
 
-/** Whether the whole timeline is in view (the window is the timeline). */
-export const isFitted = (c: { timelineDuration: [number, number]; totalTimelineFrames: number }): boolean =>
-  c.timelineDuration[0] <= 0 && c.timelineDuration[1] - c.timelineDuration[0] >= c.totalTimelineFrames;
+type View = { timelineDuration: [number, number]; totalTimelineFrames: number };
+
+/** Whether the window is the timeline (zoom to fit); wider, as at the lowest zoom of a short timeline, isn't fit. */
+export const isFitted = (c: View): boolean => c.timelineDuration[0] <= 0 && Math.abs(c.timelineDuration[1] - c.timelineDuration[0] - c.totalTimelineFrames) <= 1;
+
+/** Whether all of the timeline is in view (fit, or wider): the timeline can be extended or reduced only then. */
+export const showsWholeTimeline = (c: View): boolean => c.timelineDuration[0] <= 0 && c.timelineDuration[1] - c.timelineDuration[0] >= c.totalTimelineFrames;
 
 /**
  * Zoom to fit (Shift+Z): the whole timeline in view, at the zoom level nearest (the slider's

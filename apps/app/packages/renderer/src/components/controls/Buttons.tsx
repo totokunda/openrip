@@ -13,7 +13,7 @@ import { useClipStore } from "@/lib/clip";
 import { useCallback, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { MAX_DURATION } from "@/lib/settings";
-import { isFitted } from "@/lib/timeline-shortcuts";
+import { showsWholeTimeline } from "@/lib/timeline-shortcuts";
 import { LuSquareSplitHorizontal, LuSquareSplitVertical } from "react-icons/lu";
 import { getMediaInfoCached } from "@/lib/media/utils";
 import { CropDialog } from "@/components/dialogs/CropDialog";
@@ -136,7 +136,7 @@ const ExtendTimelineButton: React.FC<{ numSeconds?: number }> = ({
   } = useControlsStore();
   const { clips } = useClipStore();
   const hasClips = clips.length > 0;
-  const fitted = isFitted({ timelineDuration, totalTimelineFrames });
+  const fitted = showsWholeTimeline({ timelineDuration, totalTimelineFrames });
   const disabled = !hasClips || !fitted;
   const handleExtendTimeline = useCallback(() => {
     if (disabled) return;
@@ -186,7 +186,7 @@ const ReduceTimelineButton: React.FC<{ numSeconds?: number }> = ({
   const disabled =
     totalTimelineFrames <= MAX_DURATION ||
     totalTimelineFrames - fps * numSeconds < clipDuration ||
-    !isFitted({ timelineDuration, totalTimelineFrames }) ||
+    !showsWholeTimeline({ timelineDuration, totalTimelineFrames }) ||
     !hasClips;
 
   const handleReduceTimeline = useCallback(() => {

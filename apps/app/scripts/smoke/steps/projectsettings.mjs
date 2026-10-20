@@ -4,8 +4,8 @@
 // ps07 ↔ 008). Every row is changed and checked in the saved project and where the engine shows it:
 // the name, the frame rate (and the clips' timing), the aspect ratio (the engine's frame), the
 // Custom resolution (the canvas the engine reports, and a still exported at its size), Save to
-// (the project files move, then back), the filter clip length; the colour space and proxy rows are
-// disabled with their notes; Cancel changes nothing; each change to the canvas and frame rate is
+// (the project files move, then back), the filter clip length; the colour space's HDR rows are
+// disabled with their notes (the Proxy switch is live, see `proxy`); Cancel changes nothing; each change to the canvas and frame rate is
 // undone and redone. PS_KEEP=1 leaves the project on its last settings (for projectsettingscheck,
 // after `reopen`).
 import path from "node:path";
@@ -111,7 +111,7 @@ export default async (ctx) => {
   await win.waitForTimeout(300);
   await shot("ps07-performance"); // 008
   const perf = (await dialog.innerText()).replace(/\s+/g, " ");
-  check("Performance has Proxy and its Resolution, disabled with a note", /Proxy/.test(perf) && /Resolution/.test(perf) && (await win.locator("[data-testid=ps-proxy]").isDisabled()) && /proxies aren't used/.test(perf), perf.slice(0, 160));
+  check("Performance has the Proxy switch and its Resolution (720P / 540P), live (the `proxy` step uses them)", /Proxy/.test(perf) && /Resolution/.test(perf) && !(await win.locator("[data-testid=ps-proxy]").isDisabled()) && /original media/.test(perf), perf.slice(0, 160));
   // Cancel changes nothing.
   await win.locator("[data-testid=ps-tab-details]").click();
   await win.locator("[data-testid=ps-name]").fill("Not saved");
