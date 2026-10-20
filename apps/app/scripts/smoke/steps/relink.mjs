@@ -98,7 +98,7 @@ export default async (ctx) => {
     });
   });
   await rightClick(win);
-  await win.getByText("Open File Location").click();
+  await win.getByText("Open file location", { exact: true }).click();
   await win.waitForTimeout(800);
   const shown = await app.evaluate(() => globalThis.__revealed);
   check(`Open file location on a missing card shows where it was (${shown.join(", ")})`, shown.length === 1 && shown[0].endsWith(name));

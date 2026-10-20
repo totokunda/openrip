@@ -74,7 +74,7 @@ export default async (ctx) => {
   await win.waitForTimeout(300);
   check("both cards are selected", (await v.getAttribute("data-selected")) === "true" && (await card("card-photo").getAttribute("data-selected")) === "true");
 
-  // The menu: Export selected clips is the last item before Delete's group (CapCut puts it last).
+  // The menu: Export selected clips is its last item, as CapCut has it.
   await v.hover();
   await v.locator("[title=Actions]").click();
   await win.waitForTimeout(400);

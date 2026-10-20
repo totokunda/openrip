@@ -1,27 +1,8 @@
 import React, { useRef, useState, useEffect, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  TbDots,
-  TbFileText,
-  TbFolderPlus,
-  TbLayoutList,
-  TbFolderOpen,
-  TbScissors,
-  TbLink,
-  TbPencil,
-  TbTrash,
-  TbVideo,
-  TbVideoOff,
-  TbFileExport,
-} from "react-icons/tb";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { TbDots } from "react-icons/tb";
 import { LuLoaderCircle, LuPlus, LuUnlink } from "react-icons/lu";
 import type { MediaRange } from "@/lib/media/add";
 
@@ -98,6 +79,9 @@ const DeleteAlertDialog: React.FC<
     </AlertDialog>
   );
 };
+
+/** A row of the card's menu: CapCut's 32 px rows and 13 px labels, with the hover every app menu has. */
+const menuRow = "dark h-8 px-3 rounded-[4px] text-[13px] text-brand-light cursor-pointer focus:bg-brand-hover data-[disabled]:text-[#525252] data-[disabled]:opacity-100";
 
 export type MediaItem = {
   name: string;
@@ -591,112 +575,53 @@ const Item: React.FC<ItemProps> = ({
               >
                 <TbDots className="w-4 h-4" />
               </DropdownMenuTrigger>
+              {/* CapCut's media card menu (05-left-media/006): plain rows, no icons or separators, in
+                  its order; 32 px rows with the hover every app menu has. */}
               <DropdownMenuContent
                 align="start"
-                className="dark w-52 flex flex-col text-brand-light bg-brand-background font-poppins"
+                className="dark w-[238px] p-1 bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] text-brand-light"
               >
-                {item.type === "video" && !item.isPlayableCopy && !item.missing && (
-                  <>
-                    {!item.hasProxy ? (
-                      <DropdownMenuItem
-                        className="py-1 rounded"
-                        onClick={() => onCreateProxy?.(item)}
-                      >
-                        <TbVideo className="w-3.5 h-3.5" />
-                        <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">
-                          Create File Proxy
-                        </span>
-                      </DropdownMenuItem>
-                    ) : (
-                      <DropdownMenuItem
-                        className="py-1 rounded"
-                        onClick={() => onRemoveProxy?.(item)}
-                      >
-                        <TbVideoOff className="w-3.5 h-3.5" />
-                        <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">
-                          Remove File Proxy
-                        </span>
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-                {item.type === "video" && !item.missing && (
-                  <DropdownMenuItem className="py-1 rounded" data-testid="media-split-scenes" onClick={() => onSplitScenes?.(item)}>
-                    <TbScissors className="w-3.5 h-3.5" />
-                    <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">Split scenes</span>
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem className="py-1 rounded" data-testid="media-new-folder" onClick={() => onNewFolder?.(item)}>
-                  <TbFolderPlus className="w-3.5 h-3.5" />
-                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">New folder with selected item</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="py-1 rounded" data-testid="media-new-timeline" disabled={item.missing || !item.mediaInfo} onClick={() => onNewTimeline?.(item)}>
-                  <TbLayoutList className="w-3.5 h-3.5" />
-                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">New timeline with selected item</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="py-1 rounded"
-                  onClick={() => startRename(item)}
-                >
-                  <TbPencil className="w-3.5 h-3.5" />
-                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">
-                    Rename
-                  </span>
-                </DropdownMenuItem>
-                {item.type !== "image" && !item.missing && (
-                  <DropdownMenuItem
-                    className="py-1 rounded"
-                    data-testid="media-transcript"
-                    onClick={() => openTranscriptForPath(item.assetUrl)}
-                  >
-                    <TbFileText className="w-3.5 h-3.5" />
-                    <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">
-                      Transcript
-                    </span>
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem className="py-1 rounded" data-testid="media-export" disabled={item.missing || !item.mediaInfo} onClick={() => onExport?.(item)}>
-                  <TbFileExport className="w-3.5 h-3.5" />
-                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">Export selected clips</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="py-1 rounded"
-                  data-testid="media-link"
-                  disabled={!item.missing}
-                  onClick={() => onRelink?.(item)}
-                >
-                  <TbLink className="w-3.5 h-3.5" />
-                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">
-                    Link to media
-                  </span>
+                <DropdownMenuItem className={menuRow} onClick={() => startRename(item)}>
+                  Rename
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  className="py-1 rounded"
-                  onClick={() => {
-                    void revealMediaFile(item.absPath);
-                  }}
-                >
-                  <TbFolderOpen className="w-3.5 h-3.5" />
-                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">
-                    Open File Location
-                  </span>
-                </DropdownMenuItem>
-
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="py-1 rounded"
+                  className={menuRow}
                   onClick={() => {
                     setDeleteItem(item.name);
                     setDeleteAlertOpen(true);
                   }}
                 >
-                  <TbTrash className="w-3.5 h-3.5" />
-                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">
-                    Delete
-                  </span>
+                  Delete
+                </DropdownMenuItem>
+                <DropdownMenuItem className={menuRow} onClick={() => void revealMediaFile(item.absPath)}>
+                  Open file location
+                </DropdownMenuItem>
+                <DropdownMenuItem className={menuRow} data-testid="media-new-folder" onClick={() => onNewFolder?.(item)}>
+                  New folder with selected item
+                </DropdownMenuItem>
+                <DropdownMenuItem className={menuRow} data-testid="media-new-timeline" disabled={item.missing || !item.mediaInfo} onClick={() => onNewTimeline?.(item)}>
+                  New timeline with selected item
+                </DropdownMenuItem>
+                <DropdownMenuItem className={menuRow} data-testid="media-link" disabled={!item.missing} onClick={() => onRelink?.(item)}>
+                  Link to media
+                </DropdownMenuItem>
+                {item.type === "video" && !item.isPlayableCopy && !item.missing && (
+                  <DropdownMenuItem className={menuRow} onClick={() => (item.hasProxy ? onRemoveProxy?.(item) : onCreateProxy?.(item))}>
+                    {item.hasProxy ? "Cancel file proxy" : "Create file proxy"}
+                  </DropdownMenuItem>
+                )}
+                {item.type === "video" && !item.missing && (
+                  <DropdownMenuItem className={menuRow} data-testid="media-split-scenes" onClick={() => onSplitScenes?.(item)}>
+                    Split scenes
+                  </DropdownMenuItem>
+                )}
+                {item.type !== "image" && !item.missing && (
+                  <DropdownMenuItem className={menuRow} data-testid="media-transcript" onClick={() => openTranscriptForPath(item.assetUrl)}>
+                    Transcript
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem className={menuRow} data-testid="media-export" disabled={item.missing || !item.mediaInfo} onClick={() => onExport?.(item)}>
+                  Export selected clips
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </div>
