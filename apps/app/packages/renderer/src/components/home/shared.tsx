@@ -102,3 +102,37 @@ const ContextMenu: React.FC<{ x: number; y: number; items: MenuItem[]; onClose: 
     document.body,
   );
 };
+
+/** The home screen's drop-down menus and their rows. */
+export const homeMenu = "dark p-1 bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] text-brand-light";
+export const homeMenuRow = "dark h-8 px-2.5 gap-2.5 rounded-[4px] text-[13px] cursor-pointer focus:bg-brand-hover";
+/** A small toolbar button over a list (search, view, Trash). */
+export const homeTool = "h-6 px-1.5 flex items-center justify-center gap-1 rounded-[4px] bg-[#29292d] hover:bg-[#333338] text-brand-light/85 text-[12px] transition-colors cursor-pointer";
+
+/** "Edited 5 min ago", "Edited yesterday", "Edited 12 Oct". */
+export const editedLabel = (ms?: number) => {
+  if (!ms) return "Never edited";
+  const s = (Date.now() - ms) / 1000;
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" });
+  if (s < 60) return "Edited just now";
+  if (s < 3600) return `Edited ${rtf.format(-Math.round(s / 60), "minute")}`;
+  if (s < 86400) return `Edited ${rtf.format(-Math.round(s / 3600), "hour")}`;
+  if (s < 7 * 86400) return `Edited ${rtf.format(-Math.round(s / 86400), "day")}`;
+  return `Edited ${new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
+};
+
+/** "00:20", or "1:02:05" past an hour. */
+export const lengthLabel = (us?: number) => {
+  const s = Math.round((us ?? 0) / 1e6);
+  const hh = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return hh > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
+};
+
+/** A long name cut in the middle, so its start and end both show ("openrip-c…landscape"). */
+export const middle = (name: string, max: number) => {
+  if (name.length <= max) return name;
+  const head = Math.ceil((max - 1) / 2);
+  return `${name.slice(0, head)}…${name.slice(name.length - (max - 1 - head))}`;
+};

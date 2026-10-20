@@ -31,8 +31,7 @@ import { useClipStore } from "@/lib/clip";
 import type { AnyClipProps, GroupClipProps } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { onCommand } from "@/lib/commands";
-import { CapCutImportDialog } from "../dialogs/CapCutImportDialog";
-import { createAndOpenProject, goHome, openProject } from "@/lib/project-actions";
+import { createAndOpenProject, goHome } from "@/lib/project-actions";
 import { useShellStore } from "@/lib/shell";
 import { clockLabel, useAutosaveStore } from "@/lib/autosave";
 
@@ -49,9 +48,7 @@ const TopBar: React.FC<TopBarProps> = () => {
   const exportPhase = useExportRun((s) => s.phase);
   const exportProgress = useExportRun((s) => s.ratio);
   const isExporting = exportPhase === "running";
-  const projects = useProjectsStore((s) => s.projects);
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);
-  const addProject = useProjectsStore((s) => s.addProject);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const updateProject = useProjectsStore((s) => s.updateProject);
 
@@ -81,7 +78,6 @@ const TopBar: React.FC<TopBarProps> = () => {
 
   const setSettingsOpen = useShellStore((s) => s.setSettingsOpen);
   const setShortcutsOpen = useShellStore((s) => s.setShortcutsOpen);
-  const [capcutOpen, setCapcutOpen] = useState(false);
 
   useEffect(() => {
     const updateCover = async () => {
@@ -170,14 +166,6 @@ const TopBar: React.FC<TopBarProps> = () => {
   return (
     <div data-testid="topbar" className="w-full relative h-[35px] shrink-0 px-2 flex items-center justify-between font-poppins">
       <div className="flex flex-row items-center gap-1 min-w-0 z-10">
-        <CapCutImportDialog
-          open={capcutOpen}
-          onOpenChange={setCapcutOpen}
-          onImported={(created) => {
-            if (!projects.some((p) => p.id === created.id)) addProject(created);
-            openProject(created.id);
-          }}
-        />
         <button
           type="button"
           data-testid="go-home"
@@ -207,7 +195,14 @@ const TopBar: React.FC<TopBarProps> = () => {
               <LuFolderPlus className="w-4 h-4 text-brand-light/80" />
               <span>New project</span>
             </DropdownMenuItem>
-            <DropdownMenuItem className={row} disabled={isExporting} onClick={() => setCapcutOpen(true)}>
+            <DropdownMenuItem
+              className={row}
+              disabled={isExporting}
+              onClick={() => {
+                // The drafts are a page of the home screen, as the projects are.
+                void goHome().then(() => useShellStore.getState().setHomeSection("capcut"));
+              }}
+            >
               <LuFolderInput className="w-4 h-4 text-brand-light/80" />
               <span>Open a CapCut project…</span>
             </DropdownMenuItem>

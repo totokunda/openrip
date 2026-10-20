@@ -7,7 +7,7 @@ import { create } from "zustand";
 export type ShellView = "home" | "editor";
 
 /** The home screen's sections, from its sidebar. */
-export type HomeSection = "home" | "templates" | "library";
+export type HomeSection = "home" | "templates" | "library" | "capcut";
 
 interface ShellState {
   view: ShellView;

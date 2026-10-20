@@ -35,7 +35,8 @@ import { TrashDialog } from "./TrashDialog";
 import { LibraryPage } from "./LibraryPage";
 import { TemplatesPage } from "./TemplatesPage";
 import { getAppInfo, revealPathInFolder } from "@app/preload";
-import { CapCutImportDialog } from "@/components/dialogs/CapCutImportDialog";
+import { CapCutDraftsPage } from "./CapCutDraftsPage";
+import { editedLabel, homeMenu as menu, homeMenuRow as menuRow, homeTool, lengthLabel, middle } from "./shared";
 import { useT } from "@/lib/i18n";
 import {
   DropdownMenu,
@@ -58,8 +59,6 @@ import AppLogo from "@/components/common/AppLogo";
 type SortKey = "edited" | "name" | "created";
 type ViewKind = "grid" | "list";
 
-const menu = "dark p-1 bg-brand-header border-[0.5px] border-black shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)] rounded-[8px] text-brand-light";
-const menuRow = "dark h-8 px-2.5 gap-2.5 rounded-[4px] text-[13px] cursor-pointer focus:bg-brand-hover";
 
 const VIEW_KEY = "openrip:home-view";
 
@@ -74,18 +73,6 @@ const BANNER_TEXT = "#0d0b10";
 const CARD_BG = "bg-[#16141a] hover:bg-[#1c1a21]";
 const FEATURE_BG = "linear-gradient(135deg, #3a2a50 0%, #2c2140 100%)";
 
-/** "Edited 5 min ago", "Edited yesterday", "Edited 12 Oct". */
-const editedLabel = (ms?: number) => {
-  if (!ms) return "Never edited";
-  const s = (Date.now() - ms) / 1000;
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" });
-  if (s < 60) return "Edited just now";
-  if (s < 3600) return `Edited ${rtf.format(-Math.round(s / 60), "minute")}`;
-  if (s < 86400) return `Edited ${rtf.format(-Math.round(s / 3600), "hour")}`;
-  if (s < 7 * 86400) return `Edited ${rtf.format(-Math.round(s / 86400), "day")}`;
-  return `Edited ${new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
-};
-
 const ratioLabel = (a?: ProjectSettings["aspectRatio"]) => {
   if (!a) return "16:9";
   return /^\d+:\d+$/.test(a.id) ? a.id : `${a.width}:${a.height}`;
@@ -97,22 +84,6 @@ const sizeLabel = (bytes?: number) => {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
   return `${(bytes / 1024 / 1024).toFixed(1)}M`;
-};
-
-/** "00:20", or "1:02:05" past an hour. */
-const lengthLabel = (us?: number) => {
-  const s = Math.round((us ?? 0) / 1e6);
-  const hh = Math.floor(s / 3600);
-  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  return hh > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
-};
-
-/** A long name cut in the middle, so its start and end both show ("openrip-c…landscape"). */
-const middle = (name: string, max: number) => {
-  if (name.length <= max) return name;
-  const head = Math.ceil((max - 1) / 2);
-  return `${name.slice(0, head)}…${name.slice(name.length - (max - 1 - head))}`;
 };
 
 /** The canvas's shape as an outlined frame, the home screen's way of showing a size. */
@@ -494,7 +465,6 @@ const HomeScreen: React.FC = () => {
   });
   const [creating, setCreating] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
-  const [capcutOpen, setCapcutOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   // Scrolled past the banner: CapCut keeps a slimmer one pinned at the top.
   const [compact, setCompact] = useState(false);
@@ -597,7 +567,7 @@ const HomeScreen: React.FC = () => {
       </div>
     );
 
-  const tool = "h-6 px-1.5 flex items-center justify-center gap-1 rounded-[4px] bg-[#29292d] hover:bg-[#333338] text-brand-light/85 text-[12px] transition-colors cursor-pointer";
+  const tool = homeTool;
   const toolbar = (
     <div className="flex items-center gap-2">
       {searching ? (
@@ -749,7 +719,7 @@ const HomeScreen: React.FC = () => {
                       onContinue={() => last && openProject(last.id)}
                       onStart={() => void create("import", undefined, true)}
                     />
-                    <QuickStart icon={LuFolderInput} title="CapCut project" note="Open a draft; it's only read, never changed" onClick={() => setCapcutOpen(true)} testId="home-open-capcut" />
+                    <QuickStart icon={LuFolderInput} title="CapCut project" note="Open a draft; it's only read, never changed" onClick={() => setSection("capcut")} testId="home-open-capcut" />
                     <QuickStart icon={LuUpload} title="Import media" note="Start a new project from your files" onClick={() => void create("import", undefined, true)} testId="home-import" busy={creating === "import"} />
                     <SizeCard creating={creating} onCreate={(p) => void create(p.id, { width: p.width, height: p.height, id: p.id })} />
                     <QuickStart icon={LuLibrary} title="Library" note="Your media from every project" onClick={() => setSection("library")} testId="home-library-card" />
@@ -769,19 +739,21 @@ const HomeScreen: React.FC = () => {
             {section === "templates" && <TemplatesPage />}
 
             {section === "library" && <LibraryPage />}
+
+            {section === "capcut" && (
+              <CapCutDraftsPage
+                onBack={() => setSection("home")}
+                onImported={(created) => {
+                  if (!useProjectsStore.getState().projects.some((p) => p.id === created.id)) addProject(created);
+                  openProject(created.id);
+                }}
+              />
+            )}
             </div>
           </div>
         </main>
       </div>
 
-      <CapCutImportDialog
-        open={capcutOpen}
-        onOpenChange={setCapcutOpen}
-        onImported={(created) => {
-          if (!useProjectsStore.getState().projects.some((p) => p.id === created.id)) addProject(created);
-          openProject(created.id);
-        }}
-      />
       <TrashDialog open={trashOpen} onOpenChange={setTrashOpen} />
     </div>
   );
