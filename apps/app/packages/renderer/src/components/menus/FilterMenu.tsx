@@ -5,10 +5,12 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchFilters } from "@app/preload";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { addFilterAtPlayhead, filterKey, useFilterLibrary } from "@/lib/filters/library";
+import { isIdentity, lookOf, lookSections } from "@/lib/filters/looks";
+import { useTilePicture } from "@/lib/filters/tile-render";
 import type { Filter } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-/** The library's filters (read once; they're files on disk). */
+/** The library's filters (read once; they're files on disk), named and grouped by look. */
 export const useFilters = (): Filter[] => {
   const { data = [] } = useQuery({
     queryKey: ["filters"],
@@ -18,15 +20,20 @@ export const useFilters = (): Filter[] => {
     refetchOnWindowFocus: false,
     staleTime: Infinity,
   });
-  return data;
+  return useMemo(
+    () =>
+      data
+        .filter((f) => !isIdentity(f.id))
+        .map((f) => {
+          const look = lookOf(f.id, f.smallPath);
+          return { ...f, name: look.name, group: look.group, photo: look.photo, featured: look.featured };
+        }),
+    [data],
+  );
 };
 
-/** The tab's column: Favorites, then the categories under Filters (what the panel lists). */
-export const filterSections = (filters: Filter[]) => [
-  { id: "favorites", label: "Favorites" },
-  { id: "all", label: "All", under: "Filters" },
-  ...[...new Set(filters.map((f) => f.category))].map((c) => ({ id: `cat:${c}`, label: c, under: "Filters" })),
-];
+/** The tab's column: Favorites, then Filters with Featured and the look groups (what the panel lists). */
+export const filterSections = (filters: Filter[]) => [{ id: "favorites", label: "Favorites" }, ...lookSections(filters.map((f) => f.group ?? ""))];
 
 /** A star: outlined, or filled when the filter is a favourite. */
 const Star: React.FC<{ on: boolean }> = ({ on }) => (
@@ -43,6 +50,21 @@ const Star: React.FC<{ on: boolean }> = ({ on }) => (
  */
 const FilterTile: React.FC<{ filter: Filter; active: boolean; favourite: boolean }> = ({ filter, active, favourite }) => {
   const [hover, setHover] = useState(false);
+  const [seen, setSeen] = useState(false);
+  const tileRef = useRef<HTMLDivElement | null>(null);
+  const picture = useTilePicture(filter.smallPath, filter.photo ?? "city", seen);
+  // The filtered picture is drawn once the tile is near the viewport.
+  useEffect(() => {
+    const el = tileRef.current;
+    if (!el || seen) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setSeen(true);
+      return;
+    }
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && (setSeen(true), io.disconnect()), { rootMargin: "120px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [seen]);
   const toggleFavourite = useFilterLibrary((s) => s.toggleFavourite);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `filter:${filterKey(filter)}`,
@@ -53,7 +75,10 @@ const FilterTile: React.FC<{ filter: Filter; active: boolean; favourite: boolean
   return (
     <div className="flex flex-col gap-1.5 w-[86px]" data-testid={`filter-card-${filterKey(filter)}`}>
       <div
-        ref={setNodeRef}
+        ref={(el) => {
+          tileRef.current = el;
+          setNodeRef(el);
+        }}
         {...listeners}
         {...attributes}
         role="button"
@@ -62,6 +87,9 @@ const FilterTile: React.FC<{ filter: Filter; active: boolean; favourite: boolean
         data-testid="filter-tile"
         data-filter={filter.id}
         data-category={filter.category}
+        data-group={filter.group}
+        data-photo={filter.photo}
+        data-filtered={picture.filtered}
         aria-pressed={active}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
@@ -71,7 +99,7 @@ const FilterTile: React.FC<{ filter: Filter; active: boolean; favourite: boolean
           isDragging && "opacity-50",
         )}
       >
-        <img src={filter.examplePath} alt={filter.name} draggable={false} loading="lazy" className="w-full h-full object-cover pointer-events-none" />
+        <img src={picture.src} alt={filter.name} draggable={false} className="w-full h-full object-cover pointer-events-none" />
         {(hover || favourite) && (
           <div className="absolute right-1 bottom-1 flex items-center gap-1">
             <button
@@ -124,7 +152,7 @@ const FilterTile: React.FC<{ filter: Filter; active: boolean; favourite: boolean
 
 /**
  * The Filters tab, in CapCut's layout: a search field, then the picked part of the column
- * (Favorites, All, or a category) as a grid of tiles under its name. A search looks through
+ * (Favorites, Featured, or a look group) as a grid of tiles under its name. A search looks through
  * every filter. The click on a tile (a press let go where it began; the app's drags start on a
  * press and swallow the click) previews it; "+" adds it.
  */
@@ -151,12 +179,13 @@ const FilterMenu: React.FC<{ part?: string }> = ({ part = "all" }) => {
   });
 
   const q = query.trim().toLowerCase();
-  const category = part.startsWith("cat:") ? part.slice(4) : null;
-  const heading = q ? "" : part === "favorites" ? "Favorites" : (category ?? "All");
+  const category = part === "favorites" ? null : part.startsWith("cat:") ? part.slice(4) : "Featured";
+  const heading = q ? "" : (category ?? "Favorites");
   const shown = useMemo(() => {
-    if (q) return filters.filter((f) => f.name.toLowerCase().includes(q) || f.category.toLowerCase().includes(q));
-    if (part === "favorites") return filters.filter((f) => favourites.includes(filterKey(f)));
-    return category ? filters.filter((f) => f.category === category) : filters;
+    if (q) return filters.filter((f) => f.name.toLowerCase().includes(q) || (f.group ?? "").toLowerCase().includes(q) || f.id.toLowerCase().replace(/_/g, " ").includes(q));
+    if (!category) return filters.filter((f) => favourites.includes(filterKey(f)));
+    if (category === "Featured") return filters.filter((f) => (f.featured ?? -1) >= 0).sort((a, b) => (a.featured ?? 0) - (b.featured ?? 0));
+    return filters.filter((f) => f.group === category);
   }, [filters, favourites, q, part, category]);
 
   const empty =

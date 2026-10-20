@@ -1254,6 +1254,10 @@ export interface Filter {
   category: string;
   examplePath: string;
   exampleAssetUrl: string;
+  /** The look group the Filters tab lists it under (lib/filters/looks.ts), the example photo its tile is drawn on, and its place in Featured (-1: not in it). */
+  group?: string;
+  photo?: string;
+  featured?: number;
 }
 
 export type FilterWithType = Filter & {

@@ -125,6 +125,16 @@ try {
   console.warn(`[third-party-notices] sticker manifest not read (${String(e.message ?? e).split("\n")[0]})`);
 }
 
+// ---- Filter example photos (the Filters tab's tiles) ----
+// Ten CC0 photographs from Wikimedia Commons, credited in public/filter-photos/credits.json.
+try {
+  const credits = JSON.parse(fs.readFileSync(path.join(appDir, "packages", "renderer", "public", "filter-photos", "credits.json"), "utf8"));
+  const text = `Example photographs on the Filters tab's tiles, all dedicated to the public domain (CC0 1.0 Universal, https://creativecommons.org/publicdomain/zero/1.0/). Credit is not required; it is given here anyway.\n\n${credits.map((c) => `${c.title}, by ${c.author}\n${c.url}`).join("\n\n")}`;
+  packages.push({ name: "Filter example photos (Wikimedia Commons)", version: "", source: "assets", license: "CC0-1.0", text });
+} catch (e) {
+  console.warn(`[third-party-notices] filter photo credits not read (${String(e.message ?? e).split("\n")[0]})`);
+}
+
 // ---- Bundled sources ----
 // The shader transitions are the gl-transitions collection (MIT, two BSD): their notices are in
 // the folder with the shaders.

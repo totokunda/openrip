@@ -307,9 +307,9 @@ const MediaModelPanel: React.FC<MediaModelPanelProps> = ({
         : section === "effects"
           ? effectSections(effectCatalog)
           : SECTIONS[section];
-  // Filters opens on All (Favorites is the first item, as CapCut's, but starts empty).
-  // Filters and Effects open on All, Stickers on Trending.
-  const sub = picked[section] ?? (section === "filters" || section === "effects" ? "all" : section === "stickers" ? "cat:Trending" : section === "transitions" ? sections?.[1]?.id : sections?.[0]?.id) ?? "";
+  // Filters opens on Featured (Favorites is the first item, as CapCut's, but starts empty).
+  // Effects opens on All, Stickers on Trending.
+  const sub = picked[section] ?? (section === "filters" ? "cat:Featured" : section === "effects" ? "all" : section === "stickers" ? "cat:Trending" : section === "transitions" ? sections?.[1]?.id : sections?.[0]?.id) ?? "";
 
   const content = () => {
     switch (section) {
