@@ -101,6 +101,7 @@ import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 import { useIsMissing } from "@/lib/media/missing";
 import { canReplaceClip, replaceClip, revealClipFile } from "@/lib/replace-clip";
 import { isCompound } from "@/lib/compound";
+import { canGroup } from "@/lib/bundle";
 import { openCompound } from "@/lib/compound-edit";
 import { paintCompoundStrip } from "@/lib/compound-thumb";
 import { bladeCut, bladeFrame, frameAtStageX } from "@/lib/timeline-tools";
@@ -532,7 +533,7 @@ const TimelineClip: React.FC<
       // A compound clip: its content's posters (the clip shows frames from its trim).
       const from = Math.max(0, currentClip.trimStart ?? 0);
       const paint = () => {
-        paintCompoundStrip(imageCanvas, currentClip.compound, from, from + (currentEndFrame - currentStartFrame), Math.max(36, thumbsHeight * 1.2), TIMELINE_COLORS.video, () => {
+        paintCompoundStrip(imageCanvas, currentClip.compound, from, from + (currentEndFrame - currentStartFrame) * Math.max(0.01, Math.abs(Number(currentClip.speed) || 1)), Math.max(36, thumbsHeight * 1.2), TIMELINE_COLORS.video, () => {
           paint();
           groupRef.current?.getLayer()?.batchDraw();
         });
@@ -1238,27 +1239,13 @@ const TimelineClip: React.FC<
 
       const otherCommands: ContextMenuItem[] = [];
 
-      // check if any of the selected clips are groups if so, we cannot group it
-      const isAnyGroup = (controls.selectedClipIds || []).some((clipId) => {
-        const clip = clipsState.getClipById(clipId);
-        return clip?.type === "group";
-      });
-      if (isGroup) {
-        otherCommands.push({
-          id: "ungroup",
-          label: "Ungroup",
-          action: "ungroup",
-          shortcut: "⌘⇧G",
-        });
-      } else if (!isAnyGroup) {
-        otherCommands.push({
-          id: "group",
-          label: "Group…",
-          action: "group",
-          disabled: (controls.selectedClipIds || []).length < 2,
-          shortcut: "⌘G",
-        });
-      }
+      // Group (⌘G) sticks the selected clips together, each on its own track; on a group, Ungroup (⌘⇧G).
+      const inGroup = targetIds.some((id) => !!clipsState.getClipById(id)?.bundleId);
+      otherCommands.push(
+        inGroup
+          ? { id: "ungroup", label: "Ungroup", action: "ungroup", shortcut: "⌘⇧G" }
+          : { id: "group", label: "Group", action: "group", disabled: !canGroup(clipsState.clips, targetIds), shortcut: "⌘G" },
+      );
 
       // Create compound clip (⌥G) from the selection, and (on a compound) Undo compound clip
       // (⌥⇧G) and Open compound clip, after Group as CapCut orders them.

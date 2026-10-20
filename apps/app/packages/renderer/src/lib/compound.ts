@@ -68,6 +68,7 @@ export const cloneContent = (content: CompoundContent, newId: NewId): CompoundCo
   const clips = content.clips.map((c) => {
     const copy: any = { ...c, clipId: clipIds.get(c.clipId)!, timelineId: trackIds.get(c.timelineId ?? "") ?? c.timelineId };
     if (c.linkId) copy.linkId = link(c.linkId);
+    if (c.bundleId) copy.bundleId = link(`bundle:${c.bundleId}`);
     if (c.groupId) copy.groupId = clipIds.get(c.groupId) ?? c.groupId;
     if (c.type === "group") copy.children = c.children.map((row) => row.map((id) => clipIds.get(id) ?? id));
     if ((c as any).tracking?.video) copy.tracking = { ...(c as any).tracking, video: clipIds.get((c as any).tracking.video) ?? (c as any).tracking.video };
@@ -190,6 +191,8 @@ export const createCompound = (
       const copy: any = { ...c, timelineId: inner.get(c.timelineId ?? "")?.timelineId ?? c.timelineId, startFrame: startOf(c) - start, endFrame: endOf(c) - start };
       // A link to a clip left behind (linkage was off) is dropped.
       if (c.linkId && !members.some((o) => o !== c && o.linkId === c.linkId)) delete copy.linkId;
+      // A group with a clip left outside is left too.
+      if (c.bundleId && clips.some((o) => o.bundleId === c.bundleId && !memberIds.has(o.clipId))) delete copy.bundleId;
       return copy as AnyClipProps;
     }),
   };

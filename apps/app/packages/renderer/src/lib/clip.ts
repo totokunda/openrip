@@ -45,6 +45,7 @@ import type { ProjectTimeline } from "./project-timelines";
 import _ from "lodash";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { carriedClips } from "./linkage";
+import { bundleMates, canGroup, groupTogether, tidyBundles, ungroupTogether, withMates } from "./bundle";
 import { preferences } from "./preferences";
 
 interface ClipStore {
@@ -130,8 +131,13 @@ interface ClipStore {
   copyClips: (clipIds: string[]) => void;
   cutClips: (clipIds: string[]) => void;
   pasteClips: (atFrame?: number, targetTimelineId?: string) => void;
+  /** Group (⌘G): the clips are stuck together (lib/bundle.ts), each staying on its own track. */
   groupClips: (clipIds: string[]) => void;
-  ungroupClips: (groupId: string) => void;
+  /** Ungroup (⌘⇧G): the groups of these clips are taken apart. */
+  ungroupClips: (clipIds: string[]) => void;
+  /** A text template's parts under one bar (the container clip, type "group" with `template`), and the container taken apart. */
+  makeTemplateGroup: (clipIds: string[]) => void;
+  dissolveTemplateGroup: (groupId: string) => void;
   /**
    * The timelines left to open the compound clip being edited, outermost first (empty on the
    * main timeline): `clips` and `timelines` are always those being edited. Opened and closed
@@ -382,7 +388,9 @@ export const getTimelineHeightForClip = (
 };
 
 // Helper function to resolve overlaps by shifting clips to maintain frame gaps
-export const resolveOverlaps = (clips: AnyClipProps[]): AnyClipProps[] => {
+export const resolveOverlaps = (clips: AnyClipProps[]): AnyClipProps[] => tidyBundles(resolveOverlapsOnly(clips));
+
+const resolveOverlapsOnly = (clips: AnyClipProps[]): AnyClipProps[] => {
   if (clips.length === 0) return clips;
 
   // Sort clips by start frame
@@ -1390,7 +1398,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       if (clipToDelete && isClipLocked(state.clips, state.timelines, clipToDelete, linkage())) return {};
 
       // Linked clips (a video's extracted audio) go with it.
-      const linked = new Set(partners(state.clips, clipToDelete).map((c) => c.clipId));
+      const linked = new Set([...partners(state.clips, clipToDelete), ...bundleMates(state.clips, clipToDelete)].map((c) => c.clipId));
       // Linkage settings: the overlays over a main track clip go with it, and with the magnet on
       // those over the clips after it move back by its length with them.
       const main = mainTrackOf(state.timelines);
@@ -1446,7 +1454,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
             if (totalRemaining <= 1) {
               // Ungroup: remove the group clip; if one child remains, reveal it and clear its groupId
               // call ungroupClips as this can get complex
-              state.ungroupClips(clipToDelete.groupId);
+              state.dissolveTemplateGroup(clipToDelete.groupId);
             } else {
               // Just update group's children nested array
               newClips[groupIdx] = {
@@ -1524,6 +1532,25 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
           } else if (deltaStart !== 0 || deltaEnd !== 0) {
             newClips[i] = { ...partner, startFrame: partner.startFrame + deltaStart, endFrame: partner.endFrame + deltaEnd };
           }
+        }
+      }
+
+      // A group moves as one: the clips stuck to it keep their offsets in time, and across tracks
+      // (a drag onto another track moves each by as many tracks). A trim moves none of them.
+      const pureMove = deltaStart !== 0 && deltaStart === deltaEnd;
+      const trackMove = updatedClip.timelineId !== current.timelineId;
+      if (current.type !== "group" && (pureMove || trackMove)) {
+        const order = state.timelines.map((t) => t.timelineId);
+        const shift = trackMove ? order.indexOf(updatedClip.timelineId ?? "") - order.indexOf(current.timelineId ?? "") : 0;
+        for (const mate of bundleMates(state.clips, current)) {
+          const i = newClips.findIndex((c) => c.clipId === mate.clipId);
+          let timelineId = mate.timelineId;
+          if (shift !== 0) {
+            const at = order.indexOf(mate.timelineId ?? "") + shift;
+            const to = state.timelines[at];
+            if (to && !to.locked && to.type === state.timelines.find((t) => t.timelineId === mate.timelineId)?.type) timelineId = to.timelineId;
+          }
+          newClips[i] = { ...mate, timelineId, startFrame: (mate.startFrame ?? 0) + deltaStart, endFrame: (mate.endFrame ?? 0) + deltaEnd } as AnyClipProps;
         }
       }
 
@@ -1772,7 +1799,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       const prunedAssets = pruneAssetsForClips(state.assets, resolvedClips);
       return { clips: resolvedClips, clipDuration, assets: prunedAssets };
     }),
-  groupClips: (clipIds: string[]) =>
+  makeTemplateGroup: (clipIds: string[]) =>
     set((state) => {
       const newClips = [...state.clips];
       const clips = newClips.filter((c) => clipIds.includes(c.clipId));
@@ -1951,7 +1978,19 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
     });
     return ok;
   },
-  ungroupClips: (_groupId: string) =>
+  groupClips: (clipIds: string[]) =>
+    set((state) => {
+      const ids = withMates(state.clips, clipIds);
+      if (!canGroup(state.clips, ids)) return {};
+      if (state.clips.some((c) => ids.includes(c.clipId) && isTrackLocked(state.timelines, c.timelineId))) return {};
+      return { clips: groupTogether(state.clips, ids, uuidv4) };
+    }),
+  ungroupClips: (clipIds: string[]) =>
+    set((state) => {
+      const next = ungroupTogether(state.clips, clipIds);
+      return next === state.clips ? {} : { clips: next };
+    }),
+  dissolveTemplateGroup: (_groupId: string) =>
     set((state) => {
       const groupClip = state.clips.find((c) => c.clipId === _groupId);
       if (!groupClip || groupClip.type !== "group")
@@ -2175,13 +2214,19 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       const within = (c: AnyClipProps) => cutFrame > (c.startFrame || 0) && cutFrame < (c.endFrame || 0);
       const clip = state.clips.find((c) => c.clipId === clipId && within(c));
       if (!clip || isClipLocked(state.clips, state.timelines, clip, linkage())) return {};
-      const cut = [clip, ...partners(state.clips, clip).filter((c) => within(c) && c.type !== "group")];
+      // A group is cut with it, where the cut falls on its clips: the left halves stick together, and the right halves.
+      const cut = _.uniqBy([clip, ...partners(state.clips, clip), ...bundleMates(state.clips, clip)].filter((c) => c === clip || (within(c) && c.type !== "group")), (c) => c.clipId);
       const [leftLink, rightLink] = [uuidv4(), uuidv4()];
+      const [leftBundle, rightBundle] = [uuidv4(), uuidv4()];
       const halves = cut.map((c) => {
         const [left, right] = splitClipAt(c, cutFrame);
-        if (cut.length > 1) {
+        if (c.linkId && cut.filter((x) => x.linkId === c.linkId).length > 1) {
           left.linkId = leftLink;
           right.linkId = rightLink;
+        }
+        if (c.bundleId) {
+          left.bundleId = leftBundle;
+          right.bundleId = rightBundle;
         }
         return [left, right] as const;
       });
@@ -2251,7 +2296,8 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
     }),
   setClipsDeactivated: (clipIds, on) =>
     set((state) => {
-      const picked = state.clips.filter((c) => clipIds.includes(c.clipId) && !c.hidden && c.type !== "group" && !isClipLocked(state.clips, state.timelines, c, false));
+      const whole = withMates(state.clips, clipIds);
+      const picked = state.clips.filter((c) => whole.includes(c.clipId) && !c.hidden && c.type !== "group" && !isClipLocked(state.clips, state.timelines, c, false));
       if (picked.length === 0) return {};
       const value = on ?? !picked.every((c) => c.deactivated);
       const ids = new Set(picked.map((c) => c.clipId));
@@ -2356,7 +2402,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
         return { clips: state.clips, clipboard: state.clipboard };
       // Not from a locked track; a clip's linked clips go with it, as in a delete.
       const picked = state.clips.filter((c) => clipIds.includes(c.clipId) && !isClipLocked(state.clips, state.timelines, c, linkage()));
-      const toCut = _.uniqBy([...picked, ...picked.flatMap((c) => partners(state.clips, c))], (c) => c.clipId);
+      const toCut = _.uniqBy([...picked, ...picked.flatMap((c) => [...partners(state.clips, c), ...bundleMates(state.clips, c)])], (c) => c.clipId);
       const cutIds = new Set(toCut.map((c) => c.clipId));
       const remaining = state.clips.filter((c) => !cutIds.has(c.clipId));
       const resolvedClips = resolveOverlaps(remaining);
@@ -2408,6 +2454,13 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
         if (!links.has(id)) links.set(id, uuidv4());
         return links.get(id);
       };
+      const bundles = new Map<string, string>();
+      const bundleCounts = _.countBy(clipboardItems.filter((c) => c.bundleId), (c) => c.bundleId);
+      const bundleFor = (id?: string) => {
+        if (!id || bundleCounts[id] < 2) return undefined;
+        if (!bundles.has(id)) bundles.set(id, uuidv4());
+        return bundles.get(id);
+      };
       const pasted = clipboardItems.map((template) => {
         const templateStart = template.startFrame || 0;
         const templateEnd = template.endFrame || 0;
@@ -2428,6 +2481,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
           trimEnd: 0,
           trimStart: 0,
           linkId: linkFor(template.linkId),
+          bundleId: bundleFor(template.bundleId),
         } as AnyClipProps;
       });
       let newClips = [...state.clips, ...pasted];

@@ -4,6 +4,7 @@
 // edits and the timeline's components use them while a drag is under way.
 // See docs/plan/app-engine-integration.md.
 import type { Asset, AnyClipProps, GroupClipProps, Marker, TimelineProps } from "./types";
+import { bundleMates } from "./bundle.ts";
 import { carriedClips } from "./linkage.ts";
 
 const startOf = (c: AnyClipProps) => c.startFrame ?? 0;
@@ -36,7 +37,9 @@ export const linkedClips = (clips: AnyClipProps[], clip: AnyClipProps | undefine
  */
 export const isClipLocked = (clips: AnyClipProps[], timelines: TimelineProps[], clip: AnyClipProps | undefined, linked = true) =>
   !!clip &&
-  (isTrackLocked(timelines, clip.timelineId) || (linked && linkedClips(clips, clip).some((c) => isTrackLocked(timelines, c.timelineId))));
+  (isTrackLocked(timelines, clip.timelineId) ||
+    (linked && linkedClips(clips, clip).some((c) => isTrackLocked(timelines, c.timelineId))) ||
+    bundleMates(clips, clip).some((c) => isTrackLocked(timelines, c.timelineId)));
 
 /** The main track's clips (a group's hidden children aren't on it), in time order. */
 const mainClips = (clips: AnyClipProps[], main: TimelineProps, exclude?: Set<string>) =>

@@ -187,8 +187,10 @@ export interface Keyframe {
 export type ClipKeyframes = Partial<Record<KeyframeProperty, Keyframe[]>>;
 
 export interface ClipProps {
-  // For grouping
+  // For a text template's container (its parts are hidden under it)
   groupId?: string;
+  /** Group (⌘G): clips with the same id are stuck together (lib/bundle.ts). */
+  bundleId?: string;
   hidden?: boolean;
   //
   timelineId?: string;

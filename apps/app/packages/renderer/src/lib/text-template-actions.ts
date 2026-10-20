@@ -43,7 +43,7 @@ export const addTemplate = async (template: TextTemplate, opts: { startFrame?: n
   }
   clips.addTimeline({ type: "media", timelineY: 0, timelineHeight: getTimelineHeightForClip("group"), timelineWidth: 0, muted: false, hidden: false }, -1);
   const ids = layout.map((l) => l.clip.clipId);
-  clips.groupClips(ids);
+  clips.makeTemplateGroup(ids);
   const group = useClipStore.getState().clips.find((c) => c.type === "group" && (c as any).children?.flat().includes(ids[0]));
   if (!group) return null;
   clips.updateClip(group.clipId, { template: { id: template.id, name: template.name } } as Partial<AnyClipProps>);

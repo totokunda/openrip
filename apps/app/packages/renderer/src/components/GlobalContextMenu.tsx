@@ -214,7 +214,7 @@ const GlobalContextMenu: React.FC = () => {
       } else if (action === "group") {
         clipsStore.groupClips(ids);
       } else if (action === "ungroup") {
-        clipsStore.ungroupClips(target.primaryClipId);
+        clipsStore.ungroupClips(ids);
       } else if (action === "link") {
         clipsStore.linkClips(ids);
       } else if (action === "unlink") {

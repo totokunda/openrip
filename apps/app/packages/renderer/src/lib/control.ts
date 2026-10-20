@@ -6,7 +6,16 @@ import {
   MAX_DURATION,
 } from "./settings";
 import { useClipStore } from "./clip";
+import { stickSelection, withMates } from "./bundle";
 import _ from "lodash";
+
+/** A selection with its groups whole (lib/bundle.ts). */
+const stuck = (next: string[], _prev?: string[]) => stickSelection(useClipStore.getState().clips, next);
+/** The selection without a clip and what is stuck to it. */
+const without = (ids: string[], clipId: string) => {
+  const gone = new Set(withMates(useClipStore.getState().clips, [clipId]));
+  return ids.filter((id) => !gone.has(id));
+};
 
 /**
  * Something that plays the timeline itself instead of the frame timer below: the Rust
@@ -326,15 +335,19 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
   setFocusAnchorRatio: (ratio) =>
     set({ focusAnchorRatio: Math.max(0, Math.min(1, ratio)) }),
   selectedClipIds: [],
-  setSelectedClipIds: (clipIds) => set(clipIds.length ? { selectedClipIds: clipIds, selectedTransitionId: null } : { selectedClipIds: clipIds }),
+  setSelectedClipIds: (clipIds) =>
+    set((state) => {
+      const ids = stuck(clipIds, state.selectedClipIds);
+      return ids.length ? { selectedClipIds: ids, selectedTransitionId: null } : { selectedClipIds: ids };
+    }),
   addClipSelection: (clipId) =>
     set((state) => {
-      return { selectedClipIds: _.uniq([...state.selectedClipIds, clipId]), selectedTransitionId: null };
+      return { selectedClipIds: stuck(_.uniq([...state.selectedClipIds, clipId]), state.selectedClipIds), selectedTransitionId: null };
     }),
   removeClipSelection: (clipId) =>
     set((state) => {
       return {
-        selectedClipIds: state.selectedClipIds.filter((id) => id !== clipId),
+        selectedClipIds: without(state.selectedClipIds, clipId),
       };
     }),
   toggleClipSelection: (clipId, isShiftClick = false) =>
@@ -344,17 +357,15 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
         if (state.selectedClipIds.includes(clipId)) {
           // Remove from selection if already selected
           return {
-            selectedClipIds: state.selectedClipIds.filter(
-              (id) => id !== clipId,
-            ),
+            selectedClipIds: without(state.selectedClipIds, clipId),
           };
         } else {
           // Add to selection
-          return { selectedClipIds: [...state.selectedClipIds, clipId], selectedTransitionId: null };
+          return { selectedClipIds: stuck([...state.selectedClipIds, clipId], state.selectedClipIds), selectedTransitionId: null };
         }
       } else {
         // Regular click - select only this clip
-        return { selectedClipIds: [clipId], selectedTransitionId: null };
+        return { selectedClipIds: stuck([clipId], state.selectedClipIds), selectedTransitionId: null };
       }
     }),
   clearSelection: () => set({ selectedClipIds: [], selectedTransitionId: null }),

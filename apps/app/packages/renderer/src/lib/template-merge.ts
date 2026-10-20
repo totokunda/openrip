@@ -37,6 +37,10 @@ export const mergeTemplate = (
     const any = c as any;
     const next: any = { ...c, clipId: clipIds.get(c.clipId as string)!, timelineId: trackIds.get(c.timelineId as string) ?? c.timelineId, startFrame: shift(any.startFrame), endFrame: shift(any.endFrame) };
     if (any.groupId) next.groupId = clipIds.get(any.groupId) ?? any.groupId;
+    if (any.bundleId) {
+      if (!linkIds.has(`bundle:${any.bundleId}`)) linkIds.set(`bundle:${any.bundleId}`, newId());
+      next.bundleId = linkIds.get(`bundle:${any.bundleId}`);
+    }
     if (any.linkId) {
       if (!linkIds.has(any.linkId)) linkIds.set(any.linkId, newId());
       next.linkId = linkIds.get(any.linkId);

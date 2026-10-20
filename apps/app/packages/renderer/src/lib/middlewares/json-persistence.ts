@@ -27,6 +27,7 @@ import type {
   CompoundContent,
 } from "../types";
 import { foldStack } from "../compound";
+import { migrateLegacyGroups } from "../bundle";
 import { timelineRoot } from "../timelines";
 import { listFromDoc, type TimelineContent } from "../project-timelines";
 
@@ -336,6 +337,25 @@ export const clipToJson = (orig: AnyClipProps, fps: number): TimelineClipJson =>
     };
   }
   return jsonClip;
+};
+
+/**
+ * A compound clip's own timeline as a small project the engine can draw or mix (its content from
+ * frame 0, on the project's canvas and frame rate, with the project's media): what the compound's
+ * thumbnails, its mixed sound for Transcript, Generate captions and Extract audio, are made from.
+ */
+export const compoundDocument = (content: CompoundContent, name = "Compound clip") => {
+  const fps = useControlsStore.getState().fps || 24;
+  const viewport = useViewportStore.getState();
+  const assets: Record<string, Asset> = {};
+  for (const a of Object.values((useClipStore.getState().assets ?? {}) as Record<string, Asset>)) if (a?.id) assets[a.id] = a;
+  return {
+    version: "1.0.0",
+    meta: { id: `compound-${name}`, name, createdAt: 0, lastModified: 0, projectId: 0 },
+    settings: { fps, aspectRatio: viewport.aspectRatio, ...(viewport.canvasSize ? { engineCanvas: viewport.canvasSize } : {}) },
+    assets,
+    timeline: { tracks: content.timelines, clips: content.clips.filter(Boolean).map((c) => clipToJson(c, fps)) },
+  };
 };
 
 /**
@@ -859,7 +879,8 @@ export const clipsFromSnapshot = (doc: ProjectJsonSnapshot): AnyClipProps[] => {
 
       clips.push(merged);
     }
-  return clips;
+  // A project saved when Group made a container clip: its clips are stuck together now.
+  return migrateLegacyGroups(clips, uuidv4);
 };
 
 /** Markers as saved, in time order. */
