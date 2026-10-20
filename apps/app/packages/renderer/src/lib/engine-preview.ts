@@ -463,7 +463,8 @@ function soloClips<T>(snapshot: T, clipIds: string[]): T {
   const picked = all.filter((c) => clipIds.includes(c?.clipId));
   if (picked.length === 0) return snapshot;
   const groups = new Set(picked.map((c) => c.groupId).filter(Boolean));
-  const keep = all.filter((c) => picked.includes(c) || (c.groupId && groups.has(c.groupId)));
+  const bundles = new Set(picked.map((c) => c.bundleId).filter(Boolean));
+  const keep = all.filter((c) => picked.includes(c) || (c.groupId && groups.has(c.groupId)) || (c.bundleId && bundles.has(c.bundleId)));
   const from = Math.min(...keep.map((c) => Number(c.startTick)));
   const moved = keep.map((c) => ({ ...c, startTick: String(Number(c.startTick) - from), endTick: String(Number(c.endTick) - from) }));
   const ids = new Set(moved.map((c) => c.timelineId));

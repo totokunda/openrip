@@ -6,11 +6,10 @@ import { useInspectorStore } from "@/lib/inspector";
 import type { GroupClipProps, TextClipProps } from "@/lib/types";
 
 /**
- * The inspector of a text template's group (the Text tab's templates): its words as fields, one
- * for each text in the template, edited here without ungrouping. CapCut's template is one clip
- * with fields to fill in; ours is a group of ordinary text and shape clips, so each field's
- * "Style" button selects its text for the whole Text tab (font, colour, animation), and
- * Ungroup (⌘⇧G) frees every layer.
+ * The inspector of a text template (the Text tab's templates): its words as fields, one for each
+ * text in the template. CapCut's template is one clip with fields to fill in; ours is one bar
+ * holding ordinary text and shape clips, so each field's "Style" button selects its text for the
+ * whole Text tab (font, colour, animation). (It's a container clip, not a Group: lib/bundle.ts.)
  */
 const TemplateProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
   const group = useClipStore((s) => s.getClipById(clipId)) as GroupClipProps | undefined;
@@ -23,7 +22,7 @@ const TemplateProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
   return (
     <div className="flex flex-col gap-3 px-3 py-3 min-w-0" data-testid="template-fields">
       <p className="text-[12px] leading-snug text-[#949494]">
-        {group.template?.name ? `${group.template.name}: ` : ""}change the words here. Style each text from its brush, or ungroup to edit every layer.
+        {group.template?.name ? `${group.template.name}: ` : ""}change the words here, and style each text from its brush.
       </p>
       {texts.map((t, n) => (
         <div key={t.clipId} className="flex flex-col gap-1.5" data-testid="template-field">
@@ -54,7 +53,7 @@ const TemplateProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
           />
         </div>
       ))}
-      {texts.length === 0 && <p className="text-[12px] text-[#6c6c6c]">This group has no text.</p>}
+      {texts.length === 0 && <p className="text-[12px] text-[#6c6c6c]">This template has no text.</p>}
     </div>
   );
 };
