@@ -228,7 +228,8 @@ const worldCanvas = () => {
 };
 
 /** Whether a clip has sound the recognizer can listen to on its own (a video or an audio clip with media). */
-const listenable = (clip: AnyClipProps | undefined): clip is VideoClipProps => (clip?.type === "video" || clip?.type === "audio") && !!useClipStore.getState().getAssetById((clip as VideoClipProps).assetId)?.path;
+const listenable = (clip: AnyClipProps | undefined): clip is VideoClipProps =>
+  (clip?.type === "video" || clip?.type === "audio") && (!!(clip as VideoClipProps).compound || !!useClipStore.getState().getAssetById((clip as VideoClipProps).assetId)?.path);
 
 /** The clip Generate listens to: the one selected (alone), else the timeline's mix. */
 export function sourceClip(): VideoClipProps | null {
@@ -283,7 +284,7 @@ export async function generateCaptions(kind: AutoKind = "captions"): Promise<num
     const { language, highlightKeywords, fillerWords, deleteCurrent } = store.getState();
     const clip = sourceClip();
     const speed = Math.max(0.1, Number((clip as VideoClipProps | null)?.speed || 1));
-    const simple = !!clip && !(clip as VideoClipProps).reverse && !(clip as VideoClipProps).speedCurve;
+    const simple = !!clip && !(clip as VideoClipProps).compound && !(clip as VideoClipProps).reverse && !(clip as VideoClipProps).speedCurve;
     const ask: SpeechAsk = {
       modelId,
       language: language === "auto" ? null : language,

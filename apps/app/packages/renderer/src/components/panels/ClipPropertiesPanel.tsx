@@ -132,7 +132,7 @@ const ClipPropertiesPanel: React.FC = () => {
           ],
         },
         ...(hasAudio ? [{ id: 'audio', label: 'Audio', sections: [audioBasic] }] : []),
-        speed(false),
+        speed(true),
         animation,
         {
           id: 'adjust',

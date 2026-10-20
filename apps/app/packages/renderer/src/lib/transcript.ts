@@ -39,14 +39,17 @@ export const useTranscript = create<State>(() => ({ target: null, preview: null,
 /** The least a pause can be to be cut, seconds, and the quiet each cut leaves. */
 export const KEEP_PAUSE_SECS = 0.2;
 
-/** A clip the transcript can follow: a video or audio clip with media, played forwards at a steady speed. */
-export const followable = (clip: AnyClipProps | undefined): boolean => transcribable(clip) && !!useClipStore.getState().getAssetById((clip as { assetId: string }).assetId)?.path;
+/** The asset whose sound a clip plays: its media, or a compound clip's mixed sound (lib/compound-actions.ts). */
+export const soundAssetId = (clip: AnyClipProps | undefined): string => ((clip as { assetId?: string } | undefined)?.assetId || (clip as { mixAssetId?: string } | undefined)?.mixAssetId || "") as string;
+
+/** A clip the transcript can follow: a video or audio clip with media (a compound with its sound mixed), played forwards at a steady speed. */
+export const followable = (clip: AnyClipProps | undefined): boolean => transcribable(clip) && !!useClipStore.getState().getAssetById(soundAssetId(clip))?.path;
 
 /** The clips the panel shows the words of: the target media's on its track, in time order. */
 export const targetPieces = (clips: AnyClipProps[], target: State["target"]): AnyClipProps[] =>
   target
     ? clips
-        .filter((c) => !c.hidden && c.timelineId === target.timelineId && (c as { assetId?: string }).assetId === target.assetId && transcribable(c))
+        .filter((c) => !c.hidden && c.timelineId === target.timelineId && soundAssetId(c) === target.assetId && transcribable(c))
         .sort((a, b) => (a.startFrame ?? 0) - (b.startFrame ?? 0))
     : [];
 
@@ -56,7 +59,7 @@ export const wordsOf = (pieces: AnyClipProps[], transcript: Transcript | undefin
 /** Follow `clip` (its media on its track). */
 export const followClip = (clip: AnyClipProps | undefined) => {
   if (!followable(clip)) return;
-  const target = { assetId: (clip as { assetId: string }).assetId, timelineId: clip!.timelineId! };
+  const target = { assetId: soundAssetId(clip), timelineId: clip!.timelineId! };
   const now = useTranscript.getState().target;
   if (now?.assetId !== target.assetId || now.timelineId !== target.timelineId) useTranscript.setState({ target, preview: null, message: null });
 };
@@ -141,7 +144,7 @@ export function cutSpans(spans: Span[]): number {
   const piece = (frame: number) =>
     useClipStore
       .getState()
-      .clips.find((c) => !c.hidden && c.timelineId === t.timelineId && (c as { assetId?: string }).assetId === t.assetId && (c.startFrame ?? 0) <= frame && frame < (c.endFrame ?? 0));
+      .clips.find((c) => !c.hidden && c.timelineId === t.timelineId && soundAssetId(c) === t.assetId && (c.startFrame ?? 0) <= frame && frame < (c.endFrame ?? 0));
   const first = piece(whole[0].from);
   if (first && isClipLocked(store.clips, store.timelines, first, useControlsStore.getState().linkage)) {
     useTranscript.setState({ message: "The track is locked." });
@@ -178,7 +181,7 @@ export const transcriptMenuItems = (clip: AnyClipProps | undefined, selected: nu
 export function openTranscriptForPath(path: string): boolean {
   const { clips, getAssetByPath } = useClipStore.getState();
   const asset = getAssetByPath(path);
-  const clip = asset && clips.filter((c) => !c.hidden && (c as { assetId?: string }).assetId === asset.id && transcribable(c)).sort((a, b) => (a.startFrame ?? 0) - (b.startFrame ?? 0))[0];
+  const clip = asset && clips.filter((c) => !c.hidden && soundAssetId(c) === asset.id && transcribable(c)).sort((a, b) => (a.startFrame ?? 0) - (b.startFrame ?? 0))[0];
   if (!clip) {
     toast("Add the media to the timeline to transcribe it");
     return false;

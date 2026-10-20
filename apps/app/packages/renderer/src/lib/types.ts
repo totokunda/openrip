@@ -731,6 +731,10 @@ export type VideoClipProps = ClipProps &
     compound?: CompoundContent;
     /** A compound clip's name (CapCut's "Compound clip1"). */
     name?: string;
+    /** A compound clip whose sound was taken out onto an audio clip (Extract audio): it plays none of its own. */
+    audioSeparated?: boolean;
+    /** A compound clip's mixed sound as an asset (lib/compound-actions.ts), which Transcript reads its words from. */
+    mixAssetId?: string;
   };
 
 export type ImageClipProps = ClipProps &

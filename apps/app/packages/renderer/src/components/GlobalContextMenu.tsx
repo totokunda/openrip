@@ -60,7 +60,7 @@ const MenuRow: React.FC<{
           onSelect(item.action, item.value);
         }}
         className={cn(
-          "w-full h-8 px-2.5 text-left text-[13px] flex items-center rounded-[4px] justify-between hover:bg-brand-hover text-brand-light",
+          "w-full h-8 px-2.5 gap-6 text-left text-[13px] flex items-center rounded-[4px] justify-between hover:bg-brand-hover text-brand-light",
           open && "bg-brand-hover",
           item.disabled && "text-[#525252] cursor-default! hover:bg-transparent",
         )}
@@ -297,7 +297,7 @@ const GlobalContextMenu: React.FC = () => {
               top: position.y,
               zIndex: 100,
             }}
-            className="w-[238px] font-poppins select-none rounded-[8px] border-[0.5px] border-black bg-brand-header shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)]"
+            className="min-w-[238px] w-max font-poppins select-none rounded-[8px] border-[0.5px] border-black bg-brand-header shadow-[0_0_0_0.5px_#494949,0_8px_24px_rgba(0,0,0,0.5)]"
           >
             {content}
           </div>,

@@ -59,7 +59,7 @@ mod tempo {
 use std::collections::HashMap;
 use std::path::Path;
 
-use openrip_model::{AudioFade, ChannelFill, EffectCategory, MediaKind, Micros, Project, Remap, Segment, TimeRange, Track, TrackKind};
+use openrip_model::{Animated, AudioFade, ChannelFill, EffectCategory, Keyframe, MediaKind, Micros, Project, Remap, Segment, TimeRange, Track, TrackKind};
 
 #[cfg(feature = "ffmpeg")]
 pub use decode::AudioDecoder;
@@ -165,27 +165,138 @@ struct ReverseWindow {
 /// The project with the sound of its compound clips' content on tracks of their own (a
 /// compound clip is a timeline played inside the clip): each of the content's clips moved to
 /// where the compound plays it, cut to the part the compound shows, at the compound's volume.
-/// The mixer then plays them like any other clips. (A compound's fades, speed curve and
-/// keyframed volume aren't applied to its sound; a constant volume is.)
+/// The mixer then plays them like any other clips. The compound's volume (keyframes included)
+/// and fades are baked into the volume of each clip placed, so they shape the content's sound
+/// as they do a video's. (A compound's speed curve isn't applied to its sound; its constant
+/// speed is.)
 fn with_compound_sound(mut project: Project) -> Project {
     if project.materials.compounds.is_empty() {
         return project;
     }
     let mut extra = Vec::new();
-    splice_compounds(&project.tracks, &project, 0, None, 1.0, true, &mut extra);
+    splice_compounds(&project.tracks, &project, 0, None, &[], true, &mut extra);
     project.tracks.extend(extra);
     project
 }
 
+/// A compound clip's content as a sound source, for one that plays it by a speed curve: the
+/// content's tracks mixed (by a mixer of their own, nested compounds and all) at the content's
+/// time, which the clip then reads as it does a media file, at the curve's varying speed.
+struct ContentSource {
+    mixer: Mixer,
+}
+
+impl ContentSource {
+    fn new(project: &Project, content: &openrip_model::Compound, rate: u32) -> ContentSource {
+        let mut inner = project.clone();
+        inner.tracks = content.tracks.clone();
+        ContentSource { mixer: Mixer::with_rate(inner, rate) }
+    }
+}
+
+impl AudioSource for ContentSource {
+    fn read(&mut self, at: i64, out: &mut [f32]) -> Result<(), AudioError> {
+        self.mixer.mix(at, out).map(|_| ())
+    }
+
+    fn end(&self) -> Option<i64> {
+        None
+    }
+}
+
+/// A compound clip's own gain over time while it plays its content: its volume (keyframes
+/// included) and fades, in the timeline's time (as the clip is placed, `origin` its start).
+#[derive(Clone)]
+struct Outer {
+    origin: i64,
+    length: i64,
+    volume: Animated<f32>,
+    /// The fade in and out lengths, µs, when it has fades.
+    fade: Option<(i64, i64)>,
+}
+
+impl Outer {
+    fn of(seg: &Segment, shift: i64, project: &Project) -> Outer {
+        let fade = seg
+            .attachments
+            .iter()
+            .find_map(|id| project.materials.audio_fades.iter().find(|f| &f.id == id))
+            .map(|f| (f.fade_in.0, f.fade_out.0))
+            .filter(|(i, o)| *i > 0 || *o > 0);
+        Outer { origin: seg.target.start.0 + shift, length: seg.target.duration.0, volume: seg.volume.clone(), fade }
+    }
+
+    /// Whether the gain is one number all along.
+    fn is_flat(&self) -> bool {
+        !self.volume.is_animated() && self.fade.is_none()
+    }
+
+    /// The gain at the timeline time `t`: its volume at its own local time, and the fades' ramps.
+    fn at(&self, t: i64) -> f32 {
+        let local = t - self.origin;
+        let mut gain = self.volume.sample(Micros(local));
+        if let Some((fade_in, fade_out)) = self.fade {
+            if fade_in > 0 && local < fade_in {
+                gain *= local.max(0) as f32 / fade_in as f32;
+            }
+            if fade_out > 0 && self.length - local < fade_out {
+                gain *= (self.length - local).max(0) as f32 / fade_out as f32;
+            }
+        }
+        gain
+    }
+}
+
+fn gain_at(env: &[Outer], t: i64) -> f32 {
+    env.iter().map(|o| o.at(t)).product()
+}
+
+/// `inner`'s volume (keyed in time from `orig_start`) times the compounds' gain over the stretch
+/// `new_start`..`new_end` of the timeline, as keys in time from `new_start`: one at each key of
+/// either and each fade's ends, with a key every 25 ms where two curves meet.
+fn baked_volume(inner: &Animated<f32>, orig_start: i64, new_start: i64, new_end: i64, env: &[Outer]) -> Animated<f32> {
+    let mut times = vec![new_start, new_end];
+    times.extend(inner.keys.iter().map(|k| orig_start + k.at.0));
+    let mut grid = false;
+    for o in env {
+        times.extend([o.origin, o.origin + o.length]);
+        times.extend(o.volume.keys.iter().map(|k| o.origin + k.at.0));
+        if let Some((fade_in, fade_out)) = o.fade {
+            if fade_in > 0 {
+                times.push(o.origin + fade_in);
+            }
+            if fade_out > 0 {
+                times.push(o.origin + o.length - fade_out);
+            }
+        }
+        grid |= o.volume.is_animated();
+    }
+    grid |= inner.is_animated() && env.iter().any(|o| o.fade.is_some());
+    if grid {
+        let step = ((new_end - new_start) / 4000).max(25_000);
+        let mut t = new_start;
+        while t < new_end {
+            times.push(t);
+            t += step;
+        }
+    }
+    times.retain(|t| *t >= new_start && *t <= new_end);
+    times.sort_unstable();
+    times.dedup();
+    let keys: Vec<Keyframe<f32>> = times.iter().map(|&t| Keyframe::new(Micros(t - new_start), inner.sample(Micros(t - orig_start)) * gain_at(env, t))).collect();
+    Animated { value: keys.first().map_or(1.0, |k| k.value), keys }
+}
+
 /// Collect onto `out` the clips of the compounds played by `tracks` (which sit `shift` µs
-/// later than their own time, within `window` if any), `gain` louder; with `top` unset, the
-/// clips of `tracks` themselves too.
-fn splice_compounds(tracks: &[Track], project: &Project, shift: i64, window: Option<TimeRange>, gain: f32, top: bool, out: &mut Vec<Track>) {
+/// later than their own time, within `window` if any), as loud as the compounds around them
+/// (`env`) make them; with `top` unset, the clips of `tracks` themselves too.
+fn splice_compounds(tracks: &[Track], project: &Project, shift: i64, window: Option<TimeRange>, env: &[Outer], top: bool, out: &mut Vec<Track>) {
     for track in tracks.iter().filter(|t| !t.muted && !t.hidden && matches!(t.kind, TrackKind::Video | TrackKind::Audio)) {
         let mut kept = Vec::new();
         for seg in track.segments.iter().filter(|s| s.visible) {
             // Where the clip plays in the outer timeline, within the window.
-            let (mut start, mut end) = (seg.target.start.0 + shift, seg.target.end().0 + shift);
+            let orig_start = seg.target.start.0 + shift;
+            let (mut start, mut end) = (orig_start, seg.target.end().0 + shift);
             if let Some(w) = window {
                 start = start.max(w.start.0);
                 end = end.min(w.end().0);
@@ -193,16 +304,18 @@ fn splice_compounds(tracks: &[Track], project: &Project, shift: i64, window: Opt
             if end <= start {
                 continue;
             }
-            if let Some(c) = project.materials.compounds.iter().find(|c| c.id == seg.material) {
+            // (One with a speed curve is played as a source of its own: see `ContentSource`.)
+            if let Some(c) = project.materials.compounds.iter().find(|c| c.id == seg.material).filter(|_| seg.speed_curve(&project.materials).is_none()) {
                 let inner = seg.target.start.0 + shift - seg.source.map_or(0, |s| s.start.0);
-                let volume = gain * seg.volume.sample(Micros::ZERO);
+                let mut around = env.to_vec();
+                around.push(Outer::of(seg, shift, project));
                 let window = Some(TimeRange::new(Micros(start), Micros(end - start)));
                 // At the clip's speed or backward, the content's clips are timed as it plays them.
                 if (seg.speed - 1.0).abs() > 1e-9 || seg.reverse {
                     let played = timed_as_played(&c.tracks, seg);
-                    splice_compounds(&played, project, inner, window, volume, false, out);
+                    splice_compounds(&played, project, inner, window, &around, false, out);
                 } else {
-                    splice_compounds(&c.tracks, project, inner, window, volume, false, out);
+                    splice_compounds(&c.tracks, project, inner, window, &around, false, out);
                 }
             } else if !top {
                 let mut seg = seg.clone();
@@ -216,8 +329,13 @@ fn splice_compounds(tracks: &[Track], project: &Project, shift: i64, window: Opt
                     src.duration = Micros((src.duration.0 - from_start - from_end).max(1));
                 }
                 seg.target = TimeRange::new(Micros(start), Micros(end - start));
-                if (gain - 1.0).abs() > 1e-6 {
-                    seg.volume = openrip_model::Animated::constant(gain * seg.volume.sample(Micros::ZERO));
+                if env.iter().all(Outer::is_flat) {
+                    let gain = gain_at(env, start);
+                    if (gain - 1.0).abs() > 1e-6 {
+                        seg.volume = Animated::constant(gain * seg.volume.sample(Micros::ZERO));
+                    }
+                } else {
+                    seg.volume = baked_volume(&seg.volume, orig_start, start, end, env);
                 }
                 kept.push(seg);
             }
@@ -328,28 +446,38 @@ impl Mixer {
             .flat_map(|t| t.segments.iter().filter(|s| s.visible && sample_at(s.target.start, rate) < end && sample_at(s.target.end(), rate) > start).cloned())
             .collect();
         for seg in clips {
-            let Some(media) = self.project.materials.media.iter().find(|m| m.id == seg.material) else { continue };
-            if media.kind == MediaKind::Photo || (media.kind == MediaKind::Video && !media.has_audio) {
-                continue;
-            }
-            // A reversed clip plays the copy CapCut rendered backward (with its sound) where
-            // it's readable, forward from the mirrored time.
-            let copy = if seg.reverse { media.reverse_path.clone().filter(|p| openrip_platform::assets::exists(Path::new(p))) } else { None };
-            let mirror = copy.as_ref().map(|_| media.duration);
-            let path = copy.unwrap_or_else(|| media.path.clone());
-            if !self.decoders.contains_key(&seg.id) {
-                match mirror {
-                    Some(d) => self.copies.insert(seg.id.clone(), d),
-                    None => self.copies.remove(&seg.id),
-                };
-                let d = match open_audio(Path::new(&path), self.rate) {
-                    Ok(d) => d,
-                    Err(_) => {
-                        report.missing.push(path.clone());
-                        None
-                    }
-                };
-                self.decoders.insert(seg.id.clone(), d);
+            // A compound clip with a speed curve plays its content's mix as the media it reads.
+            let curved = self.project.materials.compounds.iter().find(|c| c.id == seg.material).filter(|_| seg.speed_curve(&self.project.materials).is_some()).cloned();
+            if let Some(content) = &curved {
+                if !self.decoders.contains_key(&seg.id) {
+                    self.copies.remove(&seg.id);
+                    let source: Box<dyn AudioSource> = Box::new(ContentSource::new(&self.project, content, rate));
+                    self.decoders.insert(seg.id.clone(), Some(source));
+                }
+            } else {
+                let Some(media) = self.project.materials.media.iter().find(|m| m.id == seg.material) else { continue };
+                if media.kind == MediaKind::Photo || (media.kind == MediaKind::Video && !media.has_audio) {
+                    continue;
+                }
+                // A reversed clip plays the copy CapCut rendered backward (with its sound) where
+                // it's readable, forward from the mirrored time.
+                let copy = if seg.reverse { media.reverse_path.clone().filter(|p| openrip_platform::assets::exists(Path::new(p))) } else { None };
+                let mirror = copy.as_ref().map(|_| media.duration);
+                let path = copy.unwrap_or_else(|| media.path.clone());
+                if !self.decoders.contains_key(&seg.id) {
+                    match mirror {
+                        Some(d) => self.copies.insert(seg.id.clone(), d),
+                        None => self.copies.remove(&seg.id),
+                    };
+                    let d = match open_audio(Path::new(&path), self.rate) {
+                        Ok(d) => d,
+                        Err(_) => {
+                            report.missing.push(path.clone());
+                            None
+                        }
+                    };
+                    self.decoders.insert(seg.id.clone(), d);
+                }
             }
             let Some(Some(mut decoder)) = self.decoders.remove(&seg.id) else { continue };
             let (s0, s1) = (sample_at(seg.target.start, rate), sample_at(seg.target.end(), rate));

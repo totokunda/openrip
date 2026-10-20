@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Group, Rect, Shape, Text } from "react-konva";
+import { Group, Path, Rect, Shape, Text } from "react-konva";
 import type { AnyClipProps } from "@/lib/types";
 import { BAR_WIDTH, LINE_COLOR, clipBars, volumeLine, type WaveScale, type WaveformBuckets } from "@/lib/waveform";
 
@@ -79,16 +79,21 @@ const textWidth = (text: string): number => {
  * tall, 4.5 px in and 2 px down, its colour with white over it, 10 px #e0e0e0 text with 2.5 px
  * either side, 5 px apart (a media clip's name and length).
  */
-export const ClipChips: React.FC<{ texts: string[]; fill: string; maxWidth: number; clipId: string }> = ({ texts, fill, maxWidth, clipId }) => {
+export const ClipChips: React.FC<{ texts: string[]; fill: string; maxWidth: number; clipId: string; glyph?: "compound" }> = ({ texts, fill, maxWidth, clipId, glyph }) => {
   let x = 4.5;
   const out: React.ReactNode[] = [];
-  for (const t of texts) {
+  for (const [i, t] of texts.entries()) {
     if (!t || x >= maxWidth - 6) break;
-    const w = Math.min(Math.ceil(textWidth(t)) + 5, maxWidth - x - 2);
+    // A compound clip's name chip has its glyph (a framed timeline) before the name.
+    const lead = i === 0 && glyph ? 14 : 0;
+    const w = Math.min(Math.ceil(textWidth(t)) + 5 + lead, maxWidth - x - 2);
     out.push(
       <Group key={t} x={x} y={2} clipX={0} clipY={0} clipWidth={w} clipHeight={14}>
         <Rect width={w} height={14} cornerRadius={3} fill={fill} />
-        <Text x={2.5} y={2.5} text={t} fontSize={CHIP_FONT_SIZE} letterSpacing={CHIP_SPACING} fontFamily="-apple-system, BlinkMacSystemFont, sans-serif" fill="#e0e0e0" wrap="none" />
+        {lead > 0 && (
+          <Path x={3.5} y={2} data="M1.5 0.5h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zM3 3.5h4M3 5h4M3 6.5h2.5" stroke="#e0e0e0" strokeWidth={1} lineCap="round" lineJoin="round" listening={false} />
+        )}
+        <Text x={2.5 + lead} y={2.5} text={t} fontSize={CHIP_FONT_SIZE} letterSpacing={CHIP_SPACING} fontFamily="-apple-system, BlinkMacSystemFont, sans-serif" fill="#e0e0e0" wrap="none" />
       </Group>,
     );
     x += w + 5;

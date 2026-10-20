@@ -881,7 +881,7 @@ fn convert_clip(
     let is_av = matches!(ty, "video" | "audio");
     let compound = ty == "video" && clip.get("compound").is_some_and(Value::is_object);
     // A compound plays its content at the clip's constant speed (its picture and sound are the
-    // content's read faster or slower); a speed curve on one isn't applied.
+    // content's read faster or slower), or by its speed curve (`speed` is the curve's average).
     let speed = if is_av { f(clip, "speed", 1.0).clamp(0.1, 100.0) } else { 1.0 };
     let mut attachments = Vec::new();
 
@@ -997,6 +997,10 @@ fn convert_clip(
     let mut volume = Animated::constant(1.0f32);
     if is_av {
         volume = Animated::constant(10f64.powf(f(clip, "volume", 0.0) / 20.0) as f32);
+        // A compound whose sound was taken out onto an audio clip (Extract audio) plays none of its own.
+        if compound && b(clip, "audioSeparated") {
+            volume = Animated::constant(0.0f32);
+        }
         attach_fade(&id, clip, materials, &mut attachments);
         audio::attach(&id, clip, materials, &mut attachments);
     }

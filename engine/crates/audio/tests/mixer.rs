@@ -290,3 +290,87 @@ fn a_compound_at_twice_the_speed_plays_its_contents_sound_sooner() {
     // is 0.5 s of the clip, 1.0 s on the timeline.
     assert!((first_sound(&compound(2.0)) - 1.0).abs() < 0.05, "{}", first_sound(&compound(2.0)));
 }
+
+/// A compound clip with a speed curve plays its content's sound by the curve: the content's
+/// 1 s..2 s of sound comes where the curve's remap puts them in the clip.
+#[test]
+fn a_compound_with_a_speed_curve_plays_its_sound_by_the_curve() {
+    let Some(path) = noise() else { return };
+    let inner = project(path.to_str().unwrap(), &[(false, false, 1.0)]);
+    let curve = vec![(0.0, 1.0), (1.0, 3.0)];
+    let mut p = inner.clone();
+    p.materials.compounds.push(openrip_model::Compound { id: "c".into(), name: String::new(), tracks: std::mem::take(&mut p.tracks) });
+    p.materials.speeds.push(openrip_model::Speed { id: "sp".into(), speed: 2.0, curve: curve.clone(), preset: None });
+    // Mean speed 2: the clip's 2.5 s read 5 s of the content.
+    let mut clip = serde_json::json!({ "id": "outer", "material": "c", "source": { "start": 0, "duration": 5000000 }, "target": { "start": 500000, "duration": 2500000 },
+        "speed": 2.0, "visible": true, "render_index": 0,
+        "transform": { "position": { "value": { "x": 0.0, "y": 0.0 } }, "scale": { "value": { "x": 1.0, "y": 1.0 } }, "rotation": { "value": 0.0 } },
+        "opacity": { "value": 1.0 }, "volume": { "value": 1.0 } });
+    clip["attachments"] = serde_json::json!(["sp"]);
+    p.tracks.push(serde_json::from_value(serde_json::json!({ "id": "main", "kind": "video", "segments": [clip] })).unwrap());
+    let out = mix(p);
+    let remap = openrip_model::Remap::new(&curve).unwrap();
+    // The clip's local time (seconds) at which the content reaches `content` seconds.
+    let when = |content: f64| {
+        let (mut lo, mut hi) = (0.0f64, 1.0f64);
+        for _ in 0..60 {
+            let mid = (lo + hi) / 2.0;
+            if remap.source_at(mid) * 5.0 < content {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 + lo * 2.5
+    };
+    let sec = |i: usize| i as f64 / (RATE as f64 * CHANNELS as f64);
+    let first = out.iter().position(|v| v.abs() > 1e-4).unwrap();
+    let last = out.iter().rposition(|v| v.abs() > 1e-4).unwrap();
+    // The content's sound is at its 1 s..2 s.
+    assert!((sec(first) - when(1.0)).abs() < 0.03, "starts at {} not {}", sec(first), when(1.0));
+    assert!((sec(last) - when(2.0)).abs() < 0.05, "ends at {} not {}", sec(last), when(2.0));
+}
+
+/// A compound clip's fades and keyframed volume shape its content's sound as they do a video's.
+#[test]
+fn a_compound_clips_fades_and_keyed_volume_shape_its_sound() {
+    let Some(path) = noise() else { return };
+    let plain = mix(project(path.to_str().unwrap(), &[(false, false, 1.0)]));
+    let inner = project(path.to_str().unwrap(), &[(false, false, 1.0)]);
+    let compound = |volume: serde_json::Value, fade_in: i64, fade_out: i64| {
+        let mut p = inner.clone();
+        p.materials.compounds.push(openrip_model::Compound { id: "c".into(), name: String::new(), tracks: std::mem::take(&mut p.tracks) });
+        p.materials.audio_fades.push(serde_json::from_value(serde_json::json!({ "id": "f", "fade_in": fade_in, "fade_out": fade_out })).unwrap());
+        let mut clip = serde_json::json!({ "id": "outer", "material": "c", "source": { "start": 0, "duration": 2500000 }, "target": { "start": 500000, "duration": 2500000 },
+            "speed": 1.0, "visible": true, "render_index": 0,
+            "transform": { "position": { "value": { "x": 0.0, "y": 0.0 } }, "scale": { "value": { "x": 1.0, "y": 1.0 } }, "rotation": { "value": 0.0 } },
+            "opacity": { "value": 1.0 }, "volume": volume });
+        clip["attachments"] = serde_json::json!(["f"]);
+        p.tracks.push(serde_json::from_value(serde_json::json!({ "id": "main", "kind": "video", "segments": [clip] })).unwrap());
+        mix(p)
+    };
+    // The content's sound is at 1 s..2 s of the content, 1.5 s..2.5 s on the timeline; the compound runs 0.5 s..3 s.
+    let shift = RATE as usize / 2 * CHANNELS;
+    let at = |s: f64| (s * RATE as f64) as usize * CHANNELS;
+    let ratio = |out: &[f32], sec: f64| -> f32 {
+        let i = at(sec);
+        let (mut a, mut b) = (0f64, 0f64);
+        for k in 0..2000 {
+            a += out[i + k].abs() as f64;
+            b += plain[i + k - shift].abs() as f64;
+        }
+        (a / b) as f32
+    };
+    // A 2 s fade in: the gain is the compound's own time over 2 s: 0.5 at 1.5 s on the timeline, 0.75 at 2 s.
+    let faded = compound(serde_json::json!({ "value": 1.0 }), 2_000_000, 0);
+    assert!((ratio(&faded, 1.51) - 0.505).abs() < 0.02, "{}", ratio(&faded, 1.51));
+    assert!((ratio(&faded, 2.01) - 0.755).abs() < 0.02, "{}", ratio(&faded, 2.01));
+    // A fade out over the last second (2 s..3 s on the timeline): at 2.46 s the gain is 0.54.
+    let out = compound(serde_json::json!({ "value": 1.0 }), 0, 1_000_000);
+    assert!((ratio(&out, 1.51) - 1.0).abs() < 0.02);
+    assert!((ratio(&out, 2.46) - 0.54).abs() < 0.03, "{}", ratio(&out, 2.46));
+    // Keyframed volume 0 -> 1 over the clip's 2.5 s: 0.4 at 1.5 s on the timeline, 0.78 at 2.46 s.
+    let keyed = compound(serde_json::json!({ "value": 1.0, "keys": [{ "at": 0, "value": 0.0 }, { "at": 2500000, "value": 1.0 }] }), 0, 0);
+    assert!((ratio(&keyed, 1.51) - 0.404).abs() < 0.02, "{}", ratio(&keyed, 1.51));
+    assert!((ratio(&keyed, 2.46) - 0.784).abs() < 0.03, "{}", ratio(&keyed, 2.46));
+}

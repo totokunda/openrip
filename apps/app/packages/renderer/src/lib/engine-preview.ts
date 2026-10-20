@@ -183,7 +183,7 @@ const eachClip = (clips: any[], fn: (clip: any) => any): any[] =>
  * detached (separateClip) uses the file as `…#video` and its audio as `…#audio`: the engine
  * reads the file itself for both, the video half silent, as the app's own preview plays them.
  */
-async function withOriginalMedia<T>(snapshot: T): Promise<T> {
+export async function withOriginalMedia<T>(snapshot: T): Promise<T> {
   const assets = (snapshot as any)?.assets;
   if (!assets || typeof assets !== "object") return snapshot;
   const entries = Object.entries(assets as Record<string, any>).filter(([, a]) => typeof a?.path === "string");

@@ -200,6 +200,8 @@ const Controls = () => {
   const selectedMaskId = useControlsStore((s) => s.selectedMaskId);
   const selectedLineId = useDrawingStore((s) => s.selectedLineId);
   const selectedIds = useControlsStore((s) => s.selectedClipIds);
+  // Inside a compound clip the toolbar has no Crop, Transform or Detach audio, as CapCut's.
+  const inCompound = useClipStore((s) => s.compoundStack.length > 0);
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -451,9 +453,13 @@ const Controls = () => {
           <Tool id="delete-right"><DeleteRightButton /></Tool>
           <Tool title="Delete" id="delete"><TrashButton /></Tool>
           <Tool id="marker"><AddMarkerButton /></Tool>
-          <Tool title="Crop" id="crop"><CropButton /></Tool>
-          <TransformToolsMenu />
-          <Tool title="Detach audio" id="detach"><SeparateButton /></Tool>
+          {!inCompound && (
+            <>
+              <Tool title="Crop" id="crop"><CropButton /></Tool>
+              <TransformToolsMenu />
+              <Tool title="Detach audio" id="detach"><SeparateButton /></Tool>
+            </>
+          )}
           <BeatButton />
         </div>
         <div className="flex items-center gap-x-2">

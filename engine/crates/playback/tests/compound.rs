@@ -152,3 +152,21 @@ fn a_compound_plays_its_content_at_its_speed_and_direction() {
     assert!(near(px(&frame(project(back), 5.25), 32, 18), [0, 0, 0], 2));
     assert!(near(px(&frame(project(back), 6.5), 32, 18), [128, 128, 128], 2));
 }
+
+#[test]
+fn a_compound_follows_its_speed_curve() {
+    // Constant 2x reads the content's 1..5 s over the clip's 2 s: at the clip's 1.1 s it's at
+    // 3.2 s, past the still (1..3 s). A curve that starts slow and ends fast (1x to 3x, 2x on
+    // average) is only at 2.7 s there: the still is still on screen.
+    let by_curve = |curve: Vec<(f64, f64)>| {
+        let mut p = project(|s| {
+            s.speed = 2.0;
+            s.source = Some(TimeRange::new(Micros(1_000_000), Micros(4_000_000)));
+        });
+        p.materials.speeds.push(Speed { id: "sp".into(), speed: 2.0, curve, preset: None });
+        p.tracks[0].segments[0].attachments.push("sp".into());
+        p
+    };
+    assert!(near(px(&frame(by_curve(vec![(0.0, 2.0), (1.0, 2.0)]), 6.1), 32, 18), [0, 0, 0], 2));
+    assert!(near(px(&frame(by_curve(vec![(0.0, 1.0), (1.0, 3.0)]), 6.1), 32, 18), [128, 128, 128], 2));
+}

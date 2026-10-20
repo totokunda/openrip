@@ -298,6 +298,8 @@ const collectUsedAssetIds = (clips: AnyClipProps[]): Set<string> => {
     ) {
       used.add((clip as any).assetId as string);
     }
+    // A compound's mixed sound kept for its transcript.
+    if ((clip as any).mixAssetId) used.add((clip as any).mixAssetId as string);
 
     // Asset history on media clips
     if (

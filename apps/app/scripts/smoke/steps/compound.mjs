@@ -7,12 +7,18 @@
 //   (times from 0), and the engine's frame is what it was before (the picture is unchanged);
 // - the compound's own Scale and Opacity change the engine's frame (it's one picture), and undo;
 // - the clip's menu names Create compound clip and Undo compound clip; the inspector's tabs are
-//   the video's, its Speed the constant one (Standard alone, no Curve);
+//   the video's, its Speed Standard and Curve;
 // - Speed 2× on the compound plays its content twice as fast: 1 s in shows what 2 s did at 1×, the
 //   clip half as long (one undo step, the engine's frame and the saved project exact);
-// - double-click opens its timeline: the breadcrumb "Main timeline › Compound clip1", the nested
-//   clips on the timeline, the player showing the nested timeline; an edit inside (a scale on the
-//   video, one undo step) reaches the compound's picture; Back returns to the main timeline;
+// - the bar: a compound glyph in the name chip, "Compound clip1" and its length; thumbnails that are
+//   the engine's own composite frames; the waveform band of the compound's mix; the inspector's
+//   tabs Video, Audio, Speed (Standard and Curve), Animation, Adjust;
+// - the clip's menu is CapCut's 003 in its order (minus the AI rows), Transcript and Extract audio
+//   on it (Extract audio: the mix on an audio track, the compound silent, one undo step);
+// - double-click opens its timeline: the bar "‹ Compound clip1" centred in the toolbar (nothing else
+//   of the breadcrumb), the Cover tile and Ratio greyed, Crop / Transform / Detach audio gone, the
+//   nested clips on the timeline, the player showing the nested timeline; an edit inside (a scale
+//   on the video, one undo step) reaches the compound's picture; ‹ returns to the main timeline;
 // - Undo compound clip (the clip menu): the clips are back on the timeline at their places,
 //   with the edit made inside; one undo step;
 // - Media > Import > Subprojects lists the compound with its name and length; its "+" adds
@@ -137,7 +143,7 @@ export default async (ctx) => {
   await selectBars([[comp.clipId, 3.5]], doc);
   await tab(win, "Speed");
   const speedSubs = await win.evaluate(() => [...document.querySelectorAll("[data-testid=inspector] [role=tablist]")][1]?.innerText.replace(/\s+/g, ",") ?? "");
-  check("a compound's Speed has no Curve (Standard alone)", !/Curve/.test(speedSubs) && (await win.locator("[data-testid=speed-value]").count()) === 1, speedSubs);
+  check("a compound's Speed has Standard and Curve (the curve reaches its picture and sound)", /Curve/.test(speedSubs) && (await win.locator("[data-testid=speed-value]").count()) === 1, speedSubs);
   await undoCase("compound speed 2x", async () => {
     const input = win.locator("[data-testid=speed-value]");
     await input.click();
@@ -162,10 +168,84 @@ export default async (ctx) => {
   await win.mouse.click(cb, cy, { button: "right" });
   await win.waitForTimeout(500);
   const menu = await win.evaluate(() => [...document.querySelectorAll("[data-testid^=menu-]")].map((e) => e.innerText.replace(/\s+/g, " ").trim()));
-  check("the menu has Create compound clip and Undo compound clip", menu.some((m) => /^Create compound clip \(subproject\)/.test(m)) && menu.some((m) => /^Undo compound clip \(subproject\)/.test(m)), menu.join(" | "));
-  check("their shortcuts are ⌥G and ⌥⇧G", menu.some((m) => /Create compound.*⌥G/.test(m)) && menu.some((m) => /Undo compound.*⌥⇧G/.test(m)));
+  const CAPCUT = ["Copy", "Cut", "Copy/paste attributes", "Delete", "Edit", "Transcript", "Generate captions", "Extract audio", "Enhance audio", "Enhance visuals", "Adjust color", "Enhance motion", "Group", "Create compound clip (subproject)", "Undo compound clip (subproject)", "Pre-process compound clip (subproject)", "Save preset", "Export selected clips", "Deactivate clip", "More clip actions", "Range", "Render"];
+  check("the menu is CapCut's, in its order, without the AI and cloud rows", menu.length === CAPCUT.length && CAPCUT.every((m, i) => menu[i]?.startsWith(m)), menu.join(" | "));
+  check("its shortcuts: Copy ⌘C, Create ⌥G, Undo ⌥⇧G, Extract audio, Deactivate V", /^Copy ⌘C/.test(menu[0]) && /⌥G$/.test(menu[13]) && /⌥⇧G$/.test(menu[14]) && /Extract audio ⌃⇧S/.test(menu[7]) && /Deactivate clip V/.test(menu[18]), `${menu[0]} | ${menu[13]} | ${menu[14]} | ${menu[7]} | ${menu[18]}`);
+  check("Group is greyed for one clip; the rows that read a media file are greyed", (await win.locator("[data-testid=menu-group]").isDisabled()) && (await win.locator("[data-testid=menu-transcript]").isEnabled()) && (await win.locator("[data-testid=menu-extract-audio]").isEnabled()));
   await shot("cp3-menu");
   await win.keyboard.press("Escape");
+  await win.waitForTimeout(300);
+
+  // ---- the bar and its inspector --------------------------------------------------------------------
+  const chipInfo = await win.evaluate((id) => {
+    const g = (window.Konva?.stages ?? []).flatMap((st) => st.find(".clip-chips")).find((n) => n.getAttr("clipId") === id);
+    return g ? { chips: g.getAttr("chips"), glyph: g.find("Path").length } : null;
+  }, comp.clipId);
+  check("the name chip has the compound glyph, 'Compound clip1', and the length", !!chipInfo && chipInfo.glyph === 1 && chipInfo.chips[0] === "Compound clip1" && /^\d\d:\d\d:\d\d:\d\d$/.test(chipInfo.chips[1]), JSON.stringify(chipInfo));
+  await win.waitForFunction(() => Number(document.documentElement.dataset.compoundFrames ?? 0) > 0, null, { timeout: 15000 }).catch(() => {});
+  const frames = Number(await win.evaluate(() => document.documentElement.dataset.compoundFrames ?? "0"));
+  check("its thumbnails are the engine's composite frames of the compound", frames > 0, `${frames} frames drawn`);
+  await win.waitForTimeout(2500);
+  const wave = await win.evaluate((id) => {
+    const n = (window.Konva?.stages ?? []).flatMap((st) => st.find(".waveform")).find((x) => x.getAttr("clipId") === id);
+    return n ? { bars: (n.getAttr("heights") ?? []).length, max: n.getAttr("maxBar") } : null;
+  }, comp.clipId);
+  check("its waveform band is the mix of the compound's sound", !!wave && wave.bars > 10, JSON.stringify(wave));
+  await selectBars([[comp.clipId, 2.5]], doc);
+  const tabNames = await tabs(win);
+  check("the inspector's tabs: Video, Audio, Speed, Animation, Adjust", tabNames.join(",") === "Video,Audio,Speed,Animation,Adjust", tabNames.join(","));
+  await open(win, "Speed");
+  await open(win, "Video", "Basic");
+
+  // ---- Transcript and Extract audio on it ---------------------------------------------------------------
+  const menuItem = async (testid) => {
+    doc = await saved();
+    const [mx, my] = await bar(ctx, doc, comp.clipId, 2.5);
+    await win.mouse.click(mx, my, { button: "right" });
+    await win.waitForTimeout(400);
+    await win.locator(`[data-testid=${testid}]`).click();
+  };
+  await menuItem("menu-transcript");
+  await win.waitForSelector("[data-testid=transcript][data-state=empty]", { timeout: 60000 }).catch(() => {});
+  check("Transcript opens its panel on the compound's mix, not yet transcribed", (await win.locator("[data-testid=transcript][data-state=empty]").count()) === 1 && (await win.locator("[data-testid=transcript-start]").count()) === 1);
+  await shot("cp5-transcript");
+  doc = await saved();
+  const mixAsset = Object.values(doc.assets ?? {}).find((a) => /compound-mix/.test(a.path ?? ""));
+  check("the compound's mix is kept as an asset on the clip (an audio file in the data folder)", !!mixAsset && compounds(doc)[0].mixAssetId === mixAsset.id, mixAsset?.path);
+  if (process.env.OPENRIP_MODELS) {
+    await win.locator("[data-testid=transcript-start]").click();
+    await win.waitForSelector("[data-testid=transcript][data-state=ready]", { timeout: 180000 }).catch(() => {});
+    const heard = await win.locator("[data-testid=transcript-word]").count();
+    check("Transcript hears the compound's speech (the video's, through the mix)", heard > 3, `${heard} words`);
+  }
+  await undoCase("Extract audio", async () => {
+    await menuItem("menu-extract-audio");
+    await win.waitForTimeout(6000);
+  }, { frame: false });
+  doc = await saved();
+  const extracted = clips(doc).find((c) => c.type === "audio");
+  check("Extract audio puts the compound's mix on an audio track, linked to it", !!extracted && /compound-mix/.test(doc.assets?.[extracted.assetId]?.path ?? "") && extracted.linkId === compounds(doc)[0].linkId, extracted ? `${extracted.startTick}-${extracted.endTick}` : "none");
+  check("and the compound plays none of its own sound", compounds(doc)[0].audioSeparated === true);
+  await press(win, "Meta+z");
+  await win.waitForTimeout(800);
+  doc = await saved();
+  check("one undo takes the audio clip away and gives the compound its sound back", !clips(doc).some((c) => c.type === "audio") && !compounds(doc)[0].audioSeparated);
+
+  // Generate captions listens to the compound's mixed sound.
+  await menuItem("menu-generate-captions");
+  await win.waitForSelector("[data-testid=auto-generate]", { timeout: 10000 }).catch(() => {});
+  check("Generate captions opens the Auto captions panel for the compound", (await win.locator("[data-testid=auto-generate]").count()) >= 1);
+  if (process.env.OPENRIP_MODELS) {
+    await win.locator("[data-testid=auto-generate]").first().click();
+    await win.waitForTimeout(1500);
+    await win.waitForSelector("[data-testid=auto-generate]", { timeout: 180000 }).catch(() => {});
+    doc = await saved();
+    const made = clips(doc).filter((c) => c.type === "text" && c.autoCaption);
+    check("and Generate makes captions from it (the compound's speech)", made.length > 0, `${made.length} captions`);
+    await press(win, "Meta+z");
+    await win.waitForTimeout(800);
+  }
+  await win.locator("[data-testid=assets-tab-media]").click();
   await win.waitForTimeout(300);
 
   // ---- open it: the breadcrumb, an edit inside, back ---------------------------------------------------
@@ -173,7 +253,13 @@ export default async (ctx) => {
   await win.mouse.dblclick(cb, cy);
   await win.waitForTimeout(1200);
   const crumbs = await win.locator("[data-testid=compound-crumb]").allInnerTexts();
-  check("double-click opens it: the bar reads Main timeline > Compound clip1", crumbs.join(" > ") === "Main timeline > Compound clip1", crumbs.join(" > "));
+  check("double-click opens it: the bar reads ‹ Compound clip1 and nothing else", crumbs.join(" > ") === "Compound clip1", crumbs.join(" > "));
+  const barBox = await win.locator("[data-testid=compound-bar]").boundingBox();
+  const tbBox = await win.locator("[data-testid=timeline-toolbar]").boundingBox();
+  check("the bar is centred in the timeline toolbar", Math.abs(barBox.x + barBox.width / 2 - (tbBox.x + tbBox.width / 2)) < 6, `${barBox.x + barBox.width / 2} vs ${tbBox.x + tbBox.width / 2}`);
+  check("the toolbar has no Crop, Transform or Detach audio inside it", (await win.locator("[data-testid=tool-crop], [data-testid=tool-detach]").count()) === 0);
+  check("Ratio is greyed inside it", await win.locator("[data-testid=ratio-menu]").isDisabled());
+  check("the inspector shows Project and Details with nothing selected", /Project/.test(await win.evaluate(() => document.querySelector("[data-testid=inspector]")?.innerText ?? "")) && (await tabs(win)).length === 0);
   await shot("cp2-open");
   doc = await saved();
   const outer = compounds(doc)[0];
@@ -211,12 +297,14 @@ export default async (ctx) => {
   const [ob, oy] = await bar(ctx, doc, comp.clipId, 2.5);
   await win.mouse.click(ob, oy, { button: "right" });
   await win.waitForTimeout(400);
+  await win.locator("[data-testid=menu-more-actions]").hover();
+  await win.waitForTimeout(300);
   await win.locator("[data-testid=menu-open-compound]").click();
   await win.waitForTimeout(800);
-  check("Open compound clip (the menu) opens it too", (await win.locator("[data-testid=compound-bar]").count()) === 1);
+  check("Open compound clip (More clip actions) opens it too", (await win.locator("[data-testid=compound-bar]").count()) === 1);
   await win.locator("[data-testid=compound-crumb]").first().click();
   await win.waitForTimeout(800);
-  check("Main timeline (the breadcrumb) goes back", (await win.locator("[data-testid=compound-bar]").count()) === 0);
+  check("the bar goes back too (‹)", (await win.locator("[data-testid=compound-bar]").count()) === 0);
 
   // ---- break apart ---------------------------------------------------------------------------------
   doc = await saved();
@@ -244,6 +332,8 @@ export default async (ctx) => {
   doc = await saved();
   const [c2] = compounds(doc);
   check("created again: named Compound clip1", c2?.name === "Compound clip1", c2?.name);
+  await win.locator("[data-testid=assets-tab-media]").click();
+  await win.waitForTimeout(300);
   await (await sectionButton(win, "subprojects")).click();
   await win.waitForTimeout(600);
   const tiles = win.locator("[data-testid=subproject-tile]");

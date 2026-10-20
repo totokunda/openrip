@@ -65,7 +65,8 @@ import { projectBeatPoints, soundMenuItems } from "@/lib/audio-tools";
 import { analysisMenuItems } from "@/lib/analysis";
 import { enhanceMenuItems, withEnhance } from "@/lib/enhance";
 import { attributeMenuItems } from "@/lib/clip-presets";
-import { captionMenuItems } from "@/lib/autocaptions";
+import { captionMenuItems, useAutoCaptions } from "@/lib/autocaptions";
+import { extractCompoundAudio, openCompoundTranscript } from "@/lib/compound-actions";
 import { transcriptMenuItems } from "@/lib/transcript";
 import { useViewportStore } from "@/lib/viewport";
 import { useContextMenuStore, ContextMenuItem } from "@/lib/context-menu";
@@ -1432,6 +1433,99 @@ const TimelineClip: React.FC<
         return c?.type === "video" || c?.type === "image" || (c?.type === "audio" && !!c.assetId);
       });
       if (exportable.length > 0) otherCommands.push({ id: "export", label: "Export selected clips", action: "export" });
+
+      // A compound clip's menu is CapCut's own (28-inspector-compound/003), without its AI and
+      // cloud rows: the sound rows read the compound's mix; the ones that read a media file
+      // (Enhance audio, Enhance visuals, Adjust color, Enhance motion) have nothing to read.
+      if (compoundClip && targetIds.length === 1 && clip) {
+        const id = clip.clipId;
+        const separated = !!(clip as VideoClipProps).audioSeparated;
+        const none = (rowId: string, label: string, children: string[]): ContextMenuItem => ({
+          id: rowId,
+          label,
+          action: "none",
+          children: children.map((c) => ({ id: `${rowId}-${c.toLowerCase().replace(/\W+/g, "-")}`, label: c, action: "custom", disabled: true })),
+        });
+        const edit: ContextMenuItem = {
+          id: "edit",
+          label: "Edit",
+          action: "none",
+          children: [
+            { id: "mirror", label: "Mirror", action: "custom", run: () => useClipStore.getState().updateClip(id, toggleFlip(clip, "horizontal")) },
+            { id: "rotate", label: "Rotate", action: "custom", run: () => useClipStore.getState().updateClip(id, rotate90(clip, 1)) },
+            {
+              id: "crop",
+              label: "Crop",
+              action: "custom",
+              run: () => {
+                useControlsStore.getState().setSelectedClipIds([id]);
+                window.dispatchEvent(new CustomEvent(OPEN_CROP_EVENT));
+              },
+            },
+          ],
+        };
+        const busy = useAutoCaptions.getState().phase !== "idle";
+        useContextMenuStore.getState().openMenu({
+          position: { x: e.evt.clientX, y: e.evt.clientY },
+          target: { type: "clip", clipIds: targetIds, primaryClipId: currentClipId, isVideo: true },
+          groups: [
+            {
+              id: "edit",
+              items: [
+                { id: "copy", label: "Copy", action: "copy", shortcut: "⌘C" },
+                { id: "cut", label: "Cut", action: "cut", shortcut: "⌘X" },
+                attributeItems.attributes,
+                { id: "delete", label: "Delete", action: "delete", shortcut: "Del" },
+                edit,
+              ],
+            },
+            {
+              id: "sound",
+              items: [
+                { id: "transcript", label: "Transcript", action: "custom", disabled: separated, run: () => void openCompoundTranscript(id) },
+                { id: "generate-captions", label: "Generate captions", action: "generateCaptions", disabled: busy || separated },
+                { id: "extract-audio", label: "Extract audio", action: "custom", shortcut: "⌃⇧S", disabled: separated, run: () => void extractCompoundAudio(id) },
+              ],
+            },
+            { id: "enhance", items: [none("enhance-audio", "Enhance audio", ["Normalize loudness", "Reduce noise"]), none("enhance-visuals", "Enhance visuals", ["Stabilize", "Reduce image noise", "Remove flickers"]), none("adjust-color", "Adjust color", ["Auto adjust", "Color match"]), none("enhance-motion", "Enhance motion", ["Motion blur"])] },
+            {
+              id: "compound",
+              items: [
+                { id: "group", label: "Group", action: "group", disabled: true, shortcut: "⌘G" },
+                { id: "create-compound", label: "Create compound clip (subproject)", action: "custom", shortcut: "⌥G", run: () => void useClipStore.getState().createCompound(targetIds) },
+                { id: "undo-compound", label: "Undo compound clip (subproject)", action: "custom", shortcut: "⌥⇧G", run: () => void useClipStore.getState().breakApartCompound(id) },
+                { id: "preprocess-compound", label: "Pre-process compound clip (subproject)", action: "custom", run: () => void renderTimeline({ start: clip.startFrame ?? 0, end: clip.endFrame ?? 0 }) },
+                attributeItems.preset,
+              ],
+            },
+            {
+              id: "clip-actions",
+              items: [
+                { id: "export", label: "Export selected clips", action: "export" },
+                {
+                  id: "deactivate",
+                  label: clip.deactivated ? "Activate clip" : "Deactivate clip",
+                  action: "custom",
+                  shortcut: "V",
+                  run: () => useClipStore.getState().setClipsDeactivated(targetIds),
+                },
+                {
+                  id: "more-actions",
+                  label: "More clip actions",
+                  action: "none",
+                  children: [
+                    { id: "open-compound", label: "Open compound clip", action: "custom", run: () => void openCompound(id) },
+                    { id: "replace-clip", label: "Replace clip", action: "custom", disabled: true },
+                  ],
+                },
+              ],
+            },
+            { id: "range", items: rangeItems },
+            { id: "render", items: renderItems },
+          ],
+        });
+        return;
+      }
 
       useContextMenuStore.getState().openMenu({
         position: { x: e.evt.clientX, y: e.evt.clientY },

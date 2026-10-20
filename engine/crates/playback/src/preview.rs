@@ -914,9 +914,9 @@ impl PreviewEngine {
                 .collect(),
         };
         out.push((seg.clone(), Pixels::Begin(None)));
-        // The content's time at this frame: the clip's own speed and direction (constant), read
-        // as the frame time the shifted tracks answer to.
-        let at = seg.source_time(t).map_or(t, |c| Micros(c.0 + shift));
+        // The content's time at this frame: the clip's own speed (constant, or its speed curve)
+        // and direction, read as the frame time the shifted tracks answer to.
+        let at = seg.media_time(&self.project.materials, t).map_or(t, |c| Micros(c.0 + shift));
         let outer = self.scope.replace(tracks);
         let active = Self::active_in(self.scope.as_deref().unwrap_or_default(), at);
         self.draw_segments(active, at, w, h, out, report);

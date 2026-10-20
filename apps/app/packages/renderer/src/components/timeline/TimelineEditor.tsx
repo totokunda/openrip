@@ -264,6 +264,8 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
 const CoverTile: React.FC<{ top: number; height: number }> = ({ top, height }) => {
   const size = Math.max(0, Math.min(42, height - 4, TIME_ZERO_X - 8));
   const [hover, setHover] = useState(false);
+  // A compound clip's timeline has no cover of its own: the tile is greyed there, as CapCut's.
+  const inCompound = useClipStore((s) => s.compoundStack.length > 0);
   if (size < 20) return null;
   const stop = (e: Konva.KonvaEventObject<Event>) => {
     // The tile is not part of the timeline: no seek, no selection.
@@ -278,20 +280,20 @@ const CoverTile: React.FC<{ top: number; height: number }> = ({ top, height }) =
       name="cover-tile"
       x={(TIME_ZERO_X - size) / 2}
       y={top + (height - size) / 2}
-      opacity={hover ? 1 : 0.85}
+      opacity={inCompound ? 0.35 : hover ? 1 : 0.85}
       onMouseDown={stop}
       onTouchStart={stop}
       onClick={(e) => {
         stop(e);
-        openCoverEditor();
+        if (!inCompound) openCoverEditor();
       }}
       onTap={(e) => {
         stop(e);
-        openCoverEditor();
+        if (!inCompound) openCoverEditor();
       }}
       onMouseEnter={(e) => {
         setHover(true);
-        cursor(e, "pointer");
+        if (!inCompound) cursor(e, "pointer");
       }}
       onMouseLeave={(e) => {
         setHover(false);

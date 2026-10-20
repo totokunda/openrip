@@ -6,6 +6,7 @@ import { useControlsStore } from "@/lib/control";
 import { mainTrackOf } from "@/lib/timeline-edit";
 import { fileOf } from "@/lib/audio-tools";
 import { useWaveform } from "@/lib/waveform-source";
+import { useCompoundWaveform } from "@/lib/compound-mix";
 import { AUDIO_SCALE, BAND_SCALE, SOUND_COLORS, mediaBands, scaleFor, soundKindOf } from "@/lib/waveform";
 import { ClipChips, Waveform } from "./Waveform";
 import { TIMELINE_COLORS } from "@/lib/timeline-colors";
@@ -119,7 +120,10 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
   const { size } = useTrack(timelineId);
   // A photo has no sound; a video whose sound was detached plays none of its own (CapCut's empty band).
   const own = clip.type === "video" && !!asset && !asset.path.endsWith("#video");
-  const buckets = useWaveform(own ? asset?.path : undefined);
+  const fileBuckets = useWaveform(own ? asset?.path : undefined);
+  // A compound clip's band is the mix of its whole timeline (lib/compound-mix.ts).
+  const mix = useCompoundWaveform((clip as VideoClipProps).audioSeparated ? undefined : (clip as VideoClipProps).compound);
+  const buckets = fileBuckets ?? mix?.buckets ?? null;
   const len = Math.max(1, (clip.endFrame ?? 0) - (clip.startFrame ?? 0));
   const top = height - bands.sound;
   return (
@@ -131,7 +135,7 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
           clip={clip}
           buckets={buckets}
           fps={fps}
-          mediaSeconds={asset?.duration || undefined}
+          mediaSeconds={asset?.duration || mix?.seconds || undefined}
           pxPerFrame={width / len}
           fromPx={fromPx}
           toPx={toPx}
@@ -142,7 +146,7 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
           snap={snap}
         />
       )}
-      <ClipChips texts={[(clip as VideoClipProps).compound ? (clip as VideoClipProps).name ?? "Compound clip" : nameOf(asset?.path), timecode(len, fps)]} fill={VIDEO_CHIP} maxWidth={width} clipId={clip.clipId} />
+      <ClipChips texts={[(clip as VideoClipProps).compound ? (clip as VideoClipProps).name ?? "Compound clip" : nameOf(asset?.path), timecode(len, fps)]} fill={VIDEO_CHIP} maxWidth={width} clipId={clip.clipId} glyph={(clip as VideoClipProps).compound ? "compound" : undefined} />
     </>
   );
 };

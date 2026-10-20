@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useViewportStore } from "@/lib/viewport";
+import { useClipStore } from "@/lib/clip";
 import { ratioBox } from "@/lib/aspect-presets";
 import { PROJECT_ASPECTS, originalRatio, ratioForChoice } from "@/lib/project-canvas";
 import Boxed from "./Boxed";
@@ -31,6 +32,8 @@ const RatioMenu: React.FC = () => {
   const isAspectEditing = useViewportStore((s) => s.isAspectEditing);
   const setIsAspectEditing = useViewportStore((s) => s.setAspectEditing);
   const [open, setOpen] = useState(false);
+  // Inside a compound clip the canvas can't be changed: the button is greyed, as CapCut's.
+  const inCompound = useClipStore((s) => s.compoundStack.length > 0);
   const label = aspectRatio.id === "custom" ? `${aspectRatio.width}:${aspectRatio.height}` : aspectRatio.id;
   const original = open ? originalRatio() : null;
   const orig = PROJECT_ASPECTS[0];
@@ -42,11 +45,12 @@ const RatioMenu: React.FC = () => {
   const check = (on: boolean) => <span className="w-3.5 text-brand-accent">{on && <LuCheck className="w-3.5 h-3.5" />}</span>;
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open && !inCompound} onOpenChange={(o) => !inCompound && setOpen(o)}>
       <DropdownMenuTrigger
         title={`Ratio: ${label}`}
         data-testid="ratio-menu"
-        className="h-6 px-1 flex items-center rounded-[4px] text-[#cecece] hover:text-brand-lighter hover:bg-brand-light/[0.08] transition-colors cursor-pointer"
+        disabled={inCompound}
+        className="h-6 px-1 flex items-center rounded-[4px] text-[#cecece] hover:text-brand-lighter hover:bg-brand-light/[0.08] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent"
       >
         <Boxed>Ratio</Boxed>
       </DropdownMenuTrigger>

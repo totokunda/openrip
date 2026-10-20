@@ -207,7 +207,9 @@ const RUN: Record<string, () => void> = {
   extractAudio: () => {
     const clips = useClipStore.getState();
     const video = useControlsStore.getState().selectedClipIds.map((id) => clips.getClipById(id)).find((c) => c?.type === "video");
-    if (video && !(video as any).linkId) clips.separateClip(video.clipId);
+    // A compound's sound is its timeline's mix (lib/compound-actions.ts).
+    if (video && (video as any).compound) void import("./compound-actions").then((m) => m.extractCompoundAudio(video.clipId));
+    else if (video && !(video as any).linkId) clips.separateClip(video.clipId);
   },
   // Every clip that isn't on a locked track.
   selectAll: () => {
