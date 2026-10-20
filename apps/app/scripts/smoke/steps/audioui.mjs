@@ -162,12 +162,13 @@ export default async (ctx) => {
   // Search and the group chips change what's listed; None takes the filter off.
   await win.locator("[data-testid=voice-search]").fill("tel");
   await win.waitForTimeout(200);
-  const found = await inspector(win).locator("[data-testid=voice-tiles] button").allInnerTexts();
+  // (each tile also has a favourite star button now: not a tile)
+  const found = await inspector(win).locator("[data-testid=voice-tiles] button:not([data-testid$=-favourite])").allInnerTexts();
   check(`search "tel": ${found.join(", ")}`, found.join(",") === "None,Telephone");
   await win.locator("[data-testid=voice-search]").fill("");
   await inspector(win).getByRole("button", { name: "Space", exact: true }).click();
   await win.waitForTimeout(200);
-  const space = await inspector(win).locator("[data-testid=voice-tiles] button").allInnerTexts();
+  const space = await inspector(win).locator("[data-testid=voice-tiles] button:not([data-testid$=-favourite])").allInnerTexts();
   check(`the Space chip: ${space.join(", ")}`, space.join(",") === "None,Echo,Mic Echo,Small Room,Hall,Cathedral");
   await inspector(win).getByRole("button", { name: "All", exact: true }).click();
   await settled(win, () => tile("none").click());

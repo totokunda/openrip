@@ -103,7 +103,8 @@ export default async (ctx) => {
   // Width and Height.
   await edit("Width 40", () => type(slider("text-background", "Width"), 40));
   const wide = await inkBox(win, RED);
-  check(`a wider Width widens the box (${base.w} → ${wide.w} px), its height the same`, wide.w > base.w + 10 && Math.abs(wide.h - base.h) <= 2);
+  // A box drawn on the picture holds left-aligned text at the canvas's left edge, so the padding on that side falls off the canvas: the box grows by the right side's 0.26 em only (about 10 px here).
+  check(`a wider Width widens the box (${base.w} → ${wide.w} px; right edge ${base.x1} → ${wide.x1}), its height the same`, wide.x1 > base.x1 + 6 && wide.w > base.w + 6 && Math.abs(wide.h - base.h) <= 2);
   await edit("Height 50", () => type(slider("text-background", "Height"), 50));
   const tall = await inkBox(win, RED);
   check(`a larger Height heightens it (${wide.h} → ${tall.h} px)`, tall.h > wide.h + 10 && Math.abs(tall.w - wide.w) <= 2);

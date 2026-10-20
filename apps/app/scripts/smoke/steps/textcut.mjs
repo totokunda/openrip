@@ -36,7 +36,7 @@ export default async (ctx) => {
   await at(1.46, "a@1.46");
   const end = (await diff(win, "none@1.46", "a@1.46")).n;
   check("trim: whole by the clip's end (its last frame)", end === 0, `pixels hidden ${end}`);
-  // Split at 0.75 s; the panel then shows the second half (both are selected, it the last).
+  // Split at 0.75 s; the panel then shows the second half (both are selected now, which shows the multi-selection's Properties tab, so the second half is clicked on its own).
   await seek(win, map, 0.75);
   await select(0.4);
   await settled(win, () => clickSplit(win));
@@ -44,6 +44,7 @@ export default async (ctx) => {
   text = (await savedClips(win, udDir)).filter((c) => c.type === "text").sort((a, b) => +a.startTick - +b.startTick);
   check("split in two", text.length === 2, text.map((c) => `${c.startTick}-${c.endTick}`).join());
   check("split: the In stays on the first half only", text[0]?.animationIn?.type === "type_1" && !text[1]?.animationIn, JSON.stringify(text.map((c) => c.animationIn)));
+  await select(1.1);
   check("split: the second half's tab shows None", (await selected(win, "Animation")) === "None", await selected(win, "Animation"));
   await at(0.85, "a@0.85");
   const second = (await diff(win, "none@0.85", "a@0.85")).n;

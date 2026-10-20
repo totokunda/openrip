@@ -48,6 +48,8 @@ export default async (ctx) => {
 
   // The Highlight wheel's luma raised (a click near the top of its arc), the Offset wheel's red typed.
   const arc = win.locator('[data-testid=wheel-gain] [aria-label="Highlight luma"]');
+  // (the inspector is short: the lower wheels are below its fold until scrolled to)
+  await arc.scrollIntoViewIfNeeded();
   const box = await arc.boundingBox();
   await undoCase(ctx, check, "log highlight luma", async () => {
     await settled(win, async () => {
