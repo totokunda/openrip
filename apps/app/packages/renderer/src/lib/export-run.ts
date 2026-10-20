@@ -12,6 +12,7 @@ import { cancelEngineExport, engineExportProject } from "./engine-preview";
 import { timelineCues } from "./caption-actions";
 import { writeSrt } from "./captions";
 import { exportFinished } from "./export-finished";
+import type { CardExport } from "./export-scope";
 import { AUDIO_EXTENSION, GIF_FPS, outputSize, videoBitrate, type AudioFormat, type CaptionFormat, type VideoSettings } from "./export-options";
 
 /** What the dialog asks for: each part is `null` when its checkbox is off. */
@@ -76,8 +77,9 @@ export function captionsText(format: CaptionFormat, timelineId?: string): string
 }
 
 /** Write the files `s` asks for. Resolves when the run ends; its outcome is in [`useExportRun`]. */
-export async function runExport(s: ExportSettings, scope?: { clipIds: string[]; range?: { start: number; end: number } }, timelineId?: string): Promise<void> {
+export async function runExport(s: ExportSettings, scope?: { clipIds: string[]; range?: { start: number; end: number }; cards?: CardExport[] }, timelineId?: string): Promise<void> {
   const run = useExportRun;
+  if (scope?.cards?.length) return runCardsExport(s, scope.cards);
   const targets = exportTargets(s);
   if (!targets.length || !s.name.trim() || !s.path.trim()) return;
   const dir = resolvePath(s.path.trim());
@@ -139,6 +141,77 @@ export async function runExport(s: ExportSettings, scope?: { clipIds: string[]; 
   if (first) {
     toast("Export completed", { description: files.length > 1 ? `${files.length} files in ${dir}` : first.path });
     exportFinished(first.path);
+  }
+}
+
+/** The names the cards' files get: each card's own, a number after it when two share one. */
+export function cardFileNames(cards: CardExport[]): string[] {
+  const used = new Map<string, number>();
+  return cards.map((c) => {
+    const stem = c.name.replace(/\.[^.]+$/, "").replace(/[\\/:*?"<>|]+/g, "_").trim() || "clip";
+    const n = (used.get(stem) ?? 0) + 1;
+    used.set(stem, n);
+    return n === 1 ? stem : `${stem} (${n})`;
+  });
+}
+
+/**
+ * The card menu's Export selected clips: each card (the part of it its In/Out handles chose) is
+ * a file of its own in the folder, written with the dialog's settings, in the card's own
+ * picture shape; named after the card. A sound card writes just its audio.
+ */
+async function runCardsExport(s: ExportSettings, cards: CardExport[]): Promise<void> {
+  const run = useExportRun;
+  if (!s.path.trim() || (!s.video && !s.audio && !s.gif)) return;
+  const dir = resolvePath(s.path.trim());
+  // One card is named in the dialog; several by their own names.
+  const names = cards.length === 1 ? [s.name.trim() || cardFileNames(cards)[0]] : cardFileNames(cards);
+  // What each card writes: the video and GIF need a picture; the sound alone is audio.
+  const jobs = cards.flatMap((card, i) =>
+    exportTargets({ ...s, name: names[i], captions: null })
+      .filter((t) => card.type !== "audio" || t.kind === "audio")
+      .filter((t) => t.kind !== "audio" || card.audible)
+      .map((t) => ({ card, t })),
+  );
+  if (jobs.length === 0) return;
+  run.setState({ phase: "running", label: jobs[0].t.label, ratio: 0, startedAt: Date.now(), cancelling: false, files: [], error: null });
+  const files: ExportFile[] = [];
+  for (const [i, { card, t }] of jobs.entries()) {
+    if (run.getState().cancelling) break;
+    const path = join(dir, t.file);
+    const at = (r: number) => run.setState({ label: `${card.name}: ${t.label}`, ratio: (i + Math.max(0, Math.min(1, r))) / jobs.length });
+    at(0);
+    const picture = card.width && card.height ? card.width / card.height : 16 / 9;
+    const base = { path, fps: useControlsStore.getState().fps || 30, codec: "h264", bitrate: 0, audio: false, width: 0, height: 0 };
+    const request =
+      t.kind === "video"
+        ? (() => {
+            const v = s.video!;
+            const size = outputSize(v.resolution, picture);
+            return { ...base, ...size, fps: v.fps, codec: v.codec, bitrate: videoBitrate(v, size), exactBitrate: v.bitrate === "custom", audio: s.videoAudio && card.audible };
+          })()
+        : t.kind === "audio"
+          ? { ...base, kind: "audio" as const, audioFormat: s.audio! }
+          : { ...base, kind: "gif" as const, shortSide: s.gif!, fps: GIF_FPS };
+    const r = await engineExportProject(request, at, { clipIds: [], card });
+    if (r.ok) {
+      files.push({ label: `${card.name}: ${t.label}`, path });
+    } else if (r.cancelled) {
+      break;
+    } else {
+      console.error("[engine] export failed:", r.error);
+      run.setState({ phase: "failed", error: `${card.name}: ${r.error ?? "the export failed"}`, files });
+      return;
+    }
+  }
+  if (run.getState().cancelling) {
+    run.setState({ phase: "cancelled", files, cancelling: false });
+    return;
+  }
+  run.setState({ phase: "done", ratio: 1, files, cancelling: false });
+  if (files[0]) {
+    toast("Export completed", { description: files.length > 1 ? `${files.length} files in ${dir}` : files[0].path });
+    exportFinished(files[0].path);
   }
 }
 

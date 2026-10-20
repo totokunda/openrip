@@ -39,6 +39,7 @@ import {
 import { useViewportStore } from "./viewport";
 import { BASE_LONG_SIDE } from "./settings";
 import { allClips, breakApart, cloneContent, createCompound, isCompound, type CompoundFrame } from "./compound";
+import { arrangeTracks } from "./arrange-layers";
 import type { ProjectTimeline } from "./project-timelines";
 
 import _ from "lodash";
@@ -198,6 +199,13 @@ interface ClipStore {
   rescaleForFpsChange: (oldFps: number, newFps: number) => void;
   // Timelines
   timelines: TimelineProps[];
+  /**
+   * Project settings' Arrange layers: on, tracks go in any order; off, they stay in bands by
+   * kind (lib/arrange-layers.ts). Saved with the project; once on it can't be turned off.
+   */
+  arrangeLayers: boolean;
+  /** Turn Arrange layers on (never off). */
+  enableArrangeLayers: () => void;
   getClipsForTimeline: (timelineId: string) => AnyClipProps[];
   getTimelineById: (timelineId: string) => TimelineProps | undefined;
   setTimelines: (timelines: TimelineProps[]) => void;
@@ -484,6 +492,14 @@ const followRules = (prev: ClipStore, next: ClipStore): Partial<ClipStore> => {
       out.timelines = timelines;
     }
   }
+  // Arrange layers off: the tracks stay in their bands by kind (lib/arrange-layers.ts).
+  if (!next.arrangeLayers) {
+    const banded = arrangeTracks(timelines);
+    if (banded !== timelines) {
+      timelines = resolveOverlapsTimelines(banded);
+      out.timelines = timelines;
+    }
+  }
   if (next.magnet) {
     const packed = packMainTrack(next.clips, timelines, undefined, linkage());
     if (packed !== next.clips) {
@@ -764,6 +780,8 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
   activeTimelineId: INITIAL_TIMELINES[0].id,
   assets: {},
   timelines: [],
+  arrangeLayers: true,
+  enableArrangeLayers: () => set({ arrangeLayers: true }),
   magnet: true,
   // CapCut won't turn the magnet on or off while the main track is locked. Turned on, the
   // main track closes up (withTimelineRules).
@@ -857,6 +875,8 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       if (track.type === "media" && main) at = Math.min(at, rest.indexOf(main));
       const timelines = [...rest.slice(0, at), track, ...rest.slice(at)];
       if (timelines.every((t, i) => t === state.timelines[i])) return {};
+      // With Arrange layers off a track stays in its band.
+      if (!state.arrangeLayers && arrangeTracks(timelines) !== timelines) return {};
       return { timelines: resolveOverlapsTimelines(timelines) };
     }),
   setTrackLocked: (timelineId, locked) => {

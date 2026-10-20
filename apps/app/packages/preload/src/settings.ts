@@ -38,6 +38,8 @@ export interface Preferences {
   linkageOff: string[];
   /** Edit › Play audio while scrubbing. */
   scrubAudio: boolean;
+  /** Edit › Arrange layers: a new project starts with free layer order. */
+  arrangeLayers: boolean;
 }
 
 function getPreferences(): Promise<Preferences> {

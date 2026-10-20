@@ -62,6 +62,7 @@ import { useMediaFolders, type MediaFolder } from "@/lib/media/folders";
 import { ensureFullMediaStats } from "@/lib/media/utils";
 import { splitScenes } from "@/lib/analysis";
 import { copyMediaFor } from "@/lib/media/copy-mode";
+import { openCardsExport, type CardExport } from "@/lib/export-scope";
 
 /** The library's grid or list, kept between sessions. */
 const LAYOUT_KEY = "openrip:media-layout";
@@ -929,6 +930,37 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
     [selected, items, ranges],
   );
 
+  // Export selected clips: the picked cards (or this one), each as a file with its In/Out range.
+  const exportCardsWith = useCallback(
+    (item: MediaItem) => {
+      const picked = selected.has(item.name) ? items.filter((it) => selected.has(it.name)) : [item];
+      const cards: CardExport[] = picked
+        .filter((it) => !it.missing && it.mediaInfo)
+        .map((it) => {
+          const info = it.mediaInfo!;
+          const whole = it.type === "image" ? 0 : info.duration ?? 0;
+          const range = ranges[it.name];
+          const inSec = it.type === "image" ? 0 : Math.max(0, Math.min(range?.inSec ?? 0, whole));
+          const outSec = it.type === "image" ? 0 : Math.max(inSec, Math.min(range?.outSec ?? whole, whole));
+          const type = it.type as CardExport["type"];
+          return {
+            name: it.name,
+            path: it.assetUrl,
+            type,
+            duration: whole,
+            inSec,
+            outSec,
+            width: type === "video" ? info.video?.displayWidth : type === "image" ? info.image?.width : undefined,
+            height: type === "video" ? info.video?.displayHeight : type === "image" ? info.image?.height : undefined,
+            audible: type === "audio" || (type === "video" && !!info.audio),
+          };
+        });
+      if (cards.length === 0) return;
+      openCardsExport(cards);
+    },
+    [selected, items, ranges],
+  );
+
   // A press on a card let go where it began is a click (the app's drags start on a press and
   // swallow the click); one let go on a folder moves the picked cards into it.
   useDndMonitor({
@@ -1282,7 +1314,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
             className="h-full px-3 pb-3 pt-1 dark"
             onPointerDownCapture={(e) => {
               modsRef.current = e.metaKey || e.ctrlKey || e.shiftKey;
-              if (!(e.target as HTMLElement).closest('[data-testid="media-card"],[data-testid="media-folder"],button,input')) setSelected(new Set());
+              if (!(e.target as HTMLElement).closest('[data-testid="media-card"],[data-testid="media-folder"],button,input,[role="menu"]')) setSelected(new Set());
             }}
           >
             {missingItems.length > 0 && (
@@ -1373,6 +1405,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
                   onAdd={(it) => void addItem(it)}
                   onNewFolder={newFolderWith}
                   onNewTimeline={(it) => void newTimelineWith(it)}
+                  onExport={exportCardsWith}
                   onSplitScenes={(it) => void addItem(it, true)}
                 />
               ))}

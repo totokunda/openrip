@@ -20,6 +20,7 @@ import {
   TbTrash,
   TbVideo,
   TbVideoOff,
+  TbFileExport,
 } from "react-icons/tb";
 import { LuLoaderCircle, LuPlus, LuUnlink } from "react-icons/lu";
 import type { MediaRange } from "@/lib/media/add";
@@ -159,6 +160,8 @@ interface ItemProps {
   onNewFolder?: (item: MediaItem) => void;
   /** Menu: New timeline with selected item. */
   onNewTimeline?: (item: MediaItem) => void;
+  /** Menu: Export selected clips (the picked cards, each with its In/Out range, as files). */
+  onExport?: (item: MediaItem) => void;
   /** Menu: Split scenes (a video added and cut at its shot changes). */
   onSplitScenes?: (item: MediaItem) => void;
 }
@@ -468,6 +471,7 @@ const Item: React.FC<ItemProps> = ({
   onNewFolder,
   onNewTimeline,
   onSplitScenes,
+  onExport,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const row = layout === "row";
@@ -580,6 +584,8 @@ const Item: React.FC<ItemProps> = ({
               title="Actions"
             >
               <DropdownMenuTrigger
+                // A press on the menu button isn't a click on the card: the selection stays (the menu acts on all of it).
+                onPointerDown={(e) => e.stopPropagation()}
                 disabled={isCreatingProxy}
                 className="bg-black/50 cursor-pointer hover:bg-black/70 duration-300 text-white p-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -651,6 +657,10 @@ const Item: React.FC<ItemProps> = ({
                     </span>
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuItem className="py-1 rounded" data-testid="media-export" disabled={item.missing || !item.mediaInfo} onClick={() => onExport?.(item)}>
+                  <TbFileExport className="w-3.5 h-3.5" />
+                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">Export selected clips</span>
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="py-1 rounded"

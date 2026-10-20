@@ -33,6 +33,7 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
   const canvasSize = useViewportStore((s) => s.canvasSize);
   const fps = useControlsStore((s) => s.fps);
   const defaultClipLength = useControlsStore((s) => s.defaultClipLength);
+  const arrangeOn = useClipStore((s) => s.arrangeLayers);
   const hasMedia = useClipStore((s) => s.clips.some((c) => c.type === "video" || c.type === "image"));
 
   const [tab, setTab] = useState<Tab>("details");
@@ -45,6 +46,7 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
   const [projectFps, setProjectFps] = useState(fps || 24);
   const [clipSeconds, setClipSeconds] = useState(defaultClipLength || 5);
   const [copyMedia, setCopyMediaDraft] = useState(false);
+  const [arrange, setArrange] = useState(true);
   const [busy, setBusy] = useState(false);
 
   // Each opening starts from the project's values.
@@ -58,6 +60,7 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
     setProjectFps(fps || 24);
     setClipSeconds(defaultClipLength || 5);
     setCopyMediaDraft(copyMediaFor(project?.folderUuid));
+    setArrange(arrangeOn);
     void getProjectsDir().then((r) => {
       setDir(r.dir);
       setSavedDir(r.dir);
@@ -135,6 +138,10 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
         const n = await setCopyMedia(project?.folderUuid, copyMedia);
         if (copyMedia) toast(n > 0 ? `Copied ${n} media file${n === 1 ? "" : "s"} into the project` : "New imports are copied into the project");
       }
+      if (arrange && !arrangeOn) {
+        useClipStore.getState().enableArrangeLayers();
+        toast("Arrange layers is on: tracks can be put in any order");
+      }
       if (project && name.trim() && name.trim() !== project.name) await renameProject(project, name);
       if (dir && dir !== savedDir) {
         const r = await setProjectsDir(dir);
@@ -201,9 +208,9 @@ export const ProjectSettingsModal: React.FC<{ open: boolean; onOpenChange: (open
           footer="OpenRip edits and exports in Rec. 709 SDR; HLG footage is converted to it."
         />
       </Row>
-      <Row id="arrangeLayers" label={<span className="inline-flex items-center gap-1">Arrange layers <Tip text="Layers stack by their tracks, top track in front." /></span>} disabled>
-        <Toggle on disabled testId="ps-arrange-layers" />
-        <NotYet>Layers always follow the track order.</NotYet>
+      <Row id="arrangeLayers" label={<span className="inline-flex items-center gap-1">Arrange layers <Tip text="On, tracks can be put in any order, so a text track can sit under a video track. Off, they stay in bands by kind: text, stickers, effects, overlays, the main track, audio." /></span>}>
+        <Toggle on={arrange} disabled={arrangeOn} onChange={setArrange} testId="ps-arrange-layers" />
+        <p data-testid="ps-arrange-note" className="text-[12px] leading-[16px] text-[#e6b422]">*Cannot be turned off after turned on</p>
       </Row>
       <Divider />
       <p className={sectionLabel}>Timeline settings</p>

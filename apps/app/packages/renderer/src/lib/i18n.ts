@@ -48,7 +48,7 @@ const en = {
   "settings.linkage.note": "Open a project to choose which items follow the main track's clips.",
   "settings.arrangeLayers": "Arrange layers",
   "settings.arrangeLayers.check": "Layers can be reordered in every new project by default.",
-  "settings.arrangeLayers.note": "Not in OpenRip yet: a clip's layer always follows its track, so there is no free layer order to switch on.",
+  "settings.arrangeLayers.help": "Off: a new project keeps its tracks in fixed bands by kind (text on top, then stickers, effects, overlays, the main track, audio).",
   "settings.frameRate": "Frame rate",
   "settings.fps": "{fps} fps",
   "settings.timeCode": "Time code",

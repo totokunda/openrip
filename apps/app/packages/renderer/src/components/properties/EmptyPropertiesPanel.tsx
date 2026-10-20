@@ -26,6 +26,7 @@ const EmptyPropertiesPanel: React.FC = () => {
   const fps = useControlsStore((s) => s.fps);
   const clipDuration = useClipStore((s) => s.clipDuration);
   const clipCount = useClipStore((s) => s.clips.length);
+  const arrangeLayers = useClipStore((s) => s.arrangeLayers);
   const mediaCount = useClipStore((s) => Object.keys(s.assets).length);
   const setProjectSettingsOpen = useShellStore((s) => s.setProjectSettingsOpen);
   const timeCodeStyle = usePreference("timeCode");
@@ -56,7 +57,7 @@ const EmptyPropertiesPanel: React.FC = () => {
         ),
       ],
       ["Imported media:", copyMedia ? "Copy media to project" : "Stay in original location"],
-      ["Arrange layers:", "Turned on"],
+      ["Arrange layers:", arrangeLayers ? "Turned on" : "Turned off"],
       ["Proxy:", "Turned off"],
       ["Media used:", String(mediaCount)],
     ],

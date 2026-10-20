@@ -40,6 +40,7 @@ import { prepareExportClipsForValue } from "../prepareExportClips";
 import { sortClipsForStacking } from "../clipOrdering";
 import { pauseHistory, resetHistory } from "../history";
 import { isMainTrackPacked } from "../timeline-edit";
+import { preferences } from "../preferences";
 type JsonProjectSlice = {
   projects: Array<{
     id: number;
@@ -154,6 +155,8 @@ type ProjectJsonSnapshot = {
     engineCanvas?: { width: number; height: number };
     /** The main track magnet (CapCut's maintrack_adsorb). */
     mainTrackMagnet?: boolean;
+    /** Project settings' Arrange layers (lib/arrange-layers.ts); absent is on, as in a project from before it. */
+    arrangeLayers?: boolean;
     /** The player's guides (lib/guides.ts). */
     guides?: Guide[];
     /** The cover the cover editor set (lib/cover.ts); absent while the cover follows the first frame. */
@@ -255,7 +258,7 @@ const serializeMasksForJson = (clip: AnyClipProps): SerializedMaskForJson[] => {
  * A clip as the project file holds it: frames as ticks, masks in their file shape, and a
  * compound clip's nested timeline the same way (`compound: { tracks, clips }`).
  */
-const clipToJson = (orig: AnyClipProps, fps: number): TimelineClipJson => {
+export const clipToJson = (orig: AnyClipProps, fps: number): TimelineClipJson => {
   const clipId = String((orig as any).clipId);
   const timelineId = String((orig as any).timelineId ?? "");
 
@@ -438,6 +441,7 @@ const buildProjectJsonSnapshot = (
         ...(viewportState?.canvasSize ? { engineCanvas: viewportState.canvasSize } : {}),
         defaultClipLength: controlsState.defaultClipLength,
         mainTrackMagnet: other ? other.magnet : clipState.magnet,
+        arrangeLayers: clipState.arrangeLayers !== false,
         guides: clipState.guides ?? [],
         ...(useCoverStore.getState().cover ? { cover: useCoverStore.getState().cover! } : {}),
       },
@@ -970,6 +974,7 @@ const hydrateStoresFromProjectJson = async (
           clipDuration,
           markers,
           magnet,
+          arrangeLayers: doc.settings?.arrangeLayers !== false,
           guides,
           mainPreview: null,
           snapGuideX:
@@ -1146,6 +1151,7 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
           (state as any)?.markers !== (prev as any)?.markers ||
           (state as any)?.guides !== (prev as any)?.guides ||
           (state as any)?.magnet !== (prev as any)?.magnet ||
+          (state as any)?.arrangeLayers !== (prev as any)?.arrangeLayers ||
           (state as any)?.projectTimelines !== (prev as any)?.projectTimelines;
         if (clipsChanged || timelinesChanged || assetsChanged || clipsEdited) {
           scheduleJsonProjectSave(getProjectState);
@@ -1379,6 +1385,7 @@ export const withJsonProjectPersistence =
                 snapGuideX: null,
                 markers: [],
                 magnet: true,
+                arrangeLayers: preferences().arrangeLayers !== false,
                 guides: [],
                 mainPreview: null,
               } as any);

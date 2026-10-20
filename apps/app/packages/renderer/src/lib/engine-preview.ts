@@ -26,7 +26,10 @@ import { useViewportStore } from "./viewport";
 import { useMaskStore } from "./mask";
 import { useMotionStore } from "./analysis";
 import { useProjectsStore } from "./projects";
-import { getActiveProjectJsonSnapshot } from "./middlewares/json-persistence";
+import { clipToJson, getActiveProjectJsonSnapshot } from "./middlewares/json-persistence";
+import { imageDurationFrames } from "./preferences";
+import type { CardExport } from "./export-scope";
+import type { AnyClipProps } from "./types";
 import { withoutHistory } from "./history";
 import { BASE_LONG_SIDE } from "./settings";
 import { registerBundledFonts } from "./fonts";
@@ -470,6 +473,45 @@ function soloClips<T>(snapshot: T, clipIds: string[]): T {
 }
 
 /**
+ * The snapshot holding just one media card: its media (the part the In/Out handles chose) as a
+ * clip on its own track from the start, in the card's own picture shape. What exporting the
+ * card writes.
+ */
+function cardSnapshot<T>(snapshot: T, card: CardExport): T {
+  const fps = useControlsStore.getState().fps || 30;
+  const seconds = card.type === "image" ? imageDurationFrames(fps) / fps : Math.max(0, card.outSec - card.inSec);
+  const frames = Math.max(1, Math.round(seconds * fps));
+  const timelineId = "card-track";
+  const assetId = "card-asset";
+  const audio = card.type === "audio";
+  const track = { timelineId, type: audio ? "audio" : "media", timelineY: 0, timelineHeight: audio ? 58 : 84, timelinePadding: 0, timelineWidth: 0, muted: false, hidden: false };
+  const asset = { id: assetId, type: card.type, path: card.path, duration: card.type === "image" ? 0 : card.duration, ...(card.width && card.height ? { width: card.width, height: card.height } : {}) };
+  const video = card.type === "video";
+  const clip = clipToJson(
+    {
+      timelineId,
+      clipId: "card-clip",
+      startFrame: 0,
+      endFrame: frames,
+      type: card.type,
+      trimStart: audio || video ? Math.round(card.inSec * fps) : 0,
+      trimEnd: audio || video ? Math.max(0, Math.round((card.duration - card.outSec) * fps)) : 0,
+      speed: 1,
+      assetId,
+      ...(audio ? {} : { masks: [], ...(card.width && card.height ? { mediaWidth: card.width, mediaHeight: card.height, mediaAspectRatio: card.width / card.height } : {}) }),
+    } as unknown as AnyClipProps,
+    fps,
+  );
+  const s = snapshot as any;
+  const w = Math.round(card.width ?? 0);
+  const h = Math.round(card.height ?? 0);
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const g = w > 0 && h > 0 ? gcd(w, h) || 1 : 1;
+  const settings = { ...s.settings, ...(w > 0 && h > 0 ? { aspectRatio: { width: w, height: h, id: `${w / g}:${h / g}` } } : {}), engineCanvas: undefined };
+  return { ...s, settings, assets: { [assetId]: asset }, timeline: { ...s.timeline, tracks: [track], clips: [clip], markers: [] }, editorState: { ...s.editorState, duration: frames } };
+}
+
+/**
  * The snapshot cut to the range between `start` and `end` (frames): every clip that touches it
  * trimmed to it (as a split would cut it, keeping its id so groups still hold) and moved to the
  * start.
@@ -507,11 +549,11 @@ export async function engineProjectSnapshot(): Promise<{ projectId: number; snap
 }
 
 /** Export the open project with the engine (the snapshot the preview gets, with originals). */
-export async function engineExportProject(request: EngineExportRequest, onProgress: (ratio: number) => void, scope?: { clipIds: string[]; range?: { start: number; end: number } }, timelineId?: string): Promise<EngineExportResult> {
+export async function engineExportProject(request: EngineExportRequest, onProgress: (ratio: number) => void, scope?: { clipIds: string[]; range?: { start: number; end: number }; card?: CardExport }, timelineId?: string): Promise<EngineExportResult> {
   // `timelineId`: one of the project's timelines (the Export dialog's choice), by default the one being edited.
   const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any, "root", timelineId);
   if (!snap) return { ok: false, error: "no project open" };
-  const snapshot = await withOriginalMedia(scope?.range ? trimmedToRange(snap.snapshot, scope.range) : scope?.clipIds?.length ? soloClips(snap.snapshot, scope.clipIds) : snap.snapshot);
+  const snapshot = await withOriginalMedia(scope?.card ? cardSnapshot(snap.snapshot, scope.card) : scope?.range ? trimmedToRange(snap.snapshot, scope.range) : scope?.clipIds?.length ? soloClips(snap.snapshot, scope.clipIds) : snap.snapshot);
   await registerBundledFonts();
   const off = onEngineExportProgress((done, total) => onProgress(total > 0 ? done / total : 0));
   try {

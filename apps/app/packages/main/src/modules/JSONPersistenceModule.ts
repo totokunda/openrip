@@ -196,6 +196,8 @@ export async function createProject(
       fps,
       aspectRatio,
       defaultClipLength: 5,
+      // Settings > Edit > Arrange layers: whether layers can be reordered in this project (CapCut's default is on).
+      arrangeLayers: getSettingsModule().getPreferences().arrangeLayers !== false,
     },
     editorState: {},
     assets: {},

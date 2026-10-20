@@ -50,7 +50,8 @@ import {
 import { cancelExportRun, exportTargets, revealExported, runExport, useExportRun, type ExportSettings } from "@/lib/export-run";
 import { timelineCues } from "@/lib/caption-actions";
 import { openCoverEditor } from "@/lib/cover";
-import type { ExportScope } from "@/lib/export-scope";
+import { cardSeconds, type ExportScope } from "@/lib/export-scope";
+import { imageDurationFrames } from "@/lib/preferences";
 
 export type { ExportScope };
 
@@ -370,7 +371,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
     const rangeOf = scope?.range;
     const ones = scope ? (rangeOf ? clips.filter((c) => !c.hidden && (c.endFrame ?? 0) > rangeOf.start && (c.startFrame ?? 0) < rangeOf.end) : scope.clipIds.map((id) => getClipById(id)).filter(Boolean)) : [];
     const pool = allClips(scope ? (ones as any[]) : clips);
-    const audible = pool.some((c: any) => {
+    const cards = scope?.cards;
+    const audible = cards ? cards.some((c) => c.audible) : pool.some((c: any) => {
       if (c.hidden) return false;
       if (c.type === "audio") return true;
       if (c.type === "video") return getMediaInfoCached((c as VideoClipProps).assetId)?.audio !== null;
@@ -379,6 +381,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
     setHasAudio(audible);
     const span = (() => {
       if (!scope) return (clipDuration || 0) / rate;
+      if (cards) return cards.reduce((n, c) => n + cardSeconds(c, imageDurationFrames(rate) / rate), 0);
       if (rangeOf) return (Math.min(rangeOf.end, clipDuration || rangeOf.end) - rangeOf.start) / rate;
       const list = ones as any[];
       return list.length ? (Math.max(...list.map((c) => c.endFrame)) - Math.min(...list.map((c) => c.startFrame))) / rate : 0;
@@ -479,13 +482,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
                   <Select testId="export-timeline" value={timelineId} options={timelines.map((t) => ({ value: t.id, label: t.name }))} onChange={setTimelineId} />
                 ) : (
                   <div data-testid="export-timeline" className="text-[12px] leading-[22px] text-[#a8a8a8]">
-                    {scope ? (scope.range ? "Range" : scope.clipIds.length > 1 ? "Selected clips" : "Selected clip") : (timelines.find((t) => t.id === activeTimelineId)?.name ?? "Timeline 01")}
+                    {scope ? (scope.cards ? (scope.cards.length > 1 ? "Selected media" : "Selected media item") : scope.range ? "Range" : scope.clipIds.length > 1 ? "Selected clips" : "Selected clip") : (timelines.find((t) => t.id === activeTimelineId)?.name ?? "Timeline 01")}
                   </div>
                 )}
               </div>
               <div className={row}>
                 <Label on>Name</Label>
+                {scope?.cards && scope.cards.length > 1 ? (
+                  <div data-testid="export-name-cards" className="text-[12px] leading-[22px] text-[#a8a8a8]">One file per card, named after it</div>
+                ) : (
                 <input data-testid="export-name" placeholder="My export" value={name} onChange={(e) => setName(e.target.value)} spellCheck={false} className="h-[22px] w-[239px] rounded-[4px] bg-[#343337] px-2 text-[12px] font-medium text-[#f2f2f2] outline-none focus:ring-1 focus:ring-brand-accent/60" />
+                )}
               </div>
               <div className={cn(row, "pb-[6px]")}>
                 <Label on>Export to</Label>

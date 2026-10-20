@@ -250,11 +250,11 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
         </SmallButton>
         {!inEditor && <NotYet>{t("settings.linkage.note")}</NotYet>}
       </Row>
-      <Row id="arrangeLayers" label={t("settings.arrangeLayers")} disabled>
-        <Check checked={false} disabled>
+      <Row id="arrangeLayers" label={t("settings.arrangeLayers")}>
+        <Check testId="settings-arrange-layers" checked={draft.arrangeLayers} onChange={(v) => set("arrangeLayers", v)}>
           {t("settings.arrangeLayers.check")}
         </Check>
-        <NotYet>{t("settings.arrangeLayers.note")}</NotYet>
+        <Help muted>{t("settings.arrangeLayers.help")}</Help>
       </Row>
       <Row id="frameRate" label={t("settings.frameRate")}>
         <Choice testId="settings-frame-rate" value={draft.frameRate} options={fpsOptions} onChange={(v) => set("frameRate", v)} />

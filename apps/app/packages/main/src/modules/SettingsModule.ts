@@ -57,6 +57,8 @@ export interface Preferences {
   linkageOff: string[];
   /** Edit › Play audio while scrubbing: short snippets of the sound play as the playhead is dragged or stepped (off by default, as CapCut's). */
   scrubAudio: boolean;
+  /** Edit › Arrange layers: a new project starts with free layer order (Project settings' Arrange layers). */
+  arrangeLayers: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -83,6 +85,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   renderCacheMaxGb: 10,
   linkageOff: [],
   scrubAudio: false,
+  arrangeLayers: true,
 };
 
 interface Settings {

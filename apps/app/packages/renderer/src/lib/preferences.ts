@@ -44,6 +44,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   renderCacheMaxGb: 10,
   linkageOff: [],
   scrubAudio: false,
+  arrangeLayers: true,
 };
 
 /** CapCut's choices for the rows with a menu. */
