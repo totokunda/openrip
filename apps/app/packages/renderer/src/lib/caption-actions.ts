@@ -12,6 +12,7 @@ import { captionsOnTrack, replaceAllPatches } from "./caption-edit";
 import { CAPTION_PRESETS, type CaptionKind } from "./caption-presets";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
+import { timelineRoot } from "./timelines";
 import { useViewportStore } from "./viewport";
 import { BASE_LONG_SIDE } from "./settings";
 import type { TextClipProps } from "./types";
@@ -142,8 +143,10 @@ export function applyCaptionStyle(timelineId: string, styleId: string) {
 }
 
 /** The timeline's texts as SRT cues: every visible text on a visible track. */
-export function timelineCues() {
-  const { clips, timelines } = useClipStore.getState();
+export function timelineCues(timelineId?: string) {
+  // Another timeline of the project than the one being edited (the Export dialog's choice) is read as parked.
+  const other = timelineId && timelineId !== useClipStore.getState().activeTimelineId ? timelineRoot(timelineId) : null;
+  const { clips, timelines } = other ?? useClipStore.getState();
   const hiddenTimelines = timelines.filter((t) => t.hidden).map((t) => t.timelineId);
   return clipsToCues(clips, useControlsStore.getState().fps || 24, { hiddenTimelines });
 }

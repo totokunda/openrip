@@ -14,13 +14,13 @@ export default async (ctx) => {
   ctx.map ??= await rulerMap(win);
   await seek(win, ctx.map, 1);
 
-  // The header: the name and the menu, nothing else to click.
+  // The header: the name (the timelines menu) and the player's menu, nothing else to click.
   const headerButtons = await win.evaluate(() => {
     const player = document.querySelector("[data-testid=player]");
     const header = player?.firstElementChild;
     return header ? [...header.querySelectorAll("button")].map((b) => b.getAttribute("data-testid") || b.title || b.innerText) : null;
   });
-  check("player header has only its menu", JSON.stringify(headerButtons) === JSON.stringify(["player-menu"]), JSON.stringify(headerButtons));
+  check("player header has only its title (the timelines menu) and its menu", JSON.stringify(headerButtons) === JSON.stringify(["timeline-switcher", "player-menu"]), JSON.stringify(headerButtons));
 
   // The zoom popover under the player (CapCut's; the header menu has no zoom).
   const zoom = async () => +(await win.locator("[data-testid=zoom-slider]").getAttribute("data-zoom"));

@@ -39,6 +39,7 @@ import {
 import { useViewportStore } from "./viewport";
 import { BASE_LONG_SIDE } from "./settings";
 import { allClips, breakApart, cloneContent, createCompound, isCompound, type CompoundFrame } from "./compound";
+import type { ProjectTimeline } from "./project-timelines";
 
 import _ from "lodash";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
@@ -137,6 +138,13 @@ interface ClipStore {
    * (`rootDocument`).
    */
   compoundStack: CompoundFrame[];
+  /**
+   * The project's timelines in order (File ▸ New timeline; lib/project-timelines.ts). The one
+   * being edited, `activeTimelineId`, has no `content` here: its clips, tracks and markers are
+   * the store's own. Swapped by lib/timelines.ts; the saved project holds them all.
+   */
+  projectTimelines: ProjectTimeline[];
+  activeTimelineId: string;
   /**
    * Create compound clip (⌥G): the given clips (and what goes with them) become one clip with
    * a timeline of its own, selected. Returns its id; null when nothing was taken (a locked
@@ -264,7 +272,9 @@ const collectUsedAssetIds = (clips: AnyClipProps[]): Set<string> => {
 
   // A compound's clips use assets too, and so do the timelines left to edit one.
   const outer = useClipStore.getState().compoundStack.flatMap((f) => f.clips);
-  for (const clip of allClips([...clips, ...outer])) {
+  // ... and so do the project's other timelines.
+  const parked = useClipStore.getState().projectTimelines.flatMap((t) => t.content?.clips ?? []);
+  for (const clip of allClips([...clips, ...outer, ...parked])) {
     // Direct clip asset references
     if (
       (clip.type === "video" ||
@@ -743,11 +753,15 @@ const moveEdge = (clip: AnyClipProps, side: "left" | "right", delta: number): An
   return next;
 };
 
+const INITIAL_TIMELINES: ProjectTimeline[] = [{ id: uuidv4(), name: "Timeline 01" }];
+
 export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => ({
   clipDuration: 0,
   _setClipDuration: (duration) => set({ clipDuration: duration }),
   clips: [],
   compoundStack: [],
+  projectTimelines: INITIAL_TIMELINES,
+  activeTimelineId: INITIAL_TIMELINES[0].id,
   assets: {},
   timelines: [],
   magnet: true,
@@ -2551,7 +2565,7 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
   },
   rescaleForFpsChange: (oldFps: number, newFps: number) => {
     set((state) => {
-      const clips = (state.clips || []).map((clip) => {
+      const rescaleClip = (clip: AnyClipProps) => {
         const updated: any = { ...clip };
 
         const sf = rescaleFrame(clip.startFrame, oldFps, newFps);
@@ -2566,13 +2580,34 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
         if (clip.keyframes && oldFps > 0 && newFps > 0) updated.keyframes = scaleKeyframes(clip.keyframes, newFps / oldFps);
 
         return updated as AnyClipProps;
-      });
+      };
+      const clips = (state.clips || []).map(rescaleClip);
 
       const resolvedClips = resolveOverlaps(clips);
       const clipDuration = calculateTotalClipDuration(resolvedClips);
+
+      // The project's other timelines are in frames too.
+      const k = Math.max(1, Number(newFps) || 1) / Math.max(1, Number(oldFps) || 1);
+      const scale = (f: number) => Math.max(0, Math.round(f * k));
+      const projectTimelines = state.projectTimelines.map((t) => {
+        if (!t.content) return t;
+        const c = t.content;
+        const rescaled = resolveOverlaps(c.clips.map(rescaleClip));
+        return {
+          ...t,
+          content: {
+            ...c,
+            clips: rescaled,
+            markers: c.markers.map((m) => ({ ...m, frame: scale(m.frame) })),
+            clipDuration: scale(c.clipDuration),
+            playhead: scale(c.playhead),
+            view: { total: scale(c.view.total), window: [scale(c.view.window[0]), scale(c.view.window[1])] as [number, number], zoom: c.view.zoom },
+          },
+        };
+      });
       const prunedAssets = pruneAssetsForClips(state.assets, resolvedClips);
 
-      return { clips: resolvedClips, clipDuration, assets: prunedAssets };
+      return { clips: resolvedClips, clipDuration, assets: prunedAssets, projectTimelines };
     });
   },
 })));

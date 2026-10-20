@@ -27,8 +27,11 @@ import type {
   CompoundContent,
 } from "../types";
 import { foldStack } from "../compound";
+import { timelineRoot } from "../timelines";
+import { listFromDoc, type TimelineContent } from "../project-timelines";
 
 import _ from "lodash";
+import { v4 as uuidv4 } from "uuid";
 import { getMediaInfo } from "../media/utils";
 import { useViewportStore } from "../viewport";
 import { useCoverStore, type CoverSpec } from "../cover-store";
@@ -163,6 +166,8 @@ type ProjectJsonSnapshot = {
     scrollY: number;
     playheadPosition: number;
     snapGuideX: number | null;
+    /** The id of the timeline being edited (absent: the first). */
+    activeTimeline?: string;
     position: Point;
     timelineWindow: [number, number];
     scale: number;
@@ -175,12 +180,28 @@ type ProjectJsonSnapshot = {
     contentBounds: { x: number; y: number; width: number; height: number } | null;  
   };
   assets: Record<string, Asset>;
-  timeline: {
-    tracks: TimelineProps[];
-    clips: TimelineClipJson[];
-    /** Markers on the ruler; frames, like the playhead. */
-    markers?: Marker[];
-  };
+  /**
+   * The project's first timeline (what older versions and the Rust engine read as the timeline),
+   * or in an engine's snapshot the one to render.
+   */
+  timeline: JsonTimeline;
+  /** The project's other timelines, in order after `timeline` (File ▸ New timeline); absent with just one. */
+  moreTimelines?: JsonTimeline[];
+};
+
+type JsonTimeline = {
+  /** Absent in a file from before several timelines ("Timeline 01"). */
+  id?: string;
+  name?: string;
+  tracks: TimelineProps[];
+  clips: TimelineClipJson[];
+  /** Markers on the ruler; frames, like the playhead. */
+  markers?: Marker[];
+  /** The main track magnet, and for a timeline that isn't the one being edited its length, playhead and zoom. */
+  magnet?: boolean;
+  duration?: number;
+  playhead?: number;
+  view?: { total: number; window: [number, number]; zoom: number };
 };
 
 type SerializedMaskForJson = Omit<MaskClipProps, "keyframes"> & {
@@ -315,12 +336,14 @@ const clipToJson = (orig: AnyClipProps, fps: number): TimelineClipJson => {
 };
 
 /**
- * `scope` "root" (the file, the export) is the main timeline whatever compound is open;
- * "current" is the timeline being edited, which the preview and playback show.
+ * `scope` "root" (the export) is the timeline being edited (or `timelineId`) whatever compound
+ * is open; "current" is the timeline being edited as it is now, which the preview and playback
+ * show; "file" is the whole project as saved: its first timeline as `timeline`, the others after it.
  */
 const buildProjectJsonSnapshot = (
   projectState: JsonProjectSlice,
-  scope: "root" | "current" = "root",
+  scope: "root" | "current" | "file" = "root",
+  timelineId?: string,
 ): {
   projectId: number | null;
   snapshot: ProjectJsonSnapshot;
@@ -353,17 +376,29 @@ const buildProjectJsonSnapshot = (
     const projectId = activeProject.id;
     const fps = controlsState.fps || activeProject.fps || 24;
 
-    const stack = scope === "root" ? clipState.compoundStack ?? [] : [];
+    const activeId = clipState.activeTimelineId;
+    // Another timeline than the one being edited (an export of it): it is as parked.
+    const other = scope !== "current" && timelineId && timelineId !== activeId ? timelineRoot(timelineId) : null;
+    const stack = scope !== "current" && !other ? clipState.compoundStack ?? [] : [];
     const edited = { clips: Array.isArray(clipState.clips) ? (clipState.clips as AnyClipProps[]) : ([] as AnyClipProps[]), timelines: Array.isArray(clipState.timelines) ? (clipState.timelines as TimelineProps[]) : ([] as TimelineProps[]) };
     // With a compound open the file holds the main timeline, its compound as edited so far.
-    const root = stack.length ? foldStack(stack, edited.clips, edited.timelines) : edited;
-    const allClips = root.clips;
-    const clipsForJson: ProjectJsonSnapshot["timeline"]["clips"] = [];
+    const root = other ?? (stack.length ? foldStack(stack, edited.clips, edited.timelines) : edited);
+    const clipsOf = (clips: AnyClipProps[]) => clips.filter(Boolean).map((orig) => clipToJson(orig, fps));
+    const clipsForJson: ProjectJsonSnapshot["timeline"]["clips"] = clipsOf(root.clips);
 
-    for (const orig of allClips) {
-      if (!orig) continue;
-      clipsForJson.push(clipToJson(orig, fps));
+    // The project's timelines as saved: the first is `timeline`, the rest `moreTimelines`.
+    const jsonTimelines: JsonTimeline[] = [];
+    if (scope === "file") {
+      for (const t of clipState.projectTimelines ?? []) {
+        if (t.id === activeId) {
+          jsonTimelines.push({ id: t.id, name: t.name, tracks: root.timelines, clips: clipsForJson, markers: clipState.markers, magnet: clipState.magnet });
+        } else if (t.content) {
+          const c = t.content;
+          jsonTimelines.push({ id: t.id, name: t.name, tracks: c.timelines, clips: clipsOf(c.clips), markers: c.markers, magnet: c.magnet, duration: c.clipDuration, playhead: c.playhead, view: c.view });
+        }
+      }
     }
+    const [firstTimeline, ...moreTimelines] = jsonTimelines;
 
     // Normalize assets from the clip store into a Record<string, Asset> keyed by id.
     const assetsFromStore = clipState.assets as
@@ -402,12 +437,13 @@ const buildProjectJsonSnapshot = (
         aspectRatio: viewportState?.aspectRatio,
         ...(viewportState?.canvasSize ? { engineCanvas: viewportState.canvasSize } : {}),
         defaultClipLength: controlsState.defaultClipLength,
-        mainTrackMagnet: clipState.magnet,
+        mainTrackMagnet: other ? other.magnet : clipState.magnet,
         guides: clipState.guides ?? [],
         ...(useCoverStore.getState().cover ? { cover: useCoverStore.getState().cover! } : {}),
       },
       editorState: {
-        duration: Number((stack[0]?.clipDuration ?? clipState.clipDuration) || 0),
+        duration: Number((other ? other.clipDuration : (stack[0]?.clipDuration ?? clipState.clipDuration)) || 0),
+        activeTimeline: activeId,
         zoomLevel: Number((stack[0]?.view.zoom ?? controlsState.zoomLevel) || 1),
         scrollX: 0,
         scrollY: 0,
@@ -431,11 +467,12 @@ const buildProjectJsonSnapshot = (
         linkage: controlsState.linkage,
       },
       assets,
-      timeline: {
+      timeline: firstTimeline ?? {
         tracks: root.timelines,
         clips: clipsForJson,
-        markers: clipState.markers,
+        markers: other ? other.markers : clipState.markers,
       },
+      ...(moreTimelines.length ? { moreTimelines } : {}),
     };
 
     return { projectId, snapshot };
@@ -570,6 +607,9 @@ const debouncedGenerateProjectCover = _.debounce(
         const clipState = useClipStore.getState();
         const controlsState = useControlsStore.getState();
         const viewportState = useViewportStore.getState();
+
+        // The project's cover (and its details on the home screen) are of its first timeline.
+        if (clipState.projectTimelines?.[0] && clipState.projectTimelines[0].id !== clipState.activeTimelineId) return;
 
         const getAssetById = (clipState)?.getAssetById;
         const getClipsForGroup = (clipState)?.getClipsForGroup;
@@ -818,10 +858,38 @@ export const clipsFromSnapshot = (doc: ProjectJsonSnapshot): AnyClipProps[] => {
   return clips;
 };
 
+/** Markers as saved, in time order. */
+const cleanMarkers = (markers: unknown): Marker[] =>
+  (Array.isArray(markers) ? (markers as Marker[]) : [])
+    .filter((m) => m && typeof m.id === "string" && Number.isFinite(m.frame))
+    .map((m) => ({ id: m.id, frame: Math.max(0, Math.round(m.frame)), color: m.color || "#00C1CD", note: m.note ?? "" }))
+    .sort((a, b) => a.frame - b.frame);
+
+/** A saved timeline other than the one being edited, as the content parked in the project's list. */
+const parkedContent = (saved: JsonTimeline, fps: number, canvasMagnet: boolean): TimelineContent => {
+  const clips = clipsFromSnapshot({ settings: { fps }, timeline: { clips: saved.clips } } as unknown as ProjectJsonSnapshot);
+  const timelines = resolveOverlapsTimelines(Array.isArray(saved.tracks) ? saved.tracks : []);
+  const length = clips.reduce((m, c) => Math.max(m, Number((c as any).endFrame ?? 0) || 0), 0);
+  const clipDuration = Math.max(length, Number.isFinite(saved.duration) ? Number(saved.duration) : 0);
+  return {
+    clips,
+    timelines,
+    markers: cleanMarkers(saved.markers),
+    magnet: (typeof saved.magnet === "boolean" ? saved.magnet : canvasMagnet) && isMainTrackPacked(clips, timelines),
+    clipDuration,
+    playhead: Number.isFinite(saved.playhead) ? Number(saved.playhead) : 0,
+    view: saved.view && Array.isArray(saved.view.window) ? saved.view : { total: clipDuration, window: [0, clipDuration], zoom: 1 },
+  };
+};
+
 const hydrateStoresFromProjectJson = async (
   _projectId: string | number,
-  doc: ProjectJsonSnapshot,
+  fileDoc: ProjectJsonSnapshot,
 ) => {
+  // The project's timelines: the one being edited loads into the stores as the single
+  // timeline always did, the others are parked. A file from before several timelines has one.
+  const { list: savedTimelines, active: activeTimelineId } = listFromDoc<TimelineClipJson>(fileDoc as any, uuidv4);
+  const doc: ProjectJsonSnapshot = { ...fileDoc, timeline: savedTimelines.find((t) => t.id === activeTimelineId)!.saved as JsonTimeline };
   // While we're hydrating from disk, disable autosave and remember which
   // project id the current in-memory stores correspond to once complete.
   isHydratingFromJson = true;
@@ -865,18 +933,16 @@ const hydrateStoresFromProjectJson = async (
       }
 
       // Markers as saved, in time order.
-      const markers: Marker[] = (Array.isArray(doc.timeline?.markers) ? doc.timeline.markers : [])
-        .filter((m) => m && typeof m.id === "string" && Number.isFinite(m.frame))
-        .map((m) => ({ id: m.id, frame: Math.max(0, Math.round(m.frame)), color: m.color || "#00C1CD", note: m.note ?? "" }))
-        .sort((a, b) => a.frame - b.frame);
+      const markers: Marker[] = cleanMarkers(doc.timeline?.markers);
       // The player's guides as saved.
       const guides: Guide[] = (Array.isArray(doc.settings?.guides) ? doc.settings.guides : [])
         .filter((g) => g && typeof g.id === "string" && (g.axis === "x" || g.axis === "y") && Number.isFinite(g.at))
         .map((g) => ({ id: g.id, axis: g.axis, at: g.at }));
       // The magnet as saved (on for a project saved before it existed), but only over a main
       // track that's already gapless from the start: opening a project never moves its clips.
+      const projectMagnet = typeof doc.settings?.mainTrackMagnet === "boolean" ? doc.settings.mainTrackMagnet : true;
       const magnet =
-        (typeof doc.settings?.mainTrackMagnet === "boolean" ? doc.settings.mainTrackMagnet : true) &&
+        (typeof doc.timeline?.magnet === "boolean" ? doc.timeline.magnet : projectMagnet) &&
         isMainTrackPacked(clips, timelineTracks);
 
       // The cover chosen in the cover editor, as saved.
@@ -889,9 +955,14 @@ const hydrateStoresFromProjectJson = async (
       });
 
       if (useClipStore && typeof useClipStore.setState === "function") {
+        const hydrateFps = typeof doc.settings?.fps === "number" && Number.isFinite(doc.settings.fps) ? doc.settings.fps : 24;
         useClipStore.setState({
           clips,
           compoundStack: [],
+          activeTimelineId,
+          projectTimelines: savedTimelines.map((t) =>
+            t.id === activeTimelineId ? { id: t.id, name: t.name } : { id: t.id, name: t.name, content: parkedContent(t.saved as JsonTimeline, hydrateFps, projectMagnet) },
+          ),
           // Laid out again: each track its kind's height (an older project's or a draft's
           // tracks were sized differently).
           timelines: resolveOverlapsTimelines(timelineTracks),
@@ -1024,7 +1095,7 @@ const scheduleJsonProjectSave = (getProjectState: () => JsonProjectSlice) => {
       return;
     }
 
-    const snapshotResult = buildProjectJsonSnapshot(latestState);
+    const snapshotResult = buildProjectJsonSnapshot(latestState, "file");
     if (!snapshotResult || snapshotResult.projectId == null) return;
     try {
       const res = await saveProjectJson(snapshotResult.projectId, snapshotResult.snapshot);
@@ -1074,7 +1145,8 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
           (state as any)?.clips !== (prev as any)?.clips ||
           (state as any)?.markers !== (prev as any)?.markers ||
           (state as any)?.guides !== (prev as any)?.guides ||
-          (state as any)?.magnet !== (prev as any)?.magnet;
+          (state as any)?.magnet !== (prev as any)?.magnet ||
+          (state as any)?.projectTimelines !== (prev as any)?.projectTimelines;
         if (clipsChanged || timelinesChanged || assetsChanged || clipsEdited) {
           scheduleJsonProjectSave(getProjectState);
         }
@@ -1150,9 +1222,11 @@ const initExternalSubscriptions = (getProjectState: () => JsonProjectSlice) => {
 export const getActiveProjectJsonSnapshot = (
   projectState: JsonProjectSlice,
   scope: "root" | "current" = "root",
+  /** Export: this timeline of the project instead of the one being edited. */
+  timelineId?: string,
 ): { projectId: number; snapshot: ProjectJsonSnapshot } | null => {
   if (isHydratingFromJson || (projectState as any).projectsLoaded === false) return null;
-  const r = buildProjectJsonSnapshot(projectState, scope);
+  const r = buildProjectJsonSnapshot(projectState, scope, timelineId);
   return r && r.projectId != null ? { projectId: r.projectId, snapshot: r.snapshot } : null;
 };
 
@@ -1293,9 +1367,12 @@ export const withJsonProjectPersistence =
 
             // Clear clip/timeline/assets state.
             try {
+              const firstId = uuidv4();
               useClipStore.setState({
                 clips: [],
                 compoundStack: [],
+                projectTimelines: [{ id: firstId, name: "Timeline 01" }],
+                activeTimelineId: firstId,
                 timelines: [],
                 assets: {},
                 clipDuration: 0,
@@ -1412,7 +1489,7 @@ export const withJsonProjectPersistence =
                   ...(prev as any),
                   activeProjectId: prevId,
                 } as JsonProjectSlice;
-                const snapshotResult = buildProjectJsonSnapshot(prevState);
+                const snapshotResult = buildProjectJsonSnapshot(prevState, "file");
                 if (snapshotResult?.projectId != null) {
                   void saveProjectJson(
                     snapshotResult.projectId,

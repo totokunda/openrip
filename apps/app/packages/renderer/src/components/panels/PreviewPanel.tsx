@@ -3,7 +3,7 @@ import PlayerBar from "../preview/PlayerBar";
 import PlayerMenu from "../preview/PlayerMenu";
 import PlayerStage from "../preview/PlayerStage";
 import { PanelShell, panelHeaderHandlers } from "./PanelShell";
-import { useProjectsStore } from "@/lib/projects";
+import TimelineSwitcher from "../preview/TimelineSwitcher";
 
 interface PreviewPanelProps {
   id?: string;
@@ -28,8 +28,6 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({
   minSize = 25,
   detached = false,
 }) => {
-  const projectName = useProjectsStore((s) => s.getActiveProject()?.name ?? "");
-
   return (
     <PanelShell
       id={id}
@@ -43,9 +41,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({
       {/* The header strip: the player's name and its menu. Dragged out of the window, the
           player goes into a window of its own (lib/panel-windows.ts). */}
       <div {...panelHeaderHandlers("player", detached)} className="h-[42px] shrink-0 flex items-center gap-2 pl-3 pr-2.5 bg-brand-header border-b-[0.5px] border-brand-hairline">
-        <span className="flex-1 min-w-0 truncate text-left text-[13px] text-white" title={projectName}>
-          Player<span className="text-brand-light/45">-{projectName}</span>
-        </span>
+        <TimelineSwitcher />
         <PlayerMenu />
       </div>
       {/* The canvas area (rulers, guides, overlays) and the scopes: preview/PlayerStage.tsx. */}

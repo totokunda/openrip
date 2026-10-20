@@ -1,7 +1,7 @@
 // The app's windows over either screen (home or editor): Settings, Shortcuts, About, the
 // open-source notices and the project's settings, opened through the shell store
 // (lib/shell.ts) from the home screen's gear, the top bar and the menu bar's commands, which
-// this also carries out (Back to home page, the layouts, File ▸ New project, Import, Export,
+// this also carries out (Back to home page, the layouts, File ▸ New project, New timeline, Import, Export,
 // Edit ▸ Split, Help ▸ Walkthrough) and the first-run walkthrough.
 import React, { useEffect } from "react";
 import { onMenuCommand, setMenuState } from "@app/preload";
@@ -9,6 +9,7 @@ import { useShellStore } from "@/lib/shell";
 import { useLayoutConfigStore, type AppLayoutId } from "@/lib/layout-config";
 import { goHome } from "@/lib/project-actions";
 import { runAction } from "@/lib/timeline-shortcuts";
+import { newTimelineFromMenu } from "@/lib/timelines";
 import SettingsWindow from "./settings/SettingsWindow";
 import ShortcutsWindow from "./ShortcutsWindow";
 import AboutWindow from "./AboutWindow";
@@ -43,6 +44,9 @@ export const AppDialogs: React.FC = () => {
         else if (cmd === "walkthrough") {
           if (shell.view === "editor") shell.setWalkthroughOpen(true);
         } else if (cmd === "new-project") runAction("newProject");
+        else if (cmd === "new-timeline") {
+          if (shell.view === "editor") newTimelineFromMenu();
+        }
         else if (cmd === "import") {
           if (shell.view === "editor") runAction("importMedia");
         } else if (cmd === "export") {

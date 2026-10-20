@@ -7,7 +7,8 @@
 // wrote. The choices are written by lib/export-run.ts; their numbers come from
 // lib/export-options.ts. The same dialog exports one clip (`scope`), with the sections that make
 // sense for it.
-import { allClips, foldStack } from "@/lib/compound";
+import { allClips } from "@/lib/compound";
+import { timelineRoot } from "@/lib/timelines";
 import React, { useEffect, useRef, useState } from "react";
 import { LuCheck, LuChevronDown, LuChevronUp, LuCircleCheck, LuCircleHelp, LuCircleX, LuClapperboard, LuFolder, LuFolderOpen, LuInfo, LuPencil } from "react-icons/lu";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -333,6 +334,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
   const [hasCaptions, setHasCaptions] = useState(false);
   const [fps, setFps] = useState(nearestRate(projectFps || 30));
   const wasOpen = useRef(false);
+  // Which of the project's timelines the export is of (the one being edited when the dialog opens).
+  const timelines = useClipStore((s) => s.projectTimelines);
+  const activeTimelineId = useClipStore((s) => s.activeTimelineId);
+  const [timelineId, setTimelineId] = useState(activeTimelineId);
   // The codecs beyond H.264 and HEVC this platform's encoder has; the others stay hidden.
   const [platformCodecs, setPlatformCodecs] = useState<string[]>([]);
   useEffect(() => {
@@ -347,15 +352,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
 
   // What the project (or the clip) holds, read each time the dialog opens.
   useEffect(() => {
-    if (!open || wasOpen.current) {
-      wasOpen.current = open;
+    if (!open) {
+      wasOpen.current = false;
       return;
     }
+    // Opening starts on the timeline being edited; picking another reads that one again.
+    const first = !wasOpen.current;
     wasOpen.current = true;
-    const { compoundStack, getClipById } = useClipStore.getState();
-    // An export is of the main timeline, whatever compound is open (and the compounds' sound counts).
-    const { clips } = foldStack(compoundStack, useClipStore.getState().clips, useClipStore.getState().timelines);
-    const clipDuration = compoundStack[0]?.clipDuration ?? useClipStore.getState().clipDuration;
+    const { getClipById, activeTimelineId } = useClipStore.getState();
+    if (first && timelineId !== activeTimelineId) setTimelineId(activeTimelineId);
+    const chosen = first || scope ? activeTimelineId : timelineId;
+    // An export is of a whole timeline, whatever compound is open (and the compounds' sound counts).
+    const root = timelineRoot(chosen) ?? timelineRoot()!;
+    const clips = root.clips;
+    const clipDuration = root.clipDuration;
     const rate = useControlsStore.getState().fps || 30;
     const rangeOf = scope?.range;
     const ones = scope ? (rangeOf ? clips.filter((c) => !c.hidden && (c.endFrame ?? 0) > rangeOf.start && (c.startFrame ?? 0) < rangeOf.end) : scope.clipIds.map((id) => getClipById(id)).filter(Boolean)) : [];
@@ -374,12 +384,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
       return list.length ? (Math.max(...list.map((c) => c.endFrame)) - Math.min(...list.map((c) => c.startFrame))) / rate : 0;
     })();
     setSeconds(Math.max(0, span));
-    setHasCaptions(!scope && timelineCues().length > 0);
+    setHasCaptions(!scope && timelineCues(chosen).length > 0);
+    if (!first) return;
     setFps(nearestRate(rate));
     setName(scope?.name || project?.name || "Export");
     // A finished run's screen is for the dialog it was in; a new opening starts at the settings.
     if (useExportRun.getState().phase !== "running") useExportRun.getState().reset();
-  }, [open]);
+  }, [open, timelineId]);
 
   const sections = {
     video: scope ? scope.kind !== "audio" : true,
@@ -427,7 +438,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
 
   const start = () => {
     if (!canExport) return;
-    void runExport(settings, scope);
+    void runExport(settings, scope, scope ? undefined : timelineId);
   };
 
   const pickFolder = async () => {
@@ -464,7 +475,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
             <div className="flex-1 min-w-0 overflow-y-auto pr-[17px] pb-3" data-testid="export-settings">
               <div className={cn(row, "pt-[14px]")}>
                 <Label on>Export timeline</Label>
-                <div className="text-[12px] leading-[22px] text-[#a8a8a8]">{scope ? (scope.range ? "Range" : scope.clipIds.length > 1 ? "Selected clips" : "Selected clip") : "Timeline 01"}</div>
+                {!scope && timelines.length > 1 ? (
+                  <Select testId="export-timeline" value={timelineId} options={timelines.map((t) => ({ value: t.id, label: t.name }))} onChange={setTimelineId} />
+                ) : (
+                  <div data-testid="export-timeline" className="text-[12px] leading-[22px] text-[#a8a8a8]">
+                    {scope ? (scope.range ? "Range" : scope.clipIds.length > 1 ? "Selected clips" : "Selected clip") : (timelines.find((t) => t.id === activeTimelineId)?.name ?? "Timeline 01")}
+                  </div>
+                )}
               </div>
               <div className={row}>
                 <Label on>Name</Label>

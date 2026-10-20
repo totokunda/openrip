@@ -104,7 +104,10 @@ export function ensureProjectJson(
     ...(raw?.assets ?? {}),
   };
 
+  // The first timeline keeps what the editor wrote with it (its id, name, magnet…); the others
+  // (`moreTimelines`, File ▸ New timeline) are kept as they are.
   const timeline = {
+    ...(raw?.timeline && typeof raw.timeline === "object" ? raw.timeline : {}),
     tracks: Array.isArray(raw?.timeline?.tracks)
       ? raw.timeline.tracks
       : ([] as any[]),
@@ -142,6 +145,7 @@ export function ensureProjectJson(
     editorState,
     assets,
     timeline,
+    ...(Array.isArray(raw?.moreTimelines) && raw.moreTimelines.length ? { moreTimelines: raw.moreTimelines } : {}),
     inputControls,
   };
 }

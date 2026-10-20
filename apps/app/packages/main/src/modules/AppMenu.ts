@@ -81,6 +81,7 @@ function template(): MenuItemConstructorOptions[] {
       label: "File",
       submenu: [
         { label: "New project", ...shown(state.newProject), click: command("new-project") },
+        { id: "new-timeline", label: "New timeline", enabled: editor, click: command("new-timeline") },
         { label: "Import", enabled: editor, ...shown(state.importMedia), click: command("import") },
         { label: "Export", enabled: editor, ...shown(state.export), click: command("export") },
         { type: "separator" },

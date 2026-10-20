@@ -12,6 +12,7 @@ import {
   TbDots,
   TbFileText,
   TbFolderPlus,
+  TbLayoutList,
   TbFolderOpen,
   TbScissors,
   TbLink,
@@ -156,6 +157,8 @@ interface ItemProps {
   onAdd?: (item: MediaItem) => void;
   /** Menu: New folder with selected item. */
   onNewFolder?: (item: MediaItem) => void;
+  /** Menu: New timeline with selected item. */
+  onNewTimeline?: (item: MediaItem) => void;
   /** Menu: Split scenes (a video added and cut at its shot changes). */
   onSplitScenes?: (item: MediaItem) => void;
 }
@@ -463,6 +466,7 @@ const Item: React.FC<ItemProps> = ({
   onRange,
   onAdd,
   onNewFolder,
+  onNewTimeline,
   onSplitScenes,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -620,6 +624,10 @@ const Item: React.FC<ItemProps> = ({
                 <DropdownMenuItem className="py-1 rounded" data-testid="media-new-folder" onClick={() => onNewFolder?.(item)}>
                   <TbFolderPlus className="w-3.5 h-3.5" />
                   <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">New folder with selected item</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="py-1 rounded" data-testid="media-new-timeline" disabled={item.missing || !item.mediaInfo} onClick={() => onNewTimeline?.(item)}>
+                  <TbLayoutList className="w-3.5 h-3.5" />
+                  <span className="flex flex-row gap-x-2.5 items-center justify-center text-[11px]">New timeline with selected item</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

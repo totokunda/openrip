@@ -325,7 +325,7 @@ export function initEnginePreview() {
       const [a, b] = [pick(s), pick(p)];
       if (a.some((v, i) => v !== b[i])) scheduleSync();
     });
-  watch(useClipStore.subscribe as any, (s: any) => [s.clips, s.timelines, s.assets, s.compoundStack]);
+  watch(useClipStore.subscribe as any, (s: any) => [s.clips, s.timelines, s.assets, s.compoundStack, s.activeTimelineId]);
   watch(useControlsStore.subscribe as any, (s: any) => [s.fps]);
   watch(useViewportStore.subscribe as any, (s: any) => [s.aspectRatio, s.canvasSize, s.tool === "mask"]);
   useFilterLibrary.subscribe((s, p) => {
@@ -494,8 +494,9 @@ export async function engineProjectSnapshot(): Promise<{ projectId: number; snap
 }
 
 /** Export the open project with the engine (the snapshot the preview gets, with originals). */
-export async function engineExportProject(request: EngineExportRequest, onProgress: (ratio: number) => void, scope?: { clipIds: string[]; range?: { start: number; end: number } }): Promise<EngineExportResult> {
-  const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any);
+export async function engineExportProject(request: EngineExportRequest, onProgress: (ratio: number) => void, scope?: { clipIds: string[]; range?: { start: number; end: number } }, timelineId?: string): Promise<EngineExportResult> {
+  // `timelineId`: one of the project's timelines (the Export dialog's choice), by default the one being edited.
+  const snap = getActiveProjectJsonSnapshot(useProjectsStore.getState() as any, "root", timelineId);
   if (!snap) return { ok: false, error: "no project open" };
   const snapshot = await withOriginalMedia(scope?.range ? trimmedToRange(snap.snapshot, scope.range) : scope?.clipIds?.length ? soloClips(snap.snapshot, scope.clipIds) : snap.snapshot);
   await registerBundledFonts();

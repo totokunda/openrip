@@ -52,6 +52,7 @@ import {
 } from "@/lib/media/library";
 import { HiFilm } from "react-icons/hi";
 import { useClipStore } from "@/lib/clip";
+import { createTimeline } from "@/lib/timelines";
 import { useShellStore } from "@/lib/shell";
 import { preferences } from "@/lib/preferences";
 import { linkMissingInFolder, linkToMedia } from "@/lib/relink";
@@ -911,6 +912,23 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
     [selected],
   );
 
+  // New timeline with selected item: a new timeline (opened) holding the picked cards (or this
+  // one), one after the other from its start; a card's In/Out choice counts.
+  const newTimelineWith = useCallback(
+    async (item: MediaItem) => {
+      const picked = selected.has(item.name) ? items.filter((it) => selected.has(it.name)) : [item];
+      createTimeline();
+      for (const it of picked) {
+        const range = ranges[it.name];
+        const id = await addMediaAtPlayhead(it, { startFrame: useClipStore.getState().clipDuration, ...(range ? { range } : {}) });
+        if (!id) toast.error(`${it.name} couldn't be added`, { position: "bottom-right", duration: 3000, style: { width: "fit-content" } });
+        else if (it.type !== "image") void ensureFullMediaStats(it.assetUrl);
+      }
+      setSelected(new Set());
+    },
+    [selected, items, ranges],
+  );
+
   // A press on a card let go where it began is a click (the app's drags start on a press and
   // swallow the click); one let go on a folder moves the picked cards into it.
   useDndMonitor({
@@ -1354,6 +1372,7 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
                   }
                   onAdd={(it) => void addItem(it)}
                   onNewFolder={newFolderWith}
+                  onNewTimeline={(it) => void newTimelineWith(it)}
                   onSplitScenes={(it) => void addItem(it, true)}
                 />
               ))}

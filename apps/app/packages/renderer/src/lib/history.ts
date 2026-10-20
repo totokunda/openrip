@@ -244,6 +244,8 @@ const restore = (entry: Entry) => {
     const controls = useControlsStore.getState();
     if (fps !== controls.fps && fps > 0) {
       const k = fps / Math.max(1, controls.fps);
+      // The project's other timelines go back to the frame rate too (this timeline's clips come from the state).
+      if (clipStore.projectTimelines.some((t) => t.content)) clipStore.rescaleForFpsChange(controls.fps, fps);
       const total = Math.max(0, Math.round(controls.totalTimelineFrames * k));
       useControlsStore.setState({
         fps,
@@ -325,11 +327,44 @@ export function beginStep() {
   action++;
 }
 
+/** The steps of the project's timelines that aren't being edited, by timeline id. */
+const parkedHistory = new Map<string, { past: Entry[]; future: Entry[] }>();
+
+/**
+ * Switch to another of the project's timelines: `apply` puts its content into the stores and
+ * the history becomes that timeline's (undo goes per timeline: it takes back the edit made in
+ * the timeline you're looking at, never one in a timeline that's out of sight). Switching
+ * itself isn't a step. `forget` ids (a deleted timeline) lose their steps.
+ */
+export function swapHistory(fromId: string, toId: string, apply: () => void, forget: string[] = []) {
+  if (present != null) parkedHistory.set(fromId, { past, future });
+  for (const id of forget) parkedHistory.delete(id);
+  const saved = parkedHistory.get(toId);
+  parkedHistory.delete(toId);
+  restoring = true;
+  try {
+    apply();
+  } finally {
+    restoring = false;
+  }
+  if (present == null) return;
+  past = saved?.past ?? [];
+  future = saved?.future ?? [];
+  present = readDoc();
+  selectionBefore = useControlsStore.getState().selectedClipIds;
+  stepAction = action;
+  publish();
+}
+
+/** A deleted timeline's steps go with it. */
+export const forgetTimelineHistory = (id: string) => void parkedHistory.delete(id);
+
 /** Stop recording while a project loads, and forget the last project's steps. */
 export function pauseHistory() {
   present = null;
   past = [];
   future = [];
+  parkedHistory.clear();
   publish();
 }
 
@@ -338,6 +373,7 @@ export function resetHistory() {
   subscribe();
   past = [];
   future = [];
+  parkedHistory.clear();
   present = readDoc();
   selectionBefore = useControlsStore.getState().selectedClipIds;
   // Changes before the user's first action (clips fitting their boxes as they mount) are part
