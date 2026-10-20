@@ -29,6 +29,7 @@ import {
   transitionsOffered,
 } from "./_anim.mjs";
 import { undoCase } from "./_undo.mjs";
+import { tilesReady } from "./_tiles.mjs";
 
 const TIMES = [4.5, 4.6, 4.875, 5, 5.4];
 
@@ -66,6 +67,9 @@ export default async (ctx) => {
   await flashCard.hover();
   await win.waitForTimeout(300);
   check("a hovered card shows its +", await win.locator("[data-testid=transition-add-white_flash]").isVisible());
+  const drawn = await tilesReady(win, "[data-testid=transition-picture]");
+  check("the cards show footage with the transition drawn on it (not the old drawing)", !drawn.timedOut && (await win.locator("[data-testid=gl-preview]").count()) === 0, JSON.stringify(drawn));
+  await win.mouse.move(5, 5);
   await shot("t1-tab");
 
   // + with the first half selected.

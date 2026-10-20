@@ -46,7 +46,7 @@ use openrip_playback::PreviewError;
 pub use analysis::{analyse_motion, motion_ready, set_motion_cache_dir, auto_adjust, color_stats, detect_scenes, AnalysisControl, AutoAdjust, ColorStats, CutKind, Look, MatchOn, Moments, SceneCut, SceneOptions, Sliders};
 pub use audio::{measure_loudness, set_audio_input, Level, Loudness, Recorder, Recording, ToneInput};
 pub use capcut::{capcut_to_app, AppProjectFromDraft};
-pub use effects::{effect_catalog, EffectPreviews};
+pub use effects::{effect_catalog, preview_revision, EffectPreviews};
 pub use export::{available_codecs, codec_named, export_audio, export_gif, export_project, Codec, ExportControl, ExportOptions, ExportProgress, ExportResult};
 pub use fonts::{font_face, font_families, register_fonts, FontFace, FontFamily};
 pub use openrip_model::{Micros, Project};

@@ -1,10 +1,10 @@
-// The small moving pictures on the transition, animation and speed-curve cards, drawn by the
-// app (no bundled content): two shots meeting through the transition, a picture or a line of
-// text going through the animation, and a speed curve's shape. A card shows one still moment
+// The small moving pictures on the animation and speed-curve cards, drawn by the app (no
+// bundled content): a picture or a line of text going through the animation, and a speed
+// curve's shape. (The transition and effect tiles show footage drawn by the engine: see
+// components/menus/TilePicture.tsx.) A card shows one still moment
 // of its motion and plays it in a loop while hovered (or while `playing`), with the Web
 // Animations API, so nothing runs for the cards nobody looks at.
-import React, { useEffect, useRef, useState } from "react";
-import { GL_TRANSITIONS } from "@/lib/glTransitions";
+import React, { useEffect, useRef } from "react";
 import { curveSpeedAt, MIN_CURVE_SPEED, MAX_CURVE_SPEED } from "@/lib/speed";
 import type { AnimationDirection, SpeedPoint } from "@/lib/types";
 
@@ -45,167 +45,12 @@ const useLoop = (root: React.RefObject<HTMLElement | null>, tracks: Track[], pla
   }, [playing, rest, key]);
 };
 
-// ---- transitions ---------------------------------------------------------------------------
+// ---- moves ---------------------------------------------------------------------------------
 
 /** Where an incoming shot starts for a move in `dir` ("left": it travels left, from the right). */
 const away = (dir: AnimationDirection, k = 100) =>
   dir === "left" ? `translate(${k}%, 0)` : dir === "right" ? `translate(${-k}%, 0)` : dir === "up" ? `translate(0, ${k}%)` : `translate(0, ${-k}%)`;
 const gone = (dir: AnimationDirection, k = 100) => away(dir === "left" ? "right" : dir === "right" ? "left" : dir === "up" ? "down" : "up", k);
-/** The inset that hides a shot entirely from the side a wipe in `dir` starts on. */
-const wipeFrom = (dir: AnimationDirection) =>
-  dir === "left" ? "inset(0 0 0 100%)" : dir === "right" ? "inset(0 100% 0 0)" : dir === "up" ? "inset(100% 0 0 0)" : "inset(0 0 100% 0)";
-
-/**
- * A transition's keyframes over the loop: the first shot alone for 30%, the transition over
- * the middle 40% (the cut at 50%), then the second shot.
- */
-const transitionTracks = (kind: string, dir: AnimationDirection): Track[] => {
-  const show = (at: number): Frames => [{ opacity: 0, offset: 0 }, { opacity: 0, offset: at }, { opacity: 1, offset: at }, { opacity: 1, offset: 1 }];
-  const pulse = (a: number, peak: number, b: number): Frames => [
-    { opacity: 0, offset: 0 },
-    { opacity: 0, offset: a },
-    { opacity: 1, offset: peak },
-    { opacity: 0, offset: b },
-    { opacity: 0, offset: 1 },
-  ];
-  switch (kind) {
-    case "mix":
-      return [{ el: "b", frames: [{ opacity: 0, offset: 0 }, { opacity: 0, offset: 0.3 }, { opacity: 1, offset: 0.7 }, { opacity: 1, offset: 1 }] }];
-    case "black_fade":
-    case "white_fade":
-      return [
-        { el: "b", frames: show(0.5) },
-        { el: "fx", frames: pulse(0.3, 0.5, 0.7) },
-      ];
-    case "white_flash":
-      return [
-        { el: "b", frames: show(0.5) },
-        { el: "fx", frames: pulse(0.42, 0.5, 0.58) },
-      ];
-    case "blink": {
-      // Two lids closing to the middle and opening on the second shot.
-      const lid: Frames = [{ transform: "scaleY(0)", offset: 0 }, { transform: "scaleY(0)", offset: 0.3 }, { transform: "scaleY(1)", offset: 0.5 }, { transform: "scaleY(0)", offset: 0.7 }, { transform: "scaleY(0)", offset: 1 }];
-      return [
-        { el: "b", frames: show(0.5) },
-        { el: "lid", frames: lid, easing: "ease-in-out" },
-        { el: "lid2", frames: lid, easing: "ease-in-out" },
-      ];
-    }
-    case "pull_in":
-    case "pull_out": {
-      const [out, into] = kind === "pull_in" ? ["scale(1.7)", "scale(1.7)"] : ["scale(0.55)", "scale(1.5)"];
-      return [
-        { el: "a", frames: [{ transform: "scale(1)", filter: "blur(0px)", offset: 0 }, { transform: "scale(1)", filter: "blur(0px)", offset: 0.3 }, { transform: out, filter: "blur(3px)", offset: 0.5 }, { transform: out, filter: "blur(3px)", offset: 1 }] },
-        { el: "b", frames: [{ opacity: 0, transform: into, filter: "blur(3px)", offset: 0 }, { opacity: 0, transform: into, filter: "blur(3px)", offset: 0.5 }, { opacity: 1, transform: into, filter: "blur(3px)", offset: 0.5 }, { opacity: 1, transform: "scale(1)", filter: "blur(0px)", offset: 0.7 }, { opacity: 1, transform: "scale(1)", filter: "blur(0px)", offset: 1 }] },
-      ];
-    }
-    case "blur":
-      return [
-        { el: "a", frames: [{ filter: "blur(0px)", offset: 0 }, { filter: "blur(0px)", offset: 0.3 }, { filter: "blur(5px)", offset: 0.5 }, { filter: "blur(5px)", offset: 1 }] },
-        { el: "b", frames: [{ opacity: 0, filter: "blur(5px)", offset: 0 }, { opacity: 0, filter: "blur(5px)", offset: 0.5 }, { opacity: 1, filter: "blur(5px)", offset: 0.5 }, { opacity: 1, filter: "blur(0px)", offset: 0.7 }, { opacity: 1, filter: "blur(0px)", offset: 1 }] },
-      ];
-    case "slide":
-      return [{ el: "b", easing: "ease-in-out", frames: [{ transform: away(dir), offset: 0 }, { transform: away(dir), offset: 0.3 }, { transform: "translate(0, 0)", offset: 0.7 }, { transform: "translate(0, 0)", offset: 1 }] }];
-    case "push":
-      return [
-        { el: "a", frames: [{ transform: "translate(0, 0)", offset: 0 }, { transform: "translate(0, 0)", offset: 0.3 }, { transform: gone(dir), offset: 0.7 }, { transform: gone(dir), offset: 1 }] },
-        { el: "b", frames: [{ transform: away(dir), offset: 0 }, { transform: away(dir), offset: 0.3 }, { transform: "translate(0, 0)", offset: 0.7 }, { transform: "translate(0, 0)", offset: 1 }] },
-      ];
-    case "wipe":
-      return [{ el: "b", frames: [{ clipPath: wipeFrom(dir), offset: 0 }, { clipPath: wipeFrom(dir), offset: 0.3 }, { clipPath: "inset(0 0 0 0)", offset: 0.7 }, { clipPath: "inset(0 0 0 0)", offset: 1 }] }];
-    case "circle":
-      return [{ el: "b", frames: [{ clipPath: "circle(0% at 50% 50%)", offset: 0 }, { clipPath: "circle(0% at 50% 50%)", offset: 0.3 }, { clipPath: "circle(75% at 50% 50%)", offset: 0.7 }, { clipPath: "circle(75% at 50% 50%)", offset: 1 }] }];
-    case "spin":
-      return [
-        { el: "a", frames: [{ transform: "rotate(0deg) scale(1)", offset: 0 }, { transform: "rotate(0deg) scale(1)", offset: 0.3 }, { transform: "rotate(180deg) scale(0.2)", offset: 0.5 }, { transform: "rotate(180deg) scale(0.2)", offset: 1 }] },
-        { el: "b", frames: [{ opacity: 0, transform: "rotate(-180deg) scale(0.2)", offset: 0 }, { opacity: 0, transform: "rotate(-180deg) scale(0.2)", offset: 0.5 }, { opacity: 1, transform: "rotate(-180deg) scale(0.2)", offset: 0.5 }, { opacity: 1, transform: "rotate(0deg) scale(1)", offset: 0.7 }, { opacity: 1, transform: "rotate(0deg) scale(1)", offset: 1 }] },
-      ];
-    default:
-      // A CapCut transition the engine doesn't draw: a plain cut.
-      return [{ el: "b", frames: show(0.5) }];
-  }
-};
-
-/** A shot: a gradient sky with a sun (`warm`) or a mountain (cool). */
-const Shot: React.FC<{ warm?: boolean; part: "a" | "b" }> = ({ warm, part }) => (
-  <div
-    data-part={part}
-    className="absolute inset-0 overflow-hidden"
-    style={{ background: warm ? "linear-gradient(160deg, #e7a46b 0%, #b5586a 55%, #4b2f55 100%)" : "linear-gradient(170deg, #9cc8e4 0%, #4d86ad 50%, #1f3c55 100%)" }}
-  >
-    {warm ? (
-      <div className="absolute rounded-full" style={{ width: "34%", height: "34%", left: "33%", top: "26%", background: "#ffe3a3", boxShadow: "0 0 12px #ffd38a" }} />
-    ) : (
-      <div className="absolute inset-x-0 bottom-0" style={{ height: "55%", background: "#24384a", clipPath: "polygon(0 100%, 0 70%, 28% 22%, 46% 52%, 64% 8%, 100% 64%, 100% 100%)" }} />
-    )}
-  </div>
-);
-
-/**
- * The sheet of the shader transitions' previews: one row per transition (the order of
- * lib/glTransitions.ts), eight frames across, each made by the engine's compositor on two
- * sample pictures (`openrip-dev transition-sheet`), so a card shows what the export draws.
- */
-const GL_SHEET = new URL("../../assets/transitions/gl-sheet.webp", import.meta.url).href;
-const GL_FRAMES = 8;
-/** The frames a hovered card plays through: the first picture, the transition, the second. */
-const GL_PLAY = [0, 0, 1, 2, 3, 4, 5, 6, 7, 7];
-/** The frame a resting card shows (the transition about a third of the way). */
-const GL_REST = 3;
-const GL_FRAME_MS = 100;
-
-/** A shader transition's card picture: its row of the engine's sheet, played while `playing`. */
-export const GlTransitionPreview: React.FC<{ kind: string; playing: boolean }> = ({ kind, playing }) => {
-  const [step, setStep] = useState(-1);
-  useEffect(() => {
-    if (!playing) {
-      setStep(-1);
-      return;
-    }
-    setStep(0);
-    const id = window.setInterval(() => setStep((s) => (s + 1) % GL_PLAY.length), GL_FRAME_MS);
-    return () => window.clearInterval(id);
-  }, [playing]);
-  const row = GL_TRANSITIONS.findIndex((t) => t.type === kind);
-  if (row < 0) return null;
-  const frame = step < 0 ? GL_REST : GL_PLAY[step];
-  return (
-    <div
-      data-testid="gl-preview"
-      data-frame={frame}
-      className="absolute inset-0"
-      style={{
-        backgroundImage: `url(${GL_SHEET})`,
-        backgroundSize: `${GL_FRAMES * 100}% ${GL_TRANSITIONS.length * 100}%`,
-        backgroundPosition: `${(frame / (GL_FRAMES - 1)) * 100}% ${(row / (GL_TRANSITIONS.length - 1)) * 100}%`,
-      }}
-    />
-  );
-};
-
-/** Two shots meeting through the transition `kind`. */
-export const TransitionPreview: React.FC<{ kind: string; direction?: AnimationDirection; playing: boolean }> = ({ kind, direction = "left", playing }) =>
-  kind.startsWith("gl_") ? <GlTransitionPreview kind={kind} playing={playing} /> : <CssTransitionPreview kind={kind} direction={direction} playing={playing} />;
-
-const CssTransitionPreview: React.FC<{ kind: string; direction: AnimationDirection; playing: boolean }> = ({ kind, direction, playing }) => {
-  const root = useRef<HTMLDivElement>(null);
-  const tracks = transitionTracks(kind, direction);
-  useLoop(root, tracks, playing, 0.46, `${kind}-${direction}`);
-  const fx = kind === "black_fade" ? "#000" : "#fff";
-  return (
-    <div ref={root} className="absolute inset-0 overflow-hidden">
-      <Shot warm part="a" />
-      <Shot part="b" />
-      <div data-part="fx" className="absolute inset-0 opacity-0" style={{ background: fx }} />
-      {kind === "blink" && (
-        <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-          <div data-part="lid" className="h-1/2 bg-black origin-top" style={{ transform: "scaleY(0)" }} />
-          <div data-part="lid2" className="h-1/2 bg-black origin-bottom" style={{ transform: "scaleY(0)" }} />
-        </div>
-      )}
-    </div>
-  );
-};
 
 // ---- clip animations -----------------------------------------------------------------------
 

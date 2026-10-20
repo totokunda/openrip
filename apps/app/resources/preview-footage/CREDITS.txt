@@ -1,0 +1,23 @@
+Footage on the Transitions and Effects tiles
+=============================================
+
+Three short clips (street.mp4, forest.mp4, beach.mp4), each cut to 3 seconds, scaled to 360 x 202,
+and re-encoded without sound from videos on Wikimedia Commons. All three are dedicated to the
+public domain by their authors under CC0 1.0 Universal
+(https://creativecommons.org/publicdomain/zero/1.0/); no credit is required, and it is given here
+anyway.
+
+street.mp4  (from 11.5 s)
+  "View of Braga Street in Bandung 2, 13 June 2024", by Jeromi Mikhael
+  https://commons.wikimedia.org/wiki/File:View_of_Braga_Street_in_Bandung_2,_13_June_2024.webm
+
+forest.mp4  (from 6 s)
+  "Golden hour rays break through mist on Diana Creek", by Extemporalist
+  https://commons.wikimedia.org/wiki/File:Golden_hour_rays_break_through_mist_on_Diana_Creek.webm
+
+beach.mp4  (from 14.2 s)
+  "Body surfing a wave", by JaredMcKenzie
+  https://commons.wikimedia.org/wiki/File:Body_surfing_a_wave.webm
+
+The engine draws each transition and effect on these clips when a tile is first shown
+(apps/app/packages/main/src/modules/TilePreviews.ts) and keeps the result in the rendering cache.

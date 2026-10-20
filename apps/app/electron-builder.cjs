@@ -56,6 +56,13 @@ module.exports = {
       to: "ffmpeg",
       filter: ["ffprobe", "ffprobe.exe"],
     },
+    // The small clips the Transitions and Effects tiles are drawn on (resources/preview-footage,
+    // with its CREDITS.txt), read by the engine from `<resources>/preview-footage/`.
+    {
+      from: "resources/preview-footage",
+      to: "preview-footage",
+      filter: ["*.mp4", "CREDITS.txt"],
+    },
     // The Rust engine's addon (scripts/build-engine.mjs), loaded by the main process from
     // `<resources>/engine/`. A build without it runs on the app's own preview.
     {

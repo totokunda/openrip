@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useDndMonitor, useDraggable } from "@dnd-kit/core";
+import type { EngineTileSpec } from "@app/preload";
 import { LuPlus, LuSearch, LuX } from "react-icons/lu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { addEffectBar, useEffectLibrary } from "@/lib/effects/library";
-import { effectLoop, effectStill, LOOP_FPS, PREVIEW_SIZE, useEffectCatalog, type EffectCatalog, type EffectDef, type PreviewFrame } from "@/lib/effects/catalog";
+import { defaultEffectParams, useEffectCatalog, type EffectCatalog, type EffectDef } from "@/lib/effects/catalog";
+import { TilePicture } from "./TilePicture";
 import { cn } from "@/lib/utils";
 import { RecentSearches, useRecentSearches } from "./RecentSearches";
 
@@ -24,66 +26,6 @@ const Star: React.FC<{ on: boolean }> = ({ on }) => (
   </svg>
 );
 
-const draw = (canvas: HTMLCanvasElement | null, frame: PreviewFrame | null | undefined) => {
-  const ctx = canvas?.getContext("2d");
-  if (!canvas || !ctx || !frame) return;
-  const data = new Uint8ClampedArray(frame.rgba.buffer, frame.rgba.byteOffset, frame.width * frame.height * 4);
-  ctx.putImageData(new ImageData(data, frame.width, frame.height), 0, 0);
-};
-
-/**
- * What a tile shows: the effect on a sample picture, drawn by the engine's renderer (so it
- * matches the player and an export). Still until the pointer is over the tile, then the effect
- * running in a loop.
- */
-const EffectPicture: React.FC<{ def: EffectDef; hover: boolean }> = ({ def, hover }) => {
-  const ref = useRef<HTMLCanvasElement>(null);
-  const still = useRef<PreviewFrame | null>(null);
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    let live = true;
-    void effectStill(def).then((f) => {
-      if (!live || !f) return;
-      still.current = f;
-      draw(ref.current, f);
-      setReady(true);
-    });
-    return () => {
-      live = false;
-    };
-  }, [def]);
-  useEffect(() => {
-    if (!hover) {
-      draw(ref.current, still.current);
-      return;
-    }
-    let live = true;
-    let timer: ReturnType<typeof setInterval> | undefined;
-    void effectLoop(def).then((frames) => {
-      if (!live || frames.length === 0) return;
-      let i = 0;
-      timer = setInterval(() => {
-        i = (i + 1) % frames.length;
-        draw(ref.current, frames[i]);
-      }, 1000 / LOOP_FPS);
-    });
-    return () => {
-      live = false;
-      if (timer) clearInterval(timer);
-    };
-  }, [def, hover]);
-  return (
-    <canvas
-      ref={ref}
-      width={PREVIEW_SIZE}
-      height={PREVIEW_SIZE}
-      data-ready={ready ? "1" : "0"}
-      data-testid="effect-picture"
-      className="w-full h-full object-cover pointer-events-none"
-    />
-  );
-};
-
 /**
  * One tile, as CapCut's library tiles: an 86 px rounded square showing the effect, its name
  * under it. Clicked, the effect is previewed in the player (the project doesn't change);
@@ -94,6 +36,8 @@ const EffectPicture: React.FC<{ def: EffectDef; hover: boolean }> = ({ def, hove
 const EffectTile: React.FC<{ def: EffectDef; active: boolean; favourite: boolean }> = ({ def, active, favourite }) => {
   const [hover, setHover] = useState(false);
   const toggleFavourite = useEffectLibrary((s) => s.toggleFavourite);
+  // The tile shows the effect at its defaults on footage, drawn by the engine.
+  const spec = useMemo<EngineTileSpec>(() => ({ kind: "effect", id: def.id, name: def.name, intensity: def.intensity, params: defaultEffectParams(def) }), [def]);
   const drag: EffectDrag = { type: "effect-preset", effectId: def.id, name: def.name };
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `effect:${def.id}`, data: drag });
   // The buttons keep their own presses (a press on the tile starts its drag).
@@ -115,7 +59,7 @@ const EffectTile: React.FC<{ def: EffectDef; active: boolean; favourite: boolean
         onMouseLeave={() => setHover(false)}
         className={cn("relative w-[86px] h-[86px] rounded-[6px] bg-brand-background-light overflow-hidden cursor-pointer outline-none", active && "ring-[1.5px] ring-brand-accent", isDragging && "opacity-50")}
       >
-        <EffectPicture def={def} hover={hover && !isDragging} />
+        <TilePicture spec={spec} hover={hover && !isDragging} testId="effect-picture" />
         {hover && (
           <div className="absolute right-1 bottom-1 flex items-center gap-1">
             <button

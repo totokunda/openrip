@@ -38,6 +38,20 @@ pub use flow::{work_factor, FlowField, Picture, Tween, TweenMode, WORK_SIDE};
 pub use interop::Surface;
 pub use upload::Uploader;
 
+/// The shader sources behind a transition (`id` as a project keeps it: "gl_CrossZoom", "wipe") or
+/// an effect (`effect`), so a client that keeps pictures of them can tell when the engine's
+/// drawing of one changed.
+pub fn shader_sources(id: &str, effect: bool) -> Vec<&'static str> {
+    if effect {
+        return vec![include_str!("effects.wgsl")];
+    }
+    let mut sources = vec![include_str!("mix.wgsl")];
+    if let Some(t) = glt::find(id) {
+        sources.push(t.wgsl);
+    }
+    sources
+}
+
 /// A 3D colour lookup table (CapCut's filters): `size`³ RGB entries, red fastest, then
 /// green, then blue; `key` identifies it for the GPU cache.
 #[derive(Clone, Debug)]

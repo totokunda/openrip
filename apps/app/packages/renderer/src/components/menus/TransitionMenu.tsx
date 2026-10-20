@@ -1,15 +1,24 @@
 import React, { useRef, useState } from "react";
+import type { EngineTileSpec } from "@app/preload";
 import { useDndMonitor, useDraggable } from "@dnd-kit/core";
 import { LuPlus } from "react-icons/lu";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { TransitionPreview } from "@/components/motion/Previews";
-import type { BuiltinTransition } from "@/lib/animations";
+import { TilePicture } from "./TilePicture";
+import { TRANSITIONS, type BuiltinTransition } from "@/lib/animations";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
 import { applyTransition, cutForSelection, offeredTransitions, projectBlink, takesTransition } from "@/lib/transitions";
 import type { VideoClipProps } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTransitionFavourites } from "@/lib/transition-favourites";
+
+/** What a card's picture is made from: the transition at its defaults, between two clips of footage, drawn by the engine. */
+const tileSpec = (t: Pick<BuiltinTransition, "type" | "name" | "params">): EngineTileSpec => ({
+  kind: "transition",
+  id: t.type,
+  name: t.name,
+  params: t.params?.length ? Object.fromEntries(t.params.map((p) => [p.key, p.default])) : undefined,
+});
 
 /** What a transition card carries when dragged onto a cut (TimelineEditor drops it). */
 export type TransitionDrag = { type: "transition"; transition: string };
@@ -46,7 +55,7 @@ const TransitionCard: React.FC<{ t: BuiltinTransition; active: boolean; canAdd: 
           isDragging && "opacity-50",
         )}
       >
-        <TransitionPreview kind={t.type} playing={hover} />
+        <TilePicture spec={tileSpec(t)} hover={hover && !isDragging} testId="transition-picture" />
         {hover && (
           <div className="absolute right-1 bottom-1 flex items-center gap-1">
           <button
@@ -159,7 +168,7 @@ const TransitionMenu: React.FC<{ category?: string }> = ({ category }) => {
 /** The card's picture while it's dragged (the app's drag overlay). */
 export const TransitionDragTile: React.FC<{ type: string }> = ({ type }) => (
   <div className="relative w-[86px] h-[86px] rounded-[6px] overflow-hidden ring-[1.5px] ring-brand-accent shadow-lg">
-    <TransitionPreview kind={type} playing />
+    <TilePicture spec={tileSpec(TRANSITIONS.find((t) => t.type === type) ?? { type, name: type })} hover testId="transition-drag-picture" />
   </div>
 );
 

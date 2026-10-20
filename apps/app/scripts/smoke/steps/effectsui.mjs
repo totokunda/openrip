@@ -1,7 +1,7 @@
 // The left panel's Effects tab and the effects it makes (after import timeline; CLIP_NAME=IMG_9079
 // OPENRIP_ENGINE_MUTE=1, built app, no dev server): its column as CapCut's (Favorites, then Video
-// effects with its categories) and 86 px tiles the engine draws (the effect on a sample picture,
-// playing when hovered); a category, the search and a search matching nothing; a star and
+// effects with its categories) and 86 px tiles the engine draws (the effect on real footage,
+// kept in the rendering cache, playing when hovered; `tiles` covers the cache); a category, the search and a search matching nothing; a star and
 // Favorites; a click previewing the effect in the player without touching the saved project; + adding
 // an effect bar at the playhead on its own track (the engine's frame changes, ⌘Z / ⇧⌘Z); its
 // inspector (Name, Intensity and its own parameters, keyframe diamonds), an Intensity keyframe;
@@ -17,6 +17,7 @@ import { clickSplit, drag, engineFrame, rulerMap, seek, settled, sectionButton }
 import { checks, savedProject } from "./_anim.mjs";
 import { handleX } from "./_timeline.mjs";
 import { typeInto, undoCase } from "./_undo.mjs";
+import { tilesReady } from "./_tiles.mjs";
 
 export default async (ctx) => {
   const { win, udDir, shot, outDir, fs } = ctx;
@@ -33,7 +34,8 @@ export default async (ctx) => {
 
   // The tab and its column.
   await win.locator("[data-testid=assets-tab-effects]").click();
-  await win.waitForTimeout(2500);
+  const drawn = await tilesReady(win, "[data-testid=effect-picture]");
+  check("the visible tiles' pictures are rendered footage (a loading state first, then the engine's frames)", !drawn.timedOut, JSON.stringify(drawn));
   const col = await column();
   check("the column: Favorites, Video effects, All, then the categories", col[0] === "Favorites" && col[1] === "Video effects" && col[2] === "All" && col.includes("Glitch") && col.includes("Frames"), col.join(","));
   const all = await tiles();
@@ -42,7 +44,7 @@ export default async (ctx) => {
   check("a tile is an 86 px square", Math.abs(box.width - 86) < 1 && Math.abs(box.height - 86) < 1, `${box.width}x${box.height}`);
   // The engine's pictures: each tile's canvas holds the effect drawn on the sample picture.
   const pictures = await win.locator("[data-testid=effect-picture]").evaluateAll((cs) =>
-    cs.slice(0, 12).map((c) => {
+    cs.filter((c) => c.dataset.ready === "1").slice(0, 12).map((c) => {
       const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
       let sum = 0;
       for (let i = 0; i < d.length; i += 16) sum = (sum * 31 + d[i] + d[i + 1] * 7 + d[i + 2] * 13) % 1000000007;

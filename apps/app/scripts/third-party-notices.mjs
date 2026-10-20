@@ -145,6 +145,14 @@ try {
 } catch {
   console.warn("[third-party-notices] the gl-transitions licences (engine/crates/render/src/glt/LICENSES.txt) weren't found");
 }
+// The footage on the Transitions and Effects tiles (CC0 clips from Wikimedia Commons; the
+// sources and authors are in resources/preview-footage/CREDITS.txt).
+try {
+  const text = fs.readFileSync(path.join(appDir, "resources", "preview-footage", "CREDITS.txt"), "utf8").trim();
+  packages.push({ name: "Preview footage on the Transitions and Effects tiles (Wikimedia Commons)", version: "", source: "assets", license: "CC0-1.0", text });
+} catch {
+  console.warn("[third-party-notices] the preview footage credits (resources/preview-footage/CREDITS.txt) weren't found");
+}
 // ---- Speech recognition (Auto captions) ----
 // whisper.cpp is built into the addon through the whisper-rs-sys crate (listed above with that
 // crate's own licence), and the Whisper models Auto captions downloads on first use are

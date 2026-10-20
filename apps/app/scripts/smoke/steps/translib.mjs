@@ -2,8 +2,9 @@
 // (after import timeline; the clip is split at 3, 6 and 9 s into four, three cuts):
 // - the Transitions tab's twelve categories, each with cards, together 112 (the 12 classics but
 //   Blink, 100 shader ones), a shot of four categories (`tl1-…` ↔ 10-left-transitions/001);
-// - a card hovered plays its preview (the engine's frames, several of them over a second),
-//   resting on a middle frame again when left (`tl5-hover` ↔ 018-item-hover.png);
+// - a card shows real footage with the transition drawn on it by the engine (rendered on first
+//   sight, cached), plays its loop when hovered and rests on its still again when left
+//   (`tl5-hover` ↔ 018-item-hover.png);
 // - three new ones put on the three cuts with the cards' + (Zoom blur fade, Soft circle, Cube
 //   turn): saved, undone and redone, the engine's frame at each cut unlike both clips beside it
 //   and unchanged outside the window, ahead of and after the cut;
@@ -17,6 +18,7 @@ import { createRequire } from "node:module";
 import { clickSplit, diff, grab, rulerMap, seek, settled } from "./_preview.mjs";
 import { addTransition, checks, openTransitionCard, pickTransition, rowOf, savedClips, savedProject, select, setDuration, transitionName } from "./_anim.mjs";
 import { undoCase } from "./_undo.mjs";
+import { canvasHash, tilesReady } from "./_tiles.mjs";
 
 // Type `value` into the number field of the inspector's slider labelled `label`.
 const setParam = async (win, label, value) => {
@@ -93,23 +95,23 @@ export default async (ctx) => {
   {
     const card = await openTransitionCard(win, "gl_cube");
     await card.scrollIntoViewIfNeeded();
-    const preview = card.locator("[data-testid=gl-preview]");
-    const rest = await preview.getAttribute("data-frame");
+    const preview = card.locator("[data-testid=transition-picture]");
+    const ready = await tilesReady(win, "[data-testid=transition-picture]");
+    check("the visible cards' pictures are rendered, not the old drawing", !ready.timedOut && (await win.locator("[data-testid=gl-preview]").count()) === 0, JSON.stringify(ready));
+    const rest = await canvasHash(preview);
+    check("a resting card shows footage (a real picture, not flat)", rest.spread > 40, JSON.stringify(rest));
     await card.hover();
     const seen = new Set();
-    for (let i = 0; i < 26; i++) {
-      seen.add(await preview.getAttribute("data-frame"));
-      await win.waitForTimeout(60);
+    for (let i = 0; i < 30; i++) {
+      seen.add((await canvasHash(preview)).sum);
+      await win.waitForTimeout(40);
     }
-    check("a hovered card plays its preview: at least six of the sheet's eight frames", seen.size >= 6, [...seen].join());
-    // The sheet is the engine's: its picture is drawn (a webp, 8 frames wide).
-    const bg = await preview.evaluate((e) => getComputedStyle(e).backgroundImage);
-    check("the preview is the engine's sheet", /gl-sheet.*\.webp/.test(bg), bg.slice(0, 80));
+    check("a hovered card plays its loop: at least six different frames", seen.size >= 6, `${seen.size}`);
     await win.waitForTimeout(250);
     await shot("tl5-hover");
     await win.mouse.move(5, 5);
     await win.waitForTimeout(500);
-    check("left, the card rests on a middle frame", (await preview.getAttribute("data-frame")) === "3" && rest === "3", `${rest} -> ${await preview.getAttribute("data-frame")}`);
+    check("left, the card rests on its still again", (await canvasHash(preview)).sum === rest.sum);
   }
 
   // Three of them on the three cuts, by +.

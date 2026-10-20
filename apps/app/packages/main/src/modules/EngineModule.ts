@@ -8,6 +8,7 @@ import { AppModule } from "../AppModule.js";
 import { ModuleContext } from "../ModuleContext.js";
 import { ensureProjectJson } from "./JSONPersistenceModule.js";
 import { getSettingsModule, type Preferences } from "./SettingsModule.js";
+import { TilePreviews } from "./TilePreviews.js";
 
 /**
  * The Rust engine (`engine/crates/node`, built by `scripts/build-engine.mjs`), loaded into
@@ -119,6 +120,8 @@ export type EngineAddon = {
   /** Frames of an effect on a sample picture, drawn by the renderer (0–1 values). */
   effectPreviews?(id: string, intensity: number | null, params: number[], times: number[], duration: number, width: number, height: number): Promise<{ width: number; height: number; data: Buffer }[]>;
   /** Frames of a small project given as JSON (a library tile's preview), cropped to `crop` (fractions of the frame) when given. */
+  /** A code that changes when the engine's drawing of the transition or effect `id` does (absent in engines built before it). */
+  previewRevision?(id: string, effect: boolean): string;
   projectPreviews?(json: string, times: number[], width: number, height: number, crop: number[] | null): Promise<{ width: number; height: number; data: Buffer }[]>;
   trackRegion(request: EngineTrackRequest): Promise<EngineTrackResult>;
   trackProgress(): { done: number; total: number };
@@ -495,6 +498,9 @@ export class EngineModule implements AppModule {
         return [];
       }
     });
+
+    // The Transitions and Effects tabs' tiles: real footage with the transition or effect drawn on it.
+    new TilePreviews(() => addon).register();
 
     // Frames of a video for the app's own decoder when it can't read it (ProRes).
     ipcMain.handle("engine:thumbnails", async (_event, path: string, timesUs: number[], height: number, exact: boolean) => {

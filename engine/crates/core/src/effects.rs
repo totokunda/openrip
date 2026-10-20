@@ -26,6 +26,26 @@ pub fn effect_catalog() -> Value {
     })
 }
 
+/// A short code that changes when the engine's drawing of the transition or effect `id` does (its
+/// shaders and, for an effect, its catalog entry), for a client that keeps pictures of them.
+pub fn preview_revision(id: &str, effect: bool) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut feed = |bytes: &[u8]| {
+        for b in bytes {
+            hash = (hash ^ *b as u64).wrapping_mul(0x0100_0000_01b3);
+        }
+    };
+    for source in openrip_render::shader_sources(id, effect) {
+        feed(source.as_bytes());
+    }
+    if effect {
+        if let Some(def) = fx::find(id) {
+            feed(format!("{}{}{}{}", def.kind, def.intensity, def.params.len(), def.params.iter().map(|p| p.default.to_string()).collect::<String>()).as_bytes());
+        }
+    }
+    format!("{hash:016x}")
+}
+
 /// Draws effect previews. Holds its own compositor, made on first use.
 pub struct EffectPreviews {
     compositor: Mutex<Option<Compositor>>,

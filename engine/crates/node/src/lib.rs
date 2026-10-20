@@ -1253,6 +1253,13 @@ pub fn effect_catalog() -> String {
     openrip_core::effect_catalog().to_string()
 }
 
+/// A code that changes when the engine's drawing of the transition or effect `id` does (its
+/// shaders and, for an effect, its catalog entry): what a client keeps pictures of them by.
+#[napi]
+pub fn preview_revision(id: String, effect: bool) -> String {
+    openrip_core::preview_revision(&id, effect)
+}
+
 fn effect_previews_service() -> &'static openrip_core::EffectPreviews {
     static P: openrip_core::EffectPreviews = openrip_core::EffectPreviews::new();
     &P

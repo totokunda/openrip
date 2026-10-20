@@ -371,6 +371,22 @@ export function engineEffectPreviews(
   return ipcRenderer.invoke("engine:effect-previews", id, intensity, params, times, duration, width, height);
 }
 
+export type EngineTileSpec =
+  | { kind: "transition"; id: string; name: string; params?: Record<string, unknown> }
+  | { kind: "effect"; id: string; name: string; intensity: number; params: Record<string, number> };
+
+/** A library tile's pictures: a JPEG sheet of `frames` frames of `size` px, `cols` across; the one the tile rests on, and the loop's speed. */
+export type EngineTilePreview = { jpeg: Uint8Array; size: number; cols: number; frames: number; still: number; fps: number };
+
+/**
+ * The pictures of a Transitions or Effects tile: bundled footage with the transition or effect
+ * drawn on it by the engine, made the first time and kept in the rendering cache. Null without
+ * the engine.
+ */
+export function engineTilePreview(spec: EngineTileSpec): Promise<EngineTilePreview | null> {
+  return ipcRenderer.invoke("engine:tile-preview", spec);
+}
+
 /**
  * Frames of the small project in `json` (an OpenRip, v1 or CapCut project) drawn by the
  * engine's renderer, so they match the player and an export: `width` × `height` at each of
