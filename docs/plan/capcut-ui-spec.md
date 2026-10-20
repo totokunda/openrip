@@ -634,16 +634,16 @@ OpenRip status comes from `docs/inventory/current-app.md` (dated 2026-10-15) plu
 | 6.22 Inspector: effect, filter and transition clips | 6 | 0 | 0 |
 | 6.23 Inspector: adjustment layer (also the video Adjust tab) | 11 | 0 | 0 |
 | 6.24 Inspector: caption clip | 4 | 0 | 0 |
-| 6.25 Inspector: multiple selection and compound clips | 4 | 2 | 0 |
+| 6.25 Inspector: multiple selection and compound clips | 5 | 1 | 0 |
 | 6.26 Timeline toolbar | 21 | 1 | 0 |
 | 6.27 Timeline tracks, clips, ruler | 24 | 0 | 0 |
-| 6.28 Context menus | 19 | 1 | 1 |
+| 6.28 Context menus | 20 | 1 | 0 |
 | 6.29 Export dialog | 16 | 0 | 0 |
 | 6.30 Other dialogs | 6 | 0 | 0 |
 | 6.31 Classic-algorithm features brought into scope (2026-10-18) | 12 | 0 | 0 |
-| **Total (353 in-scope features)** | **335** | **14** | **4** |
+| **Total (353 in-scope features)** | **337** | **13** | **3** |
 
-Re-audited 2026-10-19 against main 8d265833: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (329 has, 16 partly, 8 missing of 353; 93.2% strict, 95.5% with partly as half). Before it (audited against ab4960fe) the table read 289 / 36 / 28 of 353 (81.9% strict, 87.0% with partly as half). Before that (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows. Since then: Settings › Edit › Linkage settings works in the editor, and a project holds several timelines (File › New timeline, New timeline with selected item, the Export timeline menu): 333 has, 15 partly, 5 missing (94.3%). Then audio while scrubbing and Preview axis's video and audio: 335 has, 14 partly, 4 missing.
+Re-audited 2026-10-19 against main 8d265833: every non-OOS row that read missing or partly was checked against the code and the smoke steps, and the counts above are the rows' current statuses (329 has, 16 partly, 8 missing of 353; 93.2% strict, 95.5% with partly as half). Before it (audited against ab4960fe) the table read 289 / 36 / 28 of 353 (81.9% strict, 87.0% with partly as half). Before that (audited against 06c8dac7) the table read 251 / 45 / 57 of 353. Earlier: a re-audit on 2026-10-19 against main 06c8dac7 gave 251 / 45 / 57; before that the summary read 127 / 75 / 149 while the rows read 170 / 69 / 114; an audit on 2026-10-18 against main at c795cf7d found 108 has, 106 partly and 123 missing of the first 337 rows. Since then: Settings › Edit › Linkage settings works in the editor, and a project holds several timelines (File › New timeline, New timeline with selected item, the Export timeline menu): 333 has, 15 partly, 5 missing (94.3%). Then audio while scrubbing and Preview axis's video and audio: 335 has, 14 partly, 4 missing. Then the Render menu and pre-render cache (and compound Pre-process): 337 has, 13 partly, 3 missing.
 
 ### 6.1 App menu bar (macOS)
 
@@ -719,7 +719,7 @@ Screenshots are in `02-settings/` unless a path says otherwise.
 | Performance › Hardware encoding, Hardware decoding | `011-performance.png` | partly (decoding switches the engine's decoder; encoding is always VideoToolbox) |
 | Performance › Auto optimization (None / Smart) | `012-performance-optimization-dropdown.png` | has (the app's own preview's playable copies) |
 | Performance › Proxy default, proxy folder, proxy size + clear | `011-performance.png`, `024-performance-proxy-path-picker.png` | partly (size and folder shown; proxies are per item and the engine plays originals) |
-| Performance › Rendering cache location, size, auto clear, auto render | `011-performance.png`, `025-performance-rendering-path-picker.png` | partly (size, clear and auto clear by size work; the location is fixed and there is no pre-render or auto render) |
+| Performance › Rendering cache location, size, auto clear, auto render | `011-performance.png`, `025-performance-rendering-path-picker.png` | partly (size, clear and auto clear cover the thumbnails, analyses and pre-render chunks; the location is fixed and there is no auto render) |
 | General › Language | `014-general.png` | partly (English only; the words come from lib/i18n.ts, ready for more) |
 | General › Notifications | `014-general.png` | has (when an export finishes) |
 | General › Software update: automatic or notify | `014-general.png` | has (and Check for updates) |
@@ -1114,7 +1114,7 @@ Screenshots are in `27-inspector-caption/` unless a path says otherwise.
 | Multi-select menu: Group ⌘G, Create compound clip ⌥G, Create multi-camera clip, Save preset, Export selected clips (Copy/paste attributes disabled) | `29-inspector-multi/002-multiple-video-context-menu.png` | partly (Group, Create compound clip, Save preset, Export selected clips, Copy/paste attributes; no multi-camera clip) |
 | Compound clip: selected compound uses the video inspector | `28-inspector-compound/001-compound-basic.png` | has |
 | Compound clip: open the nested timeline, breadcrumb back | `28-inspector-compound/002-compound-open-timeline.png` | has |
-| Compound clip menu: Undo compound clip ⌥⇧G, Pre-process compound clip (render it) | `28-inspector-compound/003-compound-context-menu.png` | partly (Undo compound clip and Open compound clip; no Pre-process, there is no pre-render) |
+| Compound clip menu: Undo compound clip ⌥⇧G, Pre-process compound clip (render it) | `28-inspector-compound/003-compound-context-menu.png` | has (Pre-process renders the compound's span into the pre-render cache) |
 
 ### 6.26 Timeline toolbar
 
@@ -1201,7 +1201,7 @@ Video clip menu (`30-timeline-toolbar/001-video-context-menu.png` to `012-video-
 | Deactivate clip (V) | `001-video-context-menu.png` | has |
 | More clip actions › Replace clip, Trim clip, Open file location | `010-video-context-more-actions.png` | partly (Replace clip and Open file location; Trim clip is greyed) |
 | Range › Select by clip ⇧X, Deselect | `011-video-context-range.png`, `018-adjustment-range-submenu.png` | has (also Export range) |
-| Render › Whole timeline, In, Out, Delete rendering cache | `012-video-context-render.png` | missing |
+| Render › Whole timeline, In, Out, Delete rendering cache | `012-video-context-render.png` | has (2 s content-keyed chunks the preview plays from; In is the range, Out the rest; a bar on the ruler over the rendered parts) |
 | Audio clip › Auto mark beats (classic beat detection) | `020-audio-context-menu.png` | has (Auto mark beats in the clip menu: Beat 1, Beat 2, Off, Mark beat, Clear beats) |
 | Sticker clip › Mirror | `025-sticker-context-menu.png` | has |
 | Empty space › Close gap, Close all gaps, Select | `022-empty-space-context-menu.png` | has |
