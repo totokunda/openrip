@@ -36,6 +36,8 @@ export interface Preferences {
   renderCacheMaxGb: number;
   /** The timeline's Linkage settings: the kinds of clip that do not move or get deleted with the main track's clips (lib/linkage.ts). */
   linkageOff: string[];
+  /** Edit › Play audio while scrubbing. */
+  scrubAudio: boolean;
 }
 
 function getPreferences(): Promise<Preferences> {

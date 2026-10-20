@@ -240,10 +240,9 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
         <NotYet>{t("settings.targetLoudness.note")}</NotYet>
       </Row>
       <Divider />
-      <Row id="scrubAudio" label={t("settings.scrubAudio")} disabled>
-        <Toggle on={false} disabled />
+      <Row id="scrubAudio" label={t("settings.scrubAudio")}>
+        <Toggle testId="settings-scrub-audio" on={draft.scrubAudio} onChange={(v) => set("scrubAudio", v)} />
         <Help muted>{t("settings.scrubAudio.help")}</Help>
-        <NotYet>{t("settings.scrubAudio.note")}</NotYet>
       </Row>
       <Row id="linkage" label={t("settings.linkage")} disabled={!inEditor}>
         <SmallButton testId="settings-linkage" disabled={!inEditor} onClick={() => openLinkage(true)}>

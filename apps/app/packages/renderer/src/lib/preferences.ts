@@ -7,6 +7,7 @@
 // - Image duration: a photo dropped on the timeline (components/timeline/TimelineEditor.tsx);
 // - Step forward or back many frames: ⇧← / ⇧→ (lib/timeline-shortcuts.ts);
 // - Adjust value many units: ⇧↑ / ⇧↓ in the inspector's value fields;
+// - Play audio while scrubbing: snippets of sound as the playhead moves (lib/scrub-audio.ts);
 // - Target loudness: Normalize loudness (lib/audio.ts);
 // - Sound for export and Notification: when an export finishes (lib/export-finished.ts);
 // - Screen recording folder: where Record saves (preload record.ts);
@@ -42,6 +43,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   presetsDir: "",
   renderCacheMaxGb: 10,
   linkageOff: [],
+  scrubAudio: false,
 };
 
 /** CapCut's choices for the rows with a menu. */

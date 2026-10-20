@@ -1,4 +1,5 @@
 import { getZoomLevelConfig } from "@/lib/zoom";
+import { scrubSound, skimSound, scrubSoundStop } from "@/lib/scrub-audio";
 import { addEffectBar, applyEffectToClip, takesEffects } from "@/lib/effects/library";
 import type { EffectDrag } from "../menus/EffectsMenu";
 import type { PresetDrag } from "../menus/PresetsMenu";
@@ -1420,7 +1421,9 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
           setBladeX(stageXOfFrame(bladeFrame(frame, dimensions.stageWidth), dimensions.stageWidth));
         } else setBladeX(null);
         if (previewAxis && !playing && hover.x >= TIME_ZERO_X) {
-          useControlsStore.getState().setHoverFrame(Math.max(0, Math.min(useClipStore.getState().clipDuration, frame)));
+          const hovered = Math.max(0, Math.min(useClipStore.getState().clipDuration, frame));
+          useControlsStore.getState().setHoverFrame(hovered);
+          skimSound(hovered);
         }
       }
       if (!isRulerDragging) return;
@@ -1455,6 +1458,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     endRulerDrag();
     setBladeX(null);
     useControlsStore.getState().setHoverFrame(null);
+    scrubSoundStop();
   }, [endRulerDrag]);
 
   const hasClips = useMemo(() => clips.length > 0, [clips]);
@@ -1479,6 +1483,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       controlStore.setFocusAnchorRatio(clampedProgress);
       controlStore.setFocusFrame(targetFrame, false);
       controlStore.setIsAccurateSeekNeeded(true);
+      scrubSound(targetFrame);
     },
     [controlStore, controlStore.timelineDuration, dimensions.stageWidth],
   );

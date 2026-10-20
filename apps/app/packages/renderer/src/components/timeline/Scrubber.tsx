@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { scrubSound, scrubSoundStop } from "@/lib/scrub-audio";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
 import { SNAP_PX, snapPoints, snapToPoints } from "@/lib/timeline-edit";
@@ -53,6 +54,7 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
     // Release snaps to this frame: a click without a move would otherwise snap to frame 0.
     setCurrentFrame(Math.round(framePosition));
     setFocusFrame(Math.round(framePosition));
+    scrubSound(Math.round(framePosition));
     setFocusAnchorRatio(Math.max(0, Math.min(1, progress)));
   };
 
@@ -83,6 +85,7 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
     const snapped = snapPlayhead(framePosition, e.metaKey);
     setCurrentFrame(snapped);
     setFocusFrame(snapped);
+    scrubSound(snapped);
   };
 
   /** A frame for the playhead: the nearest one, or a marker or clip edge within reach. */
@@ -101,6 +104,7 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
   // snapped to), not on the ruler's tick grid, which can be two frames or more apart.
   const handleMouseUp = () => {
     setIsDragging(false);
+    scrubSoundStop();
     const [startFrame, endFrame] = timelineDuration;
     const frame = Math.max(startFrame, Math.min(endFrame, currentFrame));
     const progress = (frame - startFrame) / Math.max(1, endFrame - startFrame);

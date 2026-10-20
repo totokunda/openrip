@@ -42,7 +42,7 @@ pub use scan::{sample_colors, scan_scenes, ScanError};
 pub use input::{audio_input, set_audio_input, AudioInput, InputStream, Level, Recorder, Recording};
 pub use pipeline::{Clock, PipelineStats, PreviewPipeline, RenderedFrame, Surface};
 pub use output::{audio_output, set_audio_output, AudioOutput, OutputStream};
-pub use player::{Player, PlayerError};
+pub use player::{Player, PlayerError, ScrubStats};
 pub use preview::{FrameReport, PreviewEngine, PreviewError};
 pub use server::{Delivered, FrameServer, Quality, SeekMode, ServerStats};
 pub use thumbs::{Pass, Thumb, Thumbnailer};

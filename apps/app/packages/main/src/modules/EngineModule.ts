@@ -55,6 +55,10 @@ export type EngineAddon = {
   setVolume(volume: number): void;
   /** The playing mix's peaks (0..1) since the last call, before the volume; null without audio output. */
   outputLevels(): { left: number; right: number } | null;
+  /** Play a short snippet of the mix at `timeUs`, for scrubbing; false when none started. */
+  scrubAudio?(timeUs: number): boolean;
+  scrubAudioStop?(): void;
+  scrubAudioStats?(): { snippets: number; lastUs: number; left: number; right: number } | null;
   /** Render the frame at `timeUs` at `width`×`height` and save it as a PNG at `path`. */
   exportStill(timeUs: number, width: number, height: number, path: string): Promise<{ width: number; height: number; bytes: number }>;
   exportProject(json: string, path: string, options: EngineExportOptions): Promise<{ frames: number; seconds: number; skippedLayers: number }>;
@@ -632,6 +636,29 @@ export class EngineModule implements AppModule {
     ipcMain.handle("engine:levels", () => {
       try {
         return addon?.outputLevels() ?? null;
+      } catch {
+        return null;
+      }
+    });
+
+    // Scrubbing sound: a snippet of the mix at the playhead (fire and forget), cut short when the drag ends.
+    ipcMain.on("engine:scrub-audio", (_event, timeUs: number) => {
+      try {
+        if (Number.isFinite(timeUs)) addon?.scrubAudio?.(Math.max(0, Math.round(timeUs)));
+      } catch {
+        /* no sound is not an error */
+      }
+    });
+    ipcMain.on("engine:scrub-audio-stop", () => {
+      try {
+        addon?.scrubAudioStop?.();
+      } catch {
+        /* nothing to stop */
+      }
+    });
+    ipcMain.handle("engine:scrub-audio-stats", () => {
+      try {
+        return addon?.scrubAudioStats?.() ?? null;
       } catch {
         return null;
       }

@@ -6,7 +6,7 @@
 //   there from then on (not in the old folder);
 // - Performance > Rendering cache: its folder and size shown, Clear emptying it (the Draft cache
 //   size follows); Auto clear's limit trimming the oldest files first;
-// - Play audio while scrubbing and Arrange layers by default stay disabled with their notes (the
+// - Arrange layers by default stays disabled with its note (the
 //   `settings` step lists every row's state).
 // Shots: `sr1-draft` ↔ `02-settings/001-draft`, `sr2-performance` ↔ `011-performance`.
 import { execFileSync } from "node:child_process";
@@ -109,8 +109,8 @@ export default async (ctx) => {
   await win.waitForTimeout(1200);
   check("Clear empties the rendering cache", +(await win.locator("[data-testid=settings-render-cache-size]").getAttribute("data-bytes")) < 1024 * 1024 && !fs.existsSync(path.join(cache, "new.bin")));
   await settingsTab(win, "edit");
-  const rows = await win.evaluate(() => ["scrubAudio", "arrangeLayers"].map((id) => document.querySelector(`[data-testid=settings-row-${id}]`)?.getAttribute("data-disabled")));
-  check("scrubbing audio and Arrange layers stay disabled with their notes", rows.join() === "true,true");
+  const rows = await win.evaluate(() => ["arrangeLayers"].map((id) => document.querySelector(`[data-testid=settings-row-${id}]`)?.getAttribute("data-disabled")));
+  check("Arrange layers stays disabled with its note", rows.join() === "true");
   await win.locator("[data-testid=settings-cancel]").click();
   return report();
 };

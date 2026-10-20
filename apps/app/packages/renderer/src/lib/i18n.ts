@@ -43,7 +43,6 @@ const en = {
   "settings.loudness.tiktok": "TikTok (-12 LUFS)",
   "settings.scrubAudio": "Play audio while scrubbing",
   "settings.scrubAudio.help": "Play audio when you drag the playhead",
-  "settings.scrubAudio.note": "Not in OpenRip yet: sound plays during playback only; the engine has no short-snippet playback to scrub with.",
   "settings.linkage": "Linkage",
   "settings.linkage.button": "Settings",
   "settings.linkage.note": "Open a project to choose which items follow the main track's clips.",

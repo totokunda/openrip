@@ -136,6 +136,9 @@ interface ControlStore {
    */
   previewAxis: boolean;
   setPreviewAxis: (on: boolean) => void;
+  /** The preview axis menu's choice: "Preview video and audio" (also plays snippets of the sound) rather than video only. */
+  previewAxisAudio: boolean;
+  setPreviewAxisAudio: (on: boolean) => void;
   /** The frame the preview axis shows (null: the playhead's). */
   hoverFrame: number | null;
   setHoverFrame: (frame: number | null) => void;
@@ -409,6 +412,8 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
   setTimelineTool: (tool) => set({ timelineTool: tool }),
   previewAxis: false,
   setPreviewAxis: (on) => set(on ? { previewAxis: true } : { previewAxis: false, hoverFrame: null }),
+  previewAxisAudio: false,
+  setPreviewAxisAudio: (on) => set({ previewAxisAudio: on, previewAxis: true }),
   hoverFrame: null,
   setHoverFrame: (frame) => set({ hoverFrame: frame }),
   selectedMarkerId: null,

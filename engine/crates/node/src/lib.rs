@@ -234,6 +234,39 @@ pub fn output_levels() -> Option<OutputLevels> {
     Some(OutputLevels { left: left as f64, right: right as f64 })
 }
 
+/// Play a short snippet of the mix at `timeUs`, for scrubbing the playhead. False when none
+/// started (playback is running, too soon after the last snippet, or no audio output).
+#[napi]
+pub fn scrub_audio(time_us: i64) -> bool {
+    session().lock().unwrap().as_ref().is_some_and(|s| s.scrub_audio(Micros(time_us)))
+}
+
+/// Cut a scrub snippet short (the drag ended).
+#[napi]
+pub fn scrub_audio_stop() {
+    if let Some(s) = session().lock().unwrap().as_ref() {
+        s.scrub_audio_stop();
+    }
+}
+
+#[napi(object)]
+pub struct ScrubAudioStats {
+    /// Snippets started since the project opened.
+    pub snippets: f64,
+    /// Where the latest one started, microseconds.
+    pub last_us: f64,
+    /// The latest snippet's left and right peaks (0..1), whether or not the speakers are muted.
+    pub left: f64,
+    pub right: f64,
+}
+
+/// What scrubbing has played, for tests; `null` without an audio output (or a project).
+#[napi]
+pub fn scrub_audio_stats() -> Option<ScrubAudioStats> {
+    let s = session().lock().unwrap().as_ref()?.scrub_stats()?;
+    Some(ScrubAudioStats { snippets: s.snippets as f64, last_us: s.last_us as f64, left: s.peaks[0] as f64, right: s.peaks[1] as f64 })
+}
+
 #[napi(object)]
 pub struct StillFrame {
     pub width: u32,

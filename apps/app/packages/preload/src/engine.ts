@@ -212,6 +212,21 @@ export function engineOutputLevels(): Promise<{ left: number; right: number } | 
   return ipcRenderer.invoke("engine:levels");
 }
 
+/** Play a short snippet of the mix at `timeUs` (scrubbing); the engine drops it when too soon after the last or while playing. */
+export function engineScrubAudio(timeUs: number): void {
+  ipcRenderer.send("engine:scrub-audio", timeUs);
+}
+
+/** Cut a scrub snippet short (the drag ended). */
+export function engineScrubAudioStop(): void {
+  ipcRenderer.send("engine:scrub-audio-stop");
+}
+
+/** What scrubbing has played (for tests; counts even with the speakers muted); null without the engine's sound. */
+export function engineScrubAudioStats(): Promise<{ snippets: number; lastUs: number; left: number; right: number } | null> {
+  return ipcRenderer.invoke("engine:scrub-audio-stats");
+}
+
 export type EngineStillResult = { ok: true; path: string; width: number; height: number; bytes: number } | { ok: false; error: string };
 
 /** Save the frame at `timeUs` at the project's size as a PNG at `path` (the player's Export still frames). */

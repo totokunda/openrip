@@ -6,6 +6,7 @@
 // every reverse step the playhead from a timer, showing frames as scrubbing does, without
 // sound: the engine plays forward at its own rate only. Space, K, another seek or reaching an end of
 // the project stops the run.
+import { scrubSound } from "./scrub-audio";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
 
@@ -40,6 +41,7 @@ const tick = (now: number) => {
     const next = Math.max(0, Math.min(end, c.focusFrame + whole));
     c.setFocusFrame(next, false);
     c.setIsAccurateSeekNeeded(true);
+    scrubSound(next);
     expected = next;
     if (next <= 0 || next >= end) {
       rate = 0;

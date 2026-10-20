@@ -2,6 +2,7 @@
 // markers, the magnet and snapping toggles, selection, timeline zoom, the keyframe graph, the
 // transform tools and the player's zoom. The keyboard handler in Controls.tsx passes keys here
 // first; which key is which action is lib/keymap.ts's (the Shortcuts window changes it).
+import { scrubSound } from "./scrub-audio";
 import { spanOf, withEnd } from "./range";
 import { useClipStore } from "./clip";
 import { zoomFit, zoomIn, zoomOut } from "./player-zoom";
@@ -65,8 +66,10 @@ const seekTo = (frame: number) => {
   const c = useControlsStore.getState();
   const end = useClipStore.getState().clipDuration;
   if (c.isPlaying) c.pause();
-  c.setFocusFrame(Math.max(0, Math.min(end, Math.round(frame))), false);
+  const to = Math.max(0, Math.min(end, Math.round(frame)));
+  c.setFocusFrame(to, false);
   c.setIsAccurateSeekNeeded(true);
+  scrubSound(to);
 };
 
 /** The next (or previous) clip edge or marker after (before) the playhead. */

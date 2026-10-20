@@ -54,6 +54,8 @@ export interface Preferences {
   renderCacheMaxGb: number;
   /** The timeline's Linkage settings: the kinds of clip that do not move or get deleted with the main track's clips (lib/linkage.ts). */
   linkageOff: string[];
+  /** Edit › Play audio while scrubbing: short snippets of the sound play as the playhead is dragged or stepped (off by default, as CapCut's). */
+  scrubAudio: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -79,6 +81,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   presetsDir: "",
   renderCacheMaxGb: 10,
   linkageOff: [],
+  scrubAudio: false,
 };
 
 interface Settings {

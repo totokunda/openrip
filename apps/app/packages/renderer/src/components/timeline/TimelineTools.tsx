@@ -217,11 +217,13 @@ export const SelectionToolMenu = () => {
 /**
  * CapCut's preview axis: a toggle with a menu. On, the player shows the frame under the mouse
  * while it's over the timeline and goes back to the playhead's frame when it leaves. The menu's
- * video-only choice is what it does; the sound isn't scrubbed.
+ * "video and audio" choice also plays snippets of the sound as the mouse skims (lib/scrub-audio.ts).
  */
 export const PreviewAxisToggle = () => {
   const on = useControlsStore((c) => c.previewAxis);
   const setOn = useControlsStore((c) => c.setPreviewAxis);
+  const withAudio = useControlsStore((c) => c.previewAxisAudio);
+  const setAudio = useControlsStore((c) => c.setPreviewAxisAudio);
   return (
     <div className="flex items-center">
       <Toggle title={useShortcutTitle("Preview axis", "previewAxis")} on={on} onClick={() => setOn(!on)}>
@@ -232,11 +234,11 @@ export const PreviewAxisToggle = () => {
           <span className="w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px] border-t-current" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className={cn(menuContent, "w-[200px]")}>
-          <DropdownMenuItem data-testid="axis-audio" disabled className={menuRow}>
-            <span className="w-3.5" /> Preview video and audio
+          <DropdownMenuItem data-testid="axis-audio" className={menuRow} onClick={() => setAudio(true)}>
+            {withAudio ? <LuCheck className="w-3.5 h-3.5 text-brand-accent" /> : <span className="w-3.5" />} Preview video and audio
           </DropdownMenuItem>
-          <DropdownMenuItem data-testid="axis-video" className={menuRow} onClick={() => setOn(true)}>
-            <LuCheck className="w-3.5 h-3.5 text-brand-accent" /> Preview video only
+          <DropdownMenuItem data-testid="axis-video" className={menuRow} onClick={() => { setAudio(false); setOn(true); }}>
+            {withAudio ? <span className="w-3.5" /> : <LuCheck className="w-3.5 h-3.5 text-brand-accent" />} Preview video only
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

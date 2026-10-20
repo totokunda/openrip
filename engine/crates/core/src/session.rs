@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use openrip_model::{Micros, Project};
-use openrip_playback::{Player, PreviewEngine, PreviewPipeline};
+use openrip_playback::{Player, PreviewEngine, PreviewPipeline, ScrubStats};
 pub use openrip_render::Surface;
 
 use crate::project::{ProjectInfo, Source, TextBlock};
@@ -185,6 +185,25 @@ impl Session {
     /// output gain, for a level meter; zero while paused, `None` without audio output.
     pub fn output_levels(&self) -> Option<[f32; 2]> {
         self.player.as_ref().map(|p| p.take_levels())
+    }
+
+    /// Play a short snippet of the mix at `time`, for scrubbing (see [`Player::scrub`]).
+    /// False when none started: playback is running, it came too soon after the last, or there
+    /// is no audio output.
+    pub fn scrub_audio(&self, time: Micros) -> bool {
+        self.player.as_ref().is_some_and(|p| p.scrub(time))
+    }
+
+    /// Cut a scrub snippet short (the drag ended).
+    pub fn scrub_audio_stop(&self) {
+        if let Some(p) = &self.player {
+            p.scrub_stop();
+        }
+    }
+
+    /// What scrubbing has played, for tests; `None` without audio output.
+    pub fn scrub_stats(&self) -> Option<ScrubStats> {
+        self.player.as_ref().map(|p| p.scrub_stats())
     }
 }
 
