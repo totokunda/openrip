@@ -109,6 +109,7 @@ import { canGroup } from "@/lib/bundle";
 import { openCompound } from "@/lib/compound-edit";
 import { paintCompoundStrip } from "@/lib/compound-thumb";
 import { bladeCut, bladeFrame, frameAtStageX } from "@/lib/timeline-tools";
+import { startEdgeScroll, type EdgePointer } from "@/lib/edge-scroll";
 
 /** The diagonal stripes a deactivated clip is drawn with. */
 let hatch: HTMLCanvasElement | null = null;
@@ -328,6 +329,8 @@ const TimelineClip: React.FC<
   );
   const groupRef = useRef<Konva.Group>(null);
   const rootGroupRef = useRef<Konva.Group>(null);
+  // The group a drag moves (the clip's body).
+  const dragGroupRef = useRef<Konva.Group>(null);
   const exactVideoUpdateTimerRef = useRef<number | null>(null);
   const exactVideoUpdateSeqRef = useRef(0);
   const lastExactRequestKeyRef = useRef<string | null>(null);
@@ -506,10 +509,12 @@ const TimelineClip: React.FC<
   ]);
 
   useEffect(() => {
+    // Dragged, it's where the drag has it (handleDragMove), the timeline scrolling under it or not.
+    if (isDragging) return;
     const newY = timelineY - totalClipHeight;
     setClipPosition({ x: clipX + timelinePadding, y: newY });
     fixedYRef.current = newY;
-  }, [timelinePadding, timelineY, timelineId, clipX, totalClipHeight]);
+  }, [timelinePadding, timelineY, timelineId, clipX, totalClipHeight, isDragging]);
 
   useEffect(() => {
     if (textRef.current) {
@@ -613,7 +618,9 @@ const TimelineClip: React.FC<
   );
 
   const handleDragMove = useCallback(
-    (e: Konva.KonvaEventObject<MouseEvent>) => {
+    // Konva's drag event, or (`scrolled`) the dragged group and the pointer where it last was, the
+    // edge scroll having moved the timeline under them.
+    (e: { target: Konva.Node; evt: EdgePointer }, scrolled = false) => {
       if (assetMode) return;
       const halfStroke = isSelected ? 1.5 : 0;
       setClipPosition({
@@ -634,14 +641,16 @@ const TimelineClip: React.FC<
         return;
       }
 
-      // Notify editor to auto-scroll if near top/bottom edges
-      try {
-        window.dispatchEvent(
-          new CustomEvent("timeline-editor-autoscroll", {
-            detail: { y: pointerY },
-          }),
-        );
-      } catch {}
+      // Notify editor to auto-scroll if near top/bottom edges (as the pointer moves).
+      if (!scrolled) {
+        try {
+          window.dispatchEvent(
+            new CustomEvent("timeline-editor-autoscroll", {
+              detail: { y: pointerY },
+            }),
+          );
+        } catch {}
+      }
 
       // We only need the pointer position for proximity checks
 
@@ -718,7 +727,8 @@ const TimelineClip: React.FC<
       // Convert the dragged group's stage X into "inner timeline" X (0..timelineWidth)
       // so all snapping/ghost math is independent of the left gutter/padding.
       const rectLeft = Math.round(e.target.x() - halfStroke - timelinePadding);
-      const [visibleStartFrame, visibleEndFrame] = timelineDuration;
+      // The window as it is now: the edge scroll moves it between renders.
+      const [visibleStartFrame, visibleEndFrame] = useControlsStore.getState().timelineDuration;
       const clipLen = Math.max(1, currentEndFrame - currentStartFrame);
       const ghostWidthPx = getClipWidth(0, clipLen, timelineWidth, [
         visibleStartFrame,
@@ -780,11 +790,13 @@ const TimelineClip: React.FC<
         setMainPreview(null);
       }
 
-      // Build occupied intervals on the target timeline excluding this clip (visible-window pixels)
+      // Build occupied intervals on the target timeline excluding this clip (visible-window pixels,
+      // from frame 0's: the clip can go before the visible part, as it's dragged there)
       const otherClips = getClipsForTimeline(targetTimelineId).filter(
         (c) => c.clipId !== currentClipId,
       );
-      let maxRight = 0;
+      const zeroX = pxOfFrame(0);
+      let maxRight = zeroX;
       const occupied = otherClips
         .map((c) => {
           const sx = getClipX(
@@ -799,8 +811,8 @@ const TimelineClip: React.FC<
             timelineWidth,
             [visibleStartFrame, visibleEndFrame],
           );
-          const lo = Math.max(0, sx);
-          const hi = Math.max(0, sx + sw);
+          const lo = Math.max(zeroX, sx);
+          const hi = Math.max(zeroX, sx + sw);
           maxRight = Math.max(maxRight, hi);
           return hi > lo ? ([lo, hi] as [number, number]) : null;
         })
@@ -816,7 +828,7 @@ const TimelineClip: React.FC<
         }
       }
       const gaps: [number, number][] = [];
-      let prev = 0;
+      let prev = zeroX;
       for (const [lo, hi] of merged) {
         if (lo > prev) gaps.push([prev, lo]);
         prev = Math.max(prev, hi);
@@ -857,7 +869,7 @@ const TimelineClip: React.FC<
         validatedLeft = Math.max(validatedLeft, maxRight);
       }
 
-      validatedLeft = Math.max(0, validatedLeft);
+      validatedLeft = Math.max(zeroX, validatedLeft);
 
       // Snapping (CapCut's auto snapping, N; held ⌘ skips it): either edge to the playhead, a
       // marker or the edge of any clip on any track, within the gap it would drop into. The
@@ -896,7 +908,6 @@ const TimelineClip: React.FC<
       timelineHeight,
       isSelected,
       timelinePadding,
-      timelineDuration,
       currentEndFrame,
       currentStartFrame,
       timelineWidth,
@@ -915,6 +926,22 @@ const TimelineClip: React.FC<
     ],
   );
 
+  // Dragged near or past either edge of the visible timeline, the timeline scrolls that way each
+  // animation frame (lib/edge-scroll.ts) and where the clip would drop is worked out again for
+  // the pointer, held still or not; it stops at frame 0 and at the timeline's end. The view then
+  // stays where the drag took it: the drop doesn't put it back (restoreWindowIfChanged).
+  const dragMoveRef = useRef(handleDragMove);
+  dragMoveRef.current = handleDragMove;
+  useEffect(() => {
+    const target = dragGroupRef.current;
+    const area = target?.getStage()?.container();
+    if (!isDragging || assetMode || !target || !area) return;
+    return startEdgeScroll(area, timelinePadding, timelineWidth, useControlsStore.getState, (pointer) => {
+      dragInitialWindowRef.current = null;
+      dragMoveRef.current({ target, evt: pointer }, true);
+    });
+  }, [isDragging, assetMode, timelinePadding, timelineWidth]);
+
   const handleDragEnd = useCallback(
     (_e: Konva.KonvaEventObject<MouseEvent>) => {
       if (assetMode) return;
@@ -922,8 +949,9 @@ const TimelineClip: React.FC<
       rectRefRight.current?.moveToTop();
       setIsDragging(false);
       setIsDraggingGlobal(false);
-      // Compute validated frames from ghost state
-      const [tStart, tEnd] = timelineDuration;
+      // Compute validated frames from ghost state, in the window as it is now: the edge scroll
+      // moves it between renders.
+      const [tStart, tEnd] = useControlsStore.getState().timelineDuration;
       const stageWidth = timelineWidth;
       const visibleDuration = tEnd - tStart;
       const clipLen = Math.max(1, currentEndFrame - currentStartFrame);
@@ -1008,9 +1036,10 @@ const TimelineClip: React.FC<
         addTimeline(newTimeline, hoveredIdx);
         dropTimelineId = newTimelineId;
         // When creating a new timeline via dashed hover, place based on the clip's left edge
-        // Use the dragged group's X position rather than the pointer position
+        // Use the dragged group's X position rather than the pointer position (frame 0's at
+        // the least: it can go before the visible part)
         const groupLeftX = Math.max(
-          0,
+          (-tStart * stageWidth) / visibleDuration,
           Math.min(stageWidth, _e.target.x() - timelinePadding),
         );
         gX = Math.round(groupLeftX);
@@ -1145,7 +1174,6 @@ const TimelineClip: React.FC<
     [
       assetMode,
       timelineWidth,
-      timelineDuration,
       currentEndFrame,
       currentStartFrame,
       getClipsForTimeline,
@@ -1174,10 +1202,11 @@ const TimelineClip: React.FC<
   );
 
   useEffect(() => {
+    if (isDragging) return;
     const newY = timelineY - totalClipHeight;
     setClipPosition({ x: clipX + timelinePadding, y: newY });
     fixedYRef.current = newY;
-  }, [clipX, timelinePadding, timelineY, totalClipHeight]);
+  }, [clipX, timelinePadding, timelineY, totalClipHeight, isDragging]);
 
   const handleClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -1923,6 +1952,7 @@ const TimelineClip: React.FC<
   return (
     <Group ref={rootGroupRef}>
       <Group
+        ref={dragGroupRef}
         onClick={handleClick}
         draggable={!assetMode && resizeSide === null && !locked && !blade}
         onDragEnd={handleDragEnd}

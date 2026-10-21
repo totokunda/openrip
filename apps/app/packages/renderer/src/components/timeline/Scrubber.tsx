@@ -6,7 +6,7 @@ import { SNAP_PX, snapPoints, snapToPoints } from "@/lib/timeline-edit";
 import { projectBeatPoints } from "@/lib/audio-tools";
 import { cn } from "@/lib/utils";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
-import { edgeScrollFrames, edgeScrollSpeed } from "@/lib/edge-scroll";
+import { startEdgeScroll } from "@/lib/edge-scroll";
 
 interface ScrubControlProps {
   stageHeight: number;
@@ -36,8 +36,6 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
   const handleHalf = 5; // half of the head's width (10 px)
   const containerRef = useRef<HTMLDivElement>(null);
   const [wasPlaying, setWasPlaying] = useState(false);
-  // Where the pointer last was in the drag, for the edge scroll to keep the playhead under it.
-  const pointerRef = useRef<Pick<MouseEvent, "clientX" | "metaKey"> | null>(null);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -60,7 +58,6 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
 
   const handleMouseMove = (e: Pick<MouseEvent, "clientX" | "metaKey">) => {
     if (!isDragging || !containerRef.current) return;
-    pointerRef.current = { clientX: e.clientX, metaKey: e.metaKey };
 
     const container = containerRef.current.parentElement;
     if (!container) return;
@@ -150,32 +147,11 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
 
   // Dragged near or past either edge of the visible timeline, the timeline scrolls that way each
   // animation frame (lib/edge-scroll.ts) with the playhead under the pointer, even while the
-  // pointer is held still; it stops at frame 0 and at the timeline's end. The animation frames
-  // are those of the timeline's window: it can be in one of its own (lib/panel-windows.ts).
+  // pointer is held still; it stops at frame 0 and at the timeline's end.
   useEffect(() => {
-    if (!isDragging) return;
-    const view = containerRef.current?.ownerDocument.defaultView ?? window;
-    let carry = 0;
-    let raf = 0;
-    const tick = () => {
-      raf = view.requestAnimationFrame(tick);
-      const pointer = pointerRef.current;
-      const container = containerRef.current?.parentElement;
-      if (!pointer || !container) return;
-      const x = pointer.clientX - container.getBoundingClientRect().left;
-      const controls = useControlsStore.getState();
-      const speed = edgeScrollSpeed(x, startPadding, stageWidth);
-      const step = edgeScrollFrames(speed, controls.timelineDuration, stageWidth, controls.totalTimelineFrames, carry);
-      carry = step.carry;
-      if (step.frames === 0) return;
-      controls.shiftTimelineDuration(step.frames);
-      handleMouseMove(pointer);
-    };
-    raf = view.requestAnimationFrame(tick);
-    return () => {
-      view.cancelAnimationFrame(raf);
-      pointerRef.current = null;
-    };
+    const container = containerRef.current?.parentElement;
+    if (!isDragging || !container) return;
+    return startEdgeScroll(container, startPadding, stageWidth, useControlsStore.getState, handleMouseMove);
   }, [isDragging, stageWidth]);
 
   useEffect(() => {
