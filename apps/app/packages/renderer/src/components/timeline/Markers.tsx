@@ -13,6 +13,7 @@ import { useContextMenuStore } from "@/lib/context-menu";
 import { MARKER_COLORS, SNAP_PX, snapPoints, snapToPoints } from "@/lib/timeline-edit";
 import { cn } from "@/lib/utils";
 import { withEnd } from "@/lib/range";
+import { startEdgeScroll } from "@/lib/edge-scroll";
 
 import { formatTimecode, parseTimecode } from "@/lib/timecode";
 
@@ -41,10 +42,22 @@ export { formatTimecode, parseTimecode };
 export const RangeBand: React.FC<{ stageWidth: number; startPadding: number; stageHeight: number }> = ({ stageWidth, startPadding, stageHeight }) => {
   const range = useControlsStore((s) => s.range);
   const [start, end] = useControlsStore((s) => s.timelineDuration);
+  // The edge being dragged and the frame it's at, where it's drawn even with its own out of view.
+  const [drag, setDrag] = useState<{ which: "in" | "out"; frame: number } | null>(null);
+  // Where the pointer has the dragged edge, before it stops at an edge of the visible timeline.
+  const dragX = useRef(0);
+  const stopEdgeScroll = useRef<(() => void) | null>(null);
   if (!range) return null;
   const span = Math.max(1, end - start);
   const xOf = (f: number) => startPadding + ((f - start) / span) * stageWidth;
-  const frameOf = (x: number) => Math.max(0, Math.round(start + ((x - startPadding) / stageWidth) * span));
+  // A dragged edge stops at either edge of the visible timeline, which then scrolls that way
+  // (lib/edge-scroll.ts): its frame is the one there in the window as it is now, which the
+  // scroll moves between renders.
+  const dragTo = (x: number) => {
+    const [start, end] = useControlsStore.getState().timelineDuration;
+    const held = Math.max(startPadding, Math.min(stageWidth, x));
+    return { x: held, frame: Math.max(0, Math.round(start + ((held - startPadding) / stageWidth) * Math.max(1, end - start))) };
+  };
   const [x0, x1] = [xOf(range.start), xOf(range.end)];
   const edge = (which: "in" | "out", x: number) => (
     <Rect
@@ -57,12 +70,24 @@ export const RangeBand: React.FC<{ stageWidth: number; startPadding: number; sta
       cornerRadius={2}
       fill="#ae81ce"
       draggable
-      dragBoundFunc={(pos) => ({ x: pos.x, y: 0 })}
+      dragBoundFunc={(pos) => {
+        dragX.current = pos.x + 3;
+        return { x: dragTo(dragX.current).x - 3, y: 0 };
+      }}
       onMouseDown={(e) => {
         e.cancelBubble = true;
       }}
+      onDragStart={(e) => {
+        setDrag({ which, frame: which === "in" ? range.start : range.end });
+        stopEdgeScroll.current = startEdgeScroll(e.target.getStage()!.container(), startPadding, stageWidth, useControlsStore.getState, () =>
+          setDrag({ which, frame: dragTo(dragX.current).frame }),
+        );
+      }}
+      onDragMove={() => setDrag({ which, frame: dragTo(dragX.current).frame })}
       onDragEnd={(e) => {
-        const f = frameOf(e.target.x() + 3);
+        stopEdgeScroll.current?.();
+        setDrag(null);
+        const f = dragTo(dragX.current).frame;
         const c = useControlsStore.getState();
         if (c.range) c.setRange(withEnd(c.range, which, f, c.range.end));
         e.target.x(xOf(useControlsStore.getState().range?.[which === "in" ? "start" : "end"] ?? f) - 3);
@@ -81,8 +106,9 @@ export const RangeBand: React.FC<{ stageWidth: number; startPadding: number; sta
     <Group name="timeline-range" listening>
       <Rect x={Math.max(startPadding, x0)} y={1} width={Math.max(0, Math.min(startPadding + stageWidth, x1) - Math.max(startPadding, x0))} height={16} fill="rgba(174,129,206,0.35)" listening={false} />
       <Rect x={Math.max(startPadding, x0)} y={18} width={Math.max(0, Math.min(startPadding + stageWidth, x1) - Math.max(startPadding, x0))} height={Math.max(0, stageHeight - 18)} fill="rgba(174,129,206,0.07)" listening={false} />
-      {x0 >= startPadding && x0 <= startPadding + stageWidth && edge("in", x0)}
-      {x1 >= startPadding && x1 <= startPadding + stageWidth && edge("out", x1)}
+      {/* A dragged edge is drawn where the drag has it, even with its own frame out of view. */}
+      {drag?.which === "in" ? edge("in", xOf(drag.frame)) : x0 >= startPadding && x0 <= startPadding + stageWidth && edge("in", x0)}
+      {drag?.which === "out" ? edge("out", xOf(drag.frame)) : x1 >= startPadding && x1 <= startPadding + stageWidth && edge("out", x1)}
     </Group>
   );
 };
@@ -92,25 +118,38 @@ export const MarkerFlags: React.FC<{ stageWidth: number; startPadding: number }>
   const markers = useClipStore((s) => s.markers);
   const [start, end] = useControlsStore((s) => s.timelineDuration);
   const selectedId = useControlsStore((s) => s.selectedMarkerId);
+  // The marker being dragged and the frame it's at, where it's drawn even with its own out of view.
+  const [drag, setDrag] = useState<{ id: string; frame: number } | null>(null);
+  // Where the pointer has the dragged tag, before it snaps or stops at an edge of the visible timeline.
+  const dragX = useRef(0);
+  const stopEdgeScroll = useRef<(() => void) | null>(null);
   const span = Math.max(1, end - start);
   const xOf = (f: number) => startPadding + ((f - start) / span) * stageWidth;
-  const frameOf = (x: number) => Math.max(0, Math.round(start + ((x - startPadding) / stageWidth) * span));
 
-  // Dragged along the ruler, a marker snaps to the playhead and clip edges as a clip does.
-  const snapX = (x: number) => {
+  // Dragged along the ruler, a marker snaps to the playhead and clip edges as a clip does. It
+  // stops at either edge of the visible timeline, which then scrolls that way
+  // (lib/edge-scroll.ts): its frame is the one there in the window as it is now, which the scroll
+  // moves between renders.
+  const dragTo = (x: number) => {
     const controls = useControlsStore.getState();
-    const f = frameOf(x);
-    if (!controls.snapping) return xOf(f);
-    const { clips } = useClipStore.getState();
-    const hit = snapToPoints([f], snapPoints(clips, { playhead: controls.focusFrame, markers: [], exclude: new Set() }), (SNAP_PX * span) / stageWidth);
-    return xOf(hit ? hit.point : f);
+    const [start, end] = controls.timelineDuration;
+    const span = Math.max(1, end - start);
+    const held = Math.max(startPadding, Math.min(stageWidth, x));
+    let frame = Math.max(0, Math.round(start + ((held - startPadding) / stageWidth) * span));
+    if (controls.snapping) {
+      const { clips } = useClipStore.getState();
+      const hit = snapToPoints([frame], snapPoints(clips, { playhead: controls.focusFrame, markers: [], exclude: new Set() }), (SNAP_PX * span) / stageWidth);
+      if (hit) frame = hit.point;
+    }
+    return { x: startPadding + ((frame - start) / span) * stageWidth, frame };
   };
 
   return (
     <>
       {markers.map((m) => {
-        const x = xOf(m.frame);
-        if (x < startPadding - FLAG_HALF || x > startPadding + stageWidth + FLAG_HALF) return null;
+        const dragged = drag?.id === m.id ? drag : null;
+        const x = xOf(dragged ? dragged.frame : m.frame);
+        if (!dragged && (x < startPadding - FLAG_HALF || x > startPadding + stageWidth + FLAG_HALF)) return null;
         const selected = m.id === selectedId;
         return (
           <Group
@@ -119,7 +158,10 @@ export const MarkerFlags: React.FC<{ stageWidth: number; startPadding: number }>
             x={x}
             y={0}
             draggable
-            dragBoundFunc={(pos) => ({ x: snapX(pos.x), y: 0 })}
+            dragBoundFunc={(pos) => {
+              dragX.current = pos.x;
+              return { x: dragTo(pos.x).x, y: 0 };
+            }}
             onMouseDown={(e) => {
               // Not the ruler's pan.
               e.cancelBubble = true;
@@ -156,8 +198,17 @@ export const MarkerFlags: React.FC<{ stageWidth: number; startPadding: number }>
                 ],
               });
             }}
-            onDragEnd={(e) => {
-              useClipStore.getState().updateMarker(m.id, { frame: frameOf(e.target.x()) });
+            onDragStart={(e) => {
+              setDrag({ id: m.id, frame: m.frame });
+              stopEdgeScroll.current = startEdgeScroll(e.target.getStage()!.container(), startPadding, stageWidth, useControlsStore.getState, () =>
+                setDrag({ id: m.id, frame: dragTo(dragX.current).frame }),
+              );
+            }}
+            onDragMove={() => setDrag({ id: m.id, frame: dragTo(dragX.current).frame })}
+            onDragEnd={() => {
+              stopEdgeScroll.current?.();
+              setDrag(null);
+              useClipStore.getState().updateMarker(m.id, { frame: dragTo(dragX.current).frame });
             }}
             onMouseEnter={(e) => {
               const c = e.target.getStage()?.container();
