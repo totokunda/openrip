@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { RecentSearches, useRecentSearches } from "./RecentSearches";
 
 /** What an effect tile drags as (the timeline and the player's clips take it). */
-export type EffectDrag = { type: "effect-preset"; effectId: string; name: string };
+export type EffectDrag = { type: "effect-preset"; effectId: string; name: string; spec?: EngineTileSpec };
 
 /** The tab's column: Favorites, then Video effects with its categories (what the panel lists). */
 export const effectSections = (catalog: EffectCatalog) => [
@@ -38,7 +38,7 @@ const EffectTile: React.FC<{ def: EffectDef; active: boolean; favourite: boolean
   const toggleFavourite = useEffectLibrary((s) => s.toggleFavourite);
   // The tile shows the effect at its defaults on footage, drawn by the engine.
   const spec = useMemo<EngineTileSpec>(() => ({ kind: "effect", id: def.id, name: def.name, intensity: def.intensity, params: defaultEffectParams(def) }), [def]);
-  const drag: EffectDrag = { type: "effect-preset", effectId: def.id, name: def.name };
+  const drag: EffectDrag = { type: "effect-preset", effectId: def.id, name: def.name, spec };
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `effect:${def.id}`, data: drag });
   // The buttons keep their own presses (a press on the tile starts its drag).
   const own = (e: React.PointerEvent) => e.stopPropagation();

@@ -68,7 +68,7 @@ const FilterTile: React.FC<{ filter: Filter; active: boolean; favourite: boolean
   const toggleFavourite = useFilterLibrary((s) => s.toggleFavourite);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `filter:${filterKey(filter)}`,
-    data: { ...filter, type: "filter", absPath: filter.examplePath, assetUrl: filter.exampleAssetUrl, fillCanvas: true },
+    data: { ...filter, type: "filter", absPath: filter.examplePath, assetUrl: filter.exampleAssetUrl, fillCanvas: true, dragPicture: picture.src },
   });
   // The buttons keep their own presses (a press on the tile starts its drag).
   const own = (e: React.PointerEvent) => e.stopPropagation();

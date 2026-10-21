@@ -9,6 +9,7 @@ import Topbar from "./bars/Topbar";
 import { DndContext, DragEndEvent, DragOverlay, getClientRect } from "@dnd-kit/core";
 import { MediaItem, MediaThumb } from "@/components/media/Item";
 import { TransitionDragTile } from "@/components/menus/TransitionMenu";
+import { TileDragPicture } from "@/components/menus/TilePicture";
 import { cn } from "@/lib/utils";
 import { useClipStore } from "@/lib/clip";
 import GlobalContextMenu from "@/components/GlobalContextMenu";
@@ -289,7 +290,10 @@ const App: React.FC = () => {
       {portalInto(
         timelineWindow?.document.body,
         <DragOverlay dropAnimation={null}>
-          {activeDragItem ? (
+          {activeDragItem && ((activeDragItem as any).spec || (activeDragItem as any).dragPicture) ? (
+            // A filter or effect tile: its own picture, not the sample photo behind it.
+            <TileDragPicture spec={(activeDragItem as any).spec} src={(activeDragItem as any).dragPicture} className={cn({ "opacity-0": ghostInStage && clips.length > 0 })} />
+          ) : activeDragItem ? (
             <div
               className={cn(
                 "w-44 aspect-video rounded-md overflow-hidden bg-brand opacity-100",

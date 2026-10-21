@@ -79,3 +79,13 @@ export const TilePicture: React.FC<{ spec: EngineTileSpec; hover: boolean; testI
     </div>
   );
 };
+
+/**
+ * A filter or effect tile's picture while it's dragged (the app's drag overlay), as a transition
+ * card's: the effect drawn by the engine (`spec`), or the filter's picture as its tile shows it.
+ */
+export const TileDragPicture: React.FC<{ spec?: EngineTileSpec; src?: string; className?: string }> = ({ spec, src, className }) => (
+  <div className={cn("relative w-[86px] h-[86px] rounded-[6px] overflow-hidden ring-[1.5px] ring-brand-accent shadow-lg", className)}>
+    {spec ? <TilePicture spec={spec} hover testId="tile-drag-picture" /> : <img src={src} alt="" draggable={false} data-testid="tile-drag-picture" className="w-full h-full object-cover" />}
+  </div>
+);
