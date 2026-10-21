@@ -73,6 +73,7 @@ const en = {
   "home.update.downloading": "Downloading the update…",
   "home.update.ready": "Update ready: click to restart",
   "home.update.checking": "Checking for updates…",
+  "home.update.failed": "Couldn't check for updates",
   "settings.proxy": "Proxy:",
   "settings.proxy.check": "Turn it on to edit smoothly and faster without losing video quality.",
   "settings.proxy.note": "New projects start with their Proxy switch on: video above 1080p gets a low-resolution proxy when it's imported, and playback uses it while you edit. Exports always use the originals.",

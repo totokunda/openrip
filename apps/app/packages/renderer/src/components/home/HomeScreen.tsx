@@ -304,8 +304,8 @@ const UpdateIndicator: React.FC = () => {
   const next = (state?.updateInfo as { version?: string } | undefined)?.version;
   const ready = status === "downloaded";
   const available = status === "available" || status === "downloading" || ready;
-  const title = ready ? t("home.update.ready") : status === "downloading" ? t("home.update.downloading") : available ? t("home.update.available") : status === "checking" ? t("home.update.checking") : t("home.update.current");
-  const detail = available ? (next ? t("home.update.version", { version: next }) : "") + (ready ? "" : "") : t("home.update.currentVersion", { version: version || "…" });
+  const title = ready ? t("home.update.ready") : status === "downloading" ? t("home.update.downloading") : available ? t("home.update.available") : status === "checking" ? t("home.update.checking") : status === "error" ? t("home.update.failed") : t("home.update.current");
+  const detail = available ? (next ? t("home.update.version", { version: next }) : "") + (ready ? "" : "") : status === "error" ? (state?.errorMessage ?? "") : t("home.update.currentVersion", { version: version || "…" });
   const click = () => {
     if (ready) void installAppUpdate();
     else if (status === "available") void downloadAppUpdate();
