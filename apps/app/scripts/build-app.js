@@ -114,6 +114,7 @@ Environment Variables:
   APPLE_APP_SPECIFIC_PASSWORD    App-specific password for notarization
   APPLE_TEAM_ID         Apple Developer Team ID
   APPLE_IDENTITY        Code signing identity (certificate name)
+  APPLE_KEYCHAIN_PROFILE         notarytool keychain profile for notarization (instead of APPLE_ID)
   WINDOWS_CERT_FILE     Path to Windows code signing certificate (.pfx)
   WINDOWS_CERT_PASSWORD Password for the certificate
   GH_TOKEN / GITHUB_TOKEN / GITHUB_RELEASE_TOKEN   GitHub token for publishing releases
@@ -229,6 +230,10 @@ async function packageApp(config) {
     const env = {
       ...process.env
     };
+    // electron-builder finds a Developer ID Application certificate in the keychain by itself;
+    // these pin one, or stop it from signing.
+    if (process.env.APPLE_IDENTITY) env.CSC_NAME = process.env.APPLE_IDENTITY;
+    if (config.skipSign) env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
     // Allow overriding publish timeout from CLI; electron-builder config reads this env var.
     if (config.publishTimeoutMs != null) {
       env.ELECTRON_PUBLISH_TIMEOUT_MS = String(config.publishTimeoutMs);

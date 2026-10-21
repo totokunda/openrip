@@ -24,8 +24,8 @@ const hasMacNotarizeEnv =
   (process.env.APPLE_API_KEY && process.env.APPLE_API_KEY_ID && process.env.APPLE_API_ISSUER) ||
   // Apple ID + app-specific password flow
   (process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID) ||
-  // Keychain profile flow
-  (process.env.APPLE_KEYCHAIN && process.env.APPLE_KEYCHAIN_PROFILE);
+  // Keychain profile flow (`xcrun notarytool store-credentials`); APPLE_KEYCHAIN is optional
+  process.env.APPLE_KEYCHAIN_PROFILE;
 
 /** @type {import("electron-builder").Configuration} */
 module.exports = {
@@ -107,16 +107,10 @@ module.exports = {
   // macOS configuration
   mac: {
     category: "public.app-category.video",
-    target: [
-      {
-        target: "dmg",
-        arch: ["x64", "arm64"],
-      },
-      {
-        target: "zip",
-        arch: ["x64", "arm64"],
-      },
-    ],
+    // No `arch` here: electron-builder ignores the command line's architecture for targets that
+    // name their own, so a build would also package the other architecture with a stale engine.
+    // build-app.js's --arch picks it (default: this Mac's).
+    target: ["dmg", "zip"],
     icon: "buildResources/icon.icns",
     hardenedRuntime: true,
     gatekeeperAssess: false,
