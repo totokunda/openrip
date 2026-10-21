@@ -2,14 +2,14 @@
 // strips the types itself).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cutAtFrame, cutNear, cutsOn, fitTransitions } from "../src/lib/transition-cuts.ts";
+import { cutAtFrame, cutNear, cutsOn, fitTransitions, sameShotAt } from "../src/lib/transition-cuts.ts";
 
 const clip = (clipId: string, startFrame: number, endFrame: number, extra: Record<string, unknown> = {}) =>
   ({ clipId, type: "video", timelineId: "main", startFrame, endFrame, ...extra }) as any;
 
 // Test123: one shot split at 3.17 s (frame 76 at 24 fps), a 0.55 s Chessboard on the cut.
 const chess = { type: "gl_chessboard", name: "Chessboard", duration: 0.55, params: { grid_num: 10 } };
-const test123 = () => [clip("a", 0, 76, { transitionOut: chess }), clip("b", 76, 188)];
+const test123 = () => [clip("a", 0, 76, { assetId: "IMG_9086", transitionOut: chess }), clip("b", 76, 188, { assetId: "IMG_9086", trimStart: 76 })];
 const tracks = [{ timelineId: "text", type: "text" }, { timelineId: "main", type: "media" }] as any;
 
 test("a transition stays as it is while its cut has room for it", () => {
@@ -70,4 +70,12 @@ test("a cut is a clip and the one starting on the frame it ends", () => {
   // the same frame. A frame apart is a gap to both.
   assert.deepEqual(cutsOn(test123(), "main").map((c) => [c.clip.clipId, c.next.clipId]), [["a", "b"]]);
   assert.deepEqual(cutsOn([clip("a", 0, 76), clip("b", 77, 188)], "main"), []);
+});
+
+test("a split left in place is one shot carrying on; a piece taken out or another shot is not", () => {
+  const [a, b] = test123();
+  assert.equal(sameShotAt([a, b], a, 24), true);
+  assert.equal(sameShotAt([a, { ...b, trimStart: 100 }], a, 24), false);
+  assert.equal(sameShotAt([a, { ...b, assetId: "IMG_9019" }], a, 24), false);
+  assert.equal(sameShotAt([{ ...a, speed: 2 }, { ...b, startFrame: 76 }], { ...a, speed: 2 }, 24), false);
 });

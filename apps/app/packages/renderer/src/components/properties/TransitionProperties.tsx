@@ -10,6 +10,7 @@ import {
   applyTransitionToAll,
   cutsOn,
   resetTransition,
+  sameShotAt,
   setTransitionDirection,
   setTransitionParam,
   setTransitionDuration,
@@ -144,6 +145,7 @@ const TransitionProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
   const fps = useControlsStore((s) => s.fps) || 30;
   const max = useClipStore((s) => (clip ? transitionMax(s.clips, clip, fps) : MIN_TRANSITION));
   const others = useClipStore((s) => (clip?.timelineId ? cutsOn(s.clips, clip.timelineId).length - 1 : 0));
+  const sameShot = useClipStore((s) => (clip ? sameShotAt(s.clips, clip, fps) : false));
   const t = takesTransition(clip) ? clip.transitionOut : null;
   if (!t) return null;
   const builtin = TRANSITIONS.find((b) => b.type === t.type);
@@ -171,6 +173,11 @@ const TransitionProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
             {kept ? `${t.name || "CapCut's"} (CapCut)` : builtin.name}
           </span>
         </PropertyRow>
+        {sameShot && (
+          <p data-testid="transition-same-shot" className="text-[12px] text-[#949494] text-left py-2">
+            Both sides of this cut are the same shot, so a transition that blends one picture into the other won't show here. Ones that move or flash the picture do, such as Slide, Push, White Flash and Blur.
+          </p>
+        )}
         {!kept && (
           <div className="pt-2 pb-1">
             <PropertiesSlider

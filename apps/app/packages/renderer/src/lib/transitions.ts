@@ -13,7 +13,7 @@ import { isRestoring } from "./history";
 import { cutsOn, fitTransitions, takesTransition, transitionMax, withinTransition } from "./transition-cuts";
 import type { AnimationDirection, AnyClipProps, ClipTransition, TransitionParamValue, VideoClipProps } from "./types";
 
-export { MIN_TRANSITION, cutAtFrame, cutForSelection, cutNear, cutsOn, nextClipOf, previousClipOf, takesTransition, transitionMax, withinTransition } from "./transition-cuts";
+export { MIN_TRANSITION, cutAtFrame, cutForSelection, cutNear, cutsOn, nextClipOf, previousClipOf, sameShotAt, takesTransition, transitionMax, withinTransition } from "./transition-cuts";
 
 /**
  * Blink draws CapCut's downloaded image sequence: offered when the project has one, on a clip

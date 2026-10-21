@@ -2,6 +2,7 @@
 // can load it): a cut is a video or photo and the clip starting where it ends on its track,
 // the transition kept on the first clip (`transitionOut`). lib/transitions.ts makes the edits.
 import { clipSeconds, maxTransitionDuration } from "./animations.ts";
+import { sourceTimeAt } from "./speed.ts";
 import { mainTrackOf } from "./timeline-edit.ts";
 import type { AnyClipProps, ImageClipProps, TimelineProps, VideoClipProps } from "./types";
 
@@ -103,4 +104,18 @@ export const fitTransitions = (clips: AnyClipProps[], fps: number): AnyClipProps
     if (fitted !== t) (out ??= clips.slice())[i] = { ...clip, transitionOut: fitted } as AnyClipProps;
   });
   return out ?? clips;
+};
+
+/**
+ * Whether the two sides of `clip`'s cut are one shot carrying on (a split left in place): the
+ * same photo, or the same video playing on from the frame the first one ends on. A transition
+ * that blends one picture into the other draws the same picture twice there, and shows nothing.
+ */
+export const sameShotAt = (clips: AnyClipProps[], clip: AnyClipProps, fps: number): boolean => {
+  const next = nextClipOf(clips, clip);
+  if (!takesTransition(clip) || !takesTransition(next) || !clip.assetId || clip.assetId !== next.assetId || clip.type !== next.type) return false;
+  if (clip.type === "image") return true;
+  const [a, b] = [clip as VideoClipProps, next as VideoClipProps];
+  if (a.reverse || b.reverse || a.freeze || b.freeze) return false;
+  return Math.abs(sourceTimeAt(a, a.endFrame - a.startFrame, fps) - sourceTimeAt(b, 0, fps)) < 1 / fps;
 };
