@@ -51,8 +51,13 @@ const TransitionMarkers: React.FC<Props> = ({ timelineId, timelineWidth, timelin
   const groupRef = useRef<Konva.Group>(null);
 
   // Over the clips again after each change (not while a clip is dragged: it's over everything then).
+  // Only when something else is above it: the tracks' transitions raised over each other in turn
+  // after every render, each move drawing the layer again.
   useEffect(() => {
-    if (!dragging) groupRef.current?.moveToTop();
+    const group = groupRef.current;
+    if (dragging || !group) return;
+    const above = group.getParent()?.getChildren().slice(group.zIndex() + 1) ?? [];
+    if (above.some((node) => node.name() !== "transition-markers")) group.moveToTop();
   });
 
   // Dragging a side: the duration follows the pointer, both halves moving together.

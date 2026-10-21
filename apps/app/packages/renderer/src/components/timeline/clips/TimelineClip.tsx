@@ -2,6 +2,7 @@ import { trackDy } from "@/lib/timeline-view";
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -25,6 +26,7 @@ import {
 } from "@/lib/timeline-edit";
 import { generatePosterCanvas } from "@/lib/media/timeline";
 import { useControlsStore } from "@/lib/control";
+import { useShallow } from "zustand/react/shallow";
 import { useAssetControlsStore } from "@/lib/assetControl";
 import { Image, Group, Rect, Text, Line, Path } from "react-konva";
 import Konva from "konva";
@@ -164,7 +166,8 @@ const TimelineClip: React.FC<
 }) => {
   // Select only what we need to avoid unnecessary rerenders
   const ctrlTimelineDuration = useControlsStore((s) => s.timelineDuration);
-  const ctrlSelectedClipIds = useControlsStore((s) => s.selectedClipIds);
+  // Whether it's selected, not the selection: a click re-renders the clips it selects or leaves.
+  const ctrlSelected = useControlsStore((s) => s.selectedClipIds.includes(clipId));
   const blade = useControlsStore((s) => s.timelineTool === "split");
   const ctrlToggleClipSelection = useControlsStore(
     (s) => s.toggleClipSelection,
@@ -233,12 +236,16 @@ const TimelineClip: React.FC<
     filter: 0,
     shape: 0,
   });
-  // Subscribe directly to this clip's data
-  const currentClip = useClipStore((s) =>
-    s.clips.find(
-      (c) =>
-        c.clipId === clipId &&
-        (timelineId ? c.timelineId === timelineId : true),
+  // Subscribe directly to this clip's data. Field by field: an edit gives every clip a new
+  // object (resolveOverlaps copies them all), which re-rendered every clip and drew its
+  // thumbnails again on each step of a trim or each key typed in a caption.
+  const currentClip = useClipStore(
+    useShallow((s) =>
+      s.clips.find(
+        (c) =>
+          c.clipId === clipId &&
+          (timelineId ? c.timelineId === timelineId : true),
+      ),
     ),
   );
   // A bar on an effect track drawing one of the Effects tab's effects.
@@ -358,7 +365,8 @@ const TimelineClip: React.FC<
 
   // (moved) image positioning is computed after clipPosition is defined
 
-  useEffect(() => {
+  // Layout effects, as the thumbnails drawn with them below (and in this order).
+  useLayoutEffect(() => {
     if (!(currentClip as VideoClipProps | ImageClipProps)?.assetId) {
       mediaInfoRef.current = undefined;
       return;
@@ -366,7 +374,7 @@ const TimelineClip: React.FC<
     mediaInfoRef.current = getMediaInfoCached((currentClip as VideoClipProps | ImageClipProps)?.assetId!);
   }, [(currentClip as VideoClipProps | ImageClipProps)?.assetId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     imageCanvas.width = Math.min(clipWidth, maxTimelineWidth);
     imageCanvas.height = thumbsHeight;
   }, [
@@ -418,7 +426,7 @@ const TimelineClip: React.FC<
   const currentClipId = clipId;
   const isSelected = assetMode
     ? isAssetSelected(currentClipId) || assetSelectedAssetClipId === currentClipId
-    : ctrlSelectedClipIds.includes(currentClipId);
+    : ctrlSelected;
 
   const showMaskKeyframes = useMemo(() => {
     if (!isSelected) return false;
@@ -429,10 +437,17 @@ const TimelineClip: React.FC<
     return masks.length > 0;
   }, [currentClip, isSelected, tool, isDragging]);
 
-  const [clipPosition, setClipPosition] = useState<{ x: number; y: number }>({
+  const [draggedPosition, setClipPosition] = useState<{ x: number; y: number }>({
     x: clipX + timelinePadding,
     y: timelineY - totalClipHeight,
   });
+  // Where it's drawn: dragged, where the drag has it (handleDragMove), the timeline scrolling
+  // under it or not; otherwise where its frames put it, in this render. Synced into state by an
+  // effect, a scroll or zoom drew the clips a frame late, then again.
+  const clipPosition = useMemo(
+    () => (isDragging ? draggedPosition : { x: clipX + timelinePadding, y: timelineY - totalClipHeight }),
+    [isDragging, draggedPosition, clipX, timelinePadding, timelineY, totalClipHeight],
+  );
   const [tempClipPosition, setTempClipPosition] = useState<{
     x: number;
     y: number;
@@ -487,7 +502,7 @@ const TimelineClip: React.FC<
     Math.min(clipWidth, Math.round(timelineRight - absClipX)) - htmlLocalX,
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     thumbnailClipWidth.current = Math.max(
       getClipWidth(
         currentStartFrame,
@@ -509,20 +524,14 @@ const TimelineClip: React.FC<
   ]);
 
   useEffect(() => {
-    // Dragged, it's where the drag has it (handleDragMove), the timeline scrolling under it or not.
-    if (isDragging) return;
-    const newY = timelineY - totalClipHeight;
-    setClipPosition({ x: clipX + timelinePadding, y: newY });
-    fixedYRef.current = newY;
-  }, [timelinePadding, timelineY, timelineId, clipX, totalClipHeight, isDragging]);
-
-  useEffect(() => {
     if (textRef.current) {
       setTextWidth(textRef.current.width());
     }
   }, [(currentClip as ShapeClipProps)?.shapeType]);
 
-  useEffect(() => {
+  // Before the layer draws, as the clip's position: after paint, its batchDraw drew the layer a
+  // second time on every step of a scroll or zoom.
+  useLayoutEffect(() => {
     if (!currentClip) return;
 
     // An audio clip draws its waveform itself (SoundClipFace); videos and photos their
@@ -948,6 +957,9 @@ const TimelineClip: React.FC<
       if (assetMode) return;
       rectRefLeft.current?.moveToTop();
       rectRefRight.current?.moveToTop();
+      // Back where its props have it (Konva moved it with the pointer): dropped on the frames it
+      // had, they don't change, and it would stay where it was let go.
+      _e.target.position({ x: tempClipPosition.x, y: tempClipPosition.y });
       setIsDragging(false);
       setIsDraggingGlobal(false);
       // Compute validated frames from ghost state, in the window as it is now: the edge scroll
@@ -1199,15 +1211,9 @@ const TimelineClip: React.FC<
       addTimeline,
       getTimelineById,
       setIsDraggingGlobal,
+      tempClipPosition,
     ],
   );
-
-  useEffect(() => {
-    if (isDragging) return;
-    const newY = timelineY - totalClipHeight;
-    setClipPosition({ x: clipX + timelinePadding, y: newY });
-    fixedYRef.current = newY;
-  }, [clipX, timelinePadding, timelineY, totalClipHeight, isDragging]);
 
   const handleClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -1715,6 +1721,8 @@ const TimelineClip: React.FC<
       rootGroupRef.current?.moveToTop();
       groupRef.current?.moveToTop();
 
+      // Dragged, it's drawn where the drag has it, from where it is now.
+      setClipPosition({ x: clipPosition.x, y: clipPosition.y });
       setIsDragging(true);
       setIsDraggingGlobal(true);
       setTempClipPosition({ x: clipPosition.x, y: clipPosition.y });
