@@ -6,43 +6,14 @@
 // `updateClip`, so the clips in the store (which the undo history shares) are replaced, not
 // written to.
 import { create } from "zustand";
-import { TRANSITIONS, TRANSITION_CATEGORIES, clipSeconds, maxTransitionDuration, transitionOf } from "./animations";
+import { TRANSITIONS, TRANSITION_CATEGORIES, transitionOf } from "./animations";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
-import type { AnimationDirection, AnyClipProps, ClipTransition, ImageClipProps, TransitionParamValue, VideoClipProps } from "./types";
+import { isRestoring } from "./history";
+import { cutsOn, fitTransitions, takesTransition, transitionMax, withinTransition } from "./transition-cuts";
+import type { AnimationDirection, AnyClipProps, ClipTransition, TransitionParamValue, VideoClipProps } from "./types";
 
-/** The clips a transition can leave: videos and photos. */
-export const takesTransition = (clip: AnyClipProps | undefined): clip is VideoClipProps | ImageClipProps =>
-  !!clip && (clip.type === "video" || clip.type === "image");
-
-/** The clip starting where `clip` ends on its track (the other side of its cut), if any. */
-export const nextClipOf = (clips: AnyClipProps[], clip: AnyClipProps | undefined): AnyClipProps | undefined =>
-  clip ? clips.find((c) => c.clipId !== clip.clipId && c.timelineId === clip.timelineId && c.startFrame === clip.endFrame && !c.hidden) : undefined;
-
-/** The clip ending where `clip` starts on its track, if any. */
-export const previousClipOf = (clips: AnyClipProps[], clip: AnyClipProps | undefined): AnyClipProps | undefined =>
-  clip ? clips.find((c) => c.clipId !== clip.clipId && c.timelineId === clip.timelineId && c.endFrame === clip.startFrame && !c.hidden) : undefined;
-
-/** A track's cuts a transition can go on: each video or photo with a clip starting at its end. */
-export const cutsOn = (clips: AnyClipProps[], timelineId: string): { clip: VideoClipProps | ImageClipProps; next: AnyClipProps }[] => {
-  const out: { clip: VideoClipProps | ImageClipProps; next: AnyClipProps }[] = [];
-  for (const clip of clips) {
-    if (clip.timelineId !== timelineId || clip.hidden || !takesTransition(clip)) continue;
-    const next = nextClipOf(clips, clip);
-    if (next) out.push({ clip, next });
-  }
-  return out.sort((a, b) => a.clip.endFrame - b.clip.endFrame);
-};
-
-/** The shortest a transition can be (s), and the step its duration moves by. */
-export const MIN_TRANSITION = 0.1;
-
-/** The longest the transition leaving `clip` can run (s): the shorter clip at its cut. */
-export const transitionMax = (clips: AnyClipProps[], clip: AnyClipProps, fps: number): number =>
-  Math.max(MIN_TRANSITION, maxTransitionDuration(clip, nextClipOf(clips, clip), fps) || clipSeconds(clip, fps));
-
-/** A duration within a transition's bounds, to hundredths of a second. */
-export const withinTransition = (d: number, max: number) => Math.round(Math.max(MIN_TRANSITION, Math.min(d, max)) * 100) / 100;
+export { MIN_TRANSITION, cutAtFrame, cutForSelection, cutNear, cutsOn, nextClipOf, previousClipOf, takesTransition, transitionMax, withinTransition } from "./transition-cuts";
 
 /**
  * Blink draws CapCut's downloaded image sequence: offered when the project has one, on a clip
@@ -65,19 +36,6 @@ export const offeredTransitions = (blink: string | null) => TRANSITIONS.filter((
 export const transitionCategories = (blink: string | null): string[] => {
   const have = new Set(offeredTransitions(blink).map((t) => t.category));
   return TRANSITION_CATEGORIES.filter((c) => have.has(c));
-};
-
-/**
- * Which cut the Transitions panel's "+" gives a transition to for the selected clip: its own
- * end when a clip starts there, else the cut before it. The id of the clip leaving that cut, or
- * null when the clip has neither.
- */
-export const cutForSelection = (clips: AnyClipProps[], clipId: string | undefined): string | null => {
-  const clip = clips.find((c) => c.clipId === clipId);
-  if (!clip) return null;
-  if (takesTransition(clip) && nextClipOf(clips, clip)) return clip.clipId;
-  const before = previousClipOf(clips, clip);
-  return before && takesTransition(before) ? before.clipId : null;
 };
 
 const fpsNow = () => useControlsStore.getState().fps || 30;
@@ -163,3 +121,26 @@ export const useTransitionDropStore = create<{ target: string | null; setTarget:
   target: null,
   setTarget: (target) => set((s) => (s.target === target ? s : { target })),
 }));
+
+let fitting = false;
+
+/**
+ * Keep every transition fitted to its cut (`fitTransitions`) as the clips change: once each edit
+ * is done (an edit can pass through states where its clips don't meet yet), and in the same undo
+ * step as the edit. A state an undo or redo puts back was fitted when it was made.
+ */
+export function initTransitionFitting() {
+  if (fitting) return;
+  fitting = true;
+  let queued = false;
+  useClipStore.subscribe((s, p) => {
+    if (s.clips === p.clips || queued || isRestoring()) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      const { clips } = useClipStore.getState();
+      const fitted = fitTransitions(clips, fpsNow());
+      if (fitted !== clips) useClipStore.setState({ clips: fitted });
+    });
+  });
+}

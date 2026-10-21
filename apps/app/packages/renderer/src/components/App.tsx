@@ -29,6 +29,7 @@ import { useContextMenuStore } from "@/lib/context-menu";
 import { useUpdateToasts } from "@/hooks/use-update-toasts";
 import { initEnginePreview } from "@/lib/engine-preview";
 import { initHistory } from "@/lib/history";
+import { initTransitionFitting } from "@/lib/transitions";
 import { useShellStore } from "@/lib/shell";
 import HomeScreen from "./home/HomeScreen";
 import { HOME_PAGE_BG } from "./home/shared";
@@ -74,6 +75,10 @@ const App: React.FC = () => {
   // Undo and redo: telling one edit from the next by the user's presses.
   useEffect(() => {
     initHistory();
+  }, []);
+  // Transitions kept on their cuts and within them as clips are trimmed, moved and removed.
+  useEffect(() => {
+    initTransitionFitting();
   }, []);
   // The Settings window's preferences, and the keys they bind (lib/keymap.ts).
   useEffect(() => {

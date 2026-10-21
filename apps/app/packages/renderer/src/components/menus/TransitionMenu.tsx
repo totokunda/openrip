@@ -7,7 +7,8 @@ import { TilePicture } from "./TilePicture";
 import { TRANSITIONS, type BuiltinTransition } from "@/lib/animations";
 import { useControlsStore } from "@/lib/control";
 import { useClipStore } from "@/lib/clip";
-import { applyTransition, cutForSelection, offeredTransitions, projectBlink, takesTransition } from "@/lib/transitions";
+import { applyTransition, cutAtFrame, cutForSelection, cutsOn, offeredTransitions, projectBlink, takesTransition } from "@/lib/transitions";
+import { mainTrackOf } from "@/lib/timeline-edit";
 import type { VideoClipProps } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTransitionFavourites } from "@/lib/transition-favourites";
@@ -107,9 +108,10 @@ const TransitionCard: React.FC<{ t: BuiltinTransition; active: boolean; canAdd: 
 
 /**
  * The Transitions tab: the transitions the engine draws, in CapCut's grid, one category at a
- * time (picked in the tab's column). A card dragged onto a cut, or its "+" with a clip
- * selected, puts the transition on that cut (the selected clip's end, or the cut before it when
- * nothing follows it); the transition is then selected and its inspector shows.
+ * time (picked in the tab's column). A card dragged onto a cut, or its "+", puts the transition
+ * on that cut (the selected clip's end, or the cut before it when nothing follows it; with
+ * nothing selected, those of the main track's clip at the playhead); the transition is then
+ * selected and its inspector shows.
  */
 const TransitionMenu: React.FC<{ category?: string }> = ({ category }) => {
   const lastSelected = useControlsStore((s) => s.selectedClipIds[s.selectedClipIds.length - 1]);
@@ -121,16 +123,25 @@ const TransitionMenu: React.FC<{ category?: string }> = ({ category }) => {
     return takesTransition(c) ? ((c as VideoClipProps).transitionOut?.type ?? null) : null;
   });
   const blink = useClipStore((s) => projectBlink(s.clips));
+  // With nothing selected, the cut at the playhead, as CapCut's "+" (looked up when used, so
+  // playback doesn't redraw the tab): "+" is on while the main track has a cut.
+  const free = !lastSelected && !selectedTransition;
+  const mainHasCut = useClipStore((s) => free && cutsOn(s.clips, mainTrackOf(s.timelines)?.timelineId ?? "").length > 0);
+  const fill = () => {
+    if (target || !free) return target;
+    const { clips, timelines } = useClipStore.getState();
+    return cutAtFrame(clips, timelines, useControlsStore.getState().focusFrame);
+  };
   // The app's drags start on a press (no distance to move first) and swallow the click that
   // ends them: a card pressed and let go where it was is a click, giving its transition to the
   // cut "+" would.
-  const targetRef = useRef(target);
-  targetRef.current = target;
+  const fillRef = useRef(fill);
+  fillRef.current = fill;
   useDndMonitor({
     onDragEnd: (e) => {
       const data = e.active?.data?.current as TransitionDrag | undefined;
-      if (data?.type !== "transition" || Math.hypot(e.delta.x, e.delta.y) > 3 || !targetRef.current) return;
-      applyTransition(targetRef.current, data.transition);
+      const to = data?.type === "transition" && Math.hypot(e.delta.x, e.delta.y) <= 3 ? fillRef.current() : null;
+      if (to) applyTransition(to, data!.transition);
     },
   });
   const offered = offeredTransitions(blink);
@@ -157,7 +168,16 @@ const TransitionMenu: React.FC<{ category?: string }> = ({ category }) => {
         )}
         <div className="grid gap-x-4 gap-y-[18px]" style={{ gridTemplateColumns: "repeat(auto-fill, 86px)" }}>
           {shown.map((t) => (
-            <TransitionCard key={t.type} t={t} active={current === t.type} canAdd={!!target} onAdd={() => target && applyTransition(target, t.type)} />
+            <TransitionCard
+              key={t.type}
+              t={t}
+              active={current === t.type}
+              canAdd={!!target || mainHasCut}
+              onAdd={() => {
+                const to = fill();
+                if (to) applyTransition(to, t.type);
+              }}
+            />
           ))}
         </div>
       </div>

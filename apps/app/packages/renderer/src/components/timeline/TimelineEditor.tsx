@@ -50,7 +50,7 @@ import { MarkerEditor, MarkerFlags, RangeBand } from "./Markers";
 import RenderedBar from "./RenderedBar";
 import { RULER_HEIGHT, TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { bladeFrame, frameAtStageX, stageXOfFrame } from "@/lib/timeline-tools";
-import { applyTransition, cutsOn, useTransitionDropStore } from "@/lib/transitions";
+import { applyTransition, cutNear, useTransitionDropStore } from "@/lib/transitions";
 import type { TransitionDrag } from "../menus/TransitionMenu";
 import { addLibraryShape, type ShapeDrag } from "../menus/ShapesMenu";
 import type { StickerDrag } from "../menus/StickersMenu";
@@ -391,7 +391,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
   };
 
   // A transition card dragged from the Transitions tab: the cut under the pointer (on the track
-  // under it, the nearest cut within 24 px), by the id of the clip leaving it.
+  // under it, over a clip the nearer of its cuts, between clips the nearest within 24 px), by
+  // the id of the clip leaving it.
   const cutUnder = (event: { activatorEvent: Event | null; delta: { x: number; y: number } }): string | null => {
     const start = event.activatorEvent as PointerEvent | null;
     const el = containerRef.current;
@@ -404,13 +405,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     const [vs, ve] = controlStore.timelineDuration;
     const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
     const frame = vs + (x - TIME_ZERO_X) * perPx;
-    let best: string | null = null;
-    let gap = 24 * perPx;
-    for (const { clip } of cutsOn(clips, track.timelineId)) {
-      const d = Math.abs(clip.endFrame - frame);
-      if (d <= gap) [best, gap] = [clip.clipId, d];
-    }
-    return best;
+    return cutNear(clips, track.timelineId, frame, 24 * perPx);
   };
 
   // An effect tile from the Effects tab dropped on the timeline: onto a video or photo it goes
