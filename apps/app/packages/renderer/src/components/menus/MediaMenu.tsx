@@ -56,7 +56,7 @@ import { createTimeline } from "@/lib/timelines";
 import { useShellStore } from "@/lib/shell";
 import { preferences } from "@/lib/preferences";
 import { AUTO_PROXY_ABOVE, proxyHeightFor, proxyOnFor, setProxyMode, useProxyMode } from "@/lib/media/proxy-mode";
-import { linkMissingInFolder, linkToMedia } from "@/lib/relink";
+import { linkMissingInFolder, linkMovedMedia, linkToMedia } from "@/lib/relink";
 import { useRecordPanel } from "@/components/record/RecordPanel";
 import { addMediaAtPlayhead, type MediaRange } from "@/lib/media/add";
 import { useMediaFolders, type MediaFolder } from "@/lib/media/folders";
@@ -1073,6 +1073,10 @@ const MediaSidebar: React.FC<MediaSidebarProps> = () => {
   }, [importOnOpen]);
 
   const missingItems = useMemo(() => items.filter((it) => it.missing), [items]);
+  // Files an offload tool moved to another drive come back by themselves.
+  useEffect(() => {
+    void linkMovedMedia(missingItems.map((m) => ({ name: m.name, target: m.target ?? m.name })));
+  }, [missingItems]);
   const empty = !isMediaListLoading && items.length === 0;
   const [searching, setSearching] = useState(false);
   const heading =

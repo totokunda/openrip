@@ -134,6 +134,7 @@ export * from "./media/library.js";
 export * from "./media/previews.js";
 // Missing media and Link to media, Replace clip's import, Open file location
 export * from "./media/relink.js";
+export * from "./media/moved.js";
 // Explicit re-export to ensure the virtual browser shim includes this new API.
 export { exportVideoTranscodeWithFfmpeg } from "./media/previews.js";
 

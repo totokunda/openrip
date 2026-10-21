@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { findMediaByName, pickFolder, pickMediaPaths, relinkMediaItem, restoreMediaLink } from "@app/preload";
+import { findMediaByName, findMovedMedia, pickFolder, pickMediaPaths, relinkMediaItem, restoreMediaLink } from "@app/preload";
 import { useClipStore } from "./clip";
 import { recordEffect } from "./history";
 import { useProjectsStore } from "./projects";
@@ -21,8 +21,11 @@ const base = (p: string) => p.split(/[/\\]/g).pop() ?? p;
 
 const folderOf = () => useProjectsStore.getState().getActiveProject()?.folderUuid;
 
-/** Point the links at their files, as one undo step. Resolves how many were linked. */
-async function applyLinks(links: { name: string; to: string; from: string | null }[]): Promise<number> {
+/**
+ * Point the links at their files, as one undo step (or outside the history, `undoable` false).
+ * Resolves how many were linked.
+ */
+async function applyLinks(links: { name: string; to: string; from: string | null }[], undoable = true): Promise<number> {
   const folder = folderOf();
   const done: { name: string; to: string; from: string }[] = [];
   for (const l of links) {
@@ -40,7 +43,7 @@ async function applyLinks(links: { name: string; to: string; from: string | null
     useClipStore.setState((s) => ({ assets: { ...s.assets } }));
     await refreshMissingMedia();
   };
-  recordEffect({
+  if (undoable) recordEffect({
     undo: async () => {
       for (const d of done) await restoreMediaLink(d.name, d.from, folder);
       await refresh();
@@ -79,5 +82,20 @@ export async function linkMissingInFolder(missing: MissingLink[]): Promise<numbe
   const rest = missing.length - n;
   if (n > 0) toast.success(`${n} file${n > 1 ? "s" : ""} linked${rest > 0 ? `, ${rest} not found in that folder` : ""}`, { position: "bottom-right", duration: 5000 });
   else toast.error("None of the missing files are in that folder", { position: "bottom-right", duration: 5000 });
+  return n;
+}
+
+/**
+ * Missing files that a backup or offload tool moved to another drive under the same path are
+ * linked again by themselves (outside the history: nothing the user did), and a toast says so.
+ */
+export async function linkMovedMedia(missing: MissingLink[]): Promise<number> {
+  if (missing.length === 0) return 0;
+  const found = await findMovedMedia(missing.map((m) => m.target));
+  const links = missing.filter((m) => found[m.target]).map((m) => ({ name: m.name, to: found[m.target], from: m.target }));
+  if (links.length === 0) return 0;
+  const n = await applyLinks(links, false);
+  const drive = links[0].to.split("/")[2];
+  if (n > 0) toast.success(`Found ${n > 1 ? `${n} missing files` : links[0].name} on ${drive} and linked ${n > 1 ? "them" : "it"}`, { position: "bottom-right", duration: 6000 });
   return n;
 }
