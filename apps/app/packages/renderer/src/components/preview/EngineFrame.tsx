@@ -4,6 +4,8 @@ import Konva from "konva";
 import { engineRender, ENGINE_FRAME_CANVAS_ID, ENGINE_FRAME_EVENT } from "@app/preload";
 import { setEnginePreviewSize, useEnginePreviewStore, useEngineDraws } from "@/lib/engine-preview";
 import { useControlsStore } from "@/lib/control";
+import { useClipStore } from "@/lib/clip";
+import { shownFrame } from "@/lib/playback-end";
 import { usePlayerStore, QUALITY_SCALE } from "@/lib/player";
 
 /** Longest side the engine renders the preview at. */
@@ -37,6 +39,7 @@ const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: numb
   const hoverFrame = useControlsStore((s) => s.hoverFrame);
   const playhead = useControlsStore((s) => s.focusFrame);
   const focusFrame = hoverFrame ?? playhead;
+  const end = useClipStore((s) => s.clipDuration);
   const fps = useControlsStore((s) => s.fps);
   const isPlaying = useControlsStore((s) => s.isPlaying);
   // False while the playhead is dragged: quick frames then, the exact one on release.
@@ -77,13 +80,14 @@ const EngineFrame: React.FC<{ rectWidth: number; rectHeight: number; scale: numb
   const playSize = useMemo(() => sized(playScale), [rectWidth, rectHeight, scale, playScale, dpr]);
   useEffect(() => setEnginePreviewSize(playSize.width, playSize.height), [playSize]);
 
-  // Paused: ask for the frame at the playhead. Playing, the engine sends frames by itself.
+  // Paused: ask for the frame at the playhead (the last one on the project's end, where
+  // playback stops). Playing, the engine sends frames by itself.
   useEffect(() => {
     if (!draws || !fps || isPlaying || size.width < 2 || size.height < 2) return;
-    void engineRender((focusFrame / fps) * 1e6, size.width, size.height, !accurate || hoverFrame != null).then((r) => {
+    void engineRender((shownFrame(focusFrame, end) / fps) * 1e6, size.width, size.height, !accurate || hoverFrame != null).then((r) => {
       if (!r.ok && !r.superseded) console.warn("[engine] render failed:", r.error);
     });
-  }, [draws, version, focusFrame, fps, size, isPlaying, accurate, hoverFrame]);
+  }, [draws, version, focusFrame, end, fps, size, isPlaying, accurate, hoverFrame]);
 
   if (!draws) return null;
   return <KonvaImage ref={nodeRef} image={canvas} x={0} y={0} width={rectWidth} height={rectHeight} listening={false} />;

@@ -7,6 +7,7 @@ import {
 } from "./settings";
 import { useClipStore } from "./clip";
 import { stickSelection, withMates } from "./bundle";
+import { playsFromStart } from "./playback-end";
 import _ from "lodash";
 
 /** A selection with its groups whole (lib/bundle.ts). */
@@ -374,8 +375,8 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
     const clips = useClipStore.getState();
     if (state.isPlaying) return;
     if (!clips || (clips.clips || []).length === 0) return;
-    // If we're at or past the end, restart from the beginning
-    if (state.focusFrame >= clips.clipDuration) {
+    // At or past the end (or on the last frame), restart from the beginning
+    if (playsFromStart(state.focusFrame, clips.clipDuration)) {
       set({ focusFrame: 0 });
     }
     __lastTickMs = 0;

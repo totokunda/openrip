@@ -7,6 +7,7 @@ import { recordFake, voiceoverAsk, voiceoverBegin, voiceoverEnd, voiceoverSaveTa
 import type { VoiceoverStatus } from "@app/preload";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
+import { playsFromStart } from "@/lib/playback-end";
 import { useProjectsStore } from "@/lib/projects";
 import { placeVoiceover } from "@/lib/audio";
 import { bumpMediaLibraryVersion } from "@/lib/media/library";
@@ -241,10 +242,11 @@ export const VoiceoverPanel: React.FC = () => {
     clock$.current = setInterval(() => setElapsed(Date.now() - startedAt.current), 100);
     setPhase("recording");
     void refresh();
-    // The timeline plays from the playhead while it records, as CapCut's does.
+    // The timeline plays from the playhead while it records, as CapCut's does (not where play
+    // would start again from the beginning).
     const controls = useControlsStore.getState();
     startFrame.current = controls.focusFrame;
-    if (!controls.isPlaying && controls.focusFrame < useClipStore.getState().clipDuration) {
+    if (!controls.isPlaying && !playsFromStart(controls.focusFrame, useClipStore.getState().clipDuration)) {
       controls.play();
       played.current = true;
     }

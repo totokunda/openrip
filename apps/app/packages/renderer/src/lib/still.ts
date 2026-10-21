@@ -4,7 +4,9 @@
 import { toast } from "sonner";
 import { engineExportStill, pickSavePath, revealPathInFolder, type EngineStillResult } from "@app/preload";
 import { useControlsStore } from "./control";
+import { useClipStore } from "./clip";
 import { useEnginePreviewStore } from "./engine-preview";
+import { shownFrame } from "./playback-end";
 import { useProjectsStore } from "./projects";
 
 /** "HH-MM-SS-FF" for a file name. */
@@ -32,7 +34,8 @@ export async function exportStillFrame(): Promise<EngineStillResult | null> {
   });
   if (!path) return null;
   const file = /\.png$/i.test(path) ? path : `${path}.png`;
-  const r = await engineExportStill((focusFrame / Math.max(1, fps)) * 1e6, file);
+  // The picture the player shows: the last frame on the project's end.
+  const r = await engineExportStill((shownFrame(focusFrame, useClipStore.getState().clipDuration) / Math.max(1, fps)) * 1e6, file);
   if (r.ok) {
     toast.success(`Still frame saved (${r.width}×${r.height})`, {
       action: { label: "Show", onClick: () => void revealPathInFolder(r.path) },

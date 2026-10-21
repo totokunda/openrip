@@ -14,6 +14,7 @@ import { getApplicatorsForClip } from "@/lib/applicator-utils";
 import { useWebGLHaldClut } from "./webgl-filters";
 import DrawingPreview from "./clips/DrawingPreview";
 import { setEnginePreviewSize, useEngineDraws, useEnginePreviewStore } from "@/lib/engine-preview";
+import { shownFrame } from "@/lib/playback-end";
 import { usePlayerStore, QUALITY_SCALE } from "@/lib/player";
 import { timecode } from "./PlayerBar";
 import { ExitFullscreenGlyph, PauseGlyph, PlayGlyph } from "./player-ui";
@@ -295,6 +296,7 @@ const EngineStage: React.FC<{ size: { width: number; height: number } }> = ({ si
   const version = useEnginePreviewStore((s) => s.version);
   const aspect = useViewportStore((s) => s.aspectRatio);
   const focusFrame = useControlsStore((s) => s.focusFrame);
+  const end = useClipStore((s) => s.clipDuration);
   const fps = useControlsStore((s) => s.fps);
   const isPlaying = useControlsStore((s) => s.isPlaying);
   const accurate = useControlsStore((s) => s.isAccurateSeekNeeded);
@@ -345,12 +347,12 @@ const EngineStage: React.FC<{ size: { width: number; height: number } }> = ({ si
     }
   }, [playSize]);
 
-  // Paused: the frame at the playhead at full-screen size.
+  // Paused: the frame at the playhead (the last one on the project's end) at full-screen size.
   useEffect(() => {
     const px = pixels(1);
     if (!fps || isPlaying || box.width < 4) return;
-    void engineRender((focusFrame / fps) * 1e6, px.width, px.height, !accurate);
-  }, [pixels, focusFrame, fps, isPlaying, accurate, version, box.width]);
+    void engineRender((shownFrame(focusFrame, end) / fps) * 1e6, px.width, px.height, !accurate);
+  }, [pixels, focusFrame, end, fps, isPlaying, accurate, version, box.width]);
 
   return (
     <canvas

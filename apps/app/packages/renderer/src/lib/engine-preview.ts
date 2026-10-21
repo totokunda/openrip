@@ -465,10 +465,14 @@ export function initEnginePreview() {
     if (!playing || token !== run || !c.isPlaying) return;
     c.setFocusFrame(Math.round((timeUs * c.fps) / 1e6), false);
   });
+  // The clock's last tick is the last frame's start, a frame short of the end: playback stops
+  // on the end itself, as the frame timer's does.
   onEngineEnded((_atUs, token) => {
-    if (token !== run) return;
+    if (!playing || token !== run) return;
     playing = false;
-    useControlsStore.getState().pause();
+    const c = useControlsStore.getState();
+    c.pause();
+    c.setFocusFrame(useClipStore.getState().clipDuration, false);
   });
 }
 
