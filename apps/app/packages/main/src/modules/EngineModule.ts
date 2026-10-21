@@ -271,7 +271,9 @@ async function sendFrame(engine: EngineAddon, sender: Electron.WebContents, f: {
         pixelFormat: "bgra",
         codedSize: { width: f.width, height: f.height },
         visibleRect: { x: 0, y: 0, width: f.width, height: f.height },
-        colorSpace: { primaries: "bt709", transfer: "srgb", matrix: "rgb", range: "full" },
+        // Rec. 709, as an export is tagged, shown as macOS shows Rec. 709 video (QuickTime, Final
+        // Cut Pro: CoreMedia's gamma 1.961) rather than as sRGB, which is darker in the mid-tones.
+        colorSpace: { primaries: "bt709", transfer: "bt709-apple", matrix: "rgb", range: "full" },
         timestamp: f.timeUs,
         handle: { ioSurface: f.ioSurface },
       },
