@@ -22,13 +22,13 @@ pub struct Cut<'a> {
 }
 
 /// The transition a clip is in at `t`. A transition is drawn only where a clip on the same
-/// track starts as the one with it ends. `tracks` are the ones `seg` is on (the project's,
-/// or those of a compound clip's content).
+/// track starts as the one with it ends, both shown (as the app finds a cut). `tracks` are the
+/// ones `seg` is on (the project's, or those of a compound clip's content).
 pub fn transition_at<'a>(project: &'a Project, tracks: &'a [Track], seg: &Segment, t: Micros) -> Option<Cut<'a>> {
     let of = |s: &Segment| s.attachments.iter().find_map(|id| project.materials.transitions.iter().find(|tr| &tr.id == id && tr.builtin.is_some() && tr.duration.0 > 0));
     let progress = |tr: &Transition, cut: i64| (t.0 - (cut - tr.duration.0 / 2)) as f64 / tr.duration.0 as f64;
     let track = tracks.iter().find(|tr| tr.segments.iter().any(|s| s.id == seg.id))?;
-    let meets = |a: &Segment, b: &Segment| a.id != b.id && (a.target.end().0 - b.target.start.0).abs() <= 1_000;
+    let meets = |a: &Segment, b: &Segment| a.id != b.id && a.visible && b.visible && (a.target.end().0 - b.target.start.0).abs() <= 1_000;
     let this = track.segments.iter().find(|s| s.id == seg.id)?;
     // Into the cut at the end of this clip.
     if let Some(tr) = of(this) {
@@ -402,6 +402,11 @@ mod tests {
         // A gap before the next clip is no cut either.
         let mut p = project("white_flash");
         p.tracks[0].segments[1].target.start = Micros(2_500_000);
+        let a = &p.tracks[0].segments[0];
+        assert!(transition_at(&p, &p.tracks, a, Micros(1_850_000)).is_none());
+        // Nor is a hidden clip: it would show for the first half and go at the cut.
+        let mut p = project("white_flash");
+        p.tracks[0].segments[1].visible = false;
         let a = &p.tracks[0].segments[0];
         assert!(transition_at(&p, &p.tracks, a, Micros(1_850_000)).is_none());
     }
