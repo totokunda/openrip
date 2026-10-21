@@ -56,6 +56,13 @@ module.exports = {
       to: "ffmpeg",
       filter: ["ffprobe", "ffprobe.exe"],
     },
+    // ffprobe-static's darwin/arm64 ffprobe is an Intel binary (it needs Rosetta), so an Apple
+    // silicon build also takes a native one, to `ffmpeg/arm64/`, which ffmpegBin.ts prefers.
+    {
+      from: "node_modules/@ffprobe-installer/${platform}-${arch}",
+      to: "ffmpeg/${arch}",
+      filter: ["ffprobe"],
+    },
     // The small clips the Transitions and Effects tiles are drawn on (resources/preview-footage,
     // with its CREDITS.txt), read by the engine from `<resources>/preview-footage/`.
     {

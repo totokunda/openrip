@@ -14,6 +14,9 @@ function tryRequire<T = unknown>(name: string): T | null {
 
 function getBundledBinaryPath(cmd: "ffmpeg" | "ffprobe"): string | null {
   const exeName = process.platform === "win32" ? `${cmd}.exe` : cmd;
+  // A native one for this architecture first (Apple silicon's ffprobe, electron-builder.cjs).
+  const native = join(process.resourcesPath, "ffmpeg", process.arch, exeName);
+  if (existsSync(native)) return native;
   const p = join(process.resourcesPath, "ffmpeg", exeName);
   return existsSync(p) ? p : null;
 }
@@ -23,6 +26,10 @@ function getDevStaticBinaryPath(cmd: "ffmpeg" | "ffprobe"): string | null {
     const p = tryRequire<string>("ffmpeg-static");
     return p && existsSync(p) ? p : null;
   }
+  // ffprobe-static's darwin/arm64 binary is an Intel one: the native package where there is one.
+  try {
+    return require.resolve(`@ffprobe-installer/${process.platform}-${process.arch}/ffprobe`);
+  } catch {}
   // ffprobe-static exports either { path } or a string depending on version.
   const mod = tryRequire<any>("ffprobe-static");
   const p = typeof mod === "string" ? mod : mod?.path;
