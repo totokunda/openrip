@@ -660,6 +660,10 @@ impl TextLayout {
         let mut tinted = (style.char_colors.is_some() || style.gradient.is_some()).then(|| vec![[0f32; 4]; (w * h) as usize]);
         let mut outline = style.stroke.map(|_| vec![0f32; (w * h) as usize]);
         let mut more: Vec<Vec<f32>> = style.more_strokes.iter().map(|_| vec![0f32; (w * h) as usize]).collect();
+        // A character on a word box has no outline or shadow, only its fill on the box: a dark fill on a light box kept
+        // the text's dark outline, and the letters closed up into a black blot (a caption's "Yellow box" word).
+        let on_box = |g: &Placed| style.word_boxes.is_some_and(|b| matches!(b.get(g.char_index), Some(Some(_))));
+        let mut boxed = style.word_boxes.map(|_| vec![0f32; (w * h) as usize]);
         let mut ctxs: Vec<ScaleContext> = (0..style.font.face_count()).map(|_| ScaleContext::new()).collect();
         let mut scalers = scalers(&mut ctxs, style.font, self.size);
         let draw = |cov: &mut [f32], img: &swash::scale::image::Image, x: f32, y: f32, alpha: f32| {
@@ -713,17 +717,21 @@ impl TextLayout {
                 Render::new(&[GlyphSource::Outline]).format(Format::Alpha).embolden(style.bold).transform(shear).style(pen).offset(offset).render(scaler, g.glyph)
             };
             let scaler = &mut scalers[g.face];
-            if let Some(cov) = outline.as_mut() {
+            let on_a_box = on_box(g);
+            if let Some(cov) = outline.as_mut().filter(|_| !on_a_box) {
                 if let Some(img) = outlined(scaler, stroke) {
                     draw(cov, &img, x, y, alpha);
                 }
             }
-            for (cov, &(_, width)) in more.iter_mut().zip(style.more_strokes) {
+            for (cov, &(_, width)) in more.iter_mut().zip(style.more_strokes).filter(|_| !on_a_box) {
                 if let Some(img) = outlined(scaler, width) {
                     draw(cov, &img, x, y, alpha);
                 }
             }
             if let Some(img) = Render::new(&[GlyphSource::Outline]).format(Format::Alpha).embolden(style.bold).transform(shear).offset(offset).render(scaler, g.glyph) {
+                if let Some(cov) = boxed.as_mut().filter(|_| on_a_box) {
+                    draw(cov, &img, x, y, alpha);
+                }
                 match tinted.as_mut() {
                     None => draw(&mut fill, &img, x, y, alpha),
                     Some(tinted) => {
@@ -813,6 +821,7 @@ impl TextLayout {
         let shadow = style.shadow.map(|(color, [ox, oy], blur)| {
             let solid = |i: usize| {
                 let f = tinted.as_ref().map_or(fill[i], |t| t[i][3]);
+                let f = boxed.as_ref().map_or(f, |b| (f - b[i]).max(0.0));
                 more.iter().fold(outline.as_ref().map_or(f, |o| f.max(o[i])), |a, m| a.max(m[i]))
             };
             let mut sh: Vec<[f32; 4]> = (0..(w * h) as usize)
@@ -1458,5 +1467,30 @@ mod tests {
         // Both draw: the fallback's glyph has ink.
         let img = both.rasterize(&style(&both_font), [0.0, 0.0]).image;
         assert!(img.data.chunks(4).filter(|p| p[3] > 128).count() > 100);
+    }
+
+    #[test]
+    fn a_word_on_a_box_has_its_fill_only_never_the_texts_outline_or_shadow() {
+        // A caption's "Yellow box": white text, a black outline and shadow, and the word being said in black on a yellow
+        // box. With the outline the black letters closed up into a blot.
+        let Some(font) = web_font("poppins-latin-400-normal.woff2") else { return };
+        let (black, yellow) = ([0, 0, 0, 255], [255, 230, 0, 255]);
+        let colors = [black; 4];
+        let boxes = [Some(yellow); 4];
+        let style = |stroke, shadow| {
+            #[rustfmt::skip]
+            let s = TextStyle { font: &font, size: 60.0, color: [255; 4], align: Align::Left, letter_spacing: 0.0, line_spacing: 0.0, line_height: None, kerning: true, stroke, more_strokes: &[], gradient: None, glow: None, background: None, shadow, max_width: None, bold: 0.0, italic: 0.0, effect: None, curve: 0.0, char_colors: Some(&colors), word_boxes: Some(&boxes), underline: false };
+            s
+        };
+        let plain = style(None, None);
+        let outlined = style(Some((black, 6.0)), Some((black, [3.0, 3.0], 2.0)));
+        let a = layout("time", &plain).rasterize(&plain, [0.0, 0.0]).image;
+        let b = layout("time", &outlined).rasterize(&outlined, [0.0, 0.0]).image;
+        // The same box and letters either way (the outlined text's image may be padded wider for its outline).
+        let ink = |img: &RgbaImage| img.data.chunks(4).filter(|p| p[3] > 128 && p[0] < 60 && p[1] < 60).count();
+        let yellow_px = |img: &RgbaImage| img.data.chunks(4).filter(|p| p[3] > 128 && p[0] > 200 && p[1] > 180 && p[2] < 80).count();
+        assert_eq!(ink(&a), ink(&b), "the boxed word's black ink grew with the text's outline");
+        assert_eq!(yellow_px(&a), yellow_px(&b));
+        assert!(yellow_px(&b) > ink(&b), "the box shows around and inside the letters");
     }
 }
