@@ -279,6 +279,8 @@ const Timeline: React.FC<
           timelinePadding={timelinePadding}
           bottom={timelineBottomY}
           height={renderedTimelineHeight}
+          dimmed={hidden || !!locked}
+          locked={!!locked}
         />
       )}
       <GhostTimeline
