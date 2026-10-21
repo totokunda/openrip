@@ -34,6 +34,10 @@ const timecode = (frames: number, fps: number) => {
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}:${pad(f % r)}`;
 };
 
+/** What a video's or photo's effects chip says: the effect's name, or how many there are. */
+const effectsLabel = (effects: { name: string }[] | undefined) =>
+  !effects?.length ? undefined : effects.length === 1 ? effects[0].name || "Effect" : `${effects.length} effects`;
+
 /** A path's file name (without a detach's `#audio`/`#video`). */
 const nameOf = (path: string | undefined) => {
   const file = fileOf(path);
@@ -146,7 +150,14 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
           snap={snap}
         />
       )}
-      <ClipChips texts={[(clip as VideoClipProps).compound ? (clip as VideoClipProps).name ?? "Compound clip" : nameOf(asset?.path), timecode(len, fps)]} fill={VIDEO_CHIP} maxWidth={width} clipId={clip.clipId} glyph={(clip as VideoClipProps).compound ? "compound" : undefined} />
+      <ClipChips
+        texts={[(clip as VideoClipProps).compound ? (clip as VideoClipProps).name ?? "Compound clip" : nameOf(asset?.path), timecode(len, fps)]}
+        fill={VIDEO_CHIP}
+        maxWidth={width}
+        clipId={clip.clipId}
+        glyph={(clip as VideoClipProps).compound ? "compound" : undefined}
+        effect={effectsLabel((clip as VideoClipProps).effects)}
+      />
     </>
   );
 };

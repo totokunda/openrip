@@ -1,6 +1,6 @@
 import { getZoomLevelConfig } from "@/lib/zoom";
 import { scrubSound, skimSound, scrubSoundStop } from "@/lib/scrub-audio";
-import { addEffectBar, applyEffectToClip, takesEffects } from "@/lib/effects/library";
+import { addEffectBar, applyEffectToClip, takesEffects, useEffectDropStore } from "@/lib/effects/library";
 import type { EffectDrag } from "../menus/EffectsMenu";
 import type { PresetDrag } from "../menus/PresetsMenu";
 import { applyPreset, useClipPresets } from "@/lib/clip-presets";
@@ -408,24 +408,39 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     return cutNear(clips, track.timelineId, frame, 24 * perPx);
   };
 
-  // An effect tile from the Effects tab dropped on the timeline: onto a video or photo it goes
-  // on that clip, elsewhere it's an effect bar starting at the frame under the pointer.
-  const dropEffect = (event: { activatorEvent: Event | null; delta: { x: number; y: number } }, effectId: string) => {
+  // An effect tile from the Effects tab over the timeline: the frame under the pointer (and its
+  // x on the stage), and the video or photo there it would go onto (null elsewhere: it'd be an
+  // effect bar starting at that frame). Null off the timeline.
+  const effectDropAt = (event: { activatorEvent: Event | null; delta: { x: number; y: number } }): { frame: number; x: number; clipId: string | null } | null => {
     const start = event.activatorEvent as PointerEvent | null;
     const el = containerRef.current;
-    if (!start || !el || typeof start.clientX !== "number") return;
+    if (!start || !el || typeof start.clientX !== "number") return null;
     const r = el.getBoundingClientRect();
     const cx = start.clientX + event.delta.x;
     const cy = start.clientY + event.delta.y;
-    if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return;
+    if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return null;
     const y = cy - r.top;
     const [vs, ve] = controlStore.timelineDuration;
     const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
     const frame = Math.max(0, Math.round(vs + (cx - r.left - TIME_ZERO_X) * perPx));
     const track = trackAt(timelines, y);
     const onClip = track && clips.find((c) => c.timelineId === track.timelineId && takesEffects(c.type) && c.startFrame <= frame && frame < c.endFrame);
-    if (onClip) void applyEffectToClip(onClip.clipId, effectId);
-    else void addEffectBar(effectId, frame);
+    return { frame, x: TIME_ZERO_X + (frame - vs) / Math.max(1e-9, perPx), clipId: onClip ? onClip.clipId : null };
+  };
+
+  // An effect tile dropped on the timeline: onto a video or photo it goes on that clip,
+  // elsewhere it's an effect bar starting at the frame under the pointer.
+  const dropEffect = (event: { activatorEvent: Event | null; delta: { x: number; y: number } }, effectId: string) => {
+    const at = effectDropAt(event);
+    if (!at) return;
+    if (at.clipId) void applyEffectToClip(at.clipId, effectId);
+    else void addEffectBar(effectId, at.frame);
+  };
+
+  // Nothing marked for an effect tile once it's let go or given up.
+  const clearEffectDrop = () => {
+    useEffectDropStore.getState().setTarget(null);
+    useClipStore.getState().setSnapGuideX(null);
   };
 
   // A saved preset (Media ▸ Yours ▸ My presets) let go on a clip goes onto that clip; onto one of
@@ -535,6 +550,14 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       // Edge auto-scroll for external DnD moves
       edgeAutoScroll(pointerY);
 
+      // An effect tile marks the clip it would go onto, or the frame its bar would start at.
+      if ((data as unknown as EffectDrag)?.type === "effect-preset") {
+        const at = effectDropAt(event);
+        useEffectDropStore.getState().setTarget(at?.clipId ?? null);
+        useClipStore.getState().setSnapGuideX(at && !at.clipId ? at.x : null);
+        return;
+      }
+
       if (
         data?.type === "image" ||
         data?.type === "video" ||
@@ -581,6 +604,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       // press without a move).
       const effectDrag = data as unknown as EffectDrag;
       if (effectDrag.type === "effect-preset") {
+        clearEffectDrop();
         if (Math.hypot(event.delta.x, event.delta.y) > 3) dropEffect(event, effectDrag.effectId);
         setIsDragging(false);
         return;
@@ -646,6 +670,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     // A drag given up (Escape): the main track goes back to how it is.
     onDragCancel: () => {
       useTransitionDropStore.getState().setTarget(null);
+      clearEffectDrop();
       insertAtRef.current = null;
       useClipStore.getState().setMainPreview(null);
       setGhostTimelineId(null);

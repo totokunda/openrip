@@ -26,7 +26,7 @@ import {
 import { generatePosterCanvas } from "@/lib/media/timeline";
 import { useControlsStore } from "@/lib/control";
 import { useAssetControlsStore } from "@/lib/assetControl";
-import { Image, Group, Rect, Text, Line } from "react-konva";
+import { Image, Group, Rect, Text, Line, Path } from "react-konva";
 import Konva from "konva";
 import { sanitizeCornerRadius } from "@/lib/konva/sanitizeCornerRadius";
 import {
@@ -54,6 +54,8 @@ import { useWebGLMask } from "@/components/preview/mask/useWebGLMask";
 import MaskKeyframes from "./MaskKeyframes";
 import ClipKeyframes from "./ClipKeyframes";
 import MotionMarks from "./MotionMarks";
+import { WAND } from "./Waveform";
+import { useEffectDropStore } from "@/lib/effects/library";
 import { freezeTarget } from "@/lib/timeline-motion";
 import { rotate90, toggleFlip } from "@/lib/transform-presets";
 import { rangeByClip } from "@/lib/timeline-shortcuts";
@@ -202,6 +204,8 @@ const TimelineClip: React.FC<
   const addTimeline = useClipStore((s) => s.addTimeline);
   const getAssetById = useClipStore((s) => s.getAssetById);
   const setIsDraggingGlobal = useClipStore((s) => s.setIsDragging);
+  // An effect tile being dragged over this clip (it would go onto it).
+  const effectDropHere = useEffectDropStore((s) => s.target === clipId);
   // Only a masked clip's thumbnails follow the playhead (its masks have keyframes); every
   // other clip ignores it, rather than re-rendering on each frame.
   const hasMasks = useClipStore((s) => (((s.getClipById(clipId) as any)?.masks?.length ?? 0) as number) > 0);
@@ -236,6 +240,8 @@ const TimelineClip: React.FC<
         (timelineId ? c.timelineId === timelineId : true),
     ),
   );
+  // A bar on an effect track drawing one of the Effects tab's effects.
+  const effectBar = clipType === "filter" && !!(currentClip as FilterClipProps | undefined)?.effectId;
 
   const assetFocusFrame = useAssetControlsStore((s) => s.focusFrame);
   const { applyMask } = useWebGLMask({
@@ -2308,15 +2314,17 @@ const TimelineClip: React.FC<
               <Rect
                 x={12 - 4}
                 y={timelineHeight / 2}
-                width={textWidth + 8}
+                width={textWidth + 8 + (effectBar ? 13 : 0)}
                 height={14}
                 cornerRadius={3}
                 fill="rgba(255, 255, 255, 0.09)"
                 offsetY={7.5}
               />
+              {/* An effect bar leads with the Effects tab's wand. */}
+              {effectBar && <Path x={10} y={timelineHeight / 2 - 5} scaleX={10 / 24} scaleY={10 / 24} data={WAND} fill="#ffffff" listening={false} />}
               <Text
                 ref={textRef}
-                x={9}
+                x={9 + (effectBar ? 13 : 0)}
                 y={timelineHeight / 2}
                 text={(currentClip as FilterClipProps)?.name ?? ""}
                 fontSize={9.5}
@@ -2412,6 +2420,21 @@ const TimelineClip: React.FC<
             fillPatternRepeat={"repeat"}
           />
         </Group>
+      )}
+      {/* An effect tile dragged over it: it goes onto this clip when let go. */}
+      {!assetMode && effectDropHere && (
+        <Rect
+          name="effect-drop-target"
+          x={clipPosition.x}
+          y={clipPosition.y}
+          width={clipWidth}
+          height={timelineHeight}
+          cornerRadius={safeCornerRadius}
+          fill={"rgba(174, 129, 206, 0.28)"}
+          stroke={"#ae81ce"}
+          strokeWidth={2}
+          listening={false}
+        />
       )}
       <Rect
         ref={rectRefRight}

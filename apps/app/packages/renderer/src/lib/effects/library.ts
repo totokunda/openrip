@@ -32,6 +32,15 @@ export const useEffectLibrary = create<EffectLibrary>((set, get) => ({
 
 void loadStored(STORE_KEY, KEY, parseStrings).then((v) => v && useEffectLibrary.setState((s) => ({ favourites: [...new Set([...v, ...s.favourites])] })));
 
+/**
+ * The video or photo an effect tile is being dragged over (the clip it would go onto), for the
+ * timeline to mark; null when it's over none.
+ */
+export const useEffectDropStore = create<{ target: string | null; setTarget: (id: string | null) => void }>((set) => ({
+  target: null,
+  setTarget: (target) => set((s) => (s.target === target ? s : { target })),
+}));
+
 /** The bar a tile makes: the fields of a filter-track clip drawing the effect (also what a tile dropped on the timeline gets). */
 export const effectClipFields = (def: EffectDef): Partial<FilterClipProps> => ({
   name: def.name,
