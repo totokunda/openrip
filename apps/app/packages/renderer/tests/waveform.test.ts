@@ -8,12 +8,19 @@ import {
   BAR_PITCH,
   DB_RANGE,
   FIRST_BAR,
+  VOLUME_MAX,
+  VOLUME_MIN,
   barHeight,
   clipBars,
+  dragVolume,
+  formatDb,
   gainDbAt,
+  lineDb,
+  lineHeight,
   mediaBands,
   scaleFor,
   soundKindOf,
+  volumeAt,
   volumeLine,
   windowRms,
   type WaveformBuckets,
@@ -90,17 +97,60 @@ test("bars follow the media through trims, speed and reverse, the audio clip's 2
   close(s3, 5 + lag, 0.05, "backward, the loud part 10 − 5 s in");
 });
 
-test("the volume line: 13 px at 0 dB, with the volume on the bars' scale, down through the fades", () => {
+test("the volume line: 13 px at 0 dB, moving with the volume, down through the fades", () => {
   const flat = volumeLine(clip(), opts);
   assert.equal(flat.length, 2);
   assert.equal(flat[0].h, 13);
-  close(volumeLine(clip({ volume: 6 }), opts)[0].h, 13 + (6 * AUDIO_SCALE.full) / DB_RANGE, 1e-9, "a louder clip's line higher");
+  close(volumeLine(clip({ volume: 6 }), opts)[0].h, 13 + (37 * 6) / 20, 1e-9, "a louder clip's line higher");
+  close(volumeLine(clip({ volume: -6 }), opts)[0].h, 13 * Math.pow(10, -6 / 20), 1e-9, "a quieter one's lower");
   const faded = volumeLine(clip({ fadeIn: 1, fadeOut: 1 }), opts);
   assert.equal(faded[0].h, 0, "a fade starts it at the bottom");
   assert.equal(faded[faded.length - 1].h, 0, "and ends it there");
+  close(faded.find((p) => p.x === 16)!.h, 13 * (16 / 30), 1e-9, "a straight ramp");
   close(faded.find((p) => p.x > 60)!.h, 13, 1e-9, "level between them");
   close(gainDbAt(clip({ fadeIn: 1 }), 15, FPS), 20 * Math.log10(0.5), 1e-9, "halfway through a fade, −6 dB");
   assert.equal(volumeLine(clip(), { ...opts, scale: BAND_SCALE })[0].h, 6.5, "6.5 px in a video's band");
+});
+
+test("the volume line's height and its dB: 0 dB at the scale's line, +20 dB at the top, −∞ at the bottom", () => {
+  const h = (db: number, scale = AUDIO_SCALE, max = 50) => lineHeight(db, scale, max);
+  assert.equal(h(0), 13);
+  assert.equal(h(20), 50, "+20 dB at the area's top");
+  assert.equal(h(10), 31.5, "linear in dB above 0");
+  close(h(-6), 6.5, 0.02, "−6 dB halfway down");
+  assert.equal(h(-Infinity), 0, "nothing at −∞");
+  assert.equal(h(30), 50, "never past the top");
+  assert.equal(h(0, BAND_SCALE, 16), 6.5, "6.5 px in a video's band");
+  assert.equal(h(20, BAND_SCALE, 16), 16);
+  assert.equal(h(0, scaleFor(AUDIO_SCALE, 50, 50, 100)), 37.5, "a scale's line above three quarters of the area comes down to them");
+  // Back again, wherever it is.
+  for (const scale of [AUDIO_SCALE, BAND_SCALE, scaleFor(AUDIO_SCALE, 50, 50, 100)]) {
+    for (const db of [-40, -12.5, -6, -0.1, 0, 0.1, 3, 12, 20]) close(lineDb(h(db, scale), scale, 50), db, 1e-9, `${db} dB`);
+  }
+  assert.equal(lineDb(0, AUDIO_SCALE, 50), VOLUME_MIN, "the bottom: the inspector's least");
+  assert.equal(lineDb(-10, AUDIO_SCALE, 50), VOLUME_MIN, "below it too");
+  assert.equal(lineDb(80, AUDIO_SCALE, 50), VOLUME_MAX, "past the top: +20 dB");
+});
+
+test("dragging the volume line sets the volume to the inspector's step, or moves its keys together", () => {
+  assert.deepEqual(dragVolume(clip(), 0, 5.4054), { patch: { volume: 5.4 }, value: 5.4 });
+  assert.deepEqual(dragVolume(clip({ volume: -3 }), -3, -70), { patch: { volume: VOLUME_MIN }, value: VOLUME_MIN }, "held to the range");
+  assert.equal(dragVolume(clip(), 0, -0.04).value, 0, "no −0");
+  const keyed = clip({ keyframes: { volume: [{ frame: 0, value: 0 }, { frame: 30, value: -12, ease: "hold" }, { frame: 60, value: 18 }] } });
+  const from = volumeAt(keyed, 15, FPS);
+  const { patch, value } = dragVolume(keyed, from, from + 3.04);
+  assert.deepEqual(
+    patch.keyframes?.volume,
+    [{ frame: 0, value: 3 }, { frame: 30, value: -9, ease: "hold" }, { frame: 60, value: VOLUME_MAX }],
+    "every key by 3 dB, its ease kept, none past +20",
+  );
+  close(value, from + 3, 0.05, "the grabbed point 3 dB up");
+  close(volumeAt({ ...keyed, ...patch }, 15, FPS), from + 3, 1e-4, "the curve with it");
+  assert.equal(keyed.keyframes!.volume![0].value, 0, "the clip as it was is left alone");
+  assert.equal(volumeAt(clip({ volume: -4 }), 15, FPS), -4);
+  assert.equal(formatDb(3), "+3.0 dB");
+  assert.equal(formatDb(-12.46), "-12.5 dB");
+  assert.equal(formatDb(-0.01), "0.0 dB");
 });
 
 test("media bands, kinds and sizes", () => {

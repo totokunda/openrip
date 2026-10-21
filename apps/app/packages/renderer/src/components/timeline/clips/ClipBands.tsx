@@ -9,6 +9,7 @@ import { useWaveform } from "@/lib/waveform-source";
 import { useCompoundWaveform } from "@/lib/compound-mix";
 import { AUDIO_SCALE, BAND_SCALE, SOUND_COLORS, mediaBands, scaleFor, soundKindOf } from "@/lib/waveform";
 import { ClipChips, Waveform } from "./Waveform";
+import { VolumeLine } from "./VolumeLine";
 import { TIMELINE_COLORS } from "@/lib/timeline-colors";
 
 /**
@@ -17,7 +18,8 @@ import { TIMELINE_COLORS } from "@/lib/timeline-colors";
  * at the top left; a video or photo has a label band (name and length chips), its thumbnails,
  * and a bottom band with its own sound's waveform (empty for a photo, or a video whose sound was
  * detached). The track's "…" menu sets the waveform's size and the track's height. The body and
- * band rects take the clip's clicks and drags (its group has no hit area but its children's).
+ * band rects take the clip's clicks and drags (its group has no hit area but its children's);
+ * the volume line over a waveform takes its own (VolumeLine), on a clip that can be edited.
  */
 
 const VIDEO_BODY = TIMELINE_COLORS.video;
@@ -71,16 +73,19 @@ type FaceProps = {
   toPx: number;
   snap: number;
   cornerRadius: number;
+  /** Whether its volume line can be dragged (not on a locked track, nor with the blade). */
+  editable?: boolean;
 };
 
 /** An audio clip: its kind's colour, its waveform over the whole clip, its name chip. */
-export const SoundClipFace: React.FC<FaceProps> = ({ clip, timelineId, width, height, fromPx, toPx, snap, cornerRadius }) => {
+export const SoundClipFace: React.FC<FaceProps> = ({ clip, timelineId, width, height, fromPx, toPx, snap, cornerRadius, editable }) => {
   const asset = useClipStore((s) => s.assets[(clip as AudioClipProps).assetId]);
   const fps = useControlsStore((s) => s.fps) || 30;
   const { size } = useTrack(timelineId);
   const buckets = useWaveform(asset?.path);
   const colors = SOUND_COLORS[soundKindOf(asset)];
   const len = Math.max(1, (clip.endFrame ?? 0) - (clip.startFrame ?? 0));
+  const scale = scaleFor(AUDIO_SCALE, height, AUDIO_HEIGHT, size);
   return (
     <>
       <Rect width={width} height={height} cornerRadius={cornerRadius} fill={colors.body} />
@@ -95,12 +100,15 @@ export const SoundClipFace: React.FC<FaceProps> = ({ clip, timelineId, width, he
           toPx={toPx}
           y={0}
           height={height}
-          scale={scaleFor(AUDIO_SCALE, height, AUDIO_HEIGHT, size)}
+          scale={scale}
           color={colors.bar}
           snap={snap}
         />
       )}
       <ClipChips texts={[asset?.credit?.title ?? nameOf(asset?.path).replace(/\.[^.]+$/, "")]} fill={colors.chip} maxWidth={width} clipId={clip.clipId} />
+      {buckets && editable && (
+        <VolumeLine clip={clip} fps={fps} pxPerFrame={width / len} width={width} fromPx={fromPx} toPx={toPx} y={0} height={height} scale={scale} />
+      )}
     </>
   );
 };
@@ -118,6 +126,7 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
   toPx,
   snap,
   bands,
+  editable,
 }) => {
   const asset = useClipStore((s) => s.assets[(clip as AudioClipProps).assetId]);
   const fps = useControlsStore((s) => s.fps) || 30;
@@ -130,6 +139,7 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
   const buckets = fileBuckets ?? mix?.buckets ?? null;
   const len = Math.max(1, (clip.endFrame ?? 0) - (clip.startFrame ?? 0));
   const top = height - bands.sound;
+  const scale = scaleFor(BAND_SCALE, bands.sound, 16, size);
   return (
     <>
       <Rect width={width} height={bands.label} fill={VIDEO_BODY} />
@@ -145,7 +155,7 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
           toPx={toPx}
           y={top}
           height={bands.sound}
-          scale={scaleFor(BAND_SCALE, bands.sound, 16, size)}
+          scale={scale}
           color={TIMELINE_COLORS.fromVideoWave}
           snap={snap}
         />
@@ -158,6 +168,9 @@ export const MediaBandsFace: React.FC<FaceProps & { bands: { label: number; thum
         glyph={(clip as VideoClipProps).compound ? "compound" : undefined}
         effect={effectsLabel((clip as VideoClipProps).effects)}
       />
+      {buckets && bands.sound > 0 && editable && (
+        <VolumeLine clip={clip} fps={fps} pxPerFrame={width / len} width={width} fromPx={fromPx} toPx={toPx} y={top} height={bands.sound} scale={scale} />
+      )}
     </>
   );
 };

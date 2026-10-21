@@ -2188,6 +2188,7 @@ const TimelineClip: React.FC<
               toPx={imageX + imageWidth}
               snap={pixelSnap}
               cornerRadius={safeCornerRadius}
+              editable={!assetMode && !locked && !blade}
             />
           ) : (
             <>
@@ -2211,6 +2212,7 @@ const TimelineClip: React.FC<
                   snap={pixelSnap}
                   cornerRadius={safeCornerRadius}
                   bands={bands}
+                  editable={!assetMode && !locked && !blade}
                 />
               )}
             </>
