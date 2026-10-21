@@ -80,7 +80,7 @@ const CaptionListProperties: React.FC<{ clipId: string }> = ({ clipId }) => {
                   onChange={(e) => updateClip(r.clipId, { text: e.target.value } as Partial<TextClipProps>)}
                   className="w-full resize-none bg-transparent text-[13px] leading-[1.4] text-brand-lighter outline-none focus:bg-brand rounded-[3px] px-1 -mx-1"
                 />
-                <span className="text-[11px] text-[#6c6c6c] tabular-nums">{rowTime(r.startFrame, fps)}</span>
+                <span className="text-[11px] text-[#6c6c6c] tabular-nums text-left">{rowTime(r.startFrame, fps)}</span>
               </div>
             </div>
           );
