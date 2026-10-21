@@ -7,6 +7,7 @@ import { app, ipcMain, net, sharedTexture } from "electron";
 import { AppModule } from "../AppModule.js";
 import { ModuleContext } from "../ModuleContext.js";
 import { ensureProjectJson } from "./JSONPersistenceModule.js";
+import { withFilterTablesOnDisk } from "./engineFiles.js";
 import { getSettingsModule, type Preferences } from "./SettingsModule.js";
 import { TilePreviews } from "./TilePreviews.js";
 
@@ -232,6 +233,9 @@ function load(): EngineInfo {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Where the engine reads the look tables of the filters bundled inside app.asar (engineFiles.ts). */
+const filterTablesDir = () => join(app.getPath("userData"), "engine-filters");
 
 /**
  * The file behind a font the page loads: the file itself for a file URL, or the dev server's
@@ -627,7 +631,7 @@ export class EngineModule implements AppModule {
       try {
         const id = Number(projectId);
         const t0 = performance.now();
-        const doc = ensureProjectJson({ ...(payload as object) }, id, app.getVersion());
+        const doc = withFilterTablesOnDisk(ensureProjectJson({ ...(payload as object) }, id, app.getVersion()), filterTablesDir());
         const json = JSON.stringify(doc);
         if (openProjectId !== id) this.#playback.stop();
         const t1 = performance.now();
@@ -710,7 +714,7 @@ export class EngineModule implements AppModule {
     ipcMain.handle("engine:export", async (event, projectId: number, payload: unknown, path: string, options: EngineExportOptions): Promise<ExportResult> => {
       const engine = addon;
       if (!engine) return { ok: false, error: "engine not available" };
-      const json = JSON.stringify(ensureProjectJson({ ...(payload as object) }, Number(projectId), app.getVersion()));
+      const json = JSON.stringify(withFilterTablesOnDisk(ensureProjectJson({ ...(payload as object) }, Number(projectId), app.getVersion()), filterTablesDir()));
       const sender = event.sender;
       const timer = setInterval(() => {
         if (!sender.isDestroyed()) {
