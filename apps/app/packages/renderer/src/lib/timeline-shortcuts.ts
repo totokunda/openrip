@@ -8,7 +8,7 @@ import { useClipStore } from "./clip";
 import { zoomFit, zoomIn, zoomOut } from "./player-zoom";
 import { usePlayerStore } from "./player";
 import { useControlsStore } from "./control";
-import { zoomDuration, zoomLevelFor } from "./zoom";
+import { zoomAnchor, zoomDuration, zoomLevelFor } from "./zoom";
 import type { ZoomLevel } from "./types";
 import { isClipLocked } from "./timeline-edit";
 import { useKeyframeGraphStore } from "./timeline-keyframes";
@@ -57,14 +57,14 @@ import { copySelectedAttributes, pasteSelectedAttributes } from "./clip-presets"
 
 /**
  * Zoom the timeline to `level` (1 shows the whole project, 10 a few frames), keeping the
- * playhead where it is on screen.
+ * playhead where it is on screen (scrolled out of view, back where it was last put).
  */
 export function zoomTimelineTo(level: number) {
   const c = useControlsStore.getState();
   const clamped = Math.max(c.minZoomLevel, Math.min(c.maxZoomLevel, Math.round(level)));
   // Level 1 spans the whole timeline (two minutes when it's shorter) and the last level a few frames.
   const duration = zoomDuration(clamped, c.minZoomLevel, c.maxZoomLevel, c.totalTimelineFrames, c.fps || 24);
-  let start = Math.round(c.focusFrame - c.focusAnchorRatio * duration);
+  let start = Math.round(c.focusFrame - zoomAnchor(c.focusFrame, c.timelineDuration, c.focusAnchorRatio) * duration);
   start = Math.max(0, Math.min(start, Math.max(0, c.totalTimelineFrames - duration)));
   c.setFocusAnchorRatio(duration > 0 ? (c.focusFrame - start) / duration : 0.5);
   c.setTimelineDuration(start, start + duration);

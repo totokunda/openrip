@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { canTrimClip, sourceSecondsAt, trimExtent, trimPatch } from "../src/lib/trim-clip.ts";
-import { OVERVIEW_SECONDS, zoomDuration, zoomLevelFor } from "../src/lib/zoom.ts";
+import { OVERVIEW_SECONDS, zoomAnchor, zoomDuration, zoomLevelFor } from "../src/lib/zoom.ts";
 
 const clip = (over: Record<string, unknown> = {}) =>
   ({ clipId: "c", type: "video", assetId: "a", startFrame: 100, endFrame: 200, trimStart: 20, trimEnd: -30, ...over }) as any;
@@ -58,4 +58,14 @@ test("the zoom runs from two minutes (or the whole timeline when longer) down to
   }
   assert.equal(zoomLevelFor(short, 1, 10, short, fps) > 1, true);
   assert.equal(zoomLevelFor(OVERVIEW_SECONDS * fps, 1, 10, short, fps), 1);
+});
+
+test("the zoom keeps the playhead where it is on screen, and brings it back where it was last put when scrolled out of view", () => {
+  // Put at a fifth of the way across [300, 600], then the view scrolled on 60 frames: it's at 0.
+  assert.equal(zoomAnchor(360, [360, 660], 0.2), 0);
+  assert.equal(zoomAnchor(480, [300, 600], 0.2), 0.6);
+  assert.equal(zoomAnchor(600, [300, 600], 0.2), 1);
+  // Scrolled out of view either way.
+  assert.equal(zoomAnchor(250, [300, 600], 0.2), 0.2);
+  assert.equal(zoomAnchor(900, [300, 600], 0.2), 0.2);
 });

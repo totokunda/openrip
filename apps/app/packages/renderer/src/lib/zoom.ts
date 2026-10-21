@@ -30,6 +30,16 @@ export const zoomLevelFor = (width: number, min: number, max: number, total: num
   return best;
 };
 
+/**
+ * Where the playhead at `focus` stays across the view (0 to 1) as the timeline zooms: where it is
+ * in `view`, or, scrolled out of it (a scroll leaves the playhead at its time), back at `anchor`,
+ * where it was last put.
+ */
+export const zoomAnchor = (focus: number, view: [number, number], anchor: number): number => {
+  const at = (focus - view[0]) / Math.max(1, view[1] - view[0]);
+  return at >= 0 && at <= 1 ? at : anchor;
+};
+
 interface ZoomLevelConfig {
   minorTickInterval: number;
   majorTickInterval: number;
