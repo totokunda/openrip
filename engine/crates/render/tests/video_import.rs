@@ -189,3 +189,30 @@ fn a_lut_on_10_bit_video_keeps_its_levels() {
         assert!(row.len() >= 60, "{w}x{h}: {} levels: {row:?}", row.len());
     }
 }
+
+/// Shrunk, a 10-bit video is sharpened after its LUT, not before: sharpened first, the LUT
+/// (curved, as log LUTs are) bends the sharpen's overshoot into a halo.
+#[test]
+fn a_shrunk_10_bit_video_is_sharpened_after_its_lut() {
+    // Dark then bright, at 0.1005 and 0.6005, the edge on an even column.
+    let Some(path) = grey_clip("lut-edge.mp4", 128, 32, &["-c:v", "libx265", "-x265-params", "qp=0:log-level=error", "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1"], |x| if x < 64 { 152 } else { 590 }) else { return };
+    let Ok(c) = Compositor::new() else { return };
+    let mut d = VideoDecoder::open(&path, &DecoderOptions { hardware: HardwareMode::Require, ..Default::default() }).unwrap();
+    let f = d.frame_at(Micros(100_000)).unwrap().unwrap();
+    assert_eq!(f.pixel_format(), PixelFormat::P010);
+    let lut = channel_lut(f32::sqrt);
+    let img = c.render(64, 16, [0, 0, 0], &[Layer { lut: Some((&lut, 1.0)), ..Layer::from_model(Source::Video(&f), [64, 16], [0.0, 0.0], [1.0, 1.0], 0.0) }]);
+    // The table read along its grey diagonal, then CapCut's 0.15 sharpen across the edge.
+    let table = |v: f32| {
+        let p = v * 64.0;
+        let i = (p.floor() as usize).min(63);
+        let at = |i: usize| (i as f32 / 64.0).sqrt();
+        at(i) + (at(i + 1) - at(i)) * (p - i as f32)
+    };
+    let (dark, bright) = (table(88.0 / 876.0), table(526.0 / 876.0));
+    let a = openrip_render::DOWNSCALE_SHARPEN;
+    for (x, want) in [(31, (1.0 + a) * dark - a * bright), (32, (1.0 + a) * bright - a * dark)] {
+        let got = img.data[((8 * 64 + x) * 4) as usize] as f32 / 255.0;
+        assert!((got - want).abs() <= 2.5 / 255.0, "x {x}: {:.1} vs {:.1}", got * 255.0, want * 255.0);
+    }
+}

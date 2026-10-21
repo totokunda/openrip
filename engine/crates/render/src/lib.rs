@@ -4,7 +4,7 @@
 //! 1. Each image is resampled to its displayed size: area average then a 3×3 Laplacian
 //!    sharpen of strength 0.15 when shrinking, bilinear when enlarging, untouched at 1:1.
 //!    The result is stored in 8 bits, as CapCut does; a 10-bit video's in 16-bit float, so a
-//!    LUT on log footage doesn't band.
+//!    LUT on log footage doesn't band, and its sharpen comes after the clip's LUTs.
 //! 2. That texture is rotated and placed with Catmull-Rom interpolation and composited
 //!    (premultiplied "over") onto an 8-bit canvas at the output resolution.
 //!
@@ -1444,8 +1444,11 @@ impl Compositor {
                 }),
                 _ => None,
             };
-            let stage = match cached {
-                Some(tex) => tex,
+            let luts = [layer.match_lut, layer.lut].into_iter().flatten().filter(|(_, s)| *s > 0.0);
+            // A shrunk 10-bit video's sharpen waits for its LUTs: before them, a LUT on log
+            // footage stretches the sharpen's overshoot into halos.
+            let (stage, sharpen_after_luts) = match cached {
+                Some(tex) => (tex, false),
                 None => {
                     let src = match layer.source {
                         Source::Image(img) => self.upload(enc, img, None, &mut scratch),
@@ -1474,16 +1477,22 @@ impl Compositor {
                     let resize = Params { src_size: [sw as f32, sh as f32], dst_size: [tw as f32, th as f32], inv0: [0.0; 4], inv1: [0.0; 4], misc: [1.0, DOWNSCALE_SHARPEN, 0.0, 0.0] };
                     // A 10-bit video's picture stays wide (see `yuv_wide`).
                     let (format, sharpen, bilinear) = if src.format() == WIDE { (WIDE, &self.sharpen_wide, &self.bilinear_wide) } else { (CANVAS, &self.sharpen, &self.bilinear) };
+                    let shrunk = tw < sw && th < sh;
+                    let sharpen_later = shrunk && format == WIDE && luts.clone().next().is_some();
                     let stage = if (tw, th) == (sw, sh) {
                         src
-                    } else if tw < sw && th < sh {
+                    } else if shrunk {
                         let wide = self.texture(tw, th, WIDE, wgpu::TextureUsages::empty());
                         self.pass(enc, &self.area, &src, &wide, resize, Some(wgpu::Color::TRANSPARENT));
-                        let sharp = self.texture(tw, th, format, wgpu::TextureUsages::empty());
-                        self.pass(enc, sharpen, &wide, &sharp, resize, Some(wgpu::Color::TRANSPARENT));
-                        scratch.push(wide);
                         done_with(src, &mut keep, &mut scratch);
-                        sharp
+                        if sharpen_later {
+                            wide
+                        } else {
+                            let sharp = self.texture(tw, th, format, wgpu::TextureUsages::empty());
+                            self.pass(enc, sharpen, &wide, &sharp, resize, Some(wgpu::Color::TRANSPARENT));
+                            scratch.push(wide);
+                            sharp
+                        }
                     } else {
                         let up = self.texture(tw, th, format, wgpu::TextureUsages::empty());
                         self.pass(enc, bilinear, &src, &up, resize, Some(wgpu::Color::TRANSPARENT));
@@ -1493,7 +1502,7 @@ impl Compositor {
                     if let Source::Cached(key, _) = layer.source {
                         self.cache.lock().unwrap().insert((key, tw, th), (stage.clone(), frame));
                     }
-                    stage
+                    (stage, sharpen_later)
                 }
             };
             // A keyed image's stage stays in the cache until a pass replaces it: then it must
@@ -1511,7 +1520,7 @@ impl Compositor {
                 }
                 (stage, adjusted) = (out, true);
             }
-            for (lut, strength) in [layer.match_lut, layer.lut].into_iter().flatten().filter(|(_, s)| *s > 0.0) {
+            for (lut, strength) in luts {
                 let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
                 self.lut_pass(enc, &stage, &out, lut, strength);
                 if cached && !adjusted {
@@ -1520,6 +1529,13 @@ impl Compositor {
                     scratch.push(stage);
                 }
                 (stage, adjusted) = (out, true);
+            }
+            if sharpen_after_luts {
+                let out = self.texture(stage.width(), stage.height(), CANVAS, wgpu::TextureUsages::empty());
+                let p = Params { src_size: [0.0; 2], dst_size: [0.0; 2], inv0: [0.0; 4], inv1: [0.0; 4], misc: [1.0, DOWNSCALE_SHARPEN, 0.0, 0.0] };
+                self.pass(enc, &self.sharpen, &stage, &out, p, Some(wgpu::Color::TRANSPARENT));
+                scratch.push(stage);
+                stage = out;
             }
             // Adjust sliders on the clip's own pixels, before placement.
             let stage = match layer.adjust.as_ref().filter(|(a, _)| !a.is_identity()) {
