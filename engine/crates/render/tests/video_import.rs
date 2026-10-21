@@ -136,3 +136,56 @@ fn hlg_frames_are_tone_mapped_to_sdr() {
         }
     }
 }
+
+/// A grey 10-bit clip (BT.709, limited range, `codec`): luma `luma(x)` in 10-bit code values
+/// on every row, neutral chroma, so R = G = B = (luma − 64) / 876.
+fn grey_clip(name: &str, w: usize, h: usize, codec: &[&str], luma: impl Fn(usize) -> u16) -> Option<PathBuf> {
+    if Command::new("ffmpeg").arg("-version").output().is_err() {
+        return None;
+    }
+    let dir = { let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("t{:?}", std::thread::current().id())); std::fs::create_dir_all(&d).unwrap(); d };
+    let path = dir.join(name);
+    if !path.exists() {
+        let mut raw = Vec::new();
+        for _ in 0..10 {
+            raw.extend((0..w * h).flat_map(|i| luma(i % w).to_le_bytes()));
+            raw.extend(std::iter::repeat_n(512u16.to_le_bytes(), w * h).flatten());
+        }
+        let yuv = path.with_extension("yuv");
+        std::fs::write(&yuv, raw).unwrap();
+        let out = Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "yuv422p10le", "-s", &format!("{w}x{h}"), "-r", "30", "-i"])
+            .arg(&yuv)
+            .args(codec)
+            .args(["-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    Some(path)
+}
+
+/// A table applying `f` to each channel (65 entries a side, at the cube's corners).
+fn channel_lut(f: impl Fn(f32) -> f32) -> openrip_render::Lut3d {
+    let n = 65;
+    let rgb = (0..n * n * n).flat_map(|i| [i % n, i / n % n, i / (n * n)].map(|v| f(v as f32 / (n - 1) as f32))).collect();
+    openrip_render::Lut3d { key: 0x1ab, size: n as u32, rgb, edge_aligned: true }
+}
+
+/// Log footage spans few code values, and a LUT for it stretches them: a 10-bit ProRes ramp
+/// over 90 of them, stretched tenfold, keeps its levels rather than the 8-bit steps of 22.
+#[test]
+fn a_lut_on_10_bit_video_keeps_its_levels() {
+    let Some(path) = grey_clip("lut-ramp.mov", 256, 16, &["-c:v", "prores_ks", "-profile:v", "3"], |x| 370 + (x * 90 / 256) as u16) else { return };
+    let Ok(c) = Compositor::new() else { return };
+    let mut d = VideoDecoder::open(&path, &DecoderOptions { hardware: HardwareMode::Require, ..Default::default() }).unwrap();
+    let f = d.frame_at(Micros(100_000)).unwrap().unwrap();
+    assert_eq!(f.pixel_format(), PixelFormat::P210);
+    let lut = channel_lut(|v| ((v - 0.35) * 10.0).clamp(0.0, 1.0));
+    for (w, h) in [(256, 16), (128, 8)] {
+        let img = c.render(w, h, [0, 0, 0], &[Layer { lut: Some((&lut, 1.0)), ..Layer::from_model(Source::Video(&f), [w, h], [0.0, 0.0], [1.0, 1.0], 0.0) }]);
+        let row: std::collections::BTreeSet<u8> = (0..w).map(|x| img.data[((h / 2 * w + x) * 4) as usize]).collect();
+        assert!(row.len() >= 60, "{w}x{h}: {} levels: {row:?}", row.len());
+    }
+}

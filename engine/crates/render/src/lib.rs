@@ -3,7 +3,8 @@
 //!
 //! 1. Each image is resampled to its displayed size: area average then a 3×3 Laplacian
 //!    sharpen of strength 0.15 when shrinking, bilinear when enlarging, untouched at 1:1.
-//!    The result is stored in 8 bits, as CapCut does.
+//!    The result is stored in 8 bits, as CapCut does; a 10-bit video's in 16-bit float, so a
+//!    LUT on log footage doesn't band.
 //! 2. That texture is rotated and placed with Catmull-Rom interpolation and composited
 //!    (premultiplied "over") onto an 8-bit canvas at the output resolution.
 //!
@@ -509,9 +510,15 @@ pub struct Compositor {
     /// A hardware frame's YUV planes -> RGBA (only the Apple interop imports planes so far).
     #[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
     yuv: wgpu::RenderPipeline,
+    /// The same into `WIDE` for 10-bit frames, and the resampling passes that keep it so: a LUT
+    /// on log footage stretches its tones, and 8 bits before it band.
+    #[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
+    yuv_wide: wgpu::RenderPipeline,
     area: wgpu::RenderPipeline,
     sharpen: wgpu::RenderPipeline,
+    sharpen_wide: wgpu::RenderPipeline,
     bilinear: wgpu::RenderPipeline,
+    bilinear_wide: wgpu::RenderPipeline,
     /// Straight-alpha pixels as written -> premultiplied (see `upload`).
     premultiply: wgpu::RenderPipeline,
     place: wgpu::RenderPipeline,
@@ -683,9 +690,12 @@ impl Compositor {
         };
         Ok(Compositor {
             yuv: pipeline("fs_yuv", CANVAS, None),
+            yuv_wide: pipeline("fs_yuv", WIDE, None),
             area: pipeline("fs_area", WIDE, None),
             sharpen: pipeline("fs_sharpen", CANVAS, None),
+            sharpen_wide: pipeline("fs_sharpen", WIDE, None),
             bilinear: pipeline("fs_bilinear", CANVAS, None),
+            bilinear_wide: pipeline("fs_bilinear", WIDE, None),
             premultiply: pipeline("fs_premultiply", CANVAS, None),
             place: pipeline("fs_place", CANVAS, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             place_bgra: pipeline("fs_place", wgpu::TextureFormat::Bgra8Unorm, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
@@ -1462,19 +1472,21 @@ impl Compositor {
                     // back to the pool.
                     let done_with = |src: wgpu::Texture, keep: &mut Vec<wgpu::Texture>, scratch: &mut Vec<wgpu::Texture>| if matches!(layer.source, Source::Cached(..)) { keep.push(src) } else { scratch.push(src) };
                     let resize = Params { src_size: [sw as f32, sh as f32], dst_size: [tw as f32, th as f32], inv0: [0.0; 4], inv1: [0.0; 4], misc: [1.0, DOWNSCALE_SHARPEN, 0.0, 0.0] };
+                    // A 10-bit video's picture stays wide (see `yuv_wide`).
+                    let (format, sharpen, bilinear) = if src.format() == WIDE { (WIDE, &self.sharpen_wide, &self.bilinear_wide) } else { (CANVAS, &self.sharpen, &self.bilinear) };
                     let stage = if (tw, th) == (sw, sh) {
                         src
                     } else if tw < sw && th < sh {
                         let wide = self.texture(tw, th, WIDE, wgpu::TextureUsages::empty());
                         self.pass(enc, &self.area, &src, &wide, resize, Some(wgpu::Color::TRANSPARENT));
-                        let sharp = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
-                        self.pass(enc, &self.sharpen, &wide, &sharp, resize, Some(wgpu::Color::TRANSPARENT));
+                        let sharp = self.texture(tw, th, format, wgpu::TextureUsages::empty());
+                        self.pass(enc, sharpen, &wide, &sharp, resize, Some(wgpu::Color::TRANSPARENT));
                         scratch.push(wide);
                         done_with(src, &mut keep, &mut scratch);
                         sharp
                     } else {
-                        let up = self.texture(tw, th, CANVAS, wgpu::TextureUsages::empty());
-                        self.pass(enc, &self.bilinear, &src, &up, resize, Some(wgpu::Color::TRANSPARENT));
+                        let up = self.texture(tw, th, format, wgpu::TextureUsages::empty());
+                        self.pass(enc, bilinear, &src, &up, resize, Some(wgpu::Color::TRANSPARENT));
                         done_with(src, &mut keep, &mut scratch);
                         up
                     };

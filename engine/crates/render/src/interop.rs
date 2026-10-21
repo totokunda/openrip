@@ -16,7 +16,7 @@
 
 use crate::{Compositor, Layer, RenderError};
 #[cfg(target_vendor = "apple")]
-use crate::{Params, CANVAS};
+use crate::{Params, CANVAS, WIDE};
 #[cfg(not(target_vendor = "apple"))]
 use crate::RgbaImage;
 #[cfg(target_vendor = "apple")]
@@ -118,11 +118,12 @@ impl Compositor {
         let luma = self.wrap_plane(&surface, 0, plane_size(0), luma_fmt)?;
         let chroma = self.wrap_plane(&surface, 1, plane_size(1), chroma_fmt)?;
         let (w, h) = (frame.width(), frame.height());
-        let rgba = self.texture(w, h, CANVAS, wgpu::TextureUsages::empty());
+        // A 10-bit frame stays wider than 8 bits (see `yuv_wide`).
+        let rgba = self.texture(w, h, if ten_bit { WIDE } else { CANVAS }, wgpu::TextureUsages::empty());
         let (inv0, inv1, k) = yuv_params(frame.matrix(), frame.full_range(), ten_bit);
         let hlg = (frame.transfer() == openrip_frame::Transfer::Hlg) as u8 as f32;
         let params = Params { src_size: [w as f32, h as f32], dst_size: [w as f32, h as f32], inv0, inv1, misc: [1.0, hlg, k, sub_v] };
-        self.pass_with(enc, &self.yuv, &luma, Some(&chroma), &rgba, params, Some(wgpu::Color::BLACK));
+        self.pass_with(enc, if ten_bit { &self.yuv_wide } else { &self.yuv }, &luma, Some(&chroma), &rgba, params, Some(wgpu::Color::BLACK));
         Some((rgba, [luma, chroma]))
     }
 
