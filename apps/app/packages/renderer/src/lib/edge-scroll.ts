@@ -49,7 +49,7 @@ export type EdgePointer = Pick<MouseEvent, "clientX" | "clientY" | "metaKey">;
 export type EdgeScrollView = {
   timelineDuration: [number, number];
   totalTimelineFrames: number;
-  shiftTimelineDuration: (frames: number, shiftFocusFrame?: boolean) => void;
+  shiftTimelineDuration: (frames: number) => void;
 };
 
 /**
@@ -57,11 +57,11 @@ export type EdgeScrollView = {
  * called: each animation frame the pointer is near or past an edge of the visible timeline, it
  * moves the window (`view`) and calls `follow` with the pointer where it last was, so what's
  * dragged keeps up with the scroll even while the pointer is held still. The playhead keeps its
- * place on screen, as in the timeline's other scrolls (the wheel, the ruler, the scrollbar): the
- * ruler keeps it in view (TimelineEditor.tsx). Stage x 0 is `area`'s left edge; the visible
- * timeline runs from stage x `left` to `stageWidth`, its window spread over `stageWidth` px from
- * `left`. The pointer and the animation frames are those of `area`'s window: the timeline can be
- * in one of its own (lib/panel-windows.ts).
+ * time, as in the timeline's other scrolls (the wheel, the ruler, the scrollbar), and can go out
+ * of view; when it's the playhead that's dragged, `follow` moves it. Stage x 0 is `area`'s left
+ * edge; the visible timeline runs from stage x `left` to `stageWidth`, its window spread over
+ * `stageWidth` px from `left`. The pointer and the animation frames are those of `area`'s window:
+ * the timeline can be in one of its own (lib/panel-windows.ts).
  */
 export function startEdgeScroll(
   area: HTMLElement,
@@ -86,7 +86,7 @@ export function startEdgeScroll(
     const step = edgeScrollFrames(edgeScrollSpeed(x, left, stageWidth), now.timelineDuration, stageWidth, now.totalTimelineFrames, carry);
     carry = step.carry;
     if (step.frames === 0) return;
-    now.shiftTimelineDuration(step.frames, true);
+    now.shiftTimelineDuration(step.frames);
     follow(pointer);
   };
   // Let go, it stops before the drag's own release handlers (a document listener, or Konva's

@@ -186,11 +186,16 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
     return <div ref={containerRef} className="hidden" />;
   }
 
+  // Scrolled out of view, the playhead isn't drawn (a scroll leaves it at its time, as CapCut's),
+  // rather than held at the visible edge.
+  const [viewStart, viewEnd] = timelineDuration;
+  const outOfView = !isDragging && (focusFrame < viewStart || focusFrame > viewEnd);
+
   return (
     <div
       ref={containerRef}
       onMouseDown={handleMouseDown}
-      style={{ left: Math.min(position, stageWidth) }}
+      style={{ left: Math.min(position, stageWidth), visibility: outOfView ? "hidden" : undefined }}
       className="absolute flex z-50 top-0 cursor-col-resize"
     >
       <div className="flex flex-col items-center">

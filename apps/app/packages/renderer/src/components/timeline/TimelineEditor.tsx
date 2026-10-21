@@ -119,7 +119,9 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
 
     // We will basically render from startDuration to startDuration + duration.
     useEffect(() => {
-      // ensure focusframe is always within the timeline duration
+      // The playhead moved (played, sought, stepped) out of view: the view follows it, as
+      // CapCut's does. Scrolling the view alone leaves it at its time, out of view if it goes
+      // there (shiftTimelineDuration), so this runs only when the playhead's frame changes.
       if (focusFrame < startFrame) {
         shiftTimelineDuration(focusFrame - startFrame);
       }
@@ -129,7 +131,7 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
           duration + endFrame > focusFrame ? 0 : focusFrame - endFrame;
         shiftTimelineDuration(duration + additionalDuration);
       }
-    }, [startFrame, endFrame, focusFrame]);
+    }, [focusFrame]);
     // Convert duration to milliseconds if needed for consistent calculations
     const tickMark: TickMark[] = useMemo(() => {
       let ticks: TickMark[] = [];
@@ -1396,7 +1398,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         wheelRemainderRef.current = deltaFramesFloat - integerShift;
         if (integerShift !== 0) {
           if (controlStore.canTimelineDurationBeShifted(integerShift)) {
-            controlStore.shiftTimelineDuration(integerShift, true, true);
+            controlStore.shiftTimelineDuration(integerShift);
           }
         }
       } else if (maxScroll > 0) {
@@ -1462,10 +1464,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       const integerShift = Math.trunc(deltaFramesFloat);
       panStateRef.current.fractionalFrames = deltaFramesFloat - integerShift;
       if (integerShift !== 0) {
-        // update focus frame
-
         if (controlStore.canTimelineDurationBeShifted(integerShift)) {
-          controlStore.shiftTimelineDuration(integerShift, true);
+          controlStore.shiftTimelineDuration(integerShift);
         }
       }
       panStateRef.current.lastX = pos.x;
@@ -1535,6 +1535,9 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       const stage = e.target.getStage();
       const pos = stage?.getPointerPosition();
       if (!pos) return;
+      // Pressed and dragged as far as a drag (Konva's), the ruler panned the view: no seek, the
+      // playhead keeps its time.
+      if (Math.abs(pos.x - panStateRef.current.startX) >= Konva.dragDistance) return;
       seekToPointerX(pos.x);
     },
     [controlStore, seekToPointerX],

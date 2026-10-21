@@ -79,9 +79,8 @@ function drag(view: [number, number]) {
     timelineDuration: view,
     totalTimelineFrames: total,
     focusFrame: view[0] + 20,
-    shiftTimelineDuration: (n: number, withFocus?: boolean) => {
+    shiftTimelineDuration: (n: number) => {
       store.timelineDuration = [store.timelineDuration[0] + n, store.timelineDuration[1] + n];
-      if (withFocus) store.focusFrame += n;
     },
   };
   const followed: EdgePointer[] = [];
@@ -122,8 +121,8 @@ test("a drag held past an edge scrolls the timeline each frame, and what's dragg
   d.move(right + 30);
   d.frames(30);
   assert.ok(d.store.timelineDuration[0] > start, `${d.store.timelineDuration}`);
-  // The playhead keeps its place on screen, as the timeline's other scrolls have it.
-  assert.equal(d.store.focusFrame - d.store.timelineDuration[0], 20);
+  // The playhead keeps its time, as the timeline's other scrolls have it.
+  assert.equal(d.store.focusFrame, 320);
 });
 
 test("it stops at frame 0 and at the timeline's end, and the drag isn't told of a scroll that didn't happen", () => {

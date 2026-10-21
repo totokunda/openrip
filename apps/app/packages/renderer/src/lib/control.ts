@@ -87,11 +87,12 @@ interface ControlStore {
   decrementTotalTimelineFrames: (duration: number) => void;
   timelineDuration: [number, number]; // [startFrame, endFrame]
   setTimelineDuration: (startFrame: number, endFrame: number) => void;
-  shiftTimelineDuration: (
-    duration: number,
-    shiftFocusFrame?: boolean,
-    pause?: boolean,
-  ) => void;
+  /**
+   * Scrolls the view `duration` frames, not before frame 0 or past the timeline's end. The
+   * playhead keeps its time, as CapCut's does, and can go out of view: the view follows it only
+   * when it moves (TimelineEditor.tsx).
+   */
+  shiftTimelineDuration: (duration: number) => void;
   canTimelineDurationBeShifted: (duration: number) => boolean;
   resetTimelineDuration: () => void;
   fps: number;
@@ -231,11 +232,7 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
   timelineDuration: [0, TIMELINE_DURATION_SECONDS * DEFAULT_FPS], // [startFrame, endFrame]
   setTimelineDuration: (startFrame: number, endFrame: number) =>
     set({ timelineDuration: [startFrame, endFrame] }),
-  shiftTimelineDuration: (
-    duration: number,
-    shiftFocusFrame?: boolean,
-    pause: boolean = false,
-  ) => {
+  shiftTimelineDuration: (duration: number) => {
     const state = get();
     const [startFrame, endFrame] = state.timelineDuration;
     const requestedShift = Math.trunc(duration);
@@ -245,31 +242,9 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
     if (clampedShift === 0) {
       return;
     }
-    const wasPlaying = state.isPlaying;
-    if (wasPlaying && pause) {
-      state.pause();
-    }
     const newStartFrame = startFrame + clampedShift;
     const newEndFrame = endFrame + clampedShift;
-    const nextUpdate: Partial<ControlStore> = shiftFocusFrame
-      ? {
-          timelineDuration: [newStartFrame, newEndFrame],
-          focusFrame: Math.max(
-            0,
-            Math.min(
-              state.totalTimelineFrames - 1,
-              state.focusFrame + clampedShift,
-            ),
-          ),
-        }
-      : { timelineDuration: [newStartFrame, newEndFrame] };
-    set(nextUpdate as any);
-    if (wasPlaying && pause) {
-      setTimeout(() => {
-        const s = get();
-        if (!s.isPlaying) s.play();
-      }, 0);
-    }
+    set({ timelineDuration: [newStartFrame, newEndFrame] });
   },
   resetTimelineDuration: () =>
     set({ timelineDuration: [0, TIMELINE_DURATION_SECONDS * DEFAULT_FPS] }),

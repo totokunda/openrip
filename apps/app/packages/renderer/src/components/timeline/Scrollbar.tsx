@@ -125,7 +125,7 @@ const Scrollbar: React.FC<ScrollbarProps> = ({
         const framesToShift = clampedTarget - currentStart;
 
         if (framesToShift !== 0) {
-          controlStore.shiftTimelineDuration(framesToShift, true);
+          controlStore.shiftTimelineDuration(framesToShift);
           horizontalScrollStateRef.current.startFrame =
             currentStart + framesToShift;
         }
