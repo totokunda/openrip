@@ -91,7 +91,10 @@ const App: React.FC = () => {
   // The timeline's own window, when it's out of the editor (drops land there).
   const timelineWindow = usePanelWindowsStore((s) => s.open.timeline?.window);
   const view = useShellStore((s) => s.view);
-  const { ghostInStage, clips} = useClipStore();
+  // Not the whole store: subscribed to it, the window (every panel in it) re-rendered on each step
+  // of a drag or a trim and each key typed in a caption.
+  const ghostInStage = useClipStore((s) => s.ghostInStage);
+  const hasClips = useClipStore((s) => s.clips.length > 0);
   const projectsLoaded = useProjectsStore((s) => s.projectsLoaded);
   // The home screen waits for the first load only: it lists the projects from then on.
   const [ready, setReady] = useState(false);
@@ -292,13 +295,13 @@ const App: React.FC = () => {
         <DragOverlay dropAnimation={null}>
           {activeDragItem && ((activeDragItem as any).spec || (activeDragItem as any).dragPicture) ? (
             // A filter or effect tile: its own picture, not the sample photo behind it.
-            <TileDragPicture spec={(activeDragItem as any).spec} src={(activeDragItem as any).dragPicture} className={cn({ "opacity-0": ghostInStage && clips.length > 0 })} />
+            <TileDragPicture spec={(activeDragItem as any).spec} src={(activeDragItem as any).dragPicture} className={cn({ "opacity-0": ghostInStage && hasClips })} />
           ) : activeDragItem ? (
             <div
               className={cn(
                 "w-44 aspect-video rounded-md overflow-hidden bg-brand opacity-100",
                 {
-                  "opacity-0": ghostInStage && clips.length > 0,
+                  "opacity-0": ghostInStage && hasClips,
                 },
               )}
             >

@@ -21,6 +21,7 @@ import { useViewportStore } from "@/lib/viewport";
 import { isRestoredAspect } from "@/lib/history";
 import { sortClipsForStacking } from "@/lib/clipOrdering";
 import { useClipStore } from "@/lib/clip";
+import { useShallow } from "zustand/react/shallow";
 import { KonvaEventObject } from "konva/lib/Node";
 import { BASE_LONG_SIDE, DEFAULT_FPS } from "@/lib/settings";
 
@@ -236,6 +237,8 @@ const Preview: React.FC<PreviewProps> = () => {
   const shouldUpdateViewport = useViewportStore((s) => s.shouldUpdateViewport);
   
   const setAspectRatio = useViewportStore((s) => s.setAspectRatio);
+  // What it reads, not the whole store: subscribed to it, the player re-rendered on every pointer
+  // move of a drag on the timeline (its ghost) and every hover over a track while dragging.
   const {
     clips,
     clipWithinFrame,
@@ -243,7 +246,16 @@ const Preview: React.FC<PreviewProps> = () => {
     addClip,
     addTimeline,
     updateClip,
-  } = useClipStore();
+  } = useClipStore(
+    useShallow((s) => ({
+      clips: s.clips,
+      clipWithinFrame: s.clipWithinFrame,
+      timelines: s.timelines,
+      addClip: s.addClip,
+      addTimeline: s.addTimeline,
+      updateClip: s.updateClip,
+    })),
+  );
   const getClipTransform = useClipStore((s) => s.getClipTransform);
   // Note: we use imperative store access in the recenter effect to avoid rerender loops
   const focusFrame = useControlsStore((s) => s.focusFrame);
