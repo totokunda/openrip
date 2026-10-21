@@ -6,6 +6,7 @@ import { SNAP_PX, snapPoints, snapToPoints } from "@/lib/timeline-edit";
 import { projectBeatPoints } from "@/lib/audio-tools";
 import { cn } from "@/lib/utils";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
+import { edgeScrollFrames, edgeScrollSpeed } from "@/lib/edge-scroll";
 
 interface ScrubControlProps {
   stageHeight: number;
@@ -30,12 +31,13 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
   } = useControlsStore();
   const [isDragging, setIsDragging] = useState(false);
   const [position, setPosition] = useState(18);
-  const [currentFrame, setCurrentFrame] = useState(0);
   // Geometry constants: keep in sync with timeline ticks padding and handle width
   const startPadding = TIME_ZERO_X; // ticks start at time 0, after the Cover column
   const handleHalf = 5; // half of the head's width (10 px)
   const containerRef = useRef<HTMLDivElement>(null);
   const [wasPlaying, setWasPlaying] = useState(false);
+  // Where the pointer last was in the drag, for the edge scroll to keep the playhead under it.
+  const pointerRef = useRef<Pick<MouseEvent, "clientX" | "metaKey"> | null>(null);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -51,15 +53,14 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
     const progress = (centerX - startPadding) / stageWidth;
     const [startFrame, endFrame] = timelineDuration;
     const framePosition = startFrame + progress * (endFrame - startFrame);
-    // Release snaps to this frame: a click without a move would otherwise snap to frame 0.
-    setCurrentFrame(Math.round(framePosition));
     setFocusFrame(Math.round(framePosition));
     scrubSound(Math.round(framePosition));
     setFocusAnchorRatio(Math.max(0, Math.min(1, progress)));
   };
 
-  const handleMouseMove = (e: MouseEvent) => {
+  const handleMouseMove = (e: Pick<MouseEvent, "clientX" | "metaKey">) => {
     if (!isDragging || !containerRef.current) return;
+    pointerRef.current = { clientX: e.clientX, metaKey: e.metaKey };
 
     const container = containerRef.current.parentElement;
     if (!container) return;
@@ -80,10 +81,10 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
     // The frame under the pointer, or a marker or clip edge it comes near (snapping, N; held
     // ⌘ skips it), as CapCut's playhead does.
     const progress = (centerX - startPadding) / stageWidth;
-    const [startFrame, endFrame] = timelineDuration;
+    // The window as it is now: the edge scroll moves it between renders.
+    const [startFrame, endFrame] = useControlsStore.getState().timelineDuration;
     const framePosition = startFrame + progress * (endFrame - startFrame);
     const snapped = snapPlayhead(framePosition, e.metaKey);
-    setCurrentFrame(snapped);
     setFocusFrame(snapped);
     scrubSound(snapped);
   };
@@ -105,8 +106,9 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
   const handleMouseUp = () => {
     setIsDragging(false);
     scrubSoundStop();
-    const [startFrame, endFrame] = timelineDuration;
-    const frame = Math.max(startFrame, Math.min(endFrame, currentFrame));
+    // The window and frame as they are now: the edge scroll moves both between renders.
+    const { timelineDuration: [startFrame, endFrame], focusFrame: dragged } = useControlsStore.getState();
+    const frame = Math.max(startFrame, Math.min(endFrame, dragged));
     const progress = (frame - startFrame) / Math.max(1, endFrame - startFrame);
     setPosition(startPadding + progress * stageWidth - handleHalf);
     setIsAccurateSeekNeeded(true);
@@ -144,7 +146,37 @@ export const ScrubControl: React.FC<ScrubControlProps> = ({
         document.removeEventListener("mouseup", handleMouseUp);
       };
     }
-  }, [isDragging, timelineDuration, stageWidth, currentFrame]);
+  }, [isDragging, timelineDuration, stageWidth]);
+
+  // Dragged near or past either edge of the visible timeline, the timeline scrolls that way each
+  // animation frame (lib/edge-scroll.ts) with the playhead under the pointer, even while the
+  // pointer is held still; it stops at frame 0 and at the timeline's end. The animation frames
+  // are those of the timeline's window: it can be in one of its own (lib/panel-windows.ts).
+  useEffect(() => {
+    if (!isDragging) return;
+    const view = containerRef.current?.ownerDocument.defaultView ?? window;
+    let carry = 0;
+    let raf = 0;
+    const tick = () => {
+      raf = view.requestAnimationFrame(tick);
+      const pointer = pointerRef.current;
+      const container = containerRef.current?.parentElement;
+      if (!pointer || !container) return;
+      const x = pointer.clientX - container.getBoundingClientRect().left;
+      const controls = useControlsStore.getState();
+      const speed = edgeScrollSpeed(x, startPadding, stageWidth);
+      const step = edgeScrollFrames(speed, controls.timelineDuration, stageWidth, controls.totalTimelineFrames, carry);
+      carry = step.carry;
+      if (step.frames === 0) return;
+      controls.shiftTimelineDuration(step.frames);
+      handleMouseMove(pointer);
+    };
+    raf = view.requestAnimationFrame(tick);
+    return () => {
+      view.cancelAnimationFrame(raf);
+      pointerRef.current = null;
+    };
+  }, [isDragging, stageWidth]);
 
   useEffect(() => {
     // Only calculate if we have valid dimensions
