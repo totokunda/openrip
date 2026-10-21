@@ -97,7 +97,7 @@ const Row: React.FC<{
   <div className="flex flex-row gap-x-2 items-center">
     <h4 className="text-brand-light text-[12px] text-start w-[112px] shrink-0">{label}</h4>
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger size="sm" className="w-full min-w-0 !h-[22px] text-[12px] bg-brand-background-light rounded-[4px] text-brand-light">
+      <SelectTrigger size="sm" className="w-full min-w-0 !h-[22px] text-[12px] bg-brand-background-light border-0 rounded-[4px] text-brand-light">
         <SelectValue />
       </SelectTrigger>
       <SelectContent className="bg-brand-background text-brand-light font-poppins z-[101] dark">

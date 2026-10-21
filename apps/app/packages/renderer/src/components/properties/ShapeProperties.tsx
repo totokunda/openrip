@@ -77,7 +77,7 @@ const Choice: React.FC<{ value: string; options: { value: string; label: string 
   prefix,
 }) => (
   <Select value={value} onValueChange={onChange}>
-    <SelectTrigger data-testid={testId} size="sm" className="w-full min-w-0 !h-[22px] text-[12px] bg-brand-background-light rounded-[4px] text-brand-light">
+    <SelectTrigger data-testid={testId} size="sm" className="w-full min-w-0 !h-[22px] text-[12px] bg-brand-background-light border-0 rounded-[4px] text-brand-light">
       {prefix && <span className="text-brand-light/50">{prefix}</span>}
       <SelectValue />
     </SelectTrigger>
