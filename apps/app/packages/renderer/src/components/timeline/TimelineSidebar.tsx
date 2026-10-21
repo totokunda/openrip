@@ -73,8 +73,8 @@ const TimelineSidebar: React.FC = () => {
   const [isOpen, setIsOpen] = useState<boolean>(true);
   const startXRef = useRef<number>(0);
   const isDraggingRef = useRef<boolean>(false);
-  const { timelines } = useClipStore();
-  const { isFullscreen } = useControlsStore();
+  const timelines = useClipStore((s) => s.timelines);
+  const isFullscreen = useControlsStore((s) => s.isFullscreen);
   const listRef = useRef<HTMLDivElement | null>(null);
   const last = timelines[timelines.length - 1];
   // The headers as laid out on screen, for dragging them.

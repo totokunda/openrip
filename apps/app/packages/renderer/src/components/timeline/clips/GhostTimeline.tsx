@@ -1,6 +1,7 @@
 import { useClipStore, getClipWidth, getClipX } from "@/lib/clip";
 import { mainTrackOf } from "@/lib/timeline-edit";
 import { useControlsStore } from "@/lib/control";
+import { useShallow } from "zustand/react/shallow";
 import { TimelineProps } from "@/lib/types";
 import React, { useMemo } from "react";
 import { Rect, Line } from "react-konva";
@@ -13,6 +14,8 @@ const GhostTimeline: React.FC<TimelineProps> = ({
   timelineWidth,
   timelinePadding = TIME_ZERO_X,
 }) => {
+  // Only the ghost: subscribed to the whole stores, every track's ghost re-rendered on each frame
+  // of playback and each edit.
   const {
     ghostStartEndFrame,
     ghostX,
@@ -20,10 +23,19 @@ const GhostTimeline: React.FC<TimelineProps> = ({
     getClipsForTimeline,
     draggingClipId,
     ghostInStage,
-  } = useClipStore();
+  } = useClipStore(
+    useShallow((s) => ({
+      ghostStartEndFrame: s.ghostStartEndFrame,
+      ghostX: s.ghostX,
+      ghostTimelineId: s.ghostTimelineId,
+      getClipsForTimeline: s.getClipsForTimeline,
+      draggingClipId: s.draggingClipId,
+      ghostInStage: s.ghostInStage,
+    })),
+  );
 
   
-  const { timelineDuration } = useControlsStore();
+  const timelineDuration = useControlsStore((s) => s.timelineDuration);
   const ghostWidth = useMemo(
     () =>
       getClipWidth(
@@ -34,7 +46,7 @@ const GhostTimeline: React.FC<TimelineProps> = ({
       ),
     [ghostStartEndFrame, timelineWidth, timelineDuration],
   );
-  const { getClipById } = useClipStore();
+  const getClipById = useClipStore((s) => s.getClipById);
   const currentClip = getClipById(draggingClipId!);
   const cornerRadius = useMemo(() => {
     return 1;

@@ -47,7 +47,8 @@ const Timeline: React.FC<
 }) => {
 
 
-  const { hoveredTimelineId, getClipsForTimeline } = useClipStore();
+  const hoveredTimelineId = useClipStore((s) => s.hoveredTimelineId);
+  const getClipsForTimeline = useClipStore((s) => s.getClipsForTimeline);
   const hiddenRectRef = React.useRef<KonvaRect>(null);
   const lockedRectRef = React.useRef<KonvaRect>(null);
   const locked = useClipStore((s) => !!s.getTimelineById(timelineId)?.locked);
@@ -340,4 +341,6 @@ const Timeline: React.FC<
   );
 };
 
-export default Timeline;
+// Memoised: a track re-renders on its own store subscriptions (its clips, the visible frames)
+// when what it shows changes, not each time the editor does.
+export default React.memo(Timeline);

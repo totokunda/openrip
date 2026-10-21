@@ -30,7 +30,8 @@ type TrackProp = { track: TimelineProps };
 
 /** Mute or unmute the track's sound (video and audio tracks). */
 export const TrackMuteButton: React.FC<TrackProp> = ({ track }) => {
-  const { muteTimeline, unmuteTimeline } = useClipStore();
+  const muteTimeline = useClipStore((s) => s.muteTimeline);
+  const unmuteTimeline = useClipStore((s) => s.unmuteTimeline);
   if (track.type !== "media" && track.type !== "audio") return null;
   return (
     <button
@@ -45,7 +46,8 @@ export const TrackMuteButton: React.FC<TrackProp> = ({ track }) => {
 
 /** Hide or show the track's picture (every track but audio). */
 export const TrackHideButton: React.FC<TrackProp> = ({ track }) => {
-  const { hideTimeline, unhideTimeline } = useClipStore();
+  const hideTimeline = useClipStore((s) => s.hideTimeline);
+  const unhideTimeline = useClipStore((s) => s.unhideTimeline);
   if (track.type === "audio") return null;
   return (
     <button

@@ -40,13 +40,12 @@ import { VoiceoverButton, VoiceoverPanel } from "@/components/voiceover/Voiceove
 import { BeatButton } from "@/components/timeline/BeatTools";
 
 const TimelineZoom = () => {
-  const {
-    zoomLevel,
-    setZoomLevel,
-    setFocusFrame,
-    minZoomLevel,
-    maxZoomLevel,
-  } = useControlsStore();
+  // Not the whole store: subscribed to it, the slider re-rendered on every frame of playback.
+  const zoomLevel = useControlsStore((s) => s.zoomLevel);
+  const setZoomLevel = useControlsStore((s) => s.setZoomLevel);
+  const setFocusFrame = useControlsStore((s) => s.setFocusFrame);
+  const minZoomLevel = useControlsStore((s) => s.minZoomLevel);
+  const maxZoomLevel = useControlsStore((s) => s.maxZoomLevel);
   const [isDragging, setIsDragging] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);

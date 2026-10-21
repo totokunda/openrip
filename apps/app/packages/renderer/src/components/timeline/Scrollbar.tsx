@@ -1,5 +1,6 @@
 import { Rect } from "react-konva";
 import { useControlsStore } from "@/lib/control";
+import { useShallow } from "zustand/react/shallow";
 import React, { useRef, useMemo, useEffect, useState } from "react";
 
 const SCROLLBAR_HW = 8;
@@ -17,10 +18,15 @@ const Scrollbar: React.FC<ScrollbarProps> = ({
   isScrollbarHovered,
   setIsScrollbarHovered,
 }) => {
-  const controlStore = useControlsStore();
+  // Not the playhead's frame: subscribed to it (or to the whole store), the scrollbar re-rendered
+  // and its layer was drawn again on every frame of playback.
+  const controlStore = useControlsStore(
+    useShallow((s) => ({ isPlaying: s.isPlaying, pause: s.pause, play: s.play, shiftTimelineDuration: s.shiftTimelineDuration })),
+  );
   const scrollbarHeight = SCROLLBAR_HW;
-  const { totalTimelineFrames, timelineDuration, zoomLevel, focusFrame } =
-    useControlsStore();
+  const totalTimelineFrames = useControlsStore((s) => s.totalTimelineFrames);
+  const timelineDuration = useControlsStore((s) => s.timelineDuration);
+  const zoomLevel = useControlsStore((s) => s.zoomLevel);
   const horizontalScrollStateRef = useRef({
     startX: 0,
     lastX: 0,
@@ -65,7 +71,7 @@ const Scrollbar: React.FC<ScrollbarProps> = ({
 
       setScrollbarX(scrollbarPosition);
     }
-  }, [focusFrame, timelineDuration, totalTimelineFrames, maxScrollbarX]);
+  }, [timelineDuration, totalTimelineFrames, maxScrollbarX]);
 
   useEffect(() => {
     horizontalScrollStateRef.current.startFrame = timelineDuration[0];

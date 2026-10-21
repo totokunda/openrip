@@ -232,9 +232,13 @@ const ReduceTimelineButton: React.FC<{ numSeconds?: number }> = ({
 // Splits the selected clips at the playhead, or with none selected the main track's clip
 // there, as CapCut's Split (⌘B) does.
 const SplitButton = () => {
-  const { splitAtPlayhead, getClipById } = useClipStore();
-  const { focusFrame } = useControlsStore();
-  const { clips, clipDuration, timelines } = useClipStore();
+  // What it reads, not the whole stores (a drag's ghost changes on every pointer move).
+  const splitAtPlayhead = useClipStore((s) => s.splitAtPlayhead);
+  const getClipById = useClipStore((s) => s.getClipById);
+  const focusFrame = useControlsStore((s) => s.focusFrame);
+  const clips = useClipStore((s) => s.clips);
+  const clipDuration = useClipStore((s) => s.clipDuration);
+  const timelines = useClipStore((s) => s.timelines);
   const hasClips = clips.length > 0;
 
   const selectedClipIds = useControlsStore((state) => state.selectedClipIds);
@@ -265,9 +269,11 @@ const SplitButton = () => {
 };
 
 const TrashButton = () => {
-  const { selectedClipIds, clearSelection } = useControlsStore();
-  const { removeClip, clips } = useClipStore();
-  const hasClips = clips.length > 0;
+  // What it reads, not the whole stores (the playhead's frame changes on every frame of playback).
+  const selectedClipIds = useControlsStore((s) => s.selectedClipIds);
+  const clearSelection = useControlsStore((s) => s.clearSelection);
+  const removeClip = useClipStore((s) => s.removeClip);
+  const hasClips = useClipStore((s) => s.clips.length > 0);
   const disabled = selectedClipIds.length === 0 || !hasClips;
   const handleDelete = useCallback(() => {
     if (disabled) return;
@@ -339,7 +345,7 @@ const PlayPauseButton = () => {
 };
 
 const SeparateButton = () => {
-  const { separateClip } = useClipStore();
+  const separateClip = useClipStore((s) => s.separateClip);
   const selectedClipIds = useControlsStore((state) => state.selectedClipIds);
   const getClipById = useClipStore((state) => state.getClipById);
 

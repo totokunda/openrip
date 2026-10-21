@@ -5,6 +5,7 @@ import type { EffectDrag } from "../menus/EffectsMenu";
 import type { PresetDrag } from "../menus/PresetsMenu";
 import { applyPreset, useClipPresets } from "@/lib/clip-presets";
 import { useControlsStore } from "@/lib/control";
+import { useShallow } from "zustand/react/shallow";
 import { zoomTimelineTo } from "@/lib/timeline-shortcuts";
 import React, {
   useCallback,
@@ -104,34 +105,40 @@ const getMajorZoomConfigFormat = (
   }
 };
 
+/**
+ * The playhead moved (played, sought, stepped) out of view: the view follows it, as CapCut's
+ * does. Scrolling the view alone leaves it at its time, out of view if it goes there
+ * (shiftTimelineDuration), so this runs only when the playhead's frame changes. On its own,
+ * so the ruler isn't rendered and drawn again on every frame of playback.
+ */
+const FollowPlayhead: React.FC = () => {
+  const focusFrame = useControlsStore((s) => s.focusFrame);
+  const [startFrame, endFrame] = useControlsStore((s) => s.timelineDuration);
+  const shiftTimelineDuration = useControlsStore((s) => s.shiftTimelineDuration);
+  useEffect(() => {
+    if (focusFrame < startFrame) {
+      shiftTimelineDuration(focusFrame - startFrame);
+    }
+    if (focusFrame > endFrame) {
+      let duration = endFrame - startFrame;
+      const additionalDuration =
+        duration + endFrame > focusFrame ? 0 : focusFrame - endFrame;
+      shiftTimelineDuration(duration + additionalDuration);
+    }
+  }, [focusFrame]);
+  return null;
+};
+
 const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
   ({ stageWidth, startPadding, maxScroll, thumbY, onRulerClick }) => {
-    const {
-      timelineDuration,
-      fps,
-      zoomLevel,
-      focusFrame,
-      shiftTimelineDuration,
-      maxZoomLevel,
-      minZoomLevel,
-    } = useControlsStore();
+    const timelineDuration = useControlsStore((s) => s.timelineDuration);
+    const fps = useControlsStore((s) => s.fps);
+    const zoomLevel = useControlsStore((s) => s.zoomLevel);
+    const maxZoomLevel = useControlsStore((s) => s.maxZoomLevel);
+    const minZoomLevel = useControlsStore((s) => s.minZoomLevel);
     const [startFrame, endFrame] = timelineDuration;
 
     // We will basically render from startDuration to startDuration + duration.
-    useEffect(() => {
-      // The playhead moved (played, sought, stepped) out of view: the view follows it, as
-      // CapCut's does. Scrolling the view alone leaves it at its time, out of view if it goes
-      // there (shiftTimelineDuration), so this runs only when the playhead's frame changes.
-      if (focusFrame < startFrame) {
-        shiftTimelineDuration(focusFrame - startFrame);
-      }
-      if (focusFrame > endFrame) {
-        let duration = endFrame - startFrame;
-        const additionalDuration =
-          duration + endFrame > focusFrame ? 0 : focusFrame - endFrame;
-        shiftTimelineDuration(duration + additionalDuration);
-      }
-    }, [focusFrame]);
     // Convert duration to milliseconds if needed for consistent calculations
     const tickMark: TickMark[] = useMemo(() => {
       let ticks: TickMark[] = [];
@@ -196,6 +203,7 @@ const TimelineMoments: React.FC<TimelineMomentsProps> = React.memo(
 
     return (
       <>
+        <FollowPlayhead />
         <Rect
           x={0}
           y={0}
@@ -325,9 +333,30 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
   // Always mount timeline elements; avoid conditional unmounts that can
   // cause rendering glitches in Tauri's WebView. Toggle visibility via data.
 
-  const controlStore = useControlsStore();
+  // Only what the editor reads: not the playhead's frame, which changes on every frame of
+  // playback and scrubbing, nor the ghost a drag moves on every pointer move, nor the visible
+  // frames or the clips, which change on every step of a scroll, a zoom or a trim (its handlers
+  // read them when they run). Subscribed to the whole stores, the editor and every track under
+  // it re-rendered and redrew each time.
+  const controlStore = useControlsStore(
+    useShallow((s) => ({
+      fps: s.fps,
+      defaultClipLength: s.defaultClipLength,
+      isPlaying: s.isPlaying,
+      selectedClipIds: s.selectedClipIds,
+      timelineTool: s.timelineTool,
+      previewAxis: s.previewAxis,
+      canTimelineDurationBeShifted: s.canTimelineDurationBeShifted,
+      shiftTimelineDuration: s.shiftTimelineDuration,
+      clearSelection: s.clearSelection,
+      pause: s.pause,
+      setFocusAnchorRatio: s.setFocusAnchorRatio,
+      setFocusFrame: s.setFocusFrame,
+      setIsAccurateSeekNeeded: s.setIsAccurateSeekNeeded,
+      setSelectedMarkerId: s.setSelectedMarkerId,
+    })),
+  );
   const {
-    clips,
     timelines,
     addTimeline,
     addClip,
@@ -341,7 +370,23 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     snapGuideX,
     setIsDragging,
     addAsset
-  } = useClipStore();
+  } = useClipStore(
+    useShallow((s) => ({
+      timelines: s.timelines,
+      addTimeline: s.addTimeline,
+      addClip: s.addClip,
+      setGhostStartEndFrame: s.setGhostStartEndFrame,
+      setGhostX: s.setGhostX,
+      setGhostTimelineId: s.setGhostTimelineId,
+      setActiveMediaItem: s.setActiveMediaItem,
+      setGhostInStage: s.setGhostInStage,
+      setHoveredTimelineId: s.setHoveredTimelineId,
+      hoveredTimelineId: s.hoveredTimelineId,
+      snapGuideX: s.snapGuideX,
+      setIsDragging: s.setIsDragging,
+      addAsset: s.addAsset,
+    })),
+  );
   // const scrollBarRef = useRef<any>(null);
   // const isSyncingScrollRef = useRef(false);
   const [isRulerDragging, setIsRulerDragging] = useState(false);
@@ -363,8 +408,9 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
   const [verticalScroll, setVerticalScroll] = useState(0);
   const verticalScrollRef = useRef(0);
   const [isScrollbarHovered, setIsScrollbarHovered] = useState(false);
-  const [canScrollHorizontal, setCanScrollHorizontal] = useState(false);
-  const { totalTimelineFrames, timelineDuration } = useControlsStore();
+  const canScrollHorizontal = useControlsStore(
+    (s) => s.timelineDuration[1] - s.timelineDuration[0] < s.totalTimelineFrames,
+  );
 
   useEffect(() => {
     if (!import.meta.hot) return;
@@ -374,16 +420,6 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       import.meta.hot?.off("apex:timeline-hmr", onTimelineHmr);
     };
   }, []);
-
-  useEffect(() => {
-    const [startFrame, endFrame] = timelineDuration;
-    const totalDuration = endFrame - startFrame;
-    if (totalDuration < totalTimelineFrames) {
-      setCanScrollHorizontal(true);
-    } else {
-      setCanScrollHorizontal(false);
-    }
-  }, [totalTimelineFrames, timelineDuration]);
 
   const getBoundsForTimeline = (timelineId: string) => {
     const timeline = timelines.find((t) => t.timelineId === timelineId);
@@ -404,10 +440,10 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     const y = start.clientY + event.delta.y - r.top;
     const track = trackAt(timelines, y);
     if (!track || x < 0 || x > r.width) return null;
-    const [vs, ve] = controlStore.timelineDuration;
+    const [vs, ve] = useControlsStore.getState().timelineDuration;
     const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
     const frame = vs + (x - TIME_ZERO_X) * perPx;
-    return cutNear(clips, track.timelineId, frame, 24 * perPx);
+    return cutNear(useClipStore.getState().clips, track.timelineId, frame, 24 * perPx);
   };
 
   // An effect tile from the Effects tab over the timeline: the frame under the pointer (and its
@@ -422,11 +458,11 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     const cy = start.clientY + event.delta.y;
     if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return null;
     const y = cy - r.top;
-    const [vs, ve] = controlStore.timelineDuration;
+    const [vs, ve] = useControlsStore.getState().timelineDuration;
     const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
     const frame = Math.max(0, Math.round(vs + (cx - r.left - TIME_ZERO_X) * perPx));
     const track = trackAt(timelines, y);
-    const onClip = track && clips.find((c) => c.timelineId === track.timelineId && takesEffects(c.type) && c.startFrame <= frame && frame < c.endFrame);
+    const onClip = track && useClipStore.getState().clips.find((c) => c.timelineId === track.timelineId && takesEffects(c.type) && c.startFrame <= frame && frame < c.endFrame);
     return { frame, x: TIME_ZERO_X + (frame - vs) / Math.max(1e-9, perPx), clipId: onClip ? onClip.clipId : null };
   };
 
@@ -457,11 +493,11 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     const cy = start.clientY + event.delta.y;
     if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return;
     const y = cy - r.top;
-    const [vs, ve] = controlStore.timelineDuration;
+    const [vs, ve] = useControlsStore.getState().timelineDuration;
     const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
     const frame = Math.max(0, Math.round(vs + (cx - r.left - TIME_ZERO_X) * perPx));
     const track = trackAt(timelines, y);
-    const onClip = track && clips.find((c) => c.timelineId === track.timelineId && c.startFrame <= frame && frame < c.endFrame);
+    const onClip = track && useClipStore.getState().clips.find((c) => c.timelineId === track.timelineId && c.startFrame <= frame && frame < c.endFrame);
     if (!onClip) return;
     const selected = controlStore.selectedClipIds;
     applyPreset(preset, selected.includes(onClip.clipId) ? selected : [onClip.clipId]);
@@ -477,7 +513,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     const cx = start.clientX + event.delta.x;
     const cy = start.clientY + event.delta.y;
     if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return null;
-    const [vs, ve] = controlStore.timelineDuration;
+    const [vs, ve] = useControlsStore.getState().timelineDuration;
     const perPx = (ve - vs) / Math.max(1, dimensions.stageWidth);
     return Math.max(0, Math.round(vs + (cx - r.left - TIME_ZERO_X) * perPx));
   };
@@ -526,7 +562,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         | MediaItem
         | undefined;
 
-      if (clips.length === 0) return;
+      if (useClipStore.getState().clips.length === 0) return;
       if ((data as unknown as TransitionDrag)?.type === "transition") {
         useTransitionDropStore.getState().setTarget(cutUnder(event));
         return;
@@ -1085,7 +1121,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         const timelines = useClipStore.getState().timelines;
         const idx = timelines.findIndex((t) => t.timelineId === hoveredTimelineId.replace("dashed-", ""));
         if (idx >= timelines.indexOf(main!)) {
-          const [vs, ve] = controlStore.timelineDuration;
+          const [vs, ve] = useControlsStore.getState().timelineDuration;
           const pointerX = Number((window as any).__apex_lastPointerX ?? 24);
           insertAt = insertionFrame(state.clips, timelines, vs + ((pointerX - 24) / dimensions.stageWidth) * (ve - vs));
           // The track just made above the main track isn't wanted.
@@ -1128,7 +1164,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         }
       } catch {}
 
-      let [tStart, tEnd] = controlStore.timelineDuration;
+      let [tStart, tEnd] = useControlsStore.getState().timelineDuration;
       const stageWidth = dimensions.stageWidth;
       const visibleDuration = tEnd - tStart;
       const clipLen = Math.max(1, numFrames);
@@ -1387,7 +1423,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       const isHorizontalIntent = absX >= absY || e.shiftKey;
 
       if (isHorizontalIntent) {
-        const [startFrame, endFrame] = controlStore.timelineDuration;
+        const [startFrame, endFrame] = useControlsStore.getState().timelineDuration;
         const duration = endFrame - startFrame;
         const framesPerPixel = duration / dimensions.stageWidth;
         const speedMultiplier = e.shiftKey ? 3 : 1;
@@ -1410,7 +1446,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         }
       }
     },
-    [dimensions.stageWidth, controlStore.timelineDuration, maxScroll],
+    [dimensions.stageWidth, maxScroll],
   );
 
   // Drag to pan when clicking the top ruler area
@@ -1425,12 +1461,12 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
         setIsRulerDragging(true);
         panStateRef.current.startX = pos.x;
         panStateRef.current.lastX = pos.x;
-        panStateRef.current.startFrame = controlStore.timelineDuration[0];
+        panStateRef.current.startFrame = useControlsStore.getState().timelineDuration[0];
         panStateRef.current.fractionalFrames = 0;
         if (e?.evt?.preventDefault) e.evt.preventDefault();
       }
     },
-    [controlStore.timelineDuration],
+    [],
   );
 
   // The blade's cut line and the preview axis follow the mouse.
@@ -1456,7 +1492,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       const pos = stage.getPointerPosition();
       if (!pos) return;
       const deltaX = pos.x - panStateRef.current.lastX;
-      const [startFrame, endFrame] = controlStore.timelineDuration;
+      const [startFrame, endFrame] = useControlsStore.getState().timelineDuration;
       const duration = endFrame - startFrame;
       const framesPerPixel = duration / Math.max(1, dimensions.stageWidth);
       const deltaFramesFloat =
@@ -1470,7 +1506,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       }
       panStateRef.current.lastX = pos.x;
     },
-    [isRulerDragging, controlStore.timelineDuration, dimensions.stageWidth, timelineTool, previewAxis, playing],
+    [isRulerDragging, dimensions.stageWidth, timelineTool, previewAxis, playing],
   );
 
   const endRulerDrag = useCallback(() => {
@@ -1484,13 +1520,13 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
     scrubSoundStop();
   }, [endRulerDrag]);
 
-  const hasClips = useMemo(() => clips.length > 0, [clips]);
+  const hasClips = useClipStore((s) => s.clips.length > 0);
 
   const seekToPointerX = useCallback(
     (pointerX: number) => {
       // Map pointer X to frame within the visible window [startFrame, endFrame]
       const timelinePadding = TIME_ZERO_X; // time 0, after the Cover column
-      const [startFrame, endFrame] = controlStore.timelineDuration;
+      const [startFrame, endFrame] = useControlsStore.getState().timelineDuration;
       const innerX = Math.max(
         0,
         Math.min(pointerX - timelinePadding, dimensions.stageWidth),
@@ -1508,7 +1544,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
       controlStore.setIsAccurateSeekNeeded(true);
       scrubSound(targetFrame);
     },
-    [controlStore, controlStore.timelineDuration, dimensions.stageWidth],
+    [controlStore, dimensions.stageWidth],
   );
 
   const renderTrack = (timeline: (typeof timelines)[number], index: number) => (
@@ -1788,7 +1824,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = React.memo(() => {
                 {/* Overlay helper text/icon centered */}
 
                 <div
-                  style={{ display: clips.length > 0 ? "none" : "flex" }}
+                  style={{ display: hasClips ? "none" : "flex" }}
                   className="h-full items-center justify-center w-full p-8"
                 >
                   <Droppable
