@@ -38,6 +38,7 @@
     "bundle:mac": "node scripts/build-app.js --platform darwin",
     "bundle:mac:arm64": "node scripts/build-app.js --platform darwin --arch arm64",
     "bundle:mac:x64": "node scripts/build-app.js --platform darwin --arch x64",
+    "install:mac": "scripts/install-mac.sh",
     "bundle:win": "node scripts/build-app.js --platform win32",
     "bundle:linux": "node scripts/build-app.js --platform linux",
     "publish": "node scripts/build-app.js --publish",

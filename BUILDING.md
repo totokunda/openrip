@@ -47,6 +47,12 @@ npm run bundle:linux    # Linux (deb, AppImage, tar.gz)
 
 Output goes to `apps/app/dist/`.
 
+To build for this Mac and install it in `/Applications` (it waits for a running OpenRip to quit and keeps the app it replaces in `~/Library/Caches/OpenRip/previous/`):
+
+```bash
+npm run install:mac
+```
+
 ### Code signing
 
 - **macOS:** set `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` (or the App Store Connect API key variables) to enable notarization. Without them the build is signed but not notarized.
