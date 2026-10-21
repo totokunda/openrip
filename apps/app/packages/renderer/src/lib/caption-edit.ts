@@ -41,6 +41,31 @@ export const styleOf = (clip: TextClipProps): Partial<TextClipProps> => {
   return out as Partial<TextClipProps>;
 };
 
+/** The patch that puts a caption style (Templates) on a caption: a caption made from speech takes a plain style's "whole text" in place of the last word-by-word one. */
+export const restylePatch = (clip: TextClipProps, style: Partial<TextClipProps>): Partial<TextClipProps> => (clip.captionWords ? { captionStyle: "none", ...style } : { ...style });
+
+/**
+ * A timeline as the project file has it (its `tracks` and `clips`) with a caption style tried on it from Templates, for
+ * the engine's preview only: `hover` (the style under the pointer) on every caption; or, with no captions yet, a sample
+ * caption in `hover` or else `picked` (the style last clicked) on a track of its own at the top, `sample` making its
+ * track and clip in a style. Unchanged when there's nothing to try.
+ */
+export const withCaptionStyleTried = <T extends { tracks?: TimelineProps[]; clips: AnyClipProps[] }>(
+  timeline: T,
+  tried: { hover: Partial<TextClipProps> | null; picked: Partial<TextClipProps> | null },
+  sample: (style: Partial<TextClipProps>) => { track: TimelineProps; clip: AnyClipProps },
+): T => {
+  const tracks = timeline.tracks ?? [];
+  const { hover } = tried;
+  if (timeline.clips.some((c) => isCaption(c, tracks))) {
+    return hover ? { ...timeline, clips: timeline.clips.map((c) => (isCaption(c, tracks) ? { ...c, ...restylePatch(c, hover) } : c)) } : timeline;
+  }
+  const style = hover ?? tried.picked;
+  if (!style) return timeline;
+  const { track, clip } = sample(style);
+  return { ...timeline, tracks: [track, ...tracks], clips: [...timeline.clips, clip] };
+};
+
 /**
  * The patch that moves other captions with the edited one when its box changes: the box's
  * centre, scale, rotation and opacity (each only if it changed), keeping each caption's own size

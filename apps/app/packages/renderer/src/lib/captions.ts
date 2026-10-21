@@ -365,6 +365,38 @@ export const captionClips = (
   return { timeline: { timelineId, type: "text", timelineY: 0, timelineHeight: 40, timelineWidth: 0, muted: false, hidden: false, captions: true }, clips };
 };
 
+/** The words of the sample caption the Captions tab's Templates show on the video while there are no captions. */
+export const SAMPLE_CAPTION = "Your captions look like this";
+
+/** How long the sample says each of its words (s). */
+const SAMPLE_WORD = 0.45;
+
+/**
+ * The sample caption: SAMPLE_CAPTION in `style`, where captionClips puts captions, its words said one after another so
+ * that at frame `at` (the playhead) the third is being said, for a word-by-word style to show what it does to it. Its
+ * speech starts that long before `at` (cut into, from frame 0, near the timeline's start) and it stays a second after
+ * its last word. `id` is its track's and its clip's.
+ */
+export const sampleCaption = (style: Partial<TextClipProps>, opts: { fps: number; canvas: { width: number; height: number }; at: number; id: string }) => {
+  let from = 0;
+  const words: CueWord[] = SAMPLE_CAPTION.split(" ").map((w, k) => {
+    const word = { from, to: from + w.length, start: k * SAMPLE_WORD, end: (k + 1) * SAMPLE_WORD };
+    from += w.length + 1;
+    return word;
+  });
+  const speech = opts.at - Math.round(2.5 * SAMPLE_WORD * opts.fps);
+  const start = Math.max(0, speech);
+  const end = speech + Math.round((words.length * SAMPLE_WORD + 1) * opts.fps);
+  const { timeline, clips } = captionClips([{ start: 0, end: (end - start) / opts.fps, text: SAMPLE_CAPTION, words }], {
+    fps: opts.fps,
+    canvas: opts.canvas,
+    style,
+    makeId: () => opts.id,
+    offsetFrames: start,
+  });
+  return { timeline, clip: { ...clips[0], spokenFrom: (start - speech) / opts.fps } };
+};
+
 /** The look captions get when no style is chosen: white bold text with a black outline. */
 export const CAPTION_STYLE: Partial<TextClipProps> = {
   fontSize: 30,

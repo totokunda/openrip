@@ -1,7 +1,7 @@
 // Tests for src/lib/caption-edit.ts and src/lib/text-style-presets.ts: `node --test tests/*.test.ts` in packages/renderer.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { boxChange, captionRows, captionsOnTrack, countMatches, isCaption, replaceAllPatches, replaceMatches, rowTime, styleChange, styleOf } from "../src/lib/caption-edit.ts";
+import { boxChange, captionRows, captionsOnTrack, countMatches, isCaption, replaceAllPatches, replaceMatches, rowTime, styleChange, styleOf, withCaptionStyleTried } from "../src/lib/caption-edit.ts";
 import { hasLook, lookPatch, textLookAttributes, isTextStyle, savedAsPreset, LOOK_DEFAULTS } from "../src/lib/text-style-presets.ts";
 import { TEXT_PRESETS } from "../src/lib/text-presets.ts";
 
@@ -51,6 +51,35 @@ test("a style edit carries only the look, and a box edit moves the centre", () =
   assert.equal(patch.transform!.x + patch.transform!.width / 2, 150 + 200);
   assert.equal(patch.transform!.y + patch.transform!.height / 2, 170 + 30);
   assert.equal(patch.transform!.width, 200);
+});
+
+test("a style tried from Templates goes on every caption, or on a sample caption while there are none", () => {
+  const tracks = [{ timelineId: "t1", captions: true }, { timelineId: "tv" }] as any;
+  const video = { clipId: "v", type: "video", timelineId: "tv" } as any;
+  const spoken = text("b", 24, "from speech", { captionWords: [{ from: 0, to: 4, start: 0, end: 0.3 }], captionStyle: "orip_pop" });
+  const timeline = { tracks, clips: [video, text("a", 0, "from a file"), spoken] };
+  const boxed = { captionStyle: "orip_boxed", captionColor: "#ffe600" };
+  const plain = { color: "#ffd84d" };
+  const noSample = (): never => assert.fail("no sample while there are captions");
+  const tried = withCaptionStyleTried(timeline, { hover: boxed, picked: null }, noSample);
+  assert.deepEqual(tried.clips.map((c: any) => c.captionStyle), [undefined, "orip_boxed", "orip_boxed"]);
+  assert.equal(tried.clips[0], video);
+  assert.equal(tried.tracks, tracks);
+  // A plain style shows a caption made from speech whole.
+  assert.deepEqual(
+    withCaptionStyleTried(timeline, { hover: plain, picked: null }, noSample).clips.map((c: any) => [c.captionStyle, c.color]),
+    [[undefined, undefined], [undefined, "#ffd84d"], ["none", "#ffd84d"]],
+  );
+  // The style last clicked is on the captions already (or they were made since): only the one pointed at is tried on them.
+  assert.equal(withCaptionStyleTried(timeline, { hover: null, picked: boxed }, noSample), timeline);
+  // No captions: a sample on a track of its own at the top, in the style pointed at, else the one last clicked.
+  const bare = { tracks: [tracks[1]], clips: [video] };
+  const sample = (style: any) => ({ track: { timelineId: "s", captions: true } as any, clip: { clipId: "s", type: "text", timelineId: "s", ...style } });
+  const shown = withCaptionStyleTried(bare, { hover: plain, picked: boxed }, sample);
+  assert.deepEqual(shown.tracks!.map((t) => t.timelineId), ["s", "tv"]);
+  assert.deepEqual(shown.clips.map((c: any) => [c.clipId, c.color]), [["v", undefined], ["s", "#ffd84d"]]);
+  assert.equal((withCaptionStyleTried(bare, { hover: null, picked: boxed }, sample).clips[1] as any).captionStyle, "orip_boxed");
+  assert.equal(withCaptionStyleTried(bare, { hover: null, picked: null }, sample), bare);
 });
 
 test("a preset's look resets what it doesn't set and keeps the words and the size", () => {

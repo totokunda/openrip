@@ -29,7 +29,7 @@ import { useProjectsStore } from "./projects";
 import { clipToJson, getActiveProjectJsonSnapshot } from "./middlewares/json-persistence";
 import { imageDurationFrames } from "./preferences";
 import type { CardExport } from "./export-scope";
-import type { AnyClipProps } from "./types";
+import type { AnyClipProps, TextClipProps, TimelineProps } from "./types";
 import { withoutHistory } from "./history";
 import { BASE_LONG_SIDE } from "./settings";
 import { registerBundledFonts } from "./fonts";
@@ -41,6 +41,9 @@ import { initRender } from "./prerender";
 import { proxyOnFor, useProxyMode } from "./media/proxy-mode";
 import { MediaLibraryEvents } from "./media/library";
 import { findCompound, needsRender, renderedValid } from "./compound-media";
+import { captionStyle, useCaptionsStore, worldCanvas } from "./caption-actions";
+import { withCaptionStyleTried } from "./caption-edit";
+import { sampleCaption } from "./captions";
 
 type EnginePreviewState = {
   /** The user's setting. */
@@ -119,7 +122,7 @@ async function syncNow() {
   try {
     // The engine reads originals (ProRes included) where the app uses playable copies, and
     // the proxies while editing when the project's Proxy switch is on.
-    const snapshot = withAdjustmentPreview(withEffectPreview(withFilterPreview(withoutMasksWhileEditing(await withOriginalMedia(snap.snapshot, true)))));
+    const snapshot = withCaptionPreview(withAdjustmentPreview(withEffectPreview(withFilterPreview(withoutMasksWhileEditing(await withOriginalMedia(snap.snapshot, true))))));
     // Its text in the bundled fonts from the first frame.
     await registerBundledFonts();
     const r = await engineSyncProject(snap.projectId, snapshot);
@@ -338,6 +341,25 @@ function withAdjustmentPreview<T>(snapshot: T): T {
   return { ...s, timeline: { ...s.timeline, tracks: [track, ...(s.timeline.tracks ?? [])], clips: [...s.timeline.clips, clip] } };
 }
 
+/**
+ * The caption style tried in the Captions tab's Templates, on the engine's copy only, like the others: the one under
+ * the pointer on every caption, or, with no captions yet, a sample caption in it (or in the one last clicked) about the
+ * playhead, on a track of its own above the rest. The project (and so the saved file and an export) never has it.
+ */
+function withCaptionPreview<T>(snapshot: T): T {
+  const { preview, sample } = useCaptionsStore.getState();
+  const s = snapshot as any;
+  if ((!preview && !sample) || !s?.timeline || !Array.isArray(s.timeline.clips)) return snapshot;
+  const { fps: rate, focusFrame } = useControlsStore.getState();
+  const fps = rate || 24;
+  const made = (style: Partial<TextClipProps>) => {
+    const { timeline, clip } = sampleCaption(style, { fps, canvas: worldCanvas(), at: Number.isFinite(focusFrame) ? focusFrame : 0, id: "caption-preview" });
+    return { track: timeline as TimelineProps, clip: clipToJson(clip, fps) as any };
+  };
+  const timeline = withCaptionStyleTried(s.timeline, { hover: preview ? captionStyle(preview).props : null, picked: sample ? captionStyle(sample).props : null }, made);
+  return timeline === s.timeline ? snapshot : { ...s, timeline };
+}
+
 /** Sync soon; edits arriving within `ms` are sent together. */
 function scheduleSync(ms = 60) {
   if (syncTimer) clearTimeout(syncTimer);
@@ -389,6 +411,14 @@ export function initEnginePreview() {
   });
   useAdjustmentLibrary.subscribe((s, p) => {
     if (s.preview !== p.preview && useEnginePreviewStore.getState().enabled) scheduleSync(0);
+  });
+  useCaptionsStore.subscribe((s, p) => {
+    if ((s.preview !== p.preview || s.sample !== p.sample) && useEnginePreviewStore.getState().enabled) scheduleSync(0);
+  });
+  // A sample caption is made about the playhead: moved while paused, it's made again there.
+  useControlsStore.subscribe((s, p) => {
+    const { preview, sample } = useCaptionsStore.getState();
+    if (s.focusFrame !== p.focusFrame && !s.isPlaying && (preview || sample) && useEnginePreviewStore.getState().enabled) scheduleSync();
   });
   watch(useMaskStore.subscribe as any, (s: any) => [s.tool]);
   // A proxy made or removed, or the project's Proxy switch: the engine's files change, not the project.

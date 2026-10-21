@@ -2,7 +2,7 @@ import React from "react";
 import { LuPlus, LuSearch, LuX } from "react-icons/lu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useClipStore } from "@/lib/clip";
-import { useControlsStore } from "@/lib/control";
+import { isCaption } from "@/lib/caption-edit";
 import { CAPTION_STYLES, applyCaptionStyle, captionStyle, exportCaptions, importCaptionFile, pickAndImportCaptions, useCaptionsStore } from "@/lib/caption-actions";
 import { cn } from "@/lib/utils";
 import AutoCaptionsMenu, { GenerateFooter } from "./AutoCaptionsMenu";
@@ -162,15 +162,24 @@ const CaptionsMenu: React.FC<{ part?: string }> = ({ part = "add" }) => {
 /**
  * Templates, as CapCut's caption templates: a search over every style, the category's styles as
  * square tiles (the name on hover), and the same foot as Auto captions, so a style can be picked
- * and the captions generated in it from here. A click on a tile also restyles the selected
- * caption's whole track.
+ * and the captions generated in it from here. A click on a tile also restyles every caption. The
+ * style under the pointer shows on the video as it moves (lib/engine-preview.ts): on the captions,
+ * or, with none yet, on a sample caption, which keeps the style last clicked while the tab shows.
  */
 const CaptionTemplates: React.FC<{ category: string }> = ({ category }) => {
   const styleId = useCaptionsStore((s) => s.styleId);
   const setStyle = useCaptionsStore((s) => s.setStyle);
-  const lastSelected = useControlsStore((s) => s.selectedClipIds[s.selectedClipIds.length - 1]);
-  const selected = useClipStore((s) => s.getClipById(lastSelected));
-  const selectedText = selected?.type === "text" ? selected : null;
+  const setPreview = useCaptionsStore((s) => s.setPreview);
+  const setSample = useCaptionsStore((s) => s.setSample);
+  const hasCaptions = useClipStore((s) => s.clips.some((c) => isCaption(c, s.timelines)));
+  // What's tried on the video lasts while the tab shows.
+  React.useEffect(
+    () => () => {
+      setPreview(null);
+      setSample(null);
+    },
+    [setPreview, setSample],
+  );
   const [query, setQuery] = React.useState("");
   const q = query.trim().toLowerCase();
   const group = captionTemplateSections.find((g) => g.id === `templates:${category}`) ?? captionTemplateSections[0];
@@ -207,7 +216,7 @@ const CaptionTemplates: React.FC<{ category: string }> = ({ category }) => {
           {shown.length === 0 ? (
             <p className="text-[12px] text-[#6c6c6c] leading-snug py-6">No caption styles found.</p>
           ) : (
-            <div className="grid gap-x-4 gap-y-4" style={{ gridTemplateColumns: "repeat(auto-fill, 86px)" }}>
+            <div className="grid gap-x-4 gap-y-4" style={{ gridTemplateColumns: "repeat(auto-fill, 86px)" }} onMouseLeave={() => setPreview(null)}>
               {shown.map((c) => (
                 <button
                   key={c.id}
@@ -215,9 +224,11 @@ const CaptionTemplates: React.FC<{ category: string }> = ({ category }) => {
                   data-testid={`caption-style-${c.id}`}
                   aria-pressed={styleId === c.id}
                   title={c.name}
+                  onMouseEnter={() => setPreview(c.id)}
                   onClick={() => {
                     setStyle(c.id);
-                    if (selectedText?.timelineId) applyCaptionStyle(selectedText.timelineId, c.id);
+                    // No captions to restyle: the sample keeps the style.
+                    setSample(applyCaptionStyle(c.id) ? null : c.id);
                   }}
                   className={cn(
                     "w-[86px] h-[86px] rounded-[6px] bg-brand-background-light flex items-center justify-center overflow-hidden px-1.5 transition-colors",
@@ -230,7 +241,7 @@ const CaptionTemplates: React.FC<{ category: string }> = ({ category }) => {
             </div>
           )}
           <p className="mt-4 text-[12px] leading-snug text-[#949494]">
-            {selectedText ? "A click restyles every caption on the selected caption's track." : "Generate captions in this style, or select a caption to restyle its track."}
+            {hasCaptions ? "Point at a style to try it on the captions; a click restyles every caption." : "Point at a style to see it on a sample caption; generate captions in the one you click."}
           </p>
         </div>
       </ScrollArea>

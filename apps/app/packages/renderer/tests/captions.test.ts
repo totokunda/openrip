@@ -1,7 +1,9 @@
 // Tests for src/lib/captions.ts: `node --test tests/*.test.ts` in packages/renderer.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { captionClips, clipsToCues, cueFrames, formatSrtTime, parseAss, parseCaptions, parseLrc, parseSubtitles, parseTime, writeSrt } from "../src/lib/captions.ts";
+import { captionClips, clipsToCues, cueFrames, formatSrtTime, parseAss, parseCaptions, parseLrc, parseSubtitles, parseTime, sampleCaption, SAMPLE_CAPTION, writeSrt } from "../src/lib/captions.ts";
+import { CAPTION_PRESETS } from "../src/lib/caption-presets.ts";
+import type { TextClipProps } from "../src/lib/types.ts";
 
 test("times read in SRT's and VTT's forms", () => {
   assert.equal(parseTime("00:00:01,000"), 1);
@@ -124,6 +126,32 @@ test("caption clips go on a new track in the chosen style", () => {
   assert.ok(t.y + t.height / 2 > 450 && Math.abs(t.width - 960) < 0.01);
   assert.ok(clips[1].transform!.height > t.height);
   assert.equal(new Set(clips.map((c) => c.clipId)).size, 2);
+});
+
+test("the sample caption is said about the playhead, its third word at the playhead, in the style tried", () => {
+  const boxed = CAPTION_PRESETS.find((p) => p.id === "boxed-yellow")!.props;
+  const canvas = { width: 1066.67, height: 600 };
+  // The word being said at a frame, as the engine times it: clip-local seconds plus how far into its speech the clip starts.
+  const said = (clip: TextClipProps, frame: number, fps: number) => {
+    const t = (frame - clip.startFrame) / fps + (clip.spokenFrom ?? 0);
+    const w = clip.captionWords!.find((w) => w.start <= t && t < w.end);
+    return w && clip.text!.slice(w.from, w.to);
+  };
+  const { timeline, clip } = sampleCaption(boxed, { fps: 24, canvas, at: 100, id: "s" });
+  assert.equal(clip.text, SAMPLE_CAPTION);
+  assert.deepEqual(clip.captionWords!.map((w) => clip.text!.slice(w.from, w.to)), SAMPLE_CAPTION.split(" "));
+  assert.equal(said(clip, 100, 24), "look");
+  assert.deepEqual([clip.startFrame, clip.endFrame, clip.spokenFrom], [73, 151, 0]);
+  assert.deepEqual([clip.captionStyle, clip.captionColor, clip.strokeEnabled], ["orip_boxed", "#ffe600", true]);
+  // On a captions track of its own, its box where captions go.
+  assert.deepEqual([timeline.timelineId, timeline.captions, clip.timelineId, clip.clipId], ["s", true, "s", "s"]);
+  assert.deepEqual(clip.transform, captionClips([{ start: 0, end: 1, text: SAMPLE_CAPTION }], { fps: 24, canvas, style: boxed, makeId: () => "x" }).clips[0].transform);
+  // Near the timeline's start it starts at 0, cut into its speech: the same word at the playhead, and it runs on past it.
+  const early = sampleCaption(boxed, { fps: 30, canvas, at: 10, id: "s" }).clip;
+  assert.equal(early.startFrame, 0);
+  assert.ok(early.spokenFrom! > 0);
+  assert.equal(said(early, 10, 30), "look");
+  assert.ok(early.endFrame > 10 + 30);
 });
 
 test("text clips write out as SRT and read back the same", () => {

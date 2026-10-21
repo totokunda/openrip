@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { pickMediaPaths, pickSavePath, readFileBuffer, writeFileBuffer } from "@app/preload";
 import { CAPTION_STYLE, captionClips, clipsToCues, parseSubtitles, writeSrt } from "./captions";
 import { TEXT_PRESETS } from "./text-presets";
-import { captionsOnTrack, replaceAllPatches } from "./caption-edit";
+import { captionsOnTrack, isCaption, replaceAllPatches, restylePatch } from "./caption-edit";
 import { CAPTION_PRESETS, type CaptionKind } from "./caption-presets";
 import { useClipStore } from "./clip";
 import { useControlsStore } from "./control";
@@ -53,6 +53,12 @@ interface CaptionsState {
   /** The style new captions get. */
   styleId: string;
   setStyle: (id: string) => void;
+  /** The style under the pointer in Templates, tried on the video (lib/engine-preview.ts): on the captions, or on a sample caption while there are none. */
+  preview: string | null;
+  setPreview: (id: string | null) => void;
+  /** The style last clicked in Templates while there were no captions: the sample keeps showing it once the pointer leaves. */
+  sample: string | null;
+  setSample: (id: string | null) => void;
   /** Files imported this session, newest first. */
   files: ImportedCaptions[];
   /** What the last import or export did, for the panel to say. */
@@ -74,6 +80,10 @@ export const useCaptionsStore = create<CaptionsState>((set) => ({
       localStorage.setItem(STYLE_KEY, styleId);
     } catch {}
   },
+  preview: null,
+  setPreview: (preview) => set({ preview }),
+  sample: null,
+  setSample: (sample) => set({ sample }),
   files: [],
   message: null,
   setMessage: (message) => set({ message }),
@@ -84,7 +94,7 @@ const SUBTITLES = [{ name: "Subtitles", extensions: ["srt", "vtt", "lrc", "ass",
 const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** The canvas in world units, as the preview lays it out (BASE_LONG_SIDE tall). */
-const worldCanvas = () => {
+export const worldCanvas = () => {
   const { aspectRatio } = useViewportStore.getState();
   const ratio = aspectRatio.width / aspectRatio.height;
   return { width: BASE_LONG_SIDE * (Number.isFinite(ratio) && ratio > 0 ? ratio : 16 / 9), height: BASE_LONG_SIDE };
@@ -129,17 +139,13 @@ export async function pickAndImportCaptions(): Promise<number> {
   return added;
 }
 
-/** A caption style on every text of a track (CapCut's templates go on the whole caption track). */
-export function applyCaptionStyle(timelineId: string, styleId: string) {
+/** A caption style on every caption of the timeline, on all its captions tracks (a click in Templates: one undo step). Returns how many it restyled. */
+export function applyCaptionStyle(styleId: string): number {
   const props = captionStyle(styleId).props;
-  const { clips, updateClip } = useClipStore.getState();
-  for (const c of clips) {
-    if (c.type === "text" && c.timelineId === timelineId) {
-      // A caption made from speech takes a plain style's "whole text" in place of the last word-by-word one.
-      const words = (c as TextClipProps).captionWords ? { captionStyle: "none" } : {};
-      updateClip(c.clipId, { ...words, ...props });
-    }
-  }
+  const { clips, timelines, updateClip } = useClipStore.getState();
+  const captions = clips.filter((c) => isCaption(c, timelines));
+  for (const c of captions) updateClip(c.clipId, restylePatch(c, props));
+  return captions.length;
 }
 
 /** The timeline's texts as SRT cues: every visible text on a visible track. */
