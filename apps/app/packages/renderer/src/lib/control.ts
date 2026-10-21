@@ -231,7 +231,13 @@ export const useControlsStore = create<ControlStore>((set, get) => ({
   },
   timelineDuration: [0, TIMELINE_DURATION_SECONDS * DEFAULT_FPS], // [startFrame, endFrame]
   setTimelineDuration: (startFrame: number, endFrame: number) =>
-    set({ timelineDuration: [startFrame, endFrame] }),
+    // The same frames change nothing: a new pair re-rendered and redrew every clip, on each move
+    // of the zoom slider within a level.
+    set((state) =>
+      state.timelineDuration[0] === startFrame && state.timelineDuration[1] === endFrame
+        ? state
+        : { timelineDuration: [startFrame, endFrame] },
+    ),
   shiftTimelineDuration: (duration: number) => {
     const state = get();
     const [startFrame, endFrame] = state.timelineDuration;
