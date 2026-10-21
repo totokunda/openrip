@@ -608,13 +608,14 @@ const TimelineClip: React.FC<
     (xPosition: number) => {
       // Remove padding to get actual timeline position
       const timelineX = xPosition - timelinePadding;
-      // Calculate the frame based on the position within the visible timeline
-      const [startFrame, endFrame] = timelineDuration;
+      // Calculate the frame based on the position within the visible timeline, as it is now:
+      // the edge scroll moves it between renders.
+      const [startFrame, endFrame] = useControlsStore.getState().timelineDuration;
       const framePosition =
         (timelineX / timelineWidth) * (endFrame - startFrame) + startFrame;
       return Math.round(framePosition);
     },
-    [timelinePadding, timelineWidth, timelineDuration],
+    [timelinePadding, timelineWidth],
   );
 
   const handleDragMove = useCallback(
@@ -1642,10 +1643,11 @@ const TimelineClip: React.FC<
     const stage = clipRef.current?.getStage();
     if (!stage) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handleMouseMove = (e: EdgePointer) => {
       stage.container().style.cursor = "col-resize";
       const rect = stage.container().getBoundingClientRect();
-      const stageX = e.clientX - rect.left;
+      // Held to the visible timeline, as the playhead is: past either edge, it scrolls (below).
+      const stageX = Math.max(timelinePadding, Math.min(timelineWidth, e.clientX - rect.left));
       const state = useClipStore.getState();
       const controls = useControlsStore.getState();
       const clip = state.getClipById(clipId);
@@ -1687,7 +1689,12 @@ const TimelineClip: React.FC<
 
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleMouseUp);
+    // Near or past either edge of the visible timeline, the timeline scrolls that way each
+    // animation frame (lib/edge-scroll.ts), the trimmed edge following, the pointer held still or
+    // not; it stops at frame 0 and at the timeline's end.
+    const stopEdgeScroll = startEdgeScroll(stage.container(), timelinePadding, timelineWidth, useControlsStore.getState, handleMouseMove);
     return () => {
+      stopEdgeScroll();
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
     };
