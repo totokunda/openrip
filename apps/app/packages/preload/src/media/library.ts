@@ -5,6 +5,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { ipcRenderer } from "electron";
 import { spawn } from "node:child_process";
 import { resolveFfmpegCommand } from "./ffmpegBin.js";
+import { ffmpegPixelFormat } from "./probe.js";
+import { deepPixelFormat, proxyVideoArgs, tenBitProxy } from "./proxy-format.js";
 import { symlinksDir, proxyDir } from "./paths.js";
 import {
   AUDIO_EXTS,
@@ -88,6 +90,35 @@ async function saveProxyIndex(index: ProxyIndex): Promise<void> {
   const root = join(userDataDir, "media");
   const indexPath = join(root, ".proxy-index.json");
   await fsp.writeFile(indexPath, JSON.stringify(index, null, 2), "utf8");
+}
+
+// Pixel formats by file (path, size and modification time), each probed once: the library's
+// listing and every sync with the engine ask whether a proxy is stale.
+const pixelFormats = new Map<string, Promise<string | undefined>>();
+
+function pixelFormatOf(path: string): Promise<string | undefined> {
+  let key: string;
+  try {
+    const st = fs.statSync(path);
+    key = `${path}:${st.size}:${st.mtimeMs}`;
+  } catch {
+    return Promise.resolve(undefined);
+  }
+  let format = pixelFormats.get(key);
+  if (!format) {
+    format = ffmpegPixelFormat(path);
+    pixelFormats.set(key, format);
+  }
+  return format;
+}
+
+/**
+ * Whether a proxy is an 8-bit one of a source that now gets a 10-bit one (see proxy-format.ts),
+ * made before they did: it isn't used, and the library shows none, so it is made again (by the
+ * automatic proxy, or Create file proxy). A playable copy is never stale.
+ */
+async function isStaleProxy(originalPath: string, proxyPath: string): Promise<boolean> {
+  return tenBitProxy(true) && !proxyPath.endsWith(PLAYABLE_SUFFIX) && deepPixelFormat(await pixelFormatOf(originalPath)) && !deepPixelFormat(await pixelFormatOf(proxyPath));
 }
 
 async function ensureMediaDirs(): Promise<{
@@ -215,7 +246,7 @@ async function listConvertedMedia(
 
     if (proxyIndex[name] && brokenTarget == null) {
       const proxyPath = join(proxyAbs, proxyIndex[name]);
-      if (fs.existsSync(proxyPath)) {
+      if (fs.existsSync(proxyPath) && !(await isStaleProxy(originalAbsPath, proxyPath))) {
         absPath = proxyPath;
         hasProxy = true;
         isPlayableCopy = proxyIndex[name].endsWith(PLAYABLE_SUFFIX);
@@ -443,6 +474,8 @@ async function createProxy(
   };
 
   const targetHeight = parseHeight(resolution);
+  // A deep (10-bit) source gets a 10-bit proxy where the engine keeps the bits (proxy-format.ts).
+  const tenBit = tenBitProxy(deepPixelFormat(await ffmpegPixelFormat(realPath)));
 
   const partPath = `${proxyPath}.part.mp4`;
   await new Promise<void>((resolve, reject) => {
@@ -459,14 +492,7 @@ async function createProxy(
       // Every frame a keyframe: scrubbing and playback decode one frame at a time.
       "-g",
       "1",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-crf",
-      "24",
-      "-pix_fmt",
-      "yuv420p",
+      ...proxyVideoArgs(tenBit),
       "-c:a",
       "aac",
       "-b:a",
@@ -631,12 +657,13 @@ function originalOfProxy(fsPath: string, byProxy: Map<string, string>): string |
  * The files the Rust engine reads for these paths (file URLs or plain paths; each comes back in
  * the form it went in). It decodes originals (ProRes included) quickly, so a proxy or playable
  * copy becomes its original. With `useProxy` (the project's Proxy switch) a video that has a
- * proxy plays from it instead, for editing; exports never pass it. Anything else comes back unchanged.
+ * proxy (not a stale one: isStaleProxy) plays from it instead, for editing; exports never pass
+ * it. Anything else comes back unchanged.
  */
 async function engineSourcePaths(paths: string[], useProxy = false): Promise<string[]> {
   const proxyIndex = await loadProxyIndex();
   const byProxy = new Map(Object.entries(proxyIndex).map(([original, proxy]) => [proxy, original]));
-  return paths.map((p) => {
+  return Promise.all(paths.map(async (p) => {
     try {
       const isUrl = p.startsWith("file://");
       const fsPath = isUrl ? fileURLToPath(p) : p;
@@ -647,7 +674,7 @@ async function engineSourcePaths(paths: string[], useProxy = false): Promise<str
         const entry = proxyIndex[basename(original)];
         if (entry && basename(dirname(original)) === "symlinks" && !entry.endsWith(PLAYABLE_SUFFIX)) {
           const proxyPath = join(proxyDir(dirname(dirname(original))), entry);
-          if (fs.existsSync(proxyPath)) out = proxyPath;
+          if (fs.existsSync(proxyPath) && !(await isStaleProxy(original, proxyPath))) out = proxyPath;
         }
       }
       if (out === fsPath) return p;
@@ -655,7 +682,7 @@ async function engineSourcePaths(paths: string[], useProxy = false): Promise<str
     } catch {
       return p;
     }
-  });
+  }));
 }
 
 async function resolveOriginalPath(path: string): Promise<string> {

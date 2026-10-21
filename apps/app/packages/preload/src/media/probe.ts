@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { resolveFfmpegCommand } from "./ffmpegBin.js";
+import { describedPixelFormat } from "./proxy-format.js";
 
 function run(
   cmd: string,
@@ -50,6 +51,16 @@ export async function ffprobeDimensions(
   const height = Number(hStr);
   if (!Number.isFinite(width) || !Number.isFinite(height)) return undefined;
   return { width, height };
+}
+
+/**
+ * The first video stream's pixel format (e.g. "yuv422p10le"), undefined if there's none. Read from
+ * FFmpeg's description of the file (`ffmpeg -i`), not ffprobe: the Apple Silicon ffprobe the app
+ * ships is an Intel binary, which doesn't run without Rosetta.
+ */
+export async function ffmpegPixelFormat(absPath: string): Promise<string | undefined> {
+  const res = await run("ffmpeg", ["-hide_banner", "-i", absPath]);
+  return describedPixelFormat(res.stderr);
 }
 
 export async function ffprobeHasAudio(absPath: string): Promise<boolean> {
