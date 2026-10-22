@@ -322,7 +322,8 @@ jobs:
             -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest smoke-out/xplat-clip.mp4
           export EXE="$(cygpath -w "$PWD/dist/win-unpacked/OpenRip.exe")"
           export CLIP_NAME=xplat-clip OPENRIP_ENGINE_MUTE=1
-          export FFPROBE="$(command -v ffprobe)"
+          # Chocolatey's (the export tests step installed it), as a Windows path for Node.
+          export FFPROBE="$(cygpath -w "$(command -v ffprobe)")"
           node scripts/smoke/session.mjs . smoke-out smoke-out/ud "$(cygpath -w "$PWD/smoke-out/xplat-clip.mp4")" import timeline xplat | tee smoke-out/smoke.log
           grep -q "STEP xplat: ok" smoke-out/smoke.log
 
