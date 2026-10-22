@@ -52,6 +52,7 @@ import { timelineCues } from "@/lib/caption-actions";
 import { openCoverEditor } from "@/lib/cover";
 import { cardSeconds, type ExportScope } from "@/lib/export-scope";
 import { imageDurationFrames } from "@/lib/preferences";
+import { OPENH264_ATTRIBUTION } from "@/lib/openh264";
 
 export type { ExportScope };
 
@@ -220,13 +221,37 @@ const Cover: React.FC<{ cover?: string; version?: number; ratio: number }> = ({ 
   );
 };
 
-const ProgressView: React.FC<{ onBack: () => void; onClose: () => void; name: string }> = ({ onBack, onClose, name }) => {
+/** H.264 without the hardware encoder waits on Cisco's OpenH264, downloading: what it is, Cisco's credit (its licence asks for it), how far. */
+const CodecDownload: React.FC<{ received: number; total: number }> = ({ received, total }) => {
+  const percent = total > 0 ? Math.round((received / total) * 100) : 0;
+  return (
+    <div data-testid="export-codec-download">
+      <div className="text-[13px] font-semibold text-[#f2f2f2]">Downloading the H.264 codec…</div>
+      <div className="text-[12px] leading-[17px] text-[#a8a8a8] mt-1">
+        Exporting H.264 without hardware encoding uses OpenH264, a codec Cisco makes. OpenRip downloads it from Cisco this once and keeps it; Settings › Performance can turn it off.
+      </div>
+      <div className="text-[12px] text-[#cfcfcf] mt-2" data-testid="export-openh264-credit">
+        {OPENH264_ATTRIBUTION}
+      </div>
+      <div className="mt-6 h-[6px] rounded-full bg-[#3b3b3b] overflow-hidden" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+        <div className="h-full bg-brand-accent rounded-full transition-[width] duration-150" style={{ width: `${percent}%` }} />
+      </div>
+      <div className="mt-2 flex justify-between text-[12px] text-[#a8a8a8]">
+        <span>{received > 0 ? (total > 0 ? `${sizeLabel(received)} of ${sizeLabel(total)}` : sizeLabel(received)) : "Connecting to Cisco…"}</span>
+        <span>{total > 0 ? `${percent}%` : ""}</span>
+      </div>
+    </div>
+  );
+};
+
+const ProgressView: React.FC<{ onBack: () => void; onClose: () => void; onProRes: () => void; name: string }> = ({ onBack, onClose, onProRes, name }) => {
   const run = useExportRun();
   const percent = Math.round(run.ratio * 100);
   const left = timeLeftLabel(run.startedAt, run.ratio);
   return (
     <div data-testid="export-run" data-phase={run.phase} className="flex-1 min-w-0 pr-5 pt-[14px] flex flex-col">
-      {run.phase === "running" && (
+      {run.phase === "running" && run.download && <CodecDownload received={run.download.received} total={run.download.total} />}
+      {run.phase === "running" && !run.download && (
         <>
           <div className="text-[13px] font-semibold text-[#f2f2f2]" data-testid="export-run-title">
             {run.cancelling ? "Cancelling…" : `Exporting ${run.label.toLowerCase()}…`}
@@ -277,6 +302,7 @@ const ProgressView: React.FC<{ onBack: () => void; onClose: () => void; name: st
           <div className="mt-3 text-[12px] text-[#cfcfcf] break-words" data-testid="export-error">
             {run.error}
           </div>
+          {run.offerProRes && <div className="mt-3 text-[12px] text-[#a8a8a8]">ProRes needs no download: export as ProRes 422 instead (a larger .mov, for editing).</div>}
           {run.files.length > 0 && <div className="mt-3 text-[12px] text-[#a8a8a8]">Written before it stopped: {run.files.map((f) => f.label).join(", ")}.</div>}
         </>
       )}
@@ -304,6 +330,11 @@ const ProgressView: React.FC<{ onBack: () => void; onClose: () => void; name: st
             {run.phase !== "done" && (
               <button type="button" data-testid="export-run-back" onClick={onBack} className="h-[28px] px-4 rounded-[4px] bg-[#4f4f4f] hover:bg-[#5a5a5a] text-[12px] font-semibold text-white cursor-pointer">
                 Back
+              </button>
+            )}
+            {run.phase === "failed" && run.offerProRes && (
+              <button type="button" data-testid="export-run-prores" onClick={onProRes} className="h-[28px] px-4 rounded-[4px] bg-[#4f4f4f] hover:bg-[#5a5a5a] text-[12px] font-semibold text-white cursor-pointer">
+                Export as ProRes
               </button>
             )}
             {run.phase === "done" && run.files.some((f) => !f.note) && (
@@ -339,7 +370,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
   const timelines = useClipStore((s) => s.projectTimelines);
   const activeTimelineId = useClipStore((s) => s.activeTimelineId);
   const [timelineId, setTimelineId] = useState(activeTimelineId);
-  // The codecs beyond H.264 and HEVC this platform's encoder has; the others stay hidden.
+  // The codecs this machine's encoders write with the hardware setting as it is (Settings ›
+  // Performance); the others stay hidden.
   const [platformCodecs, setPlatformCodecs] = useState<string[]>([]);
   useEffect(() => {
     if (!open) return;
@@ -410,7 +442,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
 
   // ProRes and HEVC with alpha are .mov files whatever the Format menu said.
   const video: VideoSettings = { ...saved.v, fps, format: needsMov(saved.v.codec) ? "mov" : saved.v.format };
-  const codecs = CODECS.filter((c) => BASIC_CODECS.includes(c.value) || platformCodecs.includes(c.value));
+  const codecs = CODECS.filter((c) => (platformCodecs.length ? platformCodecs : BASIC_CODECS).includes(c.value));
+  // A codec this machine can't write now (HEVC with hardware encoding off) gives way to H.264.
+  useEffect(() => {
+    if (platformCodecs.length && !platformCodecs.includes(saved.v.codec)) setV({ codec: (platformCodecs.includes("h264") ? "h264" : platformCodecs[0]) as Saved["v"]["codec"] });
+  }, [platformCodecs]);
   const proRes = isProRes(saved.v.codec);
   const size = outputSize(video.resolution, ratio);
   const on = {
@@ -444,6 +480,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
     void runExport(settings, scope, scope ? undefined : timelineId);
   };
 
+  // The video couldn't get OpenH264 (offline, or turned off): the same export as ProRes 422.
+  const exportProRes = () => {
+    setV({ codec: "prores-422" });
+    void runExport({ ...settings, video: settings.video && { ...settings.video, codec: "prores-422", format: "mov" } }, scope, scope ? undefined : timelineId);
+  };
+
   const pickFolder = async () => {
     try {
       const picked = await pickMediaPaths({ directory: true, title: "Choose export folder", defaultPath: saved.path || undefined });
@@ -473,7 +515,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
             <Cover cover={project?.coverPath} version={project?.lastModified} ratio={Number.isFinite(ratio) && ratio > 0 ? ratio : 16 / 9} />
           </div>
           {showRun ? (
-            <ProgressView name={name} onBack={() => useExportRun.getState().reset()} onClose={() => { if (run.phase !== "running") useExportRun.getState().reset(); onOpenChange(false); }} />
+            <ProgressView name={name} onBack={() => useExportRun.getState().reset()} onProRes={exportProRes} onClose={() => { if (run.phase !== "running") useExportRun.getState().reset(); onOpenChange(false); }} />
           ) : (
             <div className="flex-1 min-w-0 overflow-y-auto pr-[17px] pb-3" data-testid="export-settings">
               <div className={cn(row, "pt-[14px]")}>

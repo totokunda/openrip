@@ -182,17 +182,32 @@ export function onEngineEnded(cb: (atUs: number, token: number) => void): () => 
 export type EngineExportOptions = { kind?: "video" | "audio" | "gif"; width: number; height: number; fps: number; codec: string; bitrate: number; exactBitrate?: boolean; audio: boolean; audioFormat?: string; shortSide?: number };
 
 export type EngineExportResult =
-  | { ok: true; frames: number; seconds: number; skippedLayers: number }
-  | { ok: false; cancelled?: boolean; error?: string };
+  | { ok: true; frames: number; seconds: number; skippedLayers: number; encoder?: string }
+  /** `offerProRes`: H.264 in software couldn't get Cisco's OpenH264; ProRes needs nothing more. */
+  | { ok: false; cancelled?: boolean; error?: string; offerProRes?: boolean };
 
 /** Export a project snapshot to `path` with the engine (H.264/HEVC, AAC). */
 export function engineExport(projectId: number, snapshot: unknown, path: string, options: EngineExportOptions): Promise<EngineExportResult> {
   return ipcRenderer.invoke("engine:export", projectId, snapshot, path, options);
 }
 
-/** The video codecs the platform's encoder can write ("h264", "hevc", "hevc-alpha", "prores-422", ...); empty without the engine. */
+/** The video codecs this machine can export with the hardware setting as it is ("h264", "hevc", "hevc-alpha", "prores-422", ...); empty without the engine. */
 export function engineExportCodecs(): Promise<string[]> {
   return ipcRenderer.invoke("engine:export-codecs");
+}
+
+/** Cisco's OpenH264 (H.264 in software): whether it's made for this computer, turned on, downloaded; null without the engine. */
+export type EngineOpenh264Info = { supported: boolean; enabled: boolean; installed: boolean; version: string; url: string | null; sha256: string | null; error: string | null; attribution: string };
+
+export function engineOpenh264Info(): Promise<EngineOpenh264Info | null> {
+  return ipcRenderer.invoke("engine:openh264-info");
+}
+
+/** Called while an export downloads OpenH264 from Cisco, with the bytes received and the total (0 when unknown); received -1 when it's over. Returns an unsubscribe. */
+export function onEngineCodecDownload(cb: (received: number, total: number) => void): () => void {
+  const listener = (_e: unknown, received: number, total: number) => cb(received, total);
+  ipcRenderer.on("engine:codec-download", listener);
+  return () => ipcRenderer.off("engine:codec-download", listener);
 }
 
 /** Stop the running engine export (its promise resolves with `cancelled`). */

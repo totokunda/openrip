@@ -13,6 +13,7 @@ import {
   clearProxies,
   clearRenderCache,
   downloadAppUpdate,
+  engineOpenh264Info,
   getAppPaths,
   getAppUpdateState,
   getCacheSize,
@@ -24,6 +25,7 @@ import {
   pickFolder,
   setProjectsDir,
   type AppUpdateState,
+  type EngineOpenh264Info,
 } from "@app/preload";
 import { cn } from "@/lib/utils";
 import { CACHE_AGES, FRAME_RATES, TARGET_LOUDNESS, usePreferencesStore, type Preferences } from "@/lib/preferences";
@@ -32,6 +34,7 @@ import { useEnginePreviewStore } from "@/lib/engine-preview";
 import { refreshProjects } from "@/lib/project-actions";
 import { bumpMediaLibraryVersion } from "@/lib/media/library";
 import { useShellStore } from "@/lib/shell";
+import { OPENH264_ATTRIBUTION } from "@/lib/openh264";
 import { Check, Choice, Divider, Help, NotYet, PathField, Radio, Row, SizeClear, SmallButton, Stepper, Tip, Toggle } from "./controls";
 
 type Tab = "draft" | "edit" | "performance" | "general";
@@ -68,6 +71,7 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
   const [presetsDefault, setPresetsDefault] = useState("");
   const [renderCache, setRenderCache] = useState<{ dir: string; defaultDir?: string; bytes: number | null }>({ dir: "", bytes: null });
   const [update, setUpdate] = useState<AppUpdateState | null>(null);
+  const [openh264, setOpenh264] = useState<EngineOpenh264Info | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Each opening starts from what's saved.
@@ -90,6 +94,7 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
       setPresetsDefault(p.presets);
     });
     void getAppUpdateState().then(setUpdate).catch(() => {});
+    void engineOpenh264Info().then(setOpenh264).catch(() => setOpenh264(null));
     const off = onAppUpdateEvent(() => void getAppUpdateState().then(setUpdate).catch(() => {}));
     return () => off();
   }, [open]);
@@ -283,12 +288,21 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
   const performanceTab = (
     <div className={cn(well, "py-6")}>
       <Row id="encodeDecode" label={t("settings.encodeDecode")}>
-        <Check testId="settings-hw-encode" checked disabled tip={t("settings.hwEncode.tip")}>
+        <Check testId="settings-hw-encode" checked={draft.hardwareEncoding} onChange={(v) => set("hardwareEncoding", v)} tip={t("settings.hwEncode.tip")}>
           {t("settings.hwEncode")}
         </Check>
         <Check testId="settings-hw-decode" checked={draft.hardwareDecoding} onChange={(v) => set("hardwareDecoding", v)} tip={t("settings.hwDecode.tip")}>
           {t("settings.hwDecode")}
         </Check>
+        {/* Cisco's licence: the user can turn its binary's use on and off here, beside its credit (lib/openh264.ts). */}
+        {openh264?.supported && (
+          <>
+            <Check testId="settings-openh264" checked={draft.openh264} onChange={(v) => set("openh264", v)} tip={t("settings.openh264.tip")}>
+              {OPENH264_ATTRIBUTION}
+            </Check>
+            <Help muted>{openh264.installed ? t("settings.openh264.installed", { version: openh264.version }) : t("settings.openh264.notYet")}</Help>
+          </>
+        )}
       </Row>
       <Divider />
       <Row id="autoOptimization" label={t("settings.autoOpt")}>

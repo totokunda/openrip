@@ -34,6 +34,10 @@ export interface Preferences {
   exportSound: boolean;
   /** Performance › Speed up hardware decoding (the engine's VideoToolbox decoder). */
   hardwareDecoding: boolean;
+  /** Performance › Speed up hardware encoding: exports use the GPU's encoders where there are some; off, software only (EngineModule). */
+  hardwareEncoding: boolean;
+  /** Performance › OpenH264 Video Codec provided by Cisco Systems, Inc.: H.264 in software through Cisco's binary, downloaded the first time an export needs it (EngineModule). */
+  openh264: boolean;
   /** Performance › Auto optimization: a playable copy of media the preview can't decode. */
   autoOptimization: "none" | "smart";
   /** General › Language. */
@@ -79,6 +83,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   targetLoudness: -23,
   exportSound: false,
   hardwareDecoding: true,
+  hardwareEncoding: true,
+  openh264: true,
   autoOptimization: "smart",
   language: "en",
   notifications: false,
