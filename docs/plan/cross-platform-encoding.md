@@ -1,11 +1,12 @@
 # Plan: hardware encoding on every platform, with a software fallback
 
-Status 2026-10-20: saved for later; nothing started. Today OpenRip encodes only through VideoToolbox on macOS, and Settings' "Hardware encoding" can't be turned off because there is no software encoder behind it.
+Status 2026-10-22: phase 1 is written (branch `encoders`): software encoders behind VideoToolbox, discovery, choosing, a working "Hardware encoding" switch, and Cisco's OpenH264 downloaded the first time it's needed. Windows' Media Foundation path is written but only builds and runs once the Windows build exists (phase 2).
 
 ## Where things stand
 
-- **FFmpeg** is a minimal static LGPL build (`engine/scripts/build-ffmpeg.sh`). Its only encoders are `aac`, `h264_videotoolbox`, `hevc_videotoolbox` and `prores_videotoolbox`. x264 and x265 were left out because they are GPL.
-- **The export crate** has only the VideoToolbox path. `engine/crates/export/src/lib.rs` lists the software encoder as "Not written yet". `videotoolbox::available()` (`engine/crates/export/src/videotoolbox.rs`) probes the codecs, and `core::export::available_codecs()` reports them to the app. The Export dialog already lists whatever the engine reports, so per-machine codec lists come for free.
+- **FFmpeg** is a minimal static LGPL build (`engine/scripts/build-ffmpeg.sh`). Its encoders are `aac`, `h264_videotoolbox`, `hevc_videotoolbox`, `prores_videotoolbox` and `prores_ks`. x264 and x265 were left out because they are GPL.
+- **The export crate** (`engine/crates/export`) has a backend per encoder: VideoToolbox, Media Foundation (Windows), OpenH264 and `prores_ks`. `candidates()` orders them per platform and setting, `encoders()` finds what each can do here by trying it, and `core::export::available_codecs()` reports the codecs to the Export dialog. An encoder failing part way hands the export to the next.
+- **OpenH264** (founder's decision, 2026-10-21): Cisco's binary, downloaded from Cisco by the app the first time an H.264 export needs it, as Firefox does; pinned per platform (version 2.6.0, SHA-256 of the download and the library) and loaded at run time, never bundled (`engine/crates/export/src/openh264.rs`, `apps/app/packages/main/src/modules/openh264Download.ts`).
 - **Windows and Linux** have no builds at all. `apps/app/scripts/build-engine.mjs` prints "no engine build for this platform yet". `engine/scripts/check-targets.sh` only proves the engine compiles for other targets. Working Windows and Linux builds of the whole app have to come before hardware encoding there.
 
 ## Encoders per platform
@@ -19,7 +20,7 @@ All of these are reached through FFmpeg.
 | Linux | VAAPI (Intel, AMD, NVIDIA via a shim), NVENC, Quick Sync, Vulkan Video (newer, vendor-neutral) | Needs the right drivers on the user's machine |
 | Web, later | WebCodecs | The browser picks the hardware |
 
-**Software fallback:** OpenH264 (BSD) for H.264 and FFmpeg's `prores_ks` (LGPL) for ProRes. This keeps x264/x265 and their GPL terms out. Cisco pays OpenH264's patent fees only for its own binary downloaded at runtime, so decide whether to ship it that way.
+**Software fallback:** OpenH264 (BSD) for H.264 and FFmpeg's `prores_ks` (LGPL) for ProRes. This keeps x264/x265 and their GPL terms out. Cisco pays OpenH264's patent fees only for its own binary downloaded at runtime, which is how it ships. On Windows, Media Foundation's H.264/HEVC encoders (the GPU's, then Microsoft's software one) come before OpenH264.
 
 **Licence:** every hardware encoder above stays within FFmpeg's LGPL. They build against MIT-licensed headers (such as nv-codec-headers and the AMF headers), and the proprietary driver libraries are loaded at runtime, not linked. No `--enable-nonfree`, no GPL.
 
