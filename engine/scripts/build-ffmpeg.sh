@@ -54,11 +54,16 @@ fi
 sha256() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
 }
-# Download $1 to $2 (once) and check it against the SHA-256 $3.
+# Download file $1 (once) from the first of the URLs after $2 that answers, and check it
+# against the SHA-256 $2.
 fetch() {
-  [ -f "$2" ] || curl -fL --retry 3 -o "$2" "$1"
-  if [ "$(sha256 "$2")" != "$3" ]; then
-    echo "$2: checksum mismatch" >&2
+  file=$1 sum=$2
+  shift 2
+  for url in "$@"; do
+    [ -f "$file" ] || curl -fL --retry 3 --retry-all-errors -o "$file" "$url" || rm -f "$file"
+  done
+  if [ ! -f "$file" ] || [ "$(sha256 "$file")" != "$sum" ]; then
+    echo "$file: download failed or checksum mismatch" >&2
     exit 1
   fi
 }
@@ -66,7 +71,7 @@ fetch() {
 mkdir -p "$ROOT/src"
 if [ ! -d "$SRC" ]; then
   TARBALL="$ROOT/src/ffmpeg-$VERSION.tar.xz"
-  fetch "https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz" "$TARBALL" "$SHA256"
+  fetch "$TARBALL" "$SHA256" "https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz"
   tar --no-same-owner -xJf "$TARBALL" -C "$ROOT/src"
 fi
 
@@ -128,7 +133,8 @@ case "$OS" in
     ZLIB_VERSION=1.3.1
     ZLIB="$ROOT/zlib-$NAME"
     if [ ! -f "$ZLIB/lib/zlib.lib" ]; then
-      fetch "https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz" "$ROOT/src/zlib-$ZLIB_VERSION.tar.gz" 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
+      fetch "$ROOT/src/zlib-$ZLIB_VERSION.tar.gz" 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23 \
+        "https://github.com/madler/zlib/releases/download/v$ZLIB_VERSION/zlib-$ZLIB_VERSION.tar.gz" "https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz"
       rm -rf "$ROOT/src/zlib-$ZLIB_VERSION" "$ZLIB"
       tar --no-same-owner -xzf "$ROOT/src/zlib-$ZLIB_VERSION.tar.gz" -C "$ROOT/src"
       mkdir -p "$ZLIB/include" "$ZLIB/lib"
