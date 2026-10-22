@@ -97,13 +97,14 @@ jobs:
           cargo test --target "$(rustc -vV | sed -n 's/host: //p')" --no-fail-fast --no-default-features --lib --tests $ENGINE_TESTS \
             -- --skip every_effect_is_off_at_zero_and_changes_the_frame_at_full_strength
 
-      - name: Renderer tests
-        working-directory: apps/app/packages/renderer
-        run: node --test tests/*.test.ts
-
       - name: Build the app
         working-directory: apps/app
         run: npm run build
+
+      # After the build: some import the preload package's built output.
+      - name: Renderer tests
+        working-directory: apps/app/packages/renderer
+        run: node --test tests/*.test.ts
 
       - name: Package (deb, AppImage)
         working-directory: apps/app
@@ -220,15 +221,16 @@ jobs:
           RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=z.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
         run: cargo test --target x86_64-pc-windows-msvc --no-fail-fast --no-default-features --lib --tests $($env:ENGINE_TESTS -split ' ')
 
-      - name: Renderer tests
-        working-directory: apps/app/packages/renderer
-        run: node --test tests/*.test.ts
-
       - name: Build the app
         working-directory: apps/app
         env:
           MSYS2_BASH: ${{ steps.msys2.outputs.msys2-location }}\usr\bin\bash.exe
         run: npm run build
+
+      # After the build: some import the preload package's built output.
+      - name: Renderer tests
+        working-directory: apps/app/packages/renderer
+        run: node --test tests/*.test.ts
 
       - name: Package (NSIS installer)
         working-directory: apps/app
