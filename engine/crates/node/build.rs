@@ -3,10 +3,10 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_STATIC_FFMPEG").is_some() {
         let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
         if os == "windows" {
-            // Windows has no zlib: build-ffmpeg.sh builds z.lib beside FFmpeg's libraries.
+            // Windows has no zlib: build-ffmpeg.sh builds zlib.lib beside FFmpeg's libraries.
             // And the system libraries FFmpeg's Windows code calls: CNG for random numbers,
             // COM, and the GUIDs of Media Foundation's and DirectShow's headers.
-            println!("cargo:rustc-link-lib=static=z");
+            println!("cargo:rustc-link-lib=static=zlib");
             for lib in ["bcrypt", "ole32", "user32", "mfuuid", "strmiids"] {
                 println!("cargo:rustc-link-lib=dylib={lib}");
             }

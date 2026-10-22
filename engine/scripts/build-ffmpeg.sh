@@ -123,19 +123,19 @@ case "$OS" in
   windows)
     [ "$ARCH" = x86_64 ] || { echo "Windows builds are x86_64 only for now" >&2; exit 1; }
     command -v cl.exe >/dev/null 2>&1 || { echo "cl.exe isn't on PATH: run this from MSVC's x64 Native Tools prompt through msys2_shell.cmd -use-full-path" >&2; exit 1; }
-    # zlib, which Windows doesn't have, built here with MSVC as a static library, z.lib (what
-    # configure's -lz asks MSVC's linker for).
+    # zlib, which Windows doesn't have, built here with MSVC as a static library, zlib.lib
+    # (what configure's -lz asks MSVC's linker for).
     ZLIB_VERSION=1.3.1
     ZLIB="$ROOT/zlib-$NAME"
-    if [ ! -f "$ZLIB/lib/z.lib" ]; then
+    if [ ! -f "$ZLIB/lib/zlib.lib" ]; then
       fetch "https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz" "$ROOT/src/zlib-$ZLIB_VERSION.tar.gz" 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
       rm -rf "$ROOT/src/zlib-$ZLIB_VERSION" "$ZLIB"
       tar --no-same-owner -xzf "$ROOT/src/zlib-$ZLIB_VERSION.tar.gz" -C "$ROOT/src"
       mkdir -p "$ZLIB/include" "$ZLIB/lib"
       (cd "$ROOT/src/zlib-$ZLIB_VERSION" &&
         MSYS2_ARG_CONV_EXCL='*' cl.exe -nologo -c -MT -O2 adler32.c compress.c crc32.c deflate.c gzclose.c gzlib.c gzread.c gzwrite.c infback.c inffast.c inflate.c inftrees.c trees.c uncompr.c zutil.c &&
-        MSYS2_ARG_CONV_EXCL='*' lib.exe -nologo -out:z.lib adler32.obj compress.obj crc32.obj deflate.obj gzclose.obj gzlib.obj gzread.obj gzwrite.obj infback.obj inffast.obj inflate.obj inftrees.obj trees.obj uncompr.obj zutil.obj &&
-        cp z.lib "$ZLIB/lib/" && cp zlib.h zconf.h "$ZLIB/include/")
+        MSYS2_ARG_CONV_EXCL='*' lib.exe -nologo -out:zlib.lib adler32.obj compress.obj crc32.obj deflate.obj gzclose.obj gzlib.obj gzread.obj gzwrite.obj infback.obj inffast.obj inflate.obj inftrees.obj trees.obj uncompr.obj zutil.obj &&
+        cp zlib.lib "$ZLIB/lib/" && cp zlib.h zconf.h "$ZLIB/include/")
     fi
     # Found through MSVC's own search paths, which configure's flag translation doesn't touch.
     INCLUDE="$(cygpath -w "$ZLIB/include");${INCLUDE:-}"
@@ -173,6 +173,6 @@ if command -v nproc >/dev/null 2>&1; then JOBS=$(nproc); else JOBS=$(sysctl -n h
 make -j"$JOBS"
 make install
 # Windows: zlib goes beside FFmpeg's libraries, for the addon to link.
-[ "$OS" = windows ] && cp "$ZLIB/lib/z.lib" "$PREFIX/lib/"
+[ "$OS" = windows ] && cp "$ZLIB/lib/zlib.lib" "$PREFIX/lib/"
 echo "$STAMP" > "$PREFIX/.version"
 echo "FFmpeg $VERSION for $NAME installed in $PREFIX"
