@@ -146,7 +146,7 @@ module.exports = {
     //   the renderer's JS). electron-builder applies only `!` patterns to node_modules.
     `!node_modules/!(${["@app", ...withDependencies(runtimePackages)].join("|")})/**`,
     "!node_modules/@app/!(main|preload|renderer)/**",
-    // - renderer filter packs are huge; ship "small" and "examples" by default
+    // - renderer filter packs are huge; ship "small" only (renderer/scripts/prune-filters.mjs)
     ...(bundleFullFilters ? [] : ["!node_modules/@app/renderer/dist/filters/full/**"]),
     // - never ship the workspaces' sources or build configs (dev-only); dist/** is the runtime payload
     "!node_modules/@app/renderer/public/**",
