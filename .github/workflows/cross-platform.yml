@@ -1,0 +1,250 @@
+# Windows and Linux builds of the whole app (docs/plan/cross-platform-encoding.md, phase 2):
+# FFmpeg (cached), the engine addon, the engine's portable tests and the renderer's tests,
+# the installers, and a headless check of the packaged app (scripts/smoke/steps/xplat.mjs:
+# the engine loads, a clip's frame renders, it plays, an export). The installers are kept
+# as the run's artifacts for a few days. Nothing is signed or published.
+name: Cross-platform builds
+
+on:
+  push:
+    branches: [xplat]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The toolchain the engine is checked with (docs/plan/portability.md).
+  RUST_VERSION: "1.89.0"
+  # The engine's crates whose tests need no FFmpeg or audio device (engine/scripts/check-targets.sh).
+  ENGINE_TESTS: -p openrip-model -p openrip-platform -p openrip-motion -p openrip-capcut -p openrip-v1 -p openrip-frame -p openrip-analysis -p openrip-speech -p openrip-render -p openrip-media -p openrip-audio -p openrip-playback -p openrip-export -p openrip-core
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  NODE_OPTIONS: --max-old-space-size=8192
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }}
+    # Built on Ubuntu 22.04 so the addon needs no newer glibc and libstdc++ than 22.04's.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: ubuntu-22.04, ffmpeg: linux-x86_64 }
+          - { arch: arm64, runner: ubuntu-22.04-arm, ffmpeg: linux-arm64 }
+    steps:
+      # Without the filter packs submodule (900 MB): the app runs without it.
+      - uses: actions/checkout@v4
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          # FFmpeg (nasm, zlib), the engine (ALSA for cpal, libclang for bindgen, cmake for
+          # whisper.cpp), and running the app headless (Xvfb, Mesa's software Vulkan for wgpu).
+          sudo apt-get install -y --no-install-recommends nasm zlib1g-dev libasound2-dev clang libclang-dev cmake \
+            xvfb mesa-vulkan-drivers libgl1-mesa-dri libgtk-3-0 libnss3 libxss1 libgbm1
+
+      - name: Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            engine -> target
+            engine -> target/addon
+          cache-on-failure: true
+
+      - name: FFmpeg cache
+        uses: actions/cache@v4
+        with:
+          path: engine/.ffmpeg/${{ matrix.ffmpeg }}
+          key: ffmpeg-${{ matrix.ffmpeg }}-${{ hashFiles('engine/scripts/build-ffmpeg.sh') }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/app/package-lock.json
+
+      - name: npm ci
+        working-directory: apps/app
+        run: npm ci
+
+      - name: Engine tests (portable crates)
+        working-directory: engine
+        run: cargo test --no-default-features --lib --tests $ENGINE_TESTS
+
+      - name: Engine addon (FFmpeg and openrip-node)
+        working-directory: apps/app
+        run: node scripts/build-engine.mjs
+
+      - name: Renderer tests
+        working-directory: apps/app/packages/renderer
+        run: node --test tests/*.test.ts
+
+      - name: Build the app
+        working-directory: apps/app
+        run: npm run build
+
+      - name: Package (deb, AppImage)
+        working-directory: apps/app
+        run: npx electron-builder build --config electron-builder.cjs --linux deb AppImage --${{ matrix.arch }} --publish never
+
+      - name: Smoke test (packaged app under Xvfb)
+        working-directory: apps/app
+        run: |
+          set -o pipefail
+          FFMPEG=$(node -p "require('ffmpeg-static')")
+          mkdir -p smoke-out
+          "$FFMPEG" -v error -y -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 4 \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest smoke-out/xplat-clip.mp4
+          export EXE="$PWD/dist/linux-${{ matrix.arch == 'x64' && '' || 'arm64-' }}unpacked/openrip"
+          export CLIP_NAME=xplat-clip OPENRIP_ENGINE_MUTE=1
+          export FFPROBE=$(node -p "try { require.resolve('@ffprobe-installer/linux-${{ matrix.arch }}/ffprobe') } catch { require('ffprobe-static').path }")
+          xvfb-run -a -s "-screen 0 1920x1080x24" node scripts/smoke/session.mjs . smoke-out smoke-out/ud "$PWD/smoke-out/xplat-clip.mp4" import timeline xplat | tee smoke-out/smoke.log
+          grep -q "STEP xplat: ok" smoke-out/smoke.log
+
+      - name: Installers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openrip-linux-${{ matrix.arch }}
+          path: |
+            apps/app/dist/*.deb
+            apps/app/dist/*.AppImage
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Smoke test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-linux-${{ matrix.arch }}
+          path: |
+            apps/app/smoke-out/*.png
+            apps/app/smoke-out/*.txt
+            apps/app/smoke-out/*.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # build-ffmpeg.sh runs in MSYS2's bash: keep the scripts' line endings as they are.
+      - name: Line endings
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      # MSVC's cl.exe, link.exe, lib.exe and dumpbin on the PATH for the rest of the job.
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: MSYS
+          path-type: inherit
+          install: make nasm diffutils
+
+      - name: Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            engine -> target
+            engine -> target/addon
+          cache-on-failure: true
+
+      - name: FFmpeg cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            engine/.ffmpeg/windows-x86_64
+            engine/.ffmpeg/zlib-windows-x86_64
+          key: ffmpeg-windows-x86_64-${{ hashFiles('engine/scripts/build-ffmpeg.sh') }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/app/package-lock.json
+
+      - name: npm ci
+        working-directory: apps/app
+        run: npm ci
+
+      - name: Engine tests (portable crates)
+        working-directory: engine
+        run: cargo test --no-default-features --lib --tests $ENGINE_TESTS
+
+      - name: Engine addon (FFmpeg and openrip-node)
+        working-directory: apps/app
+        env:
+          MSYS2_BASH: ${{ steps.msys2.outputs.msys2-location }}\usr\bin\bash.exe
+        run: node scripts/build-engine.mjs
+
+      - name: Renderer tests
+        working-directory: apps/app/packages/renderer
+        run: node --test tests/*.test.ts
+
+      - name: Build the app
+        working-directory: apps/app
+        env:
+          MSYS2_BASH: ${{ steps.msys2.outputs.msys2-location }}\usr\bin\bash.exe
+        run: npm run build
+
+      - name: Package (NSIS installer)
+        working-directory: apps/app
+        run: npx electron-builder build --config electron-builder.cjs --win nsis --x64 --publish never
+
+      - name: Smoke test (packaged app)
+        working-directory: apps/app
+        run: |
+          set -o pipefail
+          FFMPEG=$(node -p "require('ffmpeg-static')")
+          mkdir -p smoke-out
+          "$FFMPEG" -v error -y -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 4 \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest smoke-out/xplat-clip.mp4
+          export EXE="$(cygpath -w "$PWD/dist/win-unpacked/OpenRip.exe")"
+          export CLIP_NAME=xplat-clip OPENRIP_ENGINE_MUTE=1
+          export FFPROBE=$(node -p "require('ffprobe-static').path")
+          node scripts/smoke/session.mjs . smoke-out smoke-out/ud "$(cygpath -w "$PWD/smoke-out/xplat-clip.mp4")" import timeline xplat | tee smoke-out/smoke.log
+          grep -q "STEP xplat: ok" smoke-out/smoke.log
+
+      - name: Installer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openrip-windows-x64
+          path: apps/app/dist/*-setup.exe
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Smoke test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-windows-x64
+          path: |
+            apps/app/smoke-out/*.png
+            apps/app/smoke-out/*.txt
+            apps/app/smoke-out/*.log
+          retention-days: 7
+          if-no-files-found: ignore
