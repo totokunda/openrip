@@ -136,10 +136,12 @@ export interface ExportOptions {
   width: number
   height: number
   fps: number
-  /** "h264" or "hevc". */
+  /** "h264", "hevc", "hevc-alpha", "prores-lt", "prores-422", "prores-hq" or "prores-4444" (see exportCodecs). */
   codec: string
   /** Bits per second. */
   bitrate: number
+  /** Hold the bit rate to the one asked (the dialog's custom bit rate). */
+  exactBitrate?: boolean
   audio: boolean
 }
 
@@ -148,16 +150,67 @@ export interface ExportResult {
   seconds: number
   /** Layers skipped because their media or font was missing, summed over frames. */
   skippedLayers: number
+  /** What wrote the video ("videotoolbox", "openh264", "prores_ks", ...; "" for sound or a GIF). */
+  encoder: string
 }
 
-/** Export a project (same JSON formats as openProjectJson) on a worker thread, independent of the preview. Rejects with "cancelled" after cancelExport(). */
+/**
+ * Export a project (same JSON formats as openProjectJson) on a worker thread, independent of the preview. Rejects with
+ * "cancelled" after cancelExport(), and with "needs-openh264" when H.264 is to be written in software and Cisco's
+ * OpenH264 isn't downloaded (installOpenh264, then export again).
+ */
 export function exportProject(json: string, path: string, options: ExportOptions): Promise<ExportResult>
 /** The running (or last) export's frames done and total. */
 export function exportProgress(): { done: number; total: number }
 /** Stop the running export; the unfinished file is removed. */
 export function cancelExport(): void
-/** The video codecs this platform can export, by the names ExportOptions.codec takes. */
+/** The video codecs this machine can export with the hardware setting as it is, by the names ExportOptions.codec takes (H.264 where OpenH264 can be downloaded). */
 export function exportCodecs(): Array<string>
+/** Settings' "Hardware encoding": the GPU's encoders where there are some (true, the default), or software only. */
+export function setHardwareEncoding(on: boolean): void
+export function hardwareEncoding(): boolean
+
+export interface EncoderInfo {
+  /** "videotoolbox", "mediafoundation", "mediafoundation-software", "openh264" or "prores_ks". */
+  backend: string
+  codec: string
+  hardware: boolean
+  /** The largest picture, longer side x shorter side. */
+  maxLong: number
+  maxShort: number
+  tenBit: boolean
+  alpha: boolean
+  /** OpenH264 not downloaded yet. */
+  needsDownload: boolean
+}
+
+/** Each of this machine's encoders tried with a tiny picture (once a run), whatever the hardware setting. */
+export function exportEncoders(): Promise<EncoderInfo[]>
+
+/** Where downloaded codecs (Cisco's OpenH264) are kept: a folder in the user data. */
+export function setCodecDir(dir: string): void
+/** Use Cisco's OpenH264 for H.264 in software (true, the default) or not. */
+export function setOpenh264Enabled(on: boolean): void
+
+export interface OpenH264Info {
+  /** Cisco makes a binary for this platform. */
+  supported: boolean
+  enabled: boolean
+  /** Downloaded, checked and loaded. */
+  installed: boolean
+  version: string
+  /** The binary on Cisco's server (a .bz2), and its SHA-256. */
+  url: string | null
+  sha256: string | null
+  /** Why the file in the codec folder wasn't used. */
+  error: string | null
+  /** "OpenH264 Video Codec provided by Cisco Systems, Inc.", shown where it's turned on and off. */
+  attribution: string
+}
+
+export function openh264Info(): OpenH264Info
+/** Keep a download of Cisco's binary (the .bz2 at openh264Info().url): both SHA-256s are checked, then it is loaded. Rejects, keeping nothing, when they don't match. */
+export function installOpenh264(data: Buffer): Promise<void>
 
 // Motion tracking.
 

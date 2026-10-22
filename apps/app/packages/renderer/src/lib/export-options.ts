@@ -38,7 +38,7 @@ export const CODECS: Choice<VideoCodec>[] = [
   { value: "prores-4444", label: "ProRes 4444", note: "Highest quality, with an alpha channel" },
 ];
 
-/** The codecs every build offers; the others (alpha, ProRes) only where the platform's encoder has them. */
+/** The codecs offered until the engine says what this machine's encoders write. */
 export const BASIC_CODECS: VideoCodec[] = ["h264", "hevc"];
 
 /** ProRes and HEVC with alpha are written to a .mov, with a bit rate of their own. */

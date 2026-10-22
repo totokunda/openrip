@@ -4,7 +4,7 @@
 // (which file, how far, what it wrote, what went wrong) is a store the dialog and the top bar
 // show; progress is the whole run's.
 import { create } from "zustand";
-import { revealPathInFolder, resolvePath, writeFileBuffer } from "@app/preload";
+import { onEngineCodecDownload, revealPathInFolder, resolvePath, writeFileBuffer } from "@app/preload";
 import { toast } from "sonner";
 import { useViewportStore } from "./viewport";
 import { useControlsStore } from "./control";
@@ -42,6 +42,10 @@ export type ExportRunState = {
   cancelling: boolean;
   files: ExportFile[];
   error: string | null;
+  /** H.264 in software is waiting on Cisco's OpenH264, downloading: bytes received and the total (0 when unknown). */
+  download: { received: number; total: number } | null;
+  /** The video couldn't get OpenH264: the dialog offers ProRes, which needs nothing more. */
+  offerProRes: boolean;
   reset: () => void;
 };
 
@@ -53,8 +57,21 @@ export const useExportRun = create<ExportRunState>((set) => ({
   cancelling: false,
   files: [],
   error: null,
-  reset: () => set({ phase: "idle", label: "", ratio: 0, cancelling: false, files: [], error: null }),
+  download: null,
+  offerProRes: false,
+  reset: () => set({ phase: "idle", label: "", ratio: 0, cancelling: false, files: [], error: null, download: null, offerProRes: false }),
 }));
+
+/** `work`, with an OpenH264 download it waits on showing in the run. */
+async function withCodecDownload<T>(work: () => Promise<T>): Promise<T> {
+  const off = onEngineCodecDownload((received, total) => useExportRun.setState({ download: received < 0 ? null : { received, total } }));
+  try {
+    return await work();
+  } finally {
+    off();
+    useExportRun.setState({ download: null });
+  }
+}
 
 const join = (dir: string, file: string) => `${dir.replace(/\/+$/, "")}/${file}`;
 
@@ -87,7 +104,7 @@ export async function runExport(s: ExportSettings, scope?: { clipIds: string[]; 
     const a = useViewportStore.getState().aspectRatio;
     return a.width / a.height;
   })();
-  run.setState({ phase: "running", label: targets[0].label, ratio: 0, startedAt: Date.now(), cancelling: false, files: [], error: null });
+  run.setState({ phase: "running", label: targets[0].label, ratio: 0, startedAt: Date.now(), cancelling: false, files: [], error: null, download: null, offerProRes: false });
   const files: ExportFile[] = [];
   for (const [i, t] of targets.entries()) {
     if (run.getState().cancelling) break;
@@ -121,14 +138,14 @@ export async function runExport(s: ExportSettings, scope?: { clipIds: string[]; 
         : t.kind === "audio"
           ? { ...base, kind: "audio" as const, audioFormat: s.audio! }
           : { ...base, kind: "gif" as const, shortSide: s.gif!, fps: GIF_FPS };
-    const r = await engineExportProject(request, at, scope, timelineId);
+    const r = await withCodecDownload(() => engineExportProject(request, at, scope, timelineId));
     if (r.ok) {
       files.push({ label: t.label, path });
     } else if (r.cancelled) {
       break;
     } else {
       console.error("[engine] export failed:", r.error);
-      run.setState({ phase: "failed", error: `${t.label}: ${r.error ?? "the export failed"}`, files });
+      run.setState({ phase: "failed", error: `${t.label}: ${r.error ?? "the export failed"}`, files, offerProRes: !!r.offerProRes });
       return;
     }
   }
@@ -174,7 +191,7 @@ async function runCardsExport(s: ExportSettings, cards: CardExport[]): Promise<v
       .map((t) => ({ card, t })),
   );
   if (jobs.length === 0) return;
-  run.setState({ phase: "running", label: jobs[0].t.label, ratio: 0, startedAt: Date.now(), cancelling: false, files: [], error: null });
+  run.setState({ phase: "running", label: jobs[0].t.label, ratio: 0, startedAt: Date.now(), cancelling: false, files: [], error: null, download: null, offerProRes: false });
   const files: ExportFile[] = [];
   for (const [i, { card, t }] of jobs.entries()) {
     if (run.getState().cancelling) break;
@@ -193,14 +210,14 @@ async function runCardsExport(s: ExportSettings, cards: CardExport[]): Promise<v
         : t.kind === "audio"
           ? { ...base, kind: "audio" as const, audioFormat: s.audio! }
           : { ...base, kind: "gif" as const, shortSide: s.gif!, fps: GIF_FPS };
-    const r = await engineExportProject(request, at, { clipIds: [], card });
+    const r = await withCodecDownload(() => engineExportProject(request, at, { clipIds: [], card }));
     if (r.ok) {
       files.push({ label: `${card.name}: ${t.label}`, path });
     } else if (r.cancelled) {
       break;
     } else {
       console.error("[engine] export failed:", r.error);
-      run.setState({ phase: "failed", error: `${card.name}: ${r.error ?? "the export failed"}`, files });
+      run.setState({ phase: "failed", error: `${card.name}: ${r.error ?? "the export failed"}`, files, offerProRes: !!r.offerProRes });
       return;
     }
   }

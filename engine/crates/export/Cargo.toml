@@ -8,7 +8,7 @@ publish.workspace = true
 description = "Offline render and encode of a project to a video file"
 
 [dependencies]
-ffmpeg-sys-next = { version = "9.0.1", default-features = false, features = ["avcodec", "avformat"], optional = true }
+ffmpeg-sys-next = { version = "9.0.1", default-features = false, features = ["avcodec", "avformat", "swscale"], optional = true }
 openrip-model.workspace = true
 openrip-playback.workspace = true
 openrip-audio.workspace = true
@@ -18,11 +18,18 @@ gif = "0.13"
 color_quant = "1"
 flacenc = "0.5.1"
 mp3lame-encoder = { version = "0.2.5", optional = true }
+# Cisco's OpenH264, loaded at run time from the binary the app downloads (never built from
+# source: `source` stays off). Pinned: its bindings are OpenH264 2.6.0's ABI (openh264.rs).
+openh264-sys2 = { version = "=0.9.8", default-features = false, features = ["libloading"], optional = true }
+# Cisco serves it bzip2-compressed (a pure Rust decoder), and its hashes are checked.
+bzip2 = { version = "0.6.1", optional = true }
+sha2 = { version = "0.10.8", optional = true }
 
 [features]
 default = ["ffmpeg"]
-# The encoder (VideoToolbox through FFmpeg on Apple platforms), and decoding through FFmpeg.
-ffmpeg = ["dep:ffmpeg-sys-next", "dep:objc2-core-foundation", "dep:objc2-core-video", "openrip-playback/ffmpeg", "openrip-audio/ffmpeg", "dep:mp3lame-encoder"]
+# The encoders (VideoToolbox on Apple platforms, Media Foundation on Windows, OpenH264 and
+# prores_ks in software) muxed by FFmpeg, and decoding through FFmpeg.
+ffmpeg = ["dep:ffmpeg-sys-next", "dep:objc2-core-foundation", "dep:objc2-core-video", "openrip-playback/ffmpeg", "openrip-audio/ffmpeg", "dep:mp3lame-encoder", "dep:openh264-sys2", "dep:bzip2", "dep:sha2"]
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFNumber", "CFString", "CFBase"], optional = true }
@@ -43,4 +50,12 @@ required-features = ["ffmpeg"]
 
 [[test]]
 name = "prerender"
+required-features = ["ffmpeg"]
+
+[[test]]
+name = "software"
+required-features = ["ffmpeg"]
+
+[[test]]
+name = "openh264"
 required-features = ["ffmpeg"]

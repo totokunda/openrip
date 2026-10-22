@@ -59,7 +59,7 @@ fn probe(path: &Path, entries: &str, select: &str) -> String {
 
 fn video(fps: FrameRate, bitrate: u64, exact: bool, audio: bool, w: u32, h: u32, name: &str) -> PathBuf {
     let out = tmp(name);
-    export(project(&source()), &out, &ExportOptions { width: w, height: h, fps, codec: Codec::H264, bitrate, exact_bitrate: exact, audio }, |_, _| true).unwrap();
+    export(project(&source()), &out, &ExportOptions { width: w, height: h, fps, codec: Codec::H264, bitrate, exact_bitrate: exact, audio, hardware: true }, |_, _| true).unwrap();
     out
 }
 

@@ -24,6 +24,10 @@ export interface Preferences {
   targetLoudness: number;
   exportSound: boolean;
   hardwareDecoding: boolean;
+  /** Performance › Speed up hardware encoding (off: exports in software). */
+  hardwareEncoding: boolean;
+  /** Performance › OpenH264 Video Codec provided by Cisco Systems, Inc. (H.264 in software). */
+  openh264: boolean;
   autoOptimization: "none" | "smart";
   language: string;
   notifications: boolean;

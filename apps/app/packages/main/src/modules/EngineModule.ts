@@ -9,6 +9,7 @@ import { ModuleContext } from "../ModuleContext.js";
 import { ensureProjectJson } from "./JSONPersistenceModule.js";
 import { withFilterTablesOnDisk } from "./engineFiles.js";
 import { getSettingsModule, type Preferences } from "./SettingsModule.js";
+import { downloadOpenh264, openh264Blocked, type OpenH264Info } from "./openh264Download.js";
 import { TilePreviews } from "./TilePreviews.js";
 
 /**
@@ -73,8 +74,17 @@ export type EngineAddon = {
   exportGif?(json: string, path: string, shortSide: number, fps: number): Promise<{ frames: number; seconds: number; skippedLayers: number }>;
   exportProgress(): { done: number; total: number };
   cancelExport(): void;
-  /** The video codecs the platform's encoder can write (absent in engines built before it). */
+  /** The video codecs this machine can export with the hardware setting as it is (absent in engines built before it). */
   exportCodecs?(): string[];
+  /** Performance › Speed up hardware encoding (absent in engines built before it). */
+  setHardwareEncoding?(on: boolean): void;
+  /** Each of this machine's encoders tried with a tiny picture, whatever the hardware setting. */
+  exportEncoders?(): Promise<{ backend: string; codec: string; hardware: boolean; maxLong: number; maxShort: number; tenBit: boolean; alpha: boolean; needsDownload: boolean }[]>;
+  /** Cisco's OpenH264 (H.264 in software): where it's kept, whether it's used, its download. */
+  setCodecDir?(dir: string): void;
+  setOpenh264Enabled?(on: boolean): void;
+  openh264Info?(): OpenH264Info;
+  installOpenh264?(data: Buffer): Promise<void>;
   setThumbnailCacheDir(dir: string): void;
   /** Render: pre-rendered chunks (absent in engines built before it). */
   setRenderCacheDir?(dir: string): void;
@@ -176,8 +186,8 @@ export type Thumbnail = { index: number; timeUs: number; exact: boolean; width: 
 export type EngineExportOptions = { kind?: "video" | "audio" | "gif"; width: number; height: number; fps: number; codec: string; bitrate: number; exactBitrate?: boolean; audio: boolean; audioFormat?: string; shortSide?: number };
 
 export type ExportResult =
-  | { ok: true; frames: number; seconds: number; skippedLayers: number }
-  | { ok: false; cancelled?: boolean; error?: string };
+  | { ok: true; frames: number; seconds: number; skippedLayers: number; encoder?: string }
+  | { ok: false; cancelled?: boolean; error?: string; offerProRes?: boolean };
 
 export type EngineInfo = {
   available: boolean;
@@ -236,6 +246,9 @@ function load(): EngineInfo {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** The OpenH264 download an export is waiting on, which its Cancel stops. */
+let download: AbortController | null = null;
 
 /** Where the engine reads the look tables of the filters bundled inside app.asar (engineFiles.ts). */
 const filterTablesDir = () => join(app.getPath("userData"), "engine-filters");
@@ -470,15 +483,28 @@ export class EngineModule implements AppModule {
     if (addon) addon.setThumbnailCacheDir(settings.renderCacheDir());
     // Pre-rendered chunks go in a folder of their own inside it, so Settings' size, Clear and Auto clear cover them.
     if (addon) addon.setRenderCacheDir?.(settings.renderCacheDir());
-    // Performance › Speed up hardware decoding, now and when it changes.
-    addon?.setHardwareDecoding?.(settings.getPreferences().hardwareDecoding);
-    settings.on("preferences-changed", (p: Preferences) => addon?.setHardwareDecoding?.(p.hardwareDecoding));
+    // Performance › Speed up hardware decoding and encoding, and OpenH264, now and when they
+    // change. A downloaded OpenH264 is kept in the user data.
+    addon?.setCodecDir?.(join(app.getPath("userData"), "codecs"));
+    const performancePrefs = (p: Preferences) => {
+      addon?.setHardwareDecoding?.(p.hardwareDecoding);
+      addon?.setHardwareEncoding?.(p.hardwareEncoding);
+      addon?.setOpenh264Enabled?.(p.openh264);
+    };
+    performancePrefs(settings.getPreferences());
+    settings.on("preferences-changed", performancePrefs);
+    // What this machine's encoders can write, found by trying each (on a worker thread) now,
+    // so the Export dialog's codec list is ready when it opens.
+    void addon?.exportEncoders?.().then(
+      (found) => console.info(`[engine] encoders: ${found.map((e) => `${e.codec} ${e.backend}${e.needsDownload ? " (not downloaded)" : ""}`).join(", ")}`),
+      (e) => console.warn("[engine] encoder discovery failed:", message(e)),
+    );
     // The rendering cache moved: the engine keeps its files in the new folder from now on.
     settings.on("render-cache-moved", (dir: string) => {
       addon?.setThumbnailCacheDir(dir);
       addon?.setRenderCacheDir?.(dir);
     });
-    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:waveform", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still", "engine:detect-scenes", "engine:color-stats", "engine:auto-adjust", "engine:analyse-motion", "engine:motion-ready", "engine:analysis-progress", "engine:analysis-cancel", "engine:render-cache-info", "engine:prerender", "engine:prerender-cancel", "engine:rendered-ranges", "engine:render-cache-delete", "engine:render-cache-stats", "engine:render-cache-enabled"]) {
+    for (const channel of ["engine:info", "engine:sync-project", "engine:render", "engine:close", "engine:play", "engine:pause", "engine:export", "engine:export-cancel", "engine:thumbnails", "engine:waveform", "engine:beats", "engine:loudness", "engine:register-fonts", "engine:font-families", "engine:levels", "engine:export-still", "engine:detect-scenes", "engine:color-stats", "engine:auto-adjust", "engine:analyse-motion", "engine:motion-ready", "engine:analysis-progress", "engine:analysis-cancel", "engine:render-cache-info", "engine:prerender", "engine:prerender-cancel", "engine:rendered-ranges", "engine:render-cache-delete", "engine:render-cache-stats", "engine:render-cache-enabled", "engine:openh264-info"]) {
       try {
         ipcMain.removeHandler(channel);
       } catch {}
@@ -743,8 +769,31 @@ export class EngineModule implements AppModule {
           return { ok: true, ...(await engine.exportGif(json, path, options.shortSide ?? 240, options.fps || 15)) };
         }
         const { kind: _kind, audioFormat: _audioFormat, shortSide: _shortSide, ...video } = options;
-        const r = await engine.exportProject(json, path, video);
-        return { ok: true, ...r };
+        try {
+          return { ok: true, ...(await engine.exportProject(json, path, video)) };
+        } catch (e) {
+          if (message(e) !== "needs-openh264") throw e;
+        }
+        // H.264 in software needs Cisco's OpenH264: downloaded from Cisco now (the window shows
+        // it, with Cisco's credit), checked, kept, then the export goes on. Failing that, the
+        // dialog offers ProRes, which needs nothing more.
+        const info = engine.openh264Info?.();
+        const blocked = openh264Blocked(info);
+        if (blocked || !engine.installOpenh264) return { ok: false, error: blocked ?? "this engine can't install OpenH264; rebuild it", offerProRes: true };
+        download = new AbortController();
+        const progress = (received: number, total: number) => !sender.isDestroyed() && sender.send("engine:codec-download", received, total);
+        try {
+          progress(0, 0);
+          const data = await downloadOpenh264(info!, (url, init) => net.fetch(url, init), progress, download.signal);
+          await engine.installOpenh264(data);
+        } catch (e) {
+          const why = message(e);
+          return why === "cancelled" ? { ok: false, cancelled: true } : { ok: false, error: why, offerProRes: true };
+        } finally {
+          download = null;
+          if (!sender.isDestroyed()) sender.send("engine:codec-download", -1, 0);
+        }
+        return { ok: true, ...(await engine.exportProject(json, path, video)) };
       } catch (e) {
         const why = message(e);
         return why === "cancelled" ? { ok: false, cancelled: true } : { ok: false, error: why };
@@ -753,7 +802,18 @@ export class EngineModule implements AppModule {
       }
     });
 
-    ipcMain.handle("engine:export-cancel", () => addon?.cancelExport());
+    ipcMain.handle("engine:export-cancel", () => {
+      download?.abort();
+      addon?.cancelExport();
+    });
+    // Settings › Performance: where OpenH264 stands (null without an engine that has it).
+    ipcMain.handle("engine:openh264-info", () => {
+      try {
+        return addon?.openh264Info?.() ?? null;
+      } catch {
+        return null;
+      }
+    });
 
     // Render (the Render menu): timeline ranges composited into the render cache, which the
     // preview then plays from; progress goes to the asking window as
@@ -798,7 +858,7 @@ export class EngineModule implements AppModule {
     ipcMain.handle("engine:render-cache-delete", () => addon?.clearRenderCache?.());
     ipcMain.handle("engine:render-cache-stats", () => addon?.renderCacheStats?.() ?? { hits: 0, misses: 0 });
     ipcMain.handle("engine:render-cache-enabled", (_event, on: boolean) => addon?.setRenderCacheEnabled?.(!!on));
-    // The codecs the Export dialog may offer beyond H.264 and HEVC: only what this platform's encoder has.
+    // The codecs the Export dialog offers: what this machine's encoders write, with the hardware setting as it is.
     ipcMain.handle("engine:export-codecs", (): string[] => {
       try {
         return addon?.exportCodecs?.() ?? [];

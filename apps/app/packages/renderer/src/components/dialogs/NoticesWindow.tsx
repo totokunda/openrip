@@ -6,6 +6,7 @@ import React, { useEffect, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { getThirdPartyNotices, type ThirdPartyNotices } from "@app/preload";
 import { useT } from "@/lib/i18n";
+import { OPENH264_BINARY_LICENSE } from "@/lib/openh264";
 
 export const NoticesWindow: React.FC<{ open: boolean; onOpenChange: (open: boolean) => void }> = ({ open, onOpenChange }) => {
   const t = useT();
@@ -31,7 +32,11 @@ export const NoticesWindow: React.FC<{ open: boolean; onOpenChange: (open: boole
             <div className="max-w-[700px] mx-auto py-8 px-6 text-left text-[14px] leading-[22px]">
               <h1 className="text-[17px] font-semibold mb-3">{t("notices.heading")}</h1>
               <p className="mb-3">{t("notices.intro")}</p>
-              <p className="mb-6">{t("notices.ffmpeg")}</p>
+              <p className="mb-3">{t("notices.ffmpeg")}</p>
+              <section data-testid="notices-openh264" className="mb-6">
+                <p className="mb-2">{t("notices.openh264")}</p>
+                <pre className="whitespace-pre-wrap font-mono text-[11.5px] leading-[17px] text-[#333] bg-[#f6f6f6] rounded-[6px] p-3">{OPENH264_BINARY_LICENSE}</pre>
+              </section>
               {notices === undefined && <p>{t("notices.loading")}</p>}
               {notices === null && <p data-testid="notices-missing">{t("notices.missing")}</p>}
               {notices?.licenses.map((l, i) => (

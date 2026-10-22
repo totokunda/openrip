@@ -14,7 +14,7 @@
 // - Preset save path: where My presets are kept (the main process's ClipPresetsModule);
 // - Auto optimization: the playable copy of a video the app's own preview can't decode;
 // - the shortcuts: lib/keymap.ts.
-// Hardware decoding, the cache's age, the rendering cache's size limit and Software update act in the main process.
+// Hardware decoding and encoding, OpenH264, the cache's age, the rendering cache's size limit and Software update act in the main process.
 import { create } from "zustand";
 import { getPreferences, onPreferencesChanged, setPreferences, type Preferences } from "@app/preload";
 
@@ -32,6 +32,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   targetLoudness: -23,
   exportSound: false,
   hardwareDecoding: true,
+  hardwareEncoding: true,
+  openh264: true,
   autoOptimization: "smart",
   language: "en",
   notifications: false,
