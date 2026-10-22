@@ -137,11 +137,13 @@ case "$OS" in
         MSYS2_ARG_CONV_EXCL='*' lib.exe -nologo -out:z.lib adler32.obj compress.obj crc32.obj deflate.obj gzclose.obj gzlib.obj gzread.obj gzwrite.obj infback.obj inffast.obj inflate.obj inftrees.obj trees.obj uncompr.obj zutil.obj &&
         cp z.lib "$ZLIB/lib/" && cp zlib.h zconf.h "$ZLIB/include/")
     fi
-    ZLIB_WIN=$(cygpath -m "$ZLIB")
+    # Found through MSVC's own search paths, which configure's flag translation doesn't touch.
+    INCLUDE="$(cygpath -w "$ZLIB/include");${INCLUDE:-}"
+    LIB="$(cygpath -w "$ZLIB/lib");${LIB:-}"
+    export INCLUDE LIB
     # -MT: the static C runtime, as the addon links it (Electron ships no VC++ runtime).
     set -- \
-      --toolchain=msvc --target-os=win64 \
-      --extra-cflags="-MT -I$ZLIB_WIN/include" --extra-ldflags="-L$ZLIB_WIN/lib" \
+      --toolchain=msvc --target-os=win64 --extra-cflags=-MT \
       --enable-w32threads --enable-zlib --enable-d3d11va --enable-mediafoundation \
       --enable-encoder=aac,$SOFTWARE_ENCODERS,$WINDOWS_ENCODERS \
       --enable-hwaccel=h264_d3d11va,hevc_d3d11va,vp9_d3d11va,av1_d3d11va,mpeg2_d3d11va
