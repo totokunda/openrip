@@ -3,15 +3,21 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_STATIC_FFMPEG").is_some() {
         let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
         if os == "windows" {
-            // Windows has no zlib: build-ffmpeg.sh builds zlib.lib beside FFmpeg's libraries.
+            // Windows has no zlib: build-ffmpeg.sh builds z.lib beside FFmpeg's libraries.
             // And the system libraries FFmpeg's Windows code calls: CNG for random numbers,
             // COM, and the GUIDs of Media Foundation's and DirectShow's headers.
-            println!("cargo:rustc-link-lib=static=zlib");
+            println!("cargo:rustc-link-lib=static=z");
             for lib in ["bcrypt", "ole32", "user32", "mfuuid", "strmiids"] {
                 println!("cargo:rustc-link-lib=dylib={lib}");
             }
+        } else if os == "linux" {
+            // The system's libz.so.1, as a link argument: those come after FFmpeg's archives
+            // on the linker's command line. As a library it would come before them, and GNU
+            // ld's --as-needed would drop it, leaving FFmpeg's inflate calls unresolved until
+            // the first one crashed.
+            println!("cargo:rustc-link-arg=-lz");
         } else {
-            // Static FFmpeg needs the zlib it was configured with (macOS and Linux ship it).
+            // Static FFmpeg needs the zlib it was configured with (macOS ships it).
             println!("cargo:rustc-link-lib=z");
         }
         // ...and compiler-rt for its `__builtin_available` checks. The addon links with

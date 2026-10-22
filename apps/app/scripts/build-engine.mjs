@@ -148,6 +148,18 @@ if (process.platform === "linux") {
     console.error(`[build-engine] the addon links libraries a user's Linux may not have:\n  ${unexpected.join("\n  ")}`);
     process.exit(1);
   }
+  // Nothing left unresolved but napi's functions (Electron's): a shared object loads with a
+  // symbol missing, which then crashes when called (as FFmpeg's zlib calls would have when
+  // the linker dropped libz). `ldd -r` resolves them against the libraries it needs.
+  const ldd = spawnSync("ldd", ["-r", dest], { encoding: "utf8" });
+  const unresolved = `${ldd.stdout}\n${ldd.stderr}`
+    .split("\n")
+    .map((l) => l.match(/undefined symbol: (\S+)/)?.[1])
+    .filter((s) => s && !s.startsWith("napi_"));
+  if (unresolved.length) {
+    console.error(`[build-engine] the addon leaves symbols unresolved: ${unresolved.slice(0, 20).join(", ")}`);
+    process.exit(1);
+  }
 }
 // Windows: no VC++ runtime DLLs (the C runtime is linked in statically), only Windows' own.
 if (process.platform === "win32") {
