@@ -147,3 +147,17 @@ fn hevc_has_no_software_encoder_but_windows_own() {
     let e = export(project(1.0), &tmp("hevc.mp4"), &options(Codec::Hevc), |_, _| true).err().unwrap().to_string();
     assert!(e.contains("no encoder on this machine writes hevc in software"), "{e}");
 }
+
+#[test]
+fn prores_4444_through_videotoolbox_has_the_same_alpha() {
+    if !tools() || !cfg!(target_vendor = "apple") {
+        return;
+    }
+    let out = tmp("prores-4444-vt.mov");
+    let stats = export(project(0.5), &out, &ExportOptions { hardware: true, ..options(Codec::ProRes(ProRes::FourFourFourFour)) }, |_, _| true).unwrap();
+    assert_eq!(stats.backend, Some(Backend::VideoToolbox));
+    assert!(probe(&out).starts_with("prores,4444,320,180,yuva444p12le,"), "{}", probe(&out));
+    let (inside, outside) = (pixel(&out, 160, 90), pixel(&out, 5, 5));
+    assert!(near(inside, [0xC0, 0x30, 0x20]) && inside[3] == 255, "{inside:?}");
+    assert_eq!(outside[3], 0, "{outside:?}");
+}
