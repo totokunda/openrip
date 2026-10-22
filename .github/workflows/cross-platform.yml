@@ -49,6 +49,11 @@ jobs:
           # the system's ffmpeg and ffprobe, which tests use to make clips and read exports back.
           sudo apt-get install -y --no-install-recommends nasm zlib1g-dev libasound2-dev clang libclang-dev cmake \
             xvfb mesa-vulkan-drivers libgl1-mesa-dri libgtk-3-0 libnss3 libxss1 libgbm1 ffmpeg
+          # electron-builder's own fpm (which makes the deb) is an x86 binary: arm64 uses Ruby's.
+          if [ "${{ matrix.arch }}" = arm64 ]; then
+            sudo apt-get install -y --no-install-recommends ruby ruby-dev
+            sudo gem install --no-document fpm
+          fi
 
       - name: Rust
         run: |
@@ -94,6 +99,9 @@ jobs:
           FFMPEG_LIB: ${{ github.workspace }}/engine/.ffmpeg/${{ matrix.ffmpeg }}/lib
           FFMPEG_DIR: ${{ github.workspace }}/engine/.ffmpeg/${{ matrix.ffmpeg }}
         run: |
+          # ffmpeg-static's ffmpeg (6.1) for the tests that make clips (Ubuntu's 4.4 lacks options
+          # they use); ffprobe is the system's.
+          export PATH="$(dirname "$(node -p "require('../apps/app/node_modules/ffmpeg-static')")"):$PATH"
           export RUSTFLAGS="-L $FFMPEG_LIB -C link-arg=-Wl,--start-group -C link-arg=-lavformat -C link-arg=-lavfilter -C link-arg=-lavcodec -C link-arg=-lswscale -C link-arg=-lswresample -C link-arg=-lavutil -C link-arg=-Wl,--end-group -C link-arg=-lz"
           cargo test --target "$(rustc -vV | sed -n 's/host: //p')" --no-fail-fast --no-default-features --lib --tests $ENGINE_TESTS \
             -- --skip every_effect_is_off_at_zero_and_changes_the_frame_at_full_strength
@@ -106,6 +114,9 @@ jobs:
           FFMPEG_LIB: ${{ github.workspace }}/engine/.ffmpeg/${{ matrix.ffmpeg }}/lib
           FFMPEG_DIR: ${{ github.workspace }}/engine/.ffmpeg/${{ matrix.ffmpeg }}
         run: |
+          # ffmpeg-static's ffmpeg (6.1) for the tests that make clips (Ubuntu's 4.4 lacks options
+          # they use); ffprobe is the system's.
+          export PATH="$(dirname "$(node -p "require('../apps/app/node_modules/ffmpeg-static')")"):$PATH"
           export RUSTFLAGS="-L $FFMPEG_LIB -C link-arg=-Wl,--start-group -C link-arg=-lavformat -C link-arg=-lavfilter -C link-arg=-lavcodec -C link-arg=-lswscale -C link-arg=-lswresample -C link-arg=-lavutil -C link-arg=-Wl,--end-group -C link-arg=-lz"
           host="$(rustc -vV | sed -n 's/host: //p')"
           cargo test --target "$host" -p openrip-export --lib --test software
@@ -122,6 +133,8 @@ jobs:
 
       - name: Package (deb, AppImage)
         working-directory: apps/app
+        env:
+          USE_SYSTEM_FPM: ${{ matrix.arch == 'arm64' }}
         run: npx electron-builder build --config electron-builder.cjs --linux deb AppImage --${{ matrix.arch }} --publish never
 
       - name: Smoke test (packaged app under Xvfb)
@@ -232,7 +245,7 @@ jobs:
         working-directory: engine
         env:
           FFMPEG_DIR: ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64
-          RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=z.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
+          RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=zlib.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
         run: cargo test --target x86_64-pc-windows-msvc --no-fail-fast --no-default-features --lib --tests $($env:ENGINE_TESTS -split ' ')
 
       # As on Linux; ffmpeg and ffprobe from the app's npm packages. Media Foundation's
@@ -241,7 +254,7 @@ jobs:
         working-directory: engine
         env:
           FFMPEG_DIR: ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64
-          RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=z.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
+          RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=zlib.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
         run: |
           $ffmpeg = Split-Path (node -p "require('../apps/app/node_modules/ffmpeg-static')")
           $ffprobe = Split-Path (node -p "require('../apps/app/node_modules/ffprobe-static').path")
