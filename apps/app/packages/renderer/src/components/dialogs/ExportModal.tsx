@@ -341,11 +341,18 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
   const [timelineId, setTimelineId] = useState(activeTimelineId);
   // The codecs beyond H.264 and HEVC this platform's encoder has; the others stay hidden.
   const [platformCodecs, setPlatformCodecs] = useState<string[]>([]);
+  // No codec at all: this computer's engine has no video encoder (Windows and Linux until
+  // their encoders are in), so the Video section is off and says so; sound, GIFs and captions still export.
+  const [noEncoder, setNoEncoder] = useState(false);
   useEffect(() => {
     if (!open) return;
     // Asked each time the dialog opens: the engine may load after the editor does.
     let live = true;
-    void engineExportCodecs().then((c) => live && setPlatformCodecs(c), () => {});
+    void engineExportCodecs().then((c) => {
+      if (!live) return;
+      setPlatformCodecs(c);
+      setNoEncoder(c.length === 0);
+    }, () => {});
     return () => {
       live = false;
     };
@@ -414,7 +421,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
   const proRes = isProRes(saved.v.codec);
   const size = outputSize(video.resolution, ratio);
   const on = {
-    video: sections.video && saved.video,
+    video: sections.video && saved.video && !noEncoder,
     audio: sections.audio && saved.audio && hasAudio,
     gif: sections.gif && saved.gif,
     captions: sections.captions && saved.captions,
@@ -505,7 +512,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
               </div>
 
               {sections.video && (
-                <Section id="video" title="Video" checked={saved.video} onCheck={(v) => set({ video: v })}>
+                <Section id="video" title="Video" checked={on.video} onCheck={(v) => set({ video: v })} disabled={noEncoder}>
+                  {noEncoder && (
+                    <div className="text-[12px] leading-[17px] pt-1 pb-2 text-[#a8a8a8]" data-testid="export-no-encoder">
+                      No video encoder is available on this computer yet, so videos can't be exported here. The sound, a GIF and captions still can.
+                    </div>
+                  )}
                   <div className={row}>
                     <Label on={on.video}>Resolution</Label>
                     <Select testId="export-resolution" disabled={dim(on.video)} value={video.resolution} options={RESOLUTIONS} onChange={(v) => setV({ resolution: v })} />
