@@ -1,4 +1,4 @@
-const { existsSync } = require("node:fs");
+const { existsSync, readdirSync, renameSync, rmSync } = require("node:fs");
 const { join } = require("node:path");
 
 // electron-builder loads config via CommonJS `require()`. Using `.cjs` avoids ESM issues.
@@ -56,12 +56,13 @@ module.exports = {
       to: "ffmpeg",
       filter: ["ffprobe", "ffprobe.exe"],
     },
-    // ffprobe-static's darwin/arm64 ffprobe is an Intel binary (it needs Rosetta), so an Apple
-    // silicon build also takes a native one, to `ffmpeg/arm64/`, which ffmpegBin.ts prefers.
+    // ffprobe-static's darwin/arm64 ffprobe is an Intel binary (it needs Rosetta). Where
+    // @ffprobe-installer has a native one for the target (Apple silicon), it comes here and
+    // afterPack (below) puts it in place of ffprobe-static's.
     {
       from: "node_modules/@ffprobe-installer/${platform}-${arch}",
-      to: "ffmpeg/${arch}",
-      filter: ["ffprobe"],
+      to: "ffmpeg/native",
+      filter: ["ffprobe", "ffprobe.exe"],
     },
     // The small clips the Transitions and Effects tiles are drawn on (resources/preview-footage,
     // with its CREDITS.txt), read by the engine from `<resources>/preview-footage/`.
@@ -78,6 +79,16 @@ module.exports = {
       filter: ["*.node"],
     },
   ],
+
+  // One ffmpeg and one ffprobe in `<resources>/ffmpeg/`: a native ffprobe from
+  // `ffmpeg/native/` (above) replaces ffprobe-static's. Runs before the app is signed.
+  afterPack: async ({ appOutDir, packager }) => {
+    const dir = join(packager.getResourcesDir(appOutDir), "ffmpeg");
+    const native = join(dir, "native");
+    if (!existsSync(native)) return;
+    for (const exe of readdirSync(native)) renameSync(join(native, exe), join(dir, exe));
+    rmSync(native, { recursive: true });
+  },
 
   /**
    * It is recommended to avoid using non-standard characters such as spaces in artifact names,

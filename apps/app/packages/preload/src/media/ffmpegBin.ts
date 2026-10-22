@@ -14,9 +14,7 @@ function tryRequire<T = unknown>(name: string): T | null {
 
 function getBundledBinaryPath(cmd: "ffmpeg" | "ffprobe"): string | null {
   const exeName = process.platform === "win32" ? `${cmd}.exe` : cmd;
-  // A native one for this architecture first (Apple silicon's ffprobe, electron-builder.cjs).
-  const native = join(process.resourcesPath, "ffmpeg", process.arch, exeName);
-  if (existsSync(native)) return native;
+  // The target's own binaries (electron-builder.cjs puts a native ffprobe there on Apple silicon).
   const p = join(process.resourcesPath, "ffmpeg", exeName);
   return existsSync(p) ? p : null;
 }
