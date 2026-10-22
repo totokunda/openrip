@@ -116,19 +116,28 @@ fn h264_in_software_asks_for_openh264_and_the_rest_goes_on() {
     std::fs::create_dir_all(&empty).unwrap();
     openh264::set_codec_dir(&empty);
     let r = export(project(1.0), &out, &options(Codec::H264), |_, _| true);
-    assert!(matches!(r, Err(ExportError::NeedsOpenH264)), "{r:?}");
-    assert!(!out.exists());
+    if cfg!(windows) {
+        // Windows' own software encoder (part of Windows) comes before OpenH264: nothing to fetch.
+        assert!(matches!(&r, Ok(s) if s.backend == Some(Backend::MediaFoundation { hardware: false })), "{r:?}");
+        std::fs::remove_file(&out).unwrap();
+    } else {
+        assert!(matches!(r, Err(ExportError::NeedsOpenH264)), "{r:?}");
+        assert!(!out.exists());
+    }
     let listed = openrip_export::encoders();
     assert!(listed.iter().any(|e| e.backend == Backend::OpenH264 && e.needs_download));
-    // A file that isn't Cisco's binary is never loaded.
+    // A file that isn't Cisco's binary is never loaded (Windows exports through its own
+    // encoder before OpenH264 is tried).
     let wrong = tmp("codecs-wrong");
     std::fs::create_dir_all(&wrong).unwrap();
     std::fs::write(wrong.join(pin.file), b"not OpenH264").unwrap();
     openh264::set_codec_dir(&wrong);
-    let r = export(project(1.0), &out, &options(Codec::H264), |_, _| true);
-    assert!(matches!(r, Err(ExportError::NeedsOpenH264)), "{r:?}");
-    let s = openh264::status();
-    assert!(!s.installed && s.error.as_deref().is_some_and(|e| e.contains("SHA-256")), "{s:?}");
+    if !cfg!(windows) {
+        let r = export(project(1.0), &out, &options(Codec::H264), |_, _| true);
+        assert!(matches!(r, Err(ExportError::NeedsOpenH264)), "{r:?}");
+        let s = openh264::status();
+        assert!(!s.installed && s.error.as_deref().is_some_and(|e| e.contains("SHA-256")), "{s:?}");
+    }
     // Turned off, it isn't offered at all.
     openh264::set_enabled(false);
     assert!(!openrip_export::encoders().iter().any(|e| e.backend == Backend::OpenH264));
