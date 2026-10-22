@@ -175,20 +175,9 @@ module.exports = {
 
   // Linux configuration
   linux: {
-    target: [
-      {
-        target: "deb",
-        arch: ["x64"],
-      },
-      {
-        target: "AppImage",
-        arch: ["x64"],
-      },
-      {
-        target: "tar.gz",
-        arch: ["x64"],
-      },
-    ],
+    // No `arch` here (as on macOS): the build machine's architecture, or the command line's
+    // (--x64, --arm64), so a package never carries another architecture's engine.
+    target: ["deb", "AppImage", "tar.gz"],
     category: "Video",
     icon: "buildResources/icon.png",
     description: "OpenRip - Video Editor",
@@ -207,8 +196,8 @@ module.exports = {
       "libuuid1",
       "libsecret-1-0",
     ],
-    afterInstall: "buildResources/linux/postinst.sh",
-    afterRemove: "buildResources/linux/postrm.sh",
+    // electron-builder's own install scripts: they link /usr/bin/openrip, set up Chromium's
+    // sandbox and install the AppArmor profile Ubuntu 24.04 needs for it to start.
   },
 
   appImage: {
