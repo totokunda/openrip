@@ -4,7 +4,9 @@
 
 - **Node.js 24.x** (see `apps/app/package.json` → `engines.node`)
 - **Git**
-- **Rust** (stable, from [rustup.rs](https://rustup.rs)) for the engine. `npm start` and `npm run build` build it (`scripts/build-engine.mjs`) into `apps/app/native/<platform>-<arch>/`; packaged builds carry it under `resources/engine/`. Without Rust, or on a platform the engine isn't built for yet (so far it's built for Apple Silicon only), the app runs on its own preview. `npm run build:engine` builds it on its own.
+- **Rust** (stable, from [rustup.rs](https://rustup.rs)) for the engine. `npm start` and `npm run build` build it (`scripts/build-engine.mjs`) into `apps/app/native/<platform>-<arch>/`; packaged builds carry it under `resources/engine/`. Without Rust, or on a platform the engine isn't built for yet, the app runs on its own preview. `npm run build:engine` builds it on its own. It builds on macOS, Linux (x64, arm64) and Windows (x64), each with a minimal LGPL FFmpeg built the first time (`engine/scripts/build-ffmpeg.sh`), which needs:
+  - **Linux:** a C/C++ toolchain, `nasm`, `cmake`, `pkg-config`, `clang` and the zlib, ALSA and libclang headers (on Ubuntu: `sudo apt install build-essential nasm cmake pkg-config clang libclang-dev zlib1g-dev libasound2-dev`).
+  - **Windows:** Visual Studio's C++ build tools, LLVM (for libclang), and [MSYS2](https://www.msys2.org) at `C:\msys64` (or `MSYS2_BASH` set to its `usr\bin\bash.exe`) with `pacman -S make nasm diffutils`. Run the build from Visual Studio's "x64 Native Tools" prompt, so FFmpeg's build finds `cl.exe`.
 
 FFmpeg doesn't need a separate install. Development builds use the `ffmpeg-static` / `ffprobe-static` npm packages, and packaged builds bundle those binaries under `resources/ffmpeg/`. To use your own FFmpeg instead, set `FFMPEG_PATH` / `FFPROBE_PATH`.
 
