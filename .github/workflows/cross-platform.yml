@@ -13,10 +13,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: cross-platform-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
   # The toolchain the engine is checked with (docs/plan/portability.md).
   RUST_VERSION: "1.89.0"
@@ -35,8 +31,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x64, runner: ubuntu-22.04, ffmpeg: linux-x86_64 }
-          - { arch: arm64, runner: ubuntu-22.04-arm, ffmpeg: linux-arm64 }
+          - { arch: x64, runner: ubuntu-22.04, ffmpeg: linux-x86_64, packages: deb AppImage }
+          # No AppImage: electron-builder's arm64 AppImage runtime needs libz.so, which only
+          # zlib's development package installs.
+          - { arch: arm64, runner: ubuntu-22.04-arm, ffmpeg: linux-arm64, packages: deb }
     steps:
       # Without the filter packs submodule (900 MB): the app runs without it.
       - uses: actions/checkout@v4
@@ -131,11 +129,11 @@ jobs:
         working-directory: apps/app/packages/renderer
         run: node --test tests/*.test.ts
 
-      - name: Package (deb, AppImage)
+      - name: Package (${{ matrix.packages }})
         working-directory: apps/app
         env:
           USE_SYSTEM_FPM: ${{ matrix.arch == 'arm64' }}
-        run: npx electron-builder build --config electron-builder.cjs --linux deb AppImage --${{ matrix.arch }} --publish never
+        run: npx electron-builder build --config electron-builder.cjs --linux ${{ matrix.packages }} --${{ matrix.arch }} --publish never
 
       - name: Smoke test (packaged app under Xvfb)
         working-directory: apps/app
