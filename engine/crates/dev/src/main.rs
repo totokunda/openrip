@@ -29,9 +29,13 @@
 //!       Import every CapCut draft and render five frames of each with the preview engine:
 //!       aggregate counts of layers drawn, media skipped and errors, and frame times (no
 //!       names). --save writes the frames as PNGs for a visual check.
-//!   openrip-dev export <project.json | draft-dir> <out.mp4> [--size WxH] [--fps N] [--hevc] [--mbps N] [--no-audio]
+//!   openrip-dev export <project.json | draft-dir> <out.mp4> [--size WxH] [--fps N] [--hevc | --codec NAME] [--mbps N] [--exact] [--no-audio] [--software] [--codec-dir DIR]
 //!       Render and encode a project (default: canvas size, project fps, H.264, AAC 44.1 kHz).
-//!       CapCut drafts are imported on the fly.
+//!       CapCut drafts are imported on the fly. --software: hardware encoding off (OpenH264
+//!       from --codec-dir for H.264, prores_ks for ProRes).
+//!   openrip-dev encoders [--codec-dir DIR] [--install <cisco-download.bz2>]
+//!       What this machine's encoders can write (each tried), and OpenH264's state;
+//!       --install checks and keeps a download of Cisco's binary in --codec-dir.
 //!   openrip-dev mix <project.json | draft-dir> <out.wav> [<start-seconds> <seconds>]
 //!       Mix a project's audio (48 kHz stereo float WAV), as export and playback will.
 //!   openrip-dev playthrough <project.json | draft-dir> [--seconds N] [--realtime] [--verbose]
@@ -127,6 +131,7 @@ fn main() -> ExitCode {
         Some("play-bench") if args.len() >= 2 => play_bench(&args[1..]).map_err(|e| e.to_string()),
         Some("preview-scan") if args.len() >= 2 => preview_scan(Path::new(&args[1]), flag(&args, "--save")).map_err(|e| e.to_string()),
         Some("export") if args.len() >= 3 => export_cmd(&args).map_err(|e| e.to_string()),
+        Some("encoders") => encoders_cmd(&args).map_err(|e| e.to_string()),
         Some("mix") if args.len() >= 3 => mix_cmd(&args).map_err(|e| e.to_string()),
         Some("playthrough") if args.len() >= 2 => playthrough(&args).map_err(|e| e.to_string()),
         Some("pipeline-bench") if args.len() >= 2 => pipeline_bench(&args).map_err(|e| e.to_string()),
@@ -736,8 +741,12 @@ fn export_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mbps: f64 = opt("--mbps").map(|m| m.parse()).transpose()?.unwrap_or(10.0);
     let duration = project.duration().as_secs_f64();
     let audio = !args.iter().any(|a| a == "--no-audio");
-    let o = openrip_export::ExportOptions { width: w, height: h, fps, codec, bitrate: (mbps * 1e6) as u64, exact_bitrate: false, audio };
-    println!("exporting {:.1} s at {w}x{h} {:.3} fps, {codec:?} {mbps} Mbps", duration, fps.as_f64());
+    let hardware = !args.iter().any(|a| a == "--software");
+    if let Some(dir) = opt("--codec-dir") {
+        openrip_export::openh264::set_codec_dir(Path::new(&dir));
+    }
+    let o = openrip_export::ExportOptions { width: w, height: h, fps, codec, bitrate: (mbps * 1e6) as u64, exact_bitrate: args.iter().any(|a| a == "--exact"), audio, hardware };
+    println!("exporting {:.1} s at {w}x{h} {:.3} fps, {codec:?} {mbps} Mbps{}", duration, fps.as_f64(), if hardware { "" } else { ", hardware encoding off" });
     let stats = openrip_export::export(project, Path::new(&args[2]), &o, |n, total| {
         if n % 60 == 0 || n == total {
             eprint!("\r  frame {n}/{total}");
@@ -746,7 +755,8 @@ fn export_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     })?;
     eprintln!();
     println!(
-        "{} frames in {:.2} s = {:.1}x real time (render {:.2} s, encode {:.2} s); {} layer-frames skipped for missing media",
+        "{}: {} frames in {:.2} s = {:.1}x real time (render {:.2} s, encode {:.2} s); {} layer-frames skipped for missing media",
+        stats.backend.map_or("?", |b| b.name()),
         stats.frames,
         stats.seconds,
         duration / stats.seconds,
@@ -754,6 +764,27 @@ fn export_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         stats.encode_seconds,
         stats.skipped_layers
     );
+    Ok(())
+}
+
+/// `encoders`: what each backend can write here, and OpenH264's state (after an install).
+fn encoders_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use openrip_export::openh264;
+    if let Some(dir) = flag(args, "--codec-dir") {
+        openh264::set_codec_dir(&dir);
+    }
+    if let Some(file) = flag(args, "--install") {
+        let t0 = Instant::now();
+        openh264::install(&std::fs::read(&file)?)?;
+        println!("installed {} in {:.0} ms", file.display(), t0.elapsed().as_secs_f64() * 1e3);
+    }
+    let t0 = Instant::now();
+    let found = openrip_export::encoders();
+    println!("probed in {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
+    for e in &found {
+        println!("  {:<24} {:<12} {:<8} max {}x{}{}{}{}", e.backend.name(), e.codec.name(), if e.hardware { "hardware" } else { "software" }, e.max_size.0, e.max_size.1, if e.ten_bit { ", 10-bit" } else { "" }, if e.alpha { ", alpha" } else { "" }, if e.needs_download { ", not downloaded" } else { "" });
+    }
+    println!("{:?}", openh264::status());
     Ok(())
 }
 

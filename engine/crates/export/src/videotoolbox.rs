@@ -14,17 +14,8 @@ use std::path::Path;
 use ffmpeg_sys_next as ff;
 use openrip_playback::{FrameReport, PreviewError};
 
-use crate::{Codec, Encoder, ExportError, ExportOptions, Picture, ProRes, AUDIO_RATE};
-
-const AUDIO_BITRATE: i64 = 192_000;
-
-fn check(op: &'static str, code: i32) -> Result<i32, ExportError> {
-    if code < 0 {
-        Err(ExportError::Ffmpeg { op, code })
-    } else {
-        Ok(code)
-    }
-}
+use crate::mux::{check, set_option, FfVideo, Muxer};
+use crate::{Codec, Encoder, ExportError, ExportOptions, Picture};
 
 fn encoder_name(codec: Codec) -> &'static str {
     match codec {
@@ -36,33 +27,34 @@ fn encoder_name(codec: Codec) -> &'static str {
 
 /// The options a codec's encoder has beyond the picture's: ProRes's profile, HEVC's alpha quality.
 unsafe fn set_codec_options(e: *mut ff::AVCodecContext, codec: Codec) {
-    let set = |key: &str, value: &str| {
-        let (k, v) = (CString::new(key).unwrap(), CString::new(value).unwrap());
-        ff::av_opt_set((*e).priv_data, k.as_ptr(), v.as_ptr(), 0);
-    };
     match codec {
-        Codec::HevcAlpha => set("alpha_quality", "0.75"),
-        Codec::ProRes(p) => set(
-            "profile",
-            match p {
-                ProRes::Lt => "lt",
-                ProRes::Standard => "standard",
-                ProRes::Hq => "hq",
-                ProRes::FourFourFourFour => "4444",
-            },
-        ),
-        _ => {}
-    }
+        Codec::HevcAlpha => set_option(e, "alpha_quality", "0.75"),
+        Codec::ProRes(p) => set_option(e, "profile", p.profile_name()),
+        _ => true,
+    };
 }
 
 /// The codecs the encoders here can open on this machine (each is tried: an encoder that is
 /// built in may still be refused by the system, or by this Mac's hardware).
 pub(crate) fn available() -> Vec<Codec> {
     static CODECS: std::sync::OnceLock<Vec<Codec>> = std::sync::OnceLock::new();
-    CODECS.get_or_init(|| Codec::ALL.into_iter().filter(|c| probe(*c)).collect()).clone()
+    CODECS.get_or_init(|| Codec::ALL.into_iter().filter(|c| probe(*c, 256, 144)).collect()).clone()
 }
 
-fn probe(codec: Codec) -> bool {
+/// The largest of the sizes exports offer (8K, then 4K) that `codec`'s encoder opens at, as
+/// longer side x shorter side.
+pub(crate) fn max_size(codec: Codec) -> (u32, u32) {
+    static SIZES: std::sync::Mutex<Vec<(Codec, (u32, u32))>> = std::sync::Mutex::new(Vec::new());
+    let mut sizes = SIZES.lock().unwrap();
+    if let Some((_, s)) = sizes.iter().find(|(c, _)| *c == codec) {
+        return *s;
+    }
+    let s = [(7680u32, 4320u32), (4096, 2304), (3840, 2160)].into_iter().find(|(w, h)| probe(codec, *w as i32, *h as i32)).unwrap_or((1920, 1080));
+    sizes.push((codec, s));
+    s
+}
+
+fn probe(codec: Codec, width: i32, height: i32) -> bool {
     let name = CString::new(encoder_name(codec)).unwrap();
     unsafe {
         let enc = ff::avcodec_find_encoder_by_name(name.as_ptr());
@@ -70,8 +62,8 @@ fn probe(codec: Codec) -> bool {
             return false;
         }
         let mut e = ff::avcodec_alloc_context3(enc);
-        (*e).width = 256;
-        (*e).height = 144;
+        (*e).width = width;
+        (*e).height = height;
         (*e).time_base = ff::AVRational { num: 1, den: 30 };
         (*e).framerate = ff::AVRational { num: 30, den: 1 };
         if codec.has_alpha() {
@@ -89,234 +81,75 @@ fn probe(codec: Codec) -> bool {
     }
 }
 
-/// Owns the muxer, encoder and the frame/packet scratch objects.
-struct Output {
-    fmt: *mut ff::AVFormatContext,
-    enc: *mut ff::AVCodecContext,
-    stream: *mut ff::AVStream,
-    pkt: *mut ff::AVPacket,
-    frame: *mut ff::AVFrame,
-    audio: Option<AudioOut>,
+/// The VideoToolbox encoder for `o`, as FFmpeg opens it.
+fn open_video(mux: &Muxer, o: &ExportOptions) -> Result<FfVideo, ExportError> {
+    FfVideo::open(encoder_name(o.codec), mux.global_header(), o, |e| unsafe {
+        if o.codec.has_alpha() {
+            // Frames arrive as BGRA pixels read back from the GPU. (The picture with alpha is
+            // RGB: it carries no YCbCr matrix or range.)
+            (*e).pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_BGRA;
+            (*e).color_range = ff::AVColorRange::AVCOL_RANGE_JPEG;
+        } else {
+            // Frames arrive as CVPixelBuffers (NV12) we rendered into on the GPU.
+            (*e).pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+            (*e).sw_pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_NV12;
+            FfVideo::bt709(e);
+        }
+        set_codec_options(e, o.codec);
+        if o.exact_bitrate && !matches!(o.codec, Codec::ProRes(_)) {
+            // macOS 13 or newer; older systems refuse the open, which then fails.
+            let key = CString::new("constant_bit_rate").unwrap();
+            ff::av_opt_set_int((*e).priv_data, key.as_ptr(), 1, 0);
+        }
+    })
 }
 
-struct AudioOut {
-    enc: *mut ff::AVCodecContext,
-    stream: *mut ff::AVStream,
-    frame: *mut ff::AVFrame,
-    /// Interleaved stereo samples not yet sent (less than one encoder frame).
-    pending: Vec<f32>,
-    next_pts: i64,
-}
-
-impl Drop for Output {
-    fn drop(&mut self) {
-        unsafe {
-            if let Some(a) = self.audio.as_mut() {
-                ff::av_frame_free(&mut a.frame);
-                ff::avcodec_free_context(&mut a.enc);
-            }
-            ff::av_frame_free(&mut self.frame);
-            ff::av_packet_free(&mut self.pkt);
-            ff::avcodec_free_context(&mut self.enc);
-            if !self.fmt.is_null() {
-                if (*(*self.fmt).oformat).flags & ff::AVFMT_NOFILE == 0 {
-                    ff::avio_closep(&mut (*self.fmt).pb);
-                }
-                ff::avformat_free_context(self.fmt);
-            }
-        }
-    }
-}
-
-impl Output {
-    fn open(path: &Path, o: &ExportOptions) -> Result<Output, ExportError> {
-        let cpath = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| ExportError::Other("path has a NUL byte".into()))?;
-        let name = CString::new(encoder_name(o.codec)).unwrap();
-        unsafe {
-            let mut out = Output { fmt: std::ptr::null_mut(), enc: std::ptr::null_mut(), stream: std::ptr::null_mut(), pkt: ff::av_packet_alloc(), frame: ff::av_frame_alloc(), audio: None };
-            check("avformat_alloc_output_context2", ff::avformat_alloc_output_context2(&mut out.fmt, std::ptr::null(), std::ptr::null(), cpath.as_ptr()))?;
-            let codec = ff::avcodec_find_encoder_by_name(name.as_ptr());
-            if codec.is_null() {
-                return Err(ExportError::Other(format!("encoder {name:?} not available")));
-            }
-            out.enc = ff::avcodec_alloc_context3(codec);
-            let e = out.enc;
-            (*e).width = o.width as i32;
-            (*e).height = o.height as i32;
-            (*e).time_base = ff::AVRational { num: o.fps.den as i32, den: o.fps.num as i32 };
-            (*e).framerate = ff::AVRational { num: o.fps.num as i32, den: o.fps.den as i32 };
-            if o.codec.has_alpha() {
-                // Frames arrive as BGRA pixels read back from the GPU.
-                (*e).pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_BGRA;
-            } else {
-                // Frames arrive as CVPixelBuffers (NV12) we rendered into on the GPU.
-                (*e).pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
-                (*e).sw_pix_fmt = ff::AVPixelFormat::AV_PIX_FMT_NV12;
-            }
-            (*e).bit_rate = o.bitrate as i64;
-            (*e).gop_size = (o.fps.as_f64() * 2.0).round() as i32;
-            // (The picture with alpha is RGB: it carries no YCbCr matrix or range.)
-            if o.codec.has_alpha() {
-                (*e).color_range = ff::AVColorRange::AVCOL_RANGE_JPEG;
-            } else {
-                (*e).color_range = ff::AVColorRange::AVCOL_RANGE_MPEG;
-                (*e).colorspace = ff::AVColorSpace::AVCOL_SPC_BT709;
-                (*e).color_primaries = ff::AVColorPrimaries::AVCOL_PRI_BT709;
-                (*e).color_trc = ff::AVColorTransferCharacteristic::AVCOL_TRC_BT709;
-            }
-            if (*(*out.fmt).oformat).flags & ff::AVFMT_GLOBALHEADER != 0 {
-                (*e).flags |= ff::AV_CODEC_FLAG_GLOBAL_HEADER as i32;
-            }
-            set_codec_options(e, o.codec);
-            if o.exact_bitrate && !matches!(o.codec, Codec::ProRes(_)) {
-                // macOS 13 or newer; older systems refuse the open, which then fails.
-                let key = CString::new("constant_bit_rate").unwrap();
-                ff::av_opt_set_int((*e).priv_data, key.as_ptr(), 1, 0);
-            }
-            check("avcodec_open2", ff::avcodec_open2(e, codec, std::ptr::null_mut()))?;
-            out.stream = ff::avformat_new_stream(out.fmt, std::ptr::null());
-            check("avcodec_parameters_from_context", ff::avcodec_parameters_from_context((*out.stream).codecpar, e))?;
-            // Apple's players want HEVC tagged "hvc1" (parameter sets in the header), not "hev1".
-            if matches!(o.codec, Codec::Hevc | Codec::HevcAlpha) {
-                (*(*out.stream).codecpar).codec_tag = u32::from_le_bytes(*b"hvc1");
-            }
-            (*out.stream).time_base = (*e).time_base;
-            (*out.stream).avg_frame_rate = (*e).framerate;
-            if o.audio {
-                out.audio = Some(Self::open_audio(out.fmt)?);
-            }
-            if (*(*out.fmt).oformat).flags & ff::AVFMT_NOFILE == 0 {
-                check("avio_open", ff::avio_open(&mut (*out.fmt).pb, cpath.as_ptr(), ff::AVIO_FLAG_WRITE))?;
-            }
-            check("avformat_write_header", ff::avformat_write_header(out.fmt, std::ptr::null_mut()))?;
-            Ok(out)
-        }
-    }
-
-    unsafe fn open_audio(fmt: *mut ff::AVFormatContext) -> Result<AudioOut, ExportError> {
-        let name = CString::new("aac").unwrap();
-        let codec = ff::avcodec_find_encoder_by_name(name.as_ptr());
-        if codec.is_null() {
-            return Err(ExportError::Other("AAC encoder not available".into()));
-        }
-        let e = ff::avcodec_alloc_context3(codec);
-        (*e).sample_rate = AUDIO_RATE as i32;
-        ff::av_channel_layout_default(&mut (*e).ch_layout, 2);
-        (*e).sample_fmt = ff::AVSampleFormat::AV_SAMPLE_FMT_FLTP;
-        (*e).bit_rate = AUDIO_BITRATE;
-        (*e).time_base = ff::AVRational { num: 1, den: AUDIO_RATE as i32 };
-        if (*(*fmt).oformat).flags & ff::AVFMT_GLOBALHEADER != 0 {
-            (*e).flags |= ff::AV_CODEC_FLAG_GLOBAL_HEADER as i32;
-        }
-        check("avcodec_open2 (aac)", ff::avcodec_open2(e, codec, std::ptr::null_mut()))?;
-        let stream = ff::avformat_new_stream(fmt, std::ptr::null());
-        check("avcodec_parameters_from_context (aac)", ff::avcodec_parameters_from_context((*stream).codecpar, e))?;
-        (*stream).time_base = (*e).time_base;
-        Ok(AudioOut { enc: e, stream, frame: ff::av_frame_alloc(), pending: Vec::new(), next_pts: 0 })
-    }
-
-    /// Queue interleaved stereo samples; whole encoder frames are encoded and written.
-    /// `flush` also sends the remainder and drains the encoder.
-    fn encode_audio(&mut self, samples: &[f32], flush: bool) -> Result<(), ExportError> {
-        let Some(a) = self.audio.as_mut() else { return Ok(()) };
-        a.pending.extend_from_slice(samples);
-        unsafe {
-            let size = ((*a.enc).frame_size.max(1)) as usize;
-            while a.pending.len() >= size * 2 || (flush && !a.pending.is_empty()) {
-                let n = (a.pending.len() / 2).min(size);
-                let f = a.frame;
+/// Send one CVPixelBuffer (or `None` to flush) and write whatever packets come out.
+fn encode_pixel_buffer(video: &mut FfVideo, mux: &mut Muxer, frame: Option<(&objc2_core_video::CVPixelBuffer, i64)>) -> Result<(), ExportError> {
+    unsafe {
+        let f = match frame {
+            Some((pb, pts)) => {
+                let f = video.frame;
                 ff::av_frame_unref(f);
-                (*f).nb_samples = n as i32;
-                (*f).format = ff::AVSampleFormat::AV_SAMPLE_FMT_FLTP as i32;
-                (*f).sample_rate = AUDIO_RATE as i32;
-                ff::av_channel_layout_copy(&mut (*f).ch_layout, &(*a.enc).ch_layout);
-                check("av_frame_get_buffer (audio)", ff::av_frame_get_buffer(f, 0))?;
-                for c in 0..2 {
-                    let plane = std::slice::from_raw_parts_mut((*f).data[c] as *mut f32, n);
-                    for (i, v) in plane.iter_mut().enumerate() {
-                        *v = a.pending[i * 2 + c].clamp(-1.0, 1.0);
-                    }
-                }
-                a.pending.drain(..n * 2);
-                (*f).pts = a.next_pts;
-                a.next_pts += n as i64;
-                check("avcodec_send_frame (audio)", ff::avcodec_send_frame(a.enc, f))?;
-                Self::drain(self.fmt, a.enc, a.stream, self.pkt)?;
+                (*f).format = ff::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX as i32;
+                (*f).width = (*video.enc).width;
+                (*f).height = (*video.enc).height;
+                (*f).pts = pts;
+                // FFmpeg reference-counts frames by their buffers: give it one that holds
+                // a retain on the pixel buffer and releases it when FFmpeg is done.
+                let held = objc2_core_foundation::CFRetained::retain(std::ptr::NonNull::from(pb));
+                let raw = objc2_core_foundation::CFRetained::into_raw(held).as_ptr() as *mut u8;
+                (*f).buf[0] = ff::av_buffer_create(raw, std::mem::size_of::<usize>(), Some(release_pixel_buffer), std::ptr::null_mut(), 0);
+                (*f).data[3] = raw;
+                f
             }
-            if flush {
-                check("avcodec_send_frame (audio flush)", ff::avcodec_send_frame(a.enc, std::ptr::null()))?;
-                Self::drain(self.fmt, a.enc, a.stream, self.pkt)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Write every packet the encoder has ready.
-    unsafe fn drain(fmt: *mut ff::AVFormatContext, enc: *mut ff::AVCodecContext, stream: *mut ff::AVStream, pkt: *mut ff::AVPacket) -> Result<(), ExportError> {
-        loop {
-            let r = ff::avcodec_receive_packet(enc, pkt);
-            if r == ff::AVERROR(ff::EAGAIN) || r == ff::AVERROR_EOF {
-                return Ok(());
-            }
-            check("avcodec_receive_packet", r)?;
-            ff::av_packet_rescale_ts(pkt, (*enc).time_base, (*stream).time_base);
-            (*pkt).stream_index = (*stream).index;
-            check("av_interleaved_write_frame", ff::av_interleaved_write_frame(fmt, pkt))?;
-        }
-    }
-
-    /// Send one frame (or `None` to flush) and write whatever packets come out.
-    fn encode(&mut self, frame: Option<(&objc2_core_video::CVPixelBuffer, i64)>) -> Result<(), ExportError> {
-        unsafe {
-            let f = match frame {
-                Some((pb, pts)) => {
-                    let f = self.frame;
-                    ff::av_frame_unref(f);
-                    (*f).format = ff::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX as i32;
-                    (*f).width = (*self.enc).width;
-                    (*f).height = (*self.enc).height;
-                    (*f).pts = pts;
-                    // FFmpeg reference-counts frames by their buffers: give it one that holds
-                    // a retain on the pixel buffer and releases it when FFmpeg is done.
-                    let held = objc2_core_foundation::CFRetained::retain(std::ptr::NonNull::from(pb));
-                    let raw = objc2_core_foundation::CFRetained::into_raw(held).as_ptr() as *mut u8;
-                    (*f).buf[0] = ff::av_buffer_create(raw, std::mem::size_of::<usize>(), Some(release_pixel_buffer), std::ptr::null_mut(), 0);
-                    (*f).data[3] = raw;
-                    f
-                }
-                None => std::ptr::null_mut(),
-            };
-            check("avcodec_send_frame", ff::avcodec_send_frame(self.enc, f))?;
-            if !f.is_null() {
-                ff::av_frame_unref(f);
-            }
-            Self::drain(self.fmt, self.enc, self.stream, self.pkt)
-        }
-    }
-
-    /// Send one BGRA picture (premultiplied alpha, `width * 4` bytes a row) and write what comes out.
-    fn encode_bgra(&mut self, bgra: &[u8], pts: i64) -> Result<(), ExportError> {
-        unsafe {
-            let f = self.frame;
+            None => std::ptr::null_mut(),
+        };
+        let sent = video.send(mux, f);
+        if !f.is_null() {
             ff::av_frame_unref(f);
-            (*f).format = ff::AVPixelFormat::AV_PIX_FMT_BGRA as i32;
-            (*f).width = (*self.enc).width;
-            (*f).height = (*self.enc).height;
-            (*f).pts = pts;
-            check("av_frame_get_buffer", ff::av_frame_get_buffer(f, 0))?;
-            let (w, h, stride) = ((*f).width as usize, (*f).height as usize, (*f).linesize[0] as usize);
-            for y in 0..h {
-                std::ptr::copy_nonoverlapping(bgra.as_ptr().add(y * w * 4), (*f).data[0].add(y * stride), w * 4);
-            }
-            check("avcodec_send_frame", ff::avcodec_send_frame(self.enc, f))?;
-            ff::av_frame_unref(f);
-            Self::drain(self.fmt, self.enc, self.stream, self.pkt)
         }
+        sent
     }
+}
 
-    fn finish(&mut self) -> Result<(), ExportError> {
-        self.encode(None)?;
-        unsafe { check("av_write_trailer", ff::av_write_trailer(self.fmt)).map(|_| ()) }
+/// Send one BGRA picture (premultiplied alpha, `width * 4` bytes a row) and write what comes out.
+fn encode_bgra(video: &mut FfVideo, mux: &mut Muxer, bgra: &[u8], pts: i64) -> Result<(), ExportError> {
+    unsafe {
+        let f = video.frame;
+        ff::av_frame_unref(f);
+        (*f).format = ff::AVPixelFormat::AV_PIX_FMT_BGRA as i32;
+        (*f).width = (*video.enc).width;
+        (*f).height = (*video.enc).height;
+        (*f).pts = pts;
+        check("av_frame_get_buffer", ff::av_frame_get_buffer(f, 0))?;
+        let (w, h, stride) = ((*f).width as usize, (*f).height as usize, (*f).linesize[0] as usize);
+        for y in 0..h {
+            std::ptr::copy_nonoverlapping(bgra.as_ptr().add(y * w * 4), (*f).data[0].add(y * stride), w * 4);
+        }
+        let sent = video.send(mux, f);
+        ff::av_frame_unref(f);
+        sent
     }
 }
 
@@ -356,48 +189,52 @@ pub(crate) struct VtEncoder {
     /// The NV12 pool; none for a codec with alpha, which takes read-back pixels.
     pool: Option<Pool>,
     image: Option<openrip_render::RgbaImage>,
-    out: Output,
-    path: std::path::PathBuf,
+    video: FfVideo,
+    mux: Muxer,
 }
 
 impl VtEncoder {
     pub(crate) fn open(path: &Path, o: &ExportOptions) -> Result<VtEncoder, ExportError> {
         let pool = if o.codec.has_alpha() { None } else { Some(Pool::new(o.width, o.height).ok_or_else(|| ExportError::Other("can't create the frame pool".into()))?) };
-        let out = Output::open(path, o)?;
-        Ok(VtEncoder { pool, image: None, out, path: path.to_path_buf() })
+        let mut mux = Muxer::new(path)?;
+        let video = open_video(&mux, o)?;
+        unsafe { mux.add_video(video.enc, o.codec)? };
+        mux.start(o.audio)?;
+        Ok(VtEncoder { pool, image: None, video, mux })
     }
 }
 
 impl Encoder for VtEncoder {
     fn video(&mut self, index: i64, draw: &mut dyn FnMut(Picture<'_>) -> Result<FrameReport, PreviewError>) -> Result<FrameReport, ExportError> {
         let Some(pool) = &self.pool else {
-            let (w, h) = unsafe { ((*self.out.enc).width as u32, (*self.out.enc).height as u32) };
+            let (w, h) = unsafe { ((*self.video.enc).width as u32, (*self.video.enc).height as u32) };
             let mut image = self.image.take().unwrap_or(openrip_render::RgbaImage { width: w, height: h, data: Vec::new() });
             let report = draw(Picture::Rgba(&mut image))?;
             // RGBA to BGRA, in place.
             for px in image.data.chunks_exact_mut(4) {
                 px.swap(0, 2);
             }
-            self.out.encode_bgra(&image.data, index)?;
+            encode_bgra(&mut self.video, &mut self.mux, &image.data, index)?;
             self.image = Some(image);
             return Ok(report);
         };
         let pb = pool.next().ok_or_else(|| ExportError::Other("frame pool exhausted".into()))?;
         let report = draw(Picture::Nv12(&pb))?;
-        self.out.encode(Some((&pb, index)))?;
+        encode_pixel_buffer(&mut self.video, &mut self.mux, Some((&pb, index)))?;
         Ok(report)
     }
 
     fn audio(&mut self, samples: &[f32], flush: bool) -> Result<(), ExportError> {
-        self.out.encode_audio(samples, flush)
+        self.mux.encode_audio(samples, flush)
     }
 
     fn finish(mut self: Box<Self>) -> Result<(), ExportError> {
-        self.out.finish()
+        encode_pixel_buffer(&mut self.video, &mut self.mux, None)?;
+        self.mux.finish()
     }
 
     fn cancel(self: Box<Self>) {
-        let path = self.path.clone();
+        let path = self.mux.path().to_path_buf();
         drop(self);
         let _ = std::fs::remove_file(path);
     }

@@ -98,14 +98,14 @@ pub fn export_audio(project: Project, path: &Path, format: AudioFormat, mut prog
             #[cfg(feature = "ffmpeg")]
             {
                 crate::aac_file::write(path, &pcm, format.bitrate().unwrap() as i64)?;
-                return Ok(ExportStats { frames: 0, seconds: t0.elapsed().as_secs_f64(), render_seconds: mixed, encode_seconds: t0.elapsed().as_secs_f64() - mixed, skipped_layers: 0 });
+                return Ok(ExportStats { frames: 0, seconds: t0.elapsed().as_secs_f64(), render_seconds: mixed, encode_seconds: t0.elapsed().as_secs_f64() - mixed, skipped_layers: 0, backend: None });
             }
             #[cfg(not(feature = "ffmpeg"))]
             return Err(ExportError::Other("no AAC encoder in this build".into()));
         }
     };
     std::fs::write(path, bytes).map_err(|e| ExportError::Other(format!("can't write {}: {e}", path.display())))?;
-    Ok(ExportStats { frames: 0, seconds: t0.elapsed().as_secs_f64(), render_seconds: mixed, encode_seconds: t0.elapsed().as_secs_f64() - mixed, skipped_layers: 0 })
+    Ok(ExportStats { frames: 0, seconds: t0.elapsed().as_secs_f64(), render_seconds: mixed, encode_seconds: t0.elapsed().as_secs_f64() - mixed, skipped_layers: 0, backend: None })
 }
 
 /// A 16-bit PCM stereo WAV file.

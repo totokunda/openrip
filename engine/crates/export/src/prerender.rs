@@ -60,7 +60,7 @@ pub fn prerender(project: Project, cache: &RenderCache, range: Option<(Micros, M
     }
     let total: u64 = todo.iter().map(|c| c.frames as u64).sum();
     let (w, h) = plan.size;
-    let options = ExportOptions { width: w, height: h, fps: plan.fps, codec, bitrate: (w as f64 * h as f64 * plan.fps.as_f64() * 0.8) as u64, exact_bitrate: false, audio: false };
+    let options = ExportOptions { width: w, height: h, fps: plan.fps, codec, bitrate: (w as f64 * h as f64 * plan.fps.as_f64() * 0.8) as u64, exact_bitrate: false, audio: false, hardware: crate::hardware_encoding() };
     let mut engine = PreviewEngine::new(project)?;
     let mut done = 0u64;
     progress(0, total);
