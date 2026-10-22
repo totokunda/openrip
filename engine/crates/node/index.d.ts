@@ -40,8 +40,10 @@ export function close(): void
 
 export interface FrameHandle {
   id: number
-  /** IOSurfaceRef pointer bytes for Electron's sharedTexture (BGRA). */
+  /** IOSurfaceRef pointer bytes for Electron's sharedTexture (BGRA), on macOS; empty elsewhere. */
   ioSurface: Buffer
+  /** Windows and Linux: the frame's pixels instead (straight-alpha RGBA, width * height * 4 bytes). */
+  rgba?: Buffer | null
   width: number
   height: number
   timeUs: number
@@ -73,7 +75,7 @@ export function positionUs(): number
 /** Output gain; 0 mutes (the clock keeps running). */
 export function setVolume(volume: number): void
 
-// Render-ahead preview (macOS): what the app's preview surface uses.
+// Render-ahead preview: what the app's preview surface uses.
 
 /** Size of the preview surfaces; creates the pipeline on the first call. */
 export function setPreviewSize(width: number, height: number): void
@@ -86,8 +88,10 @@ export function seek(timeUs: number): void
 
 export interface DisplayFrame {
   id: number
-  /** IOSurfaceRef pointer bytes for sharedTexture (BGRA). */
+  /** IOSurfaceRef pointer bytes for sharedTexture (BGRA), on macOS; empty elsewhere. */
   ioSurface: Buffer
+  /** Windows and Linux: the frame's pixels instead (straight-alpha RGBA). */
+  rgba?: Buffer | null
   width: number
   height: number
   timeUs: number

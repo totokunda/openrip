@@ -7,6 +7,10 @@
 //
 //   node scripts/build-engine.mjs [--arch arm64|x64] [--debug]
 //
+// On macOS, Linux (x64, arm64) and Windows (x64). Windows needs MSVC's cl.exe on the PATH
+// (MSVC's "x64 Native Tools" prompt) and MSYS2 (C:\msys64, or MSYS2_BASH naming its bash.exe)
+// with make and nasm, for the FFmpeg build.
+//
 // Without a Rust toolchain this warns and exits 0: the app then runs on its own preview.
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -28,6 +32,9 @@ const profile = args.includes("--debug") ? "debug" : "release";
 const rustTarget = {
   "darwin-arm64": "aarch64-apple-darwin",
   "darwin-x64": "x86_64-apple-darwin",
+  "linux-x64": "x86_64-unknown-linux-gnu",
+  "linux-arm64": "aarch64-unknown-linux-gnu",
+  "win32-x64": "x86_64-pc-windows-msvc",
 }[`${process.platform}-${arch}`];
 const outDir = join(appDir, "native", `${process.platform}-${arch}`);
 mkdirSync(outDir, { recursive: true });
@@ -43,10 +50,19 @@ if (cargo.status !== 0) {
   process.exit(0);
 }
 
-// FFmpeg for this architecture, built once into engine/.ffmpeg/<arch>/.
+// FFmpeg for this platform and architecture, built once into engine/.ffmpeg/<arch>/ on macOS
+// and engine/.ffmpeg/<os>-<arch>/ elsewhere (see build-ffmpeg.sh).
 const ffmpegArch = { arm64: "arm64", x64: "x86_64" }[arch];
-const ffmpeg = spawnSync(join(engineDir, "scripts", "build-ffmpeg.sh"), [ffmpegArch], { cwd: engineDir, stdio: "inherit" });
+const ffmpegName = { darwin: ffmpegArch, linux: `linux-${ffmpegArch}`, win32: `windows-${ffmpegArch}` }[process.platform];
+const ffmpegScript = join(engineDir, "scripts", "build-ffmpeg.sh");
+// On Windows the script runs in MSYS2's bash, a login shell that keeps this PATH (MSVC's tools).
+const msysBash = process.env.MSYS2_BASH ?? "C:\\msys64\\usr\\bin\\bash.exe";
+const ffmpeg =
+  process.platform === "win32"
+    ? spawnSync(msysBash, ["-lc", `scripts/build-ffmpeg.sh ${ffmpegArch}`], { cwd: engineDir, stdio: "inherit", env: { ...process.env, MSYSTEM: "MSYS", MSYS2_PATH_TYPE: "inherit", CHERE_INVOKING: "1" } })
+    : spawnSync(ffmpegScript, [ffmpegArch], { cwd: engineDir, stdio: "inherit" });
 if (ffmpeg.status !== 0) {
+  if (ffmpeg.error) console.error(`[build-engine] ${ffmpeg.error.message}${process.platform === "win32" ? " (MSYS2's bash.exe: install MSYS2, or set MSYS2_BASH)" : ""}`);
   console.error("[build-engine] building FFmpeg failed");
   process.exit(ffmpeg.status ?? 1);
 }
@@ -56,15 +72,23 @@ if (ffmpeg.status !== 0) {
 const targetDir = join(engineDir, "target", "addon");
 const hostArch = process.arch;
 const crossTarget = arch !== hostArch ? rustTarget : null;
-const cargoEnv = { ...process.env, FFMPEG_DIR: join(engineDir, ".ffmpeg", ffmpegArch), CARGO_TARGET_DIR: targetDir };
+const cargoEnv = { ...process.env, FFMPEG_DIR: join(engineDir, ".ffmpeg", ffmpegName), CARGO_TARGET_DIR: targetDir };
+if (process.platform !== "darwin") {
+  // whisper.cpp (auto captions) for any CPU of this architecture, not just the build machine's.
+  cargoEnv.GGML_NATIVE = "OFF";
+}
+if (process.platform === "win32") {
+  // The static C runtime, as FFmpeg and zlib are built (-MT): Electron ships no VC++ runtime.
+  cargoEnv.CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = "-C target-feature=+crt-static";
+}
 const profileArgs = [...(profile === "release" ? ["--release"] : []), ...(crossTarget ? ["--target", crossTarget] : [])];
 
 // Rust bundles a static library into the crate that links it when that crate is compiled, and
 // nothing tells cargo the FFmpeg libraries changed: after FFmpeg is rebuilt (a new version, or
 // encoders added) ffmpeg-sys-next is cleaned so the addon links the new libraries, not the copy
 // cached with the old build.
-const ffmpegStamp = readFileSync(join(engineDir, ".ffmpeg", ffmpegArch, ".version"), "utf8").trim();
-const linkedStamp = join(targetDir, `ffmpeg-${ffmpegArch}-${profile}.version`);
+const ffmpegStamp = readFileSync(join(engineDir, ".ffmpeg", ffmpegName, ".version"), "utf8").trim();
+const linkedStamp = join(targetDir, `ffmpeg-${ffmpegName}-${profile}.version`);
 if (existsSync(targetDir) && (!existsSync(linkedStamp) || readFileSync(linkedStamp, "utf8").trim() !== ffmpegStamp)) {
   console.log(`[build-engine] FFmpeg is now ${ffmpegStamp}: rebuilding its bindings`);
   spawnSync("cargo", ["clean", "-p", "ffmpeg-sys-next", ...profileArgs], { cwd: engineDir, stdio: "inherit", env: cargoEnv });
@@ -79,7 +103,7 @@ if (built.status !== 0) {
 }
 writeFileSync(linkedStamp, `${ffmpegStamp}\n`);
 
-const libName = process.platform === "darwin" ? "libopenrip_node.dylib" : "libopenrip_node.so";
+const libName = { darwin: "libopenrip_node.dylib", win32: "openrip_node.dll" }[process.platform] ?? "libopenrip_node.so";
 const libPath = join(targetDir, ...(crossTarget ? [crossTarget] : []), profile, libName);
 if (!existsSync(libPath)) {
   console.error(`[build-engine] built library not found at ${libPath}`);
@@ -109,6 +133,35 @@ if (process.platform === "darwin") {
   if (builtins.length) {
     console.error(`[build-engine] the addon leaves compiler builtins undefined: ${builtins.join(", ")}`);
     process.exit(1);
+  }
+}
+// Linux: only libraries every desktop Linux has (glibc, the C++ runtime, zlib, ALSA, which
+// Electron needs too): nothing a user would have to install.
+if (process.platform === "linux") {
+  const needed = execFileSync("readelf", ["-d", dest], { encoding: "utf8" })
+    .split("\n")
+    .map((l) => l.match(/\(NEEDED\).*\[(.+)\]/)?.[1])
+    .filter(Boolean);
+  const system = /^(libc|libm|libdl|libpthread|librt|libgcc_s|libstdc\+\+|libz|libasound|ld-linux[\w-]*)\.so\.\d+$/;
+  const unexpected = needed.filter((l) => !system.test(l));
+  if (unexpected.length) {
+    console.error(`[build-engine] the addon links libraries a user's Linux may not have:\n  ${unexpected.join("\n  ")}`);
+    process.exit(1);
+  }
+}
+// Windows: no VC++ runtime DLLs (the C runtime is linked in statically), only Windows' own.
+if (process.platform === "win32") {
+  const dumpbin = spawnSync("dumpbin", ["/nologo", "/dependents", dest], { encoding: "utf8" });
+  if (dumpbin.status !== 0) {
+    console.warn("[build-engine] dumpbin not found (MSVC's x64 Native Tools prompt has it); the addon's DLLs weren't checked");
+  } else {
+    const dlls = dumpbin.stdout.split("\n").map((l) => l.trim()).filter((l) => /\.dll$/i.test(l));
+    const runtime = dlls.filter((d) => /^(vcruntime|msvcp|api-ms-win-crt-|ucrtbase)/i.test(d));
+    if (runtime.length) {
+      console.error(`[build-engine] the addon needs the VC++ runtime, which a user's Windows may not have:\n  ${runtime.join("\n  ")}`);
+      process.exit(1);
+    }
+    console.log(`[build-engine] the addon loads ${dlls.join(", ")}`);
   }
 }
 console.log(`[build-engine] ${dest}`);

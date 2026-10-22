@@ -338,6 +338,20 @@ try {
   console.warn("[engine] shared texture receiver unavailable:", e);
 }
 
+// On Windows and Linux frames arrive as pixels (straight-alpha RGBA) instead, read back from
+// the GPU by the engine (main's EngineModule.ts sendFrame), and are drawn the same way.
+ipcRenderer.on("engine:frame-pixels", (_e, meta: { timeUs: number; width: number; height: number; renderMs?: number }, rgba: Uint8Array<ArrayBuffer>) => {
+  const canvas = document.getElementById(ENGINE_FRAME_CANVAS_ID) as HTMLCanvasElement | null;
+  if (!canvas || rgba.byteLength !== meta.width * meta.height * 4) return;
+  if (canvas.width !== meta.width || canvas.height !== meta.height) {
+    canvas.width = meta.width;
+    canvas.height = meta.height;
+  }
+  const pixels = new ImageData(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.byteLength), meta.width, meta.height);
+  canvas.getContext("2d", { alpha: false })?.putImageData(pixels, 0, 0);
+  canvas.dispatchEvent(new CustomEvent(ENGINE_FRAME_EVENT, { detail: meta }));
+});
+
 /** One of OpenRip's own video effects (engine/crates/model/src/fx.rs); values 0–100. */
 export type EngineEffect = {
   id: string;

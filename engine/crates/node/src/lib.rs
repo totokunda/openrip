@@ -4,14 +4,16 @@
 //! const engine = require("./openrip_node.node");
 //! const info = engine.openProject(pathToCapCutDraftOrProjectJson);
 //! const f = await engine.renderFrame(timeUs, 1280, 720); // on a worker thread
-//! // f.ioSurface: IOSurfaceRef bytes for Electron's sharedTexture (BGRA)
+//! // f.ioSurface: IOSurfaceRef bytes for Electron's sharedTexture (BGRA), on macOS;
+//! // f.rgba: the frame's pixels (RGBA) on Windows and Linux
 //! engine.release(f.id); // when Electron no longer references it
 //! ```
 //!
 //! Only the conversion to and from JavaScript lives here: the logic is in `openrip-core`,
 //! which other bindings wrap too. One project is open at a time (the addon's session);
-//! frames come from a small pool of IOSurface-backed buffers, reused only after
-//! `release(id)`, so the app must release every frame it receives.
+//! frames come from a small pool of IOSurface-backed buffers (pixels read back from the GPU
+//! off Apple platforms), reused only after `release(id)`, so the app must release every
+//! frame it receives.
 
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -126,7 +128,10 @@ pub fn close() {
 pub struct FrameHandle {
     pub id: u32,
     /// IOSurfaceRef pointer bytes, as Electron's `sharedTexture` expects on macOS (BGRA).
+    /// Empty elsewhere.
     pub io_surface: Buffer,
+    /// On Windows and Linux, the frame's pixels instead (straight-alpha RGBA): see [`pixels`].
+    pub rgba: Option<Buffer>,
     pub width: u32,
     pub height: u32,
     pub time_us: i64,
@@ -143,7 +148,6 @@ pub struct RenderTask {
     scrub: bool,
 }
 
-#[cfg(target_os = "macos")]
 impl Task for RenderTask {
     type Output = openrip_core::RenderedFrame;
     type JsValue = FrameHandle;
@@ -154,14 +158,28 @@ impl Task for RenderTask {
     }
 
     fn resolve(&mut self, _env: Env, out: Self::Output) -> Result<FrameHandle> {
-        let f = session().lock().unwrap().as_mut().ok_or_else(|| err(openrip_core::Error::Closed))?.hand_out(out).map_err(err)?;
-        Ok(FrameHandle { id: f.id, io_surface: Buffer::from(f.io_surface.to_ne_bytes().to_vec()), width: f.width, height: f.height, time_us: f.time_us, render_ms: f.render_ms, layers: f.layers, skipped: f.skipped })
+        let mut guard = session().lock().unwrap();
+        let s = guard.as_mut().ok_or_else(|| err(openrip_core::Error::Closed))?;
+        let f = s.hand_out(out).map_err(err)?;
+        #[cfg(target_os = "macos")]
+        let (io_surface, rgba) = (Buffer::from(f.io_surface.to_ne_bytes().to_vec()), None);
+        #[cfg(not(target_vendor = "apple"))]
+        let (io_surface, rgba) = (Buffer::from(Vec::new()), pixels(s, f.id));
+        Ok(FrameHandle { id: f.id, io_surface, rgba, width: f.width, height: f.height, time_us: f.time_us, render_ms: f.render_ms, layers: f.layers, skipped: f.skipped })
     }
 }
 
-/// Render the frame at `timeUs` into a pooled IOSurface (on a worker thread). With `scrub`,
-/// video shows a frame that's quick to get while the playhead is dragged.
-#[cfg(target_os = "macos")]
+/// A frame's pixels for the app to draw (straight-alpha RGBA). Off Apple platforms the engine
+/// shares no GPU texture with Electron yet (D3D11 and DMA-BUF handles are still to write,
+/// docs/plan/portability.md), so its frames reach the window as pixels read back from the GPU.
+#[cfg(not(target_vendor = "apple"))]
+fn pixels(s: &Session, id: u32) -> Option<Buffer> {
+    s.surface(id).map(|surface| Buffer::from(surface.image().data.clone()))
+}
+
+/// Render the frame at `timeUs` into a pooled IOSurface (on a worker thread; read back as
+/// pixels off macOS). With `scrub`, video shows a frame that's quick to get while the
+/// playhead is dragged.
 #[napi]
 pub fn render_frame(time_us: i64, width: u32, height: u32, scrub: Option<bool>) -> AsyncTask<RenderTask> {
     AsyncTask::new(RenderTask { time: Micros(time_us), width, height, scrub: scrub.unwrap_or(false) })
@@ -309,28 +327,24 @@ pub fn export_still(time_us: i64, width: u32, height: u32, path: String) -> Asyn
 // ---- Render-ahead preview (what the app's preview uses) ----
 
 /// Size of the preview surfaces; creates the pipeline on first call.
-#[cfg(target_os = "macos")]
 #[napi]
 pub fn set_preview_size(width: u32, height: u32) -> Result<()> {
     session().lock().unwrap().as_mut().ok_or_else(|| err(openrip_core::Error::NoProject))?.set_preview_size(width, height).map_err(err)
 }
 
 /// Play from `fromUs`: sound starts and frames render ahead of the audio clock.
-#[cfg(target_os = "macos")]
 #[napi]
 pub fn start_playback(from_us: i64) -> Result<()> {
     session().lock().unwrap().as_ref().ok_or_else(|| err(openrip_core::Error::NoProject))?.start_playback(Micros(from_us)).map_err(err)
 }
 
 /// Stop playing; the picture stays on the frame at the stop time.
-#[cfg(target_os = "macos")]
 #[napi]
 pub fn stop_playback() -> i64 {
     session().lock().unwrap().as_ref().map_or(0, |s| s.stop_playback().0)
 }
 
 /// Show the frame at `timeUs` (paused; scrubbing). The newest request wins.
-#[cfg(target_os = "macos")]
 #[napi]
 pub fn seek(time_us: i64) {
     if let Some(s) = session().lock().unwrap().as_ref() {
@@ -341,8 +355,10 @@ pub fn seek(time_us: i64) {
 #[napi(object)]
 pub struct DisplayFrame {
     pub id: u32,
-    /// IOSurfaceRef pointer bytes for `sharedTexture` (BGRA).
+    /// IOSurfaceRef pointer bytes for `sharedTexture` (BGRA), on macOS. Empty elsewhere.
     pub io_surface: Buffer,
+    /// On Windows and Linux, the frame's pixels instead (straight-alpha RGBA): see [`pixels`].
+    pub rgba: Option<Buffer>,
     pub width: u32,
     pub height: u32,
     pub time_us: i64,
@@ -351,11 +367,16 @@ pub struct DisplayFrame {
 
 /// The frame to show now (the newest one due by the playback clock, or the last seek), or
 /// `null` if there is nothing new. Call `release(id)` when Electron is done with it.
-#[cfg(target_os = "macos")]
 #[napi]
 pub fn frame_for_display() -> Option<DisplayFrame> {
-    let f = session().lock().unwrap().as_mut()?.frame_for_display()?;
-    Some(DisplayFrame { id: f.id, io_surface: Buffer::from(f.io_surface.to_ne_bytes().to_vec()), width: f.width, height: f.height, time_us: f.time_us, render_ms: f.render_ms })
+    let mut guard = session().lock().unwrap();
+    let s = guard.as_mut()?;
+    let f = s.frame_for_display()?;
+    #[cfg(target_os = "macos")]
+    let (io_surface, rgba) = (Buffer::from(f.io_surface.to_ne_bytes().to_vec()), None);
+    #[cfg(not(target_vendor = "apple"))]
+    let (io_surface, rgba) = (Buffer::from(Vec::new()), pixels(s, f.id));
+    Some(DisplayFrame { id: f.id, io_surface, rgba, width: f.width, height: f.height, time_us: f.time_us, render_ms: f.render_ms })
 }
 
 // ---- Decoding ----

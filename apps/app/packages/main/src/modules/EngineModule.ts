@@ -18,7 +18,8 @@ import { TilePreviews } from "./TilePreviews.js";
  *
  * With the engine preview on, the renderer sends the project after each edit
  * (`engine:sync-project`) and asks for frames (`engine:render`); frames go back to the
- * asking window as shared GPU textures, which its preload draws.
+ * asking window as shared GPU textures (macOS) or pixels (Windows, Linux), which its
+ * preload draws.
  */
 export type ProjectInfo = {
   name: string;
@@ -32,6 +33,8 @@ export type ProjectInfo = {
 type FrameHandle = {
   id: number;
   ioSurface: Buffer;
+  /** Windows and Linux: the frame's pixels (RGBA) instead of an IOSurface. */
+  rgba?: Buffer | null;
   width: number;
   height: number;
   timeUs: number;
@@ -40,7 +43,7 @@ type FrameHandle = {
   skipped: number;
 };
 
-type DisplayFrame = { id: number; ioSurface: Buffer; width: number; height: number; timeUs: number; renderMs: number };
+type DisplayFrame = { id: number; ioSurface: Buffer; rgba?: Buffer | null; width: number; height: number; timeUs: number; renderMs: number };
 
 export type EngineAddon = {
   version(): string;
@@ -268,7 +271,15 @@ async function fontFile(url: string): Promise<string | null> {
 }
 
 /** Hand a rendered surface to a window as a shared texture; the engine gets it back once released. */
-async function sendFrame(engine: EngineAddon, sender: Electron.WebContents, f: { id: number; ioSurface: Buffer; width: number; height: number; timeUs: number; renderMs?: number }) {
+async function sendFrame(engine: EngineAddon, sender: Electron.WebContents, f: { id: number; ioSurface: Buffer; rgba?: Buffer | null; width: number; height: number; timeUs: number; renderMs?: number }) {
+  // Windows and Linux: the engine shares no GPU texture with Electron there yet, so its frame
+  // comes as pixels read back from the GPU (a copy: the surface goes back to the engine now),
+  // which the window's preload draws (preload/src/engine.ts).
+  if (f.rgba) {
+    engine.release(f.id);
+    sender.send("engine:frame-pixels", { timeUs: f.timeUs, width: f.width, height: f.height, renderMs: f.renderMs }, f.rgba);
+    return;
+  }
   try {
     const imported = sharedTexture.importSharedTexture({
       textureInfo: {
