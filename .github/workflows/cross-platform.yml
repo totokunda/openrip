@@ -273,17 +273,15 @@ jobs:
           -- --skip parameters_change_the_picture --skip every_transition_starts_at_the_outgoing_clip_and_ends_at_the_incoming_one
           --skip shader_transitions_draw_the_clips_through_the_collection
 
-      # As on Linux; ffmpeg and ffprobe from the app's npm packages. Media Foundation's
-      # encoders are tried first here.
+      # As on Linux, with Chocolatey's ffmpeg and ffprobe (ffprobe-static's is too old to name
+      # ProRes profiles). Media Foundation's encoders are tried first here.
       - name: Export tests (software encoders, Media Foundation, OpenH264)
         working-directory: engine
         env:
           FFMPEG_DIR: ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64
           RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=avformat.lib -C link-arg=avfilter.lib -C link-arg=avcodec.lib -C link-arg=swscale.lib -C link-arg=swresample.lib -C link-arg=avutil.lib -C link-arg=zlib.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
         run: |
-          $ffmpeg = Split-Path (node -p "require('../apps/app/node_modules/ffmpeg-static')")
-          $ffprobe = Split-Path (node -p "require('../apps/app/node_modules/ffprobe-static').path")
-          $env:PATH = "$ffmpeg;$ffprobe;$env:PATH"
+          choco install ffmpeg -y --no-progress | Select-Object -Last 3
           cargo test --target x86_64-pc-windows-msvc -p openrip-export --lib --test software
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --target x86_64-pc-windows-msvc -p openrip-export --test openh264 -- --ignored
@@ -314,7 +312,7 @@ jobs:
             -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest smoke-out/xplat-clip.mp4
           export EXE="$(cygpath -w "$PWD/dist/win-unpacked/OpenRip.exe")"
           export CLIP_NAME=xplat-clip OPENRIP_ENGINE_MUTE=1
-          export FFPROBE=$(node -p "require('ffprobe-static').path")
+          export FFPROBE="$(command -v ffprobe)"
           node scripts/smoke/session.mjs . smoke-out smoke-out/ud "$(cygpath -w "$PWD/smoke-out/xplat-clip.mp4")" import timeline xplat | tee smoke-out/smoke.log
           grep -q "STEP xplat: ok" smoke-out/smoke.log
 
