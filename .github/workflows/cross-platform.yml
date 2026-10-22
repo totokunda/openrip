@@ -77,13 +77,25 @@ jobs:
         working-directory: apps/app
         run: npm ci
 
-      - name: Engine tests (portable crates)
-        working-directory: engine
-        run: cargo test --no-default-features --lib --tests $ENGINE_TESTS
-
       - name: Engine addon (FFmpeg and openrip-node)
         working-directory: apps/app
         run: node scripts/build-engine.mjs
+
+      # The render crate's tests decode clips, so the tests link the static FFmpeg just built:
+      # its archives again in a group at the end (unlike the addon's, they aren't bundled into
+      # one, so their order matters), then zlib. `--target` keeps these flags off build scripts.
+      # Skipped: Mesa's software Vulkan (lavapipe) draws the last two cases of the effects
+      # shader's switch (Rounded corners, Film strip) black, whatever they return; to check on
+      # real GPUs.
+      - name: Engine tests (portable crates)
+        working-directory: engine
+        env:
+          FFMPEG_LIB: ${{ github.workspace }}/engine/.ffmpeg/${{ matrix.ffmpeg }}/lib
+          FFMPEG_DIR: ${{ github.workspace }}/engine/.ffmpeg/${{ matrix.ffmpeg }}
+        run: |
+          export RUSTFLAGS="-L $FFMPEG_LIB -C link-arg=-Wl,--start-group -C link-arg=-lavformat -C link-arg=-lavfilter -C link-arg=-lavcodec -C link-arg=-lswscale -C link-arg=-lswresample -C link-arg=-lavutil -C link-arg=-Wl,--end-group -C link-arg=-lz"
+          cargo test --target "$(rustc -vV | sed -n 's/host: //p')" --no-fail-fast --no-default-features --lib --tests $ENGINE_TESTS \
+            -- --skip every_effect_is_off_at_zero_and_changes_the_frame_at_full_strength
 
       - name: Renderer tests
         working-directory: apps/app/packages/renderer
@@ -138,13 +150,15 @@ jobs:
     name: Windows x64
     runs-on: windows-latest
     timeout-minutes: 150
+    # PowerShell, not Git Bash, whose /usr/bin/link would shadow MSVC's link.exe.
     defaults:
       run:
-        shell: bash
+        shell: pwsh
     steps:
       # build-ffmpeg.sh runs in MSYS2's bash: keep the scripts' line endings as they are.
       - name: Line endings
         run: git config --global core.autocrlf false
+        shell: bash
 
       - uses: actions/checkout@v4
 
@@ -164,6 +178,7 @@ jobs:
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal
           rustup default "$RUST_VERSION"
+        shell: bash
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -190,15 +205,20 @@ jobs:
         working-directory: apps/app
         run: npm ci
 
-      - name: Engine tests (portable crates)
-        working-directory: engine
-        run: cargo test --no-default-features --lib --tests $ENGINE_TESTS
-
       - name: Engine addon (FFmpeg and openrip-node)
         working-directory: apps/app
         env:
           MSYS2_BASH: ${{ steps.msys2.outputs.msys2-location }}\usr\bin\bash.exe
         run: node scripts/build-engine.mjs
+
+      # As on Linux (MSVC's linker needs no order), with the static C runtime FFmpeg is built
+      # with and the libraries the addon's build.rs names.
+      - name: Engine tests (portable crates)
+        working-directory: engine
+        env:
+          FFMPEG_DIR: ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64
+          RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=z.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
+        run: cargo test --target x86_64-pc-windows-msvc --no-fail-fast --no-default-features --lib --tests $($env:ENGINE_TESTS -split ' ')
 
       - name: Renderer tests
         working-directory: apps/app/packages/renderer
@@ -216,6 +236,7 @@ jobs:
 
       - name: Smoke test (packaged app)
         working-directory: apps/app
+        shell: bash
         run: |
           set -o pipefail
           FFMPEG=$(node -p "require('ffmpeg-static')")
