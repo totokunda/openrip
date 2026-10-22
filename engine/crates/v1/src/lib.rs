@@ -105,7 +105,14 @@ fn file_url_to_path(url: &str) -> String {
         out.push(bytes[i]);
         i += 1;
     }
-    String::from_utf8_lossy(&out).into_owned()
+    let path = String::from_utf8_lossy(&out).into_owned();
+    // On Windows the path starts with its drive (`file:///C:/Users/...`), and `/C:/Users/...`
+    // doesn't open: the slash in front of the drive goes.
+    let b = path.as_bytes();
+    if cfg!(windows) && b.len() > 2 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' {
+        return path[1..].to_string();
+    }
+    path
 }
 
 // ---- time --------------------------------------------------------------------
@@ -1995,6 +2002,14 @@ fn caption_words(clip: &Value, material: &mut Text) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The app's file URLs of Windows paths open as those paths.
+    #[cfg(windows)]
+    #[test]
+    fn windows_file_urls_are_drive_paths() {
+        assert_eq!(file_url_to_path("file:///D:/My%20Clips/a.mp4"), "D:/My Clips/a.mp4");
+        assert_eq!(file_url_to_path("file:///C%3A/Users/me/b.mov"), "C:/Users/me/b.mov");
+    }
 
     /// 24 fps, 16:9 (world 1066.67×600). Track order in v1 is top first.
     fn doc() -> Value {

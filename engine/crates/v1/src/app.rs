@@ -467,6 +467,12 @@ fn url_from_path(path: &str) -> String {
         return path.to_string();
     }
     let mut out = String::from("file://");
+    // A Windows path (`C:\Users\x`) goes as its URL does (`file:///C%3A/Users/x`): slashes,
+    // and one in front of the drive.
+    let path = if cfg!(windows) { path.replace('\\', "/") } else { path.to_string() };
+    if cfg!(windows) && path.as_bytes().get(1) == Some(&b':') {
+        out.push('/');
+    }
     for b in path.bytes() {
         match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
@@ -723,6 +729,13 @@ fn app_clip(project: &Project, world: &World, ticks: &Ticks, to_world: f64, trac
 mod tests {
     use super::*;
     use crate::{import_v1_json, Imported};
+
+    /// Windows paths become file URLs the app (Node's fileURLToPath) reads back.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_become_file_urls() {
+        assert_eq!(url_from_path("C:\\Users\\me\\a b.mp4"), "file:///C%3A/Users/me/a%20b.mp4");
+    }
 
     /// A 1080×1920 project at 30 fps: a 4 s video with a keyframed position and an effect
     /// attached, and a caption above it.
