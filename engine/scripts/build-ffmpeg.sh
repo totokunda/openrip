@@ -141,7 +141,7 @@ case "$OS" in
     # -MT: the static C runtime, as the addon links it (Electron ships no VC++ runtime).
     set -- \
       --toolchain=msvc --target-os=win64 \
-      --extra-cflags="-MT -I$ZLIB_WIN/include" --extra-ldflags="-LIBPATH:$ZLIB_WIN/lib" \
+      --extra-cflags="-MT -I$ZLIB_WIN/include" --extra-ldflags="-L$ZLIB_WIN/lib" \
       --enable-w32threads --enable-zlib --enable-d3d11va --enable-mediafoundation \
       --enable-encoder=aac,$SOFTWARE_ENCODERS,$WINDOWS_ENCODERS \
       --enable-hwaccel=h264_d3d11va,hevc_d3d11va,vp9_d3d11va,av1_d3d11va,mpeg2_d3d11va
@@ -164,7 +164,8 @@ esac
   --enable-muxer=mp4,mov,matroska \
   --enable-parser=h264,hevc,av1,vp8,vp9,mpeg4video,mpegvideo,h263,dnxhd,mjpeg,png,bmp,webp,gif,aac,aac_latm,mpegaudio,ac3,flac,opus,vorbis \
   --enable-bsf=vp9_superframe_split,av1_frame_split,extract_extradata,h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc \
-  --enable-filter=atempo,aformat,aresample,anull,format,null,scale
+  --enable-filter=atempo,aformat,aresample,anull,format,null,scale ||
+  { tail -40 ffbuild/config.log >&2; exit 1; }
 
 if command -v nproc >/dev/null 2>&1; then JOBS=$(nproc); else JOBS=$(sysctl -n hw.ncpu); fi
 make -j"$JOBS"
