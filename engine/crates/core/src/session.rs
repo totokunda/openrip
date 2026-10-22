@@ -346,11 +346,16 @@ impl Session {
 
     /// Stop playing; the picture stays on the frame at the stop time, which is returned.
     pub fn stop_playback(&self) -> Micros {
-        let at = self.player.as_ref().map_or(Micros::ZERO, |p| {
-            let t = p.position();
-            p.pause();
-            t
-        });
+        let at = match &self.player {
+            Some(p) => {
+                let t = p.position();
+                p.pause();
+                t
+            }
+            // No audio device: the wall clock the pipeline plays by (not frame 0, where the
+            // picture would jump back to on every pause).
+            None => self.pipeline.as_ref().and_then(PreviewPipeline::clock_time).unwrap_or(Micros::ZERO),
+        };
         if let Some(p) = &self.pipeline {
             p.seek(at);
         }

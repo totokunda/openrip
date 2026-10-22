@@ -159,6 +159,15 @@ impl PreviewPipeline {
         out
     }
 
+    /// The clock's time while playing (what it plays by when there's no audio device to
+    /// ask), `None` while paused.
+    pub fn clock_time(&self) -> Option<Micros> {
+        match &self.shared.state.lock().unwrap().mode {
+            Mode::Playing { clock } => Some(clock()),
+            Mode::Paused { .. } => None,
+        }
+    }
+
     pub fn recycle(&self, surface: Surface) {
         let mut st = self.shared.state.lock().unwrap();
         if st.free.len() < AHEAD + 2 {
