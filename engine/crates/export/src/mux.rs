@@ -280,7 +280,14 @@ impl FfVideo {
 
     /// Send `frame` (null flushes) and write whatever packets come out.
     pub(crate) unsafe fn send(&mut self, mux: &mut Muxer, frame: *const ff::AVFrame) -> Result<(), ExportError> {
-        check("avcodec_send_frame", ff::avcodec_send_frame(self.enc, frame))?;
+        let mut r = ff::avcodec_send_frame(self.enc, frame);
+        if r == ff::AVERROR(ff::EAGAIN) {
+            // Full (Media Foundation's asynchronous encoders): once its output is all read, it
+            // takes the frame (FFmpeg's avcodec_send_frame contract).
+            mux.drain(self.enc)?;
+            r = ff::avcodec_send_frame(self.enc, frame);
+        }
+        check("avcodec_send_frame", r)?;
         mux.drain(self.enc)
     }
 }
