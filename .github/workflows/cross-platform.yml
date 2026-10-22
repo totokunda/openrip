@@ -154,7 +154,7 @@ jobs:
           mkdir -p smoke-out
           "$FFMPEG" -v error -y -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 4 \
             -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest smoke-out/xplat-clip.mp4
-          export EXE="$PWD/dist/linux-${{ matrix.arch == 'x64' && '' || 'arm64-' }}unpacked/openrip"
+          export EXE="$PWD/dist/linux-${{ matrix.arch == 'arm64' && 'arm64-' || '' }}unpacked/openrip"
           export CLIP_NAME=xplat-clip OPENRIP_ENGINE_MUTE=1
           export FFPROBE=$(command -v ffprobe)
           xvfb-run -a -s "-screen 0 1920x1080x24" node scripts/smoke/session.mjs . smoke-out smoke-out/ud "$PWD/smoke-out/xplat-clip.mp4" import timeline xplat | tee smoke-out/smoke.log
