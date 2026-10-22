@@ -243,6 +243,12 @@ module.exports = {
       "libatspi2.0-0",
       "libuuid1",
       "libsecret-1-0",
+      // ALSA, which Electron and the engine's audio output both load: Ubuntu 24.04's
+      // libasound2t64 first, since a bare libasound2 there can install an OSS stand-in
+      // (liboss4-salsa-asound2) without ALSA's functions, and Electron then won't start.
+      "libasound2t64 | libasound2",
+      // Electron's GPU process needs it, and minimal installs (Ubuntu 22.04's) lack it.
+      "libgbm1",
     ],
     // electron-builder's own install scripts: they link /usr/bin/openrip, set up Chromium's
     // sandbox and install the AppArmor profile Ubuntu 24.04 needs for it to start.
