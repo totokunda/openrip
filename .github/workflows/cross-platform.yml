@@ -94,6 +94,10 @@ jobs:
           path: engine/.ffmpeg/${{ matrix.ffmpeg }}
           key: ffmpeg-${{ matrix.ffmpeg }}-${{ hashFiles('engine/scripts/build-ffmpeg.sh') }}
 
+      - name: OpenH264 from Cisco loads in the addon
+        working-directory: apps/app
+        run: node scripts/smoke/openh264.mjs
+
       # The render crate's tests decode clips, so the tests link the static FFmpeg just built:
       # its archives again in a group at the end (unlike the addon's, they aren't bundled into
       # one, so their order matters), then zlib. `--target` keeps these flags off build scripts.
@@ -114,10 +118,11 @@ jobs:
             -- --skip every_effect_is_off_at_zero_and_changes_the_frame_at_full_strength
 
       # The software encoders. Not run here: the tests whose exports must match a colour within
-      # 3 levels (ProRes 4:2:2, and H.264 through Cisco's OpenH264 in tests/openh264.rs), since
-      # Mesa's software Vulkan renders that colour 2 levels off (190 for 192) and 4:2:x rounding
-      # adds the rest; to check on real GPUs. OpenH264's download, loading and an H.264 export
-      # are checked by the packaged app's smoke test below instead.
+      # 3 levels (ProRes 4:2:2, and H.264 through Cisco's OpenH264 in tests/openh264.rs). The
+      # engine renders that colour 190 for 192 on Vulkan (Mesa's software one here) as on
+      # DirectX 12 (WARP), 192 only on Metal, and 4:2:x rounding adds the rest; to look into
+      # on real GPUs. OpenH264's download and loading are checked by the step above, and an
+      # H.264 export through it by the packaged app's smoke test below.
       - name: Export tests (software encoders)
         working-directory: engine
         env:
@@ -258,6 +263,12 @@ jobs:
             engine/.ffmpeg/zlib-windows-x86_64
           key: ffmpeg-windows-x86_64-${{ hashFiles('engine/scripts/build-ffmpeg.sh') }}
 
+      # Cisco's DLL, downloaded, checked and loaded by the addon (the engine's OpenH264 test
+      # exports through Media Foundation here, which Windows tries first).
+      - name: OpenH264 from Cisco loads in the addon
+        working-directory: apps/app
+        run: node scripts/smoke/openh264.mjs
+
       # As on Linux, all of FFmpeg's libraries (MSVC's linker needs no group), with the static
       # C runtime FFmpeg is built with and the libraries the addon's build.rs names. Skipped:
       # three GL transition tests whose parameters (a fade's colour) don't come through on WARP,
@@ -273,18 +284,17 @@ jobs:
           -- --skip parameters_change_the_picture --skip every_transition_starts_at_the_outgoing_clip_and_ends_at_the_incoming_one
           --skip shader_transitions_draw_the_clips_through_the_collection
 
-      # As on Linux, with Chocolatey's ffmpeg and ffprobe (ffprobe-static's is too old to name
-      # ProRes profiles). Media Foundation's encoders are tried first here.
-      - name: Export tests (software encoders, Media Foundation, OpenH264)
+      # As on Linux (the 4:2:2 colour test skipped for the same reason), with Chocolatey's
+      # ffmpeg and ffprobe (ffprobe-static's is too old to name ProRes profiles). Media
+      # Foundation's encoders, tried first here, write H.264 and HEVC.
+      - name: Export tests (software encoders, Media Foundation)
         working-directory: engine
         env:
           FFMPEG_DIR: ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64
           RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=avformat.lib -C link-arg=avfilter.lib -C link-arg=avcodec.lib -C link-arg=swscale.lib -C link-arg=swresample.lib -C link-arg=avutil.lib -C link-arg=zlib.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
         run: |
           choco install ffmpeg -y --no-progress | Select-Object -Last 3
-          cargo test --target x86_64-pc-windows-msvc -p openrip-export --lib --test software
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --target x86_64-pc-windows-msvc -p openrip-export --test openh264 -- --ignored
+          cargo test --target x86_64-pc-windows-msvc -p openrip-export --lib --test software -- --skip prores_422_in_software
 
       - name: Build the app
         working-directory: apps/app
