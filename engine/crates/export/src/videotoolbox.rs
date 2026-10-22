@@ -5,8 +5,9 @@
 //! IOSurface from a CoreVideo pool, which goes to the encoder as a hardware frame: no pixel
 //! copies and no CPU colour conversion.
 //!
-//! The codecs with an alpha channel (HEVC with alpha) take frames drawn over a transparent
-//! canvas and read back (premultiplied RGBA) instead, as BGRA pictures.
+//! The codecs with an alpha channel (HEVC with alpha, ProRes 4444) take frames drawn over a
+//! transparent canvas and read back (premultiplied RGBA) instead, as BGRA pictures; ProRes 4444's
+//! un-premultiplied first, as the software encoder writes it (ProRes carries straight alpha).
 
 use std::ffi::CString;
 use std::path::Path;
@@ -189,6 +190,8 @@ pub(crate) struct VtEncoder {
     /// The NV12 pool; none for a codec with alpha, which takes read-back pixels.
     pool: Option<Pool>,
     image: Option<openrip_render::RgbaImage>,
+    /// ProRes 4444: its alpha is written straight.
+    straight_alpha: bool,
     video: FfVideo,
     mux: Muxer,
 }
@@ -200,7 +203,7 @@ impl VtEncoder {
         let video = open_video(&mux, o)?;
         unsafe { mux.add_video(video.enc, o.codec)? };
         mux.start(o.audio)?;
-        Ok(VtEncoder { pool, image: None, video, mux })
+        Ok(VtEncoder { pool, image: None, straight_alpha: matches!(o.codec, Codec::ProRes(_)) && o.codec.has_alpha(), video, mux })
     }
 }
 
@@ -210,6 +213,9 @@ impl Encoder for VtEncoder {
             let (w, h) = unsafe { ((*self.video.enc).width as u32, (*self.video.enc).height as u32) };
             let mut image = self.image.take().unwrap_or(openrip_render::RgbaImage { width: w, height: h, data: Vec::new() });
             let report = draw(Picture::Rgba(&mut image))?;
+            if self.straight_alpha {
+                crate::software::unpremultiply(&mut image.data);
+            }
             // RGBA to BGRA, in place.
             for px in image.data.chunks_exact_mut(4) {
                 px.swap(0, 2);
