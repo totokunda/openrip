@@ -1,10 +1,12 @@
 // The Windows and Linux builds' check in CI (.github/workflows/cross-platform.yml), after
 // `import timeline` on a short test clip (CLIP_NAME), on the packaged app (EXE=): the engine
 // addon loaded; the engine draws the preview (on these platforms its frames come as pixels,
-// not shared textures), a frame of the clip and not black; playing draws more frames; then
-// an export through the Export dialog: a 480P H.264 MP4 when the engine has a video encoder
-// (read back with ffprobe when FFPROBE= says where it is), else the dialog says there is
-// none, its Video section is off, and a GIF exports instead.
+// not shared textures), a frame of the clip and not black; playing draws more frames and
+// pausing keeps the picture where it stopped; then an export through the Export dialog: a
+// 480P video in the codec it offers first (H.264, through Media Foundation or Cisco's
+// OpenH264, which the app downloads) when the engine has a video encoder, read back with
+// ffprobe when FFPROBE= says where it is; else the dialog says there is none, its Video
+// section is off, and a GIF exports instead.
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { playButton } from "./_preview.mjs";
@@ -97,13 +99,14 @@ export default async ({ win, shot, outDir, fs }) => {
     phase = await T("export-run").getAttribute("data-phase").catch(() => null);
   }
   await shot("xplat-4-exported");
-  const file = path.join(outDir, video ? "xplat.mp4" : "xplat.gif");
+  // An MP4, or a MOV for a codec that needs one (ProRes).
+  const file = path.join(outDir, video ? (["xplat.mp4", "xplat.mov"].find((f) => fs.existsSync(path.join(outDir, f))) ?? "xplat.mp4") : "xplat.gif");
   if (phase !== "done" || !fs.existsSync(file)) {
     const why = await T("export-error").innerText().catch(() => "");
     throw new Error(`the export ended ${phase} ${why} (${file} ${fs.existsSync(file) ? "written" : "missing"})`);
   }
   let probed = "";
-  if (video && process.env.FFPROBE) {
+  if (video && process.env.FFPROBE && fs.existsSync(process.env.FFPROBE)) {
     const s = JSON.parse(execFileSync(process.env.FFPROBE, ["-v", "error", "-select_streams", "v:0", "-count_frames", "-show_streams", "-of", "json", file]).toString()).streams[0];
     if (!(s?.nb_read_frames > 0)) throw new Error(`the export has no video frames (${JSON.stringify(s)})`);
     probed = `, ${s.codec_name} ${s.width}x${s.height}, ${s.nb_read_frames} frames`;

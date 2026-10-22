@@ -45,9 +45,10 @@ jobs:
         run: |
           sudo apt-get update
           # FFmpeg (nasm, zlib), the engine (ALSA for cpal, libclang for bindgen, cmake for
-          # whisper.cpp), and running the app headless (Xvfb, Mesa's software Vulkan for wgpu).
+          # whisper.cpp), running the app headless (Xvfb, Mesa's software Vulkan for wgpu), and
+          # the system's ffmpeg and ffprobe, which tests use to make clips and read exports back.
           sudo apt-get install -y --no-install-recommends nasm zlib1g-dev libasound2-dev clang libclang-dev cmake \
-            xvfb mesa-vulkan-drivers libgl1-mesa-dri libgtk-3-0 libnss3 libxss1 libgbm1
+            xvfb mesa-vulkan-drivers libgl1-mesa-dri libgtk-3-0 libnss3 libxss1 libgbm1 ffmpeg
 
       - name: Rust
         run: |
@@ -97,6 +98,19 @@ jobs:
           cargo test --target "$(rustc -vV | sed -n 's/host: //p')" --no-fail-fast --no-default-features --lib --tests $ENGINE_TESTS \
             -- --skip every_effect_is_off_at_zero_and_changes_the_frame_at_full_strength
 
+      # The software encoders: ProRes through prores_ks, and H.264 through Cisco's OpenH264,
+      # downloaded from Cisco as the app does.
+      - name: Export tests (software encoders, OpenH264)
+        working-directory: engine
+        env:
+          FFMPEG_LIB: ${{ github.workspace }}/engine/.ffmpeg/${{ matrix.ffmpeg }}/lib
+          FFMPEG_DIR: ${{ github.workspace }}/engine/.ffmpeg/${{ matrix.ffmpeg }}
+        run: |
+          export RUSTFLAGS="-L $FFMPEG_LIB -C link-arg=-Wl,--start-group -C link-arg=-lavformat -C link-arg=-lavfilter -C link-arg=-lavcodec -C link-arg=-lswscale -C link-arg=-lswresample -C link-arg=-lavutil -C link-arg=-Wl,--end-group -C link-arg=-lz"
+          host="$(rustc -vV | sed -n 's/host: //p')"
+          cargo test --target "$host" -p openrip-export --lib --test software
+          cargo test --target "$host" -p openrip-export --test openh264 -- --ignored
+
       - name: Build the app
         working-directory: apps/app
         run: npm run build
@@ -120,7 +134,7 @@ jobs:
             -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest smoke-out/xplat-clip.mp4
           export EXE="$PWD/dist/linux-${{ matrix.arch == 'x64' && '' || 'arm64-' }}unpacked/openrip"
           export CLIP_NAME=xplat-clip OPENRIP_ENGINE_MUTE=1
-          export FFPROBE=$(node -p "try { require.resolve('@ffprobe-installer/linux-${{ matrix.arch }}/ffprobe') } catch { require('ffprobe-static').path }")
+          export FFPROBE=$(command -v ffprobe)
           xvfb-run -a -s "-screen 0 1920x1080x24" node scripts/smoke/session.mjs . smoke-out smoke-out/ud "$PWD/smoke-out/xplat-clip.mp4" import timeline xplat | tee smoke-out/smoke.log
           grep -q "STEP xplat: ok" smoke-out/smoke.log
 
@@ -220,6 +234,21 @@ jobs:
           FFMPEG_DIR: ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64
           RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=z.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
         run: cargo test --target x86_64-pc-windows-msvc --no-fail-fast --no-default-features --lib --tests $($env:ENGINE_TESTS -split ' ')
+
+      # As on Linux; ffmpeg and ffprobe from the app's npm packages. Media Foundation's
+      # encoders are tried first here.
+      - name: Export tests (software encoders, Media Foundation, OpenH264)
+        working-directory: engine
+        env:
+          FFMPEG_DIR: ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64
+          RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=z.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
+        run: |
+          $ffmpeg = Split-Path (node -p "require('../apps/app/node_modules/ffmpeg-static')")
+          $ffprobe = Split-Path (node -p "require('../apps/app/node_modules/ffprobe-static').path")
+          $env:PATH = "$ffmpeg;$ffprobe;$env:PATH"
+          cargo test --target x86_64-pc-windows-msvc -p openrip-export --lib --test software
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --target x86_64-pc-windows-msvc -p openrip-export --test openh264 -- --ignored
 
       - name: Build the app
         working-directory: apps/app

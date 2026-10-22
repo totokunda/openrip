@@ -373,8 +373,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({ open, onOpenChange, sc
   // The codecs this machine's encoders write with the hardware setting as it is (Settings ›
   // Performance); the others stay hidden.
   const [platformCodecs, setPlatformCodecs] = useState<string[]>([]);
-  // No codec at all: this computer's engine has no video encoder (Windows and Linux until
-  // their encoders are in), so the Video section is off and says so; sound, GIFs and captions still export.
+  // No codec at all: this computer's engine has no video encoder (or there's no engine), so
+  // the Video section is off and says so; sound, GIFs and captions still export.
   const [noEncoder, setNoEncoder] = useState(false);
   useEffect(() => {
     if (!open) return;
