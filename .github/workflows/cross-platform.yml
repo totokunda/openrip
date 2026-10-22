@@ -237,13 +237,13 @@ jobs:
           MSYS2_BASH: ${{ steps.msys2.outputs.msys2-location }}\usr\bin\bash.exe
         run: node scripts/build-engine.mjs
 
-      # As on Linux (MSVC's linker needs no order), with the static C runtime FFmpeg is built
-      # with and the libraries the addon's build.rs names.
+      # As on Linux, all of FFmpeg's libraries (MSVC's linker needs no group), with the static
+      # C runtime FFmpeg is built with and the libraries the addon's build.rs names.
       - name: Engine tests (portable crates)
         working-directory: engine
         env:
           FFMPEG_DIR: ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64
-          RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=zlib.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
+          RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=avformat.lib -C link-arg=avfilter.lib -C link-arg=avcodec.lib -C link-arg=swscale.lib -C link-arg=swresample.lib -C link-arg=avutil.lib -C link-arg=zlib.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
         run: cargo test --target x86_64-pc-windows-msvc --no-fail-fast --no-default-features --lib --tests $($env:ENGINE_TESTS -split ' ')
 
       # As on Linux; ffmpeg and ffprobe from the app's npm packages. Media Foundation's
@@ -252,7 +252,7 @@ jobs:
         working-directory: engine
         env:
           FFMPEG_DIR: ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64
-          RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=zlib.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
+          RUSTFLAGS: -L ${{ github.workspace }}\engine\.ffmpeg\windows-x86_64\lib -C target-feature=+crt-static -C link-arg=avformat.lib -C link-arg=avfilter.lib -C link-arg=avcodec.lib -C link-arg=swscale.lib -C link-arg=swresample.lib -C link-arg=avutil.lib -C link-arg=zlib.lib -C link-arg=bcrypt.lib -C link-arg=ole32.lib -C link-arg=user32.lib -C link-arg=mfuuid.lib -C link-arg=strmiids.lib
         run: |
           $ffmpeg = Split-Path (node -p "require('../apps/app/node_modules/ffmpeg-static')")
           $ffprobe = Split-Path (node -p "require('../apps/app/node_modules/ffprobe-static').path")
