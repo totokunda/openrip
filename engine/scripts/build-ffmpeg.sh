@@ -167,7 +167,7 @@ esac
   --enable-parser=h264,hevc,av1,vp8,vp9,mpeg4video,mpegvideo,h263,dnxhd,mjpeg,png,bmp,webp,gif,aac,aac_latm,mpegaudio,ac3,flac,opus,vorbis \
   --enable-bsf=vp9_superframe_split,av1_frame_split,extract_extradata,h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc \
   --enable-filter=atempo,aformat,aresample,anull,format,null,scale ||
-  { tail -40 ffbuild/config.log >&2; exit 1; }
+  { grep -m1 -A60 "check_pkg_config zlib" ffbuild/config.log >&2; tail -30 ffbuild/config.log >&2; exit 1; }
 
 if command -v nproc >/dev/null 2>&1; then JOBS=$(nproc); else JOBS=$(sysctl -n hw.ncpu); fi
 make -j"$JOBS"
