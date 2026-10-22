@@ -1754,7 +1754,7 @@ mod tests {
         let mut d = sample_draft();
         d["materials"]["common_mask"] = json!([{"id": "M1", "resource_type": "pentagram", "name": "Stars", "path": bundle.to_string_lossy(), "config": {"width": 0.5, "height": 0.5}}]);
         let shape = import_draft_json(&d, "hint").unwrap().project.materials.masks[0].shape.clone();
-        assert_eq!(shape, MaskShape::Picture { name: "pentagram".into(), path: bundle.join("amazingfeature/image/mask.png").to_string_lossy().into_owned() });
+        assert_eq!(shape, MaskShape::Picture { name: "pentagram".into(), path: bundle.join("amazingfeature").join("image").join("mask.png").to_string_lossy().into_owned() });
         d["materials"]["common_mask"][0]["path"] = json!("/nowhere");
         assert_eq!(import_draft_json(&d, "hint").unwrap().project.materials.masks[0].shape, MaskShape::Other { name: "pentagram".into() });
         std::fs::remove_dir_all(&bundle).ok();
