@@ -56,6 +56,10 @@ required-features = ["ffmpeg"]
 name = "enhance"
 required-features = ["ffmpeg"]
 
+[[test]]
+name = "scrub_audio"
+required-features = ["ffmpeg"]
+
 [[example]]
 name = "clock"
 required-features = ["cpal"]
