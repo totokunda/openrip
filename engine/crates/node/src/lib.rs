@@ -491,6 +491,8 @@ pub struct ExportResult {
     pub seconds: f64,
     /// Layers skipped because their media or font was missing, summed over frames.
     pub skipped_layers: f64,
+    /// What wrote the video ("videotoolbox", "openh264", "prores_ks", ...; "" for sound or a GIF).
+    pub encoder: String,
 }
 
 #[napi(object)]
@@ -514,7 +516,7 @@ impl Task for ExportTask {
     }
 
     fn resolve(&mut self, _env: Env, s: Self::Output) -> Result<ExportResult> {
-        Ok(ExportResult { frames: s.frames as f64, seconds: s.seconds, skipped_layers: s.skipped_layers as f64 })
+        Ok(ExportResult { frames: s.frames as f64, seconds: s.seconds, skipped_layers: s.skipped_layers as f64, encoder: s.encoder.to_string() })
     }
 }
 
@@ -553,7 +555,7 @@ impl Task for SideExportTask {
     }
 
     fn resolve(&mut self, _env: Env, s: Self::Output) -> Result<ExportResult> {
-        Ok(ExportResult { frames: s.frames as f64, seconds: s.seconds, skipped_layers: s.skipped_layers as f64 })
+        Ok(ExportResult { frames: s.frames as f64, seconds: s.seconds, skipped_layers: s.skipped_layers as f64, encoder: s.encoder.to_string() })
     }
 }
 
@@ -584,11 +586,124 @@ pub fn cancel_export() {
     EXPORT.cancel();
 }
 
-/// The video codecs this platform's encoder can write, by the names `exportProject`'s `codec`
-/// takes ("h264", "hevc", "hevc-alpha", "prores-lt", "prores-422", "prores-hq", "prores-4444").
+/// The video codecs exports can be written in on this machine with the hardware setting as it
+/// is, by the names `exportProject`'s `codec` takes ("h264", "hevc", "hevc-alpha", "prores-lt",
+/// "prores-422", "prores-hq", "prores-4444"). H.264 counts where OpenH264 can be downloaded.
 #[napi]
 pub fn export_codecs() -> Vec<String> {
     openrip_core::available_codecs().into_iter().map(String::from).collect()
+}
+
+/// Settings' "Hardware encoding": the GPU's encoders where the machine has them (true, the
+/// default), or software only. Exports started from then on follow it.
+#[napi]
+pub fn set_hardware_encoding(on: bool) {
+    openrip_core::set_hardware_encoding(on);
+}
+
+#[napi]
+pub fn hardware_encoding() -> bool {
+    openrip_core::hardware_encoding()
+}
+
+/// One of this machine's encoders writing one codec.
+#[napi(object)]
+pub struct EncoderInfo {
+    /// "videotoolbox", "mediafoundation", "mediafoundation-software", "openh264" or "prores_ks".
+    pub backend: String,
+    pub codec: String,
+    pub hardware: bool,
+    /// The largest picture, longer side x shorter side.
+    pub max_long: u32,
+    pub max_short: u32,
+    pub ten_bit: bool,
+    pub alpha: bool,
+    /// OpenH264 not downloaded yet.
+    pub needs_download: bool,
+}
+
+pub struct EncodersTask;
+
+impl Task for EncodersTask {
+    type Output = Vec<openrip_core::EncoderInfo>;
+    type JsValue = Vec<EncoderInfo>;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        Ok(openrip_core::encoders())
+    }
+
+    fn resolve(&mut self, _env: Env, found: Self::Output) -> Result<Vec<EncoderInfo>> {
+        Ok(found
+            .into_iter()
+            .map(|e| EncoderInfo { backend: e.backend.name().into(), codec: e.codec.name().into(), hardware: e.hardware, max_long: e.max_size.0, max_short: e.max_size.1, ten_bit: e.ten_bit, alpha: e.alpha, needs_download: e.needs_download })
+            .collect())
+    }
+}
+
+/// Try each of this machine's encoders with a tiny picture (on a worker thread; once a run,
+/// so the app does it at startup) and say what each can write, whatever the hardware setting.
+#[napi]
+pub fn export_encoders() -> AsyncTask<EncodersTask> {
+    AsyncTask::new(EncodersTask)
+}
+
+/// Where downloaded codecs are kept (Cisco's OpenH264), in the app's user data.
+#[napi]
+pub fn set_codec_dir(dir: String) {
+    openrip_core::openh264::set_codec_dir(Path::new(&dir));
+}
+
+/// Use Cisco's OpenH264 for H.264 in software (true, the default) or not (Settings).
+#[napi]
+pub fn set_openh264_enabled(on: bool) {
+    openrip_core::openh264::set_enabled(on);
+}
+
+/// Where Cisco's OpenH264 stands here, and what to download for it.
+#[napi(object)]
+pub struct OpenH264Info {
+    /// Cisco makes a binary for this platform.
+    pub supported: bool,
+    pub enabled: bool,
+    /// Downloaded, checked and loaded.
+    pub installed: bool,
+    pub version: String,
+    /// The binary on Cisco's server (a .bz2), and its SHA-256.
+    pub url: Option<String>,
+    pub sha256: Option<String>,
+    /// Why the file in the codec folder wasn't used.
+    pub error: Option<String>,
+    /// "OpenH264 Video Codec provided by Cisco Systems, Inc.", to show where it's turned on and off.
+    pub attribution: String,
+}
+
+#[napi]
+pub fn openh264_info() -> OpenH264Info {
+    let s = openrip_core::openh264::status();
+    OpenH264Info { supported: s.supported, enabled: s.enabled, installed: s.installed, version: s.version.into(), url: s.url, sha256: s.bz2_sha256.map(String::from), error: s.error, attribution: openrip_core::openh264::ATTRIBUTION.into() }
+}
+
+pub struct InstallTask(Vec<u8>);
+
+impl Task for InstallTask {
+    type Output = ();
+    type JsValue = ();
+
+    fn compute(&mut self) -> Result<()> {
+        openrip_core::openh264::install(&self.0).map_err(err)
+    }
+
+    fn resolve(&mut self, _env: Env, _: ()) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Keep a download of Cisco's binary (the .bz2 from `openh264Info().url`) in the codec folder:
+/// its SHA-256 and the library's are checked against the pinned ones, then it is loaded.
+/// Rejects, keeping nothing, when they don't match.
+#[napi]
+pub fn install_openh264(data: Buffer) -> AsyncTask<InstallTask> {
+    AsyncTask::new(InstallTask(data.to_vec()))
 }
 
 // ---- motion tracking -------------------------------------------------------------
