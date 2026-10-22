@@ -117,7 +117,7 @@ pub struct Status {
     /// Cisco makes a binary for this platform.
     pub supported: bool,
     pub enabled: bool,
-    /// Downloaded, checked and loaded.
+    /// Downloaded and checked (when turned off: downloaded, not loaded).
     pub installed: bool,
     pub version: &'static str,
     /// What to download, and its SHA-256 (none where unsupported).
@@ -131,7 +131,9 @@ pub fn status() -> Status {
     let pin = pin();
     let lib = loaded(false);
     let s = STATE.lock().unwrap();
-    Status { supported: pin.is_some(), enabled: s.enabled, installed: lib.is_some(), version: VERSION, url: pin.map(|p| p.url()), bz2_sha256: pin.map(|p| p.bz2_sha256), error: s.error.clone() }
+    // Turned off, it isn't loaded (nor its hash checked): the file being there is what's known.
+    let kept = !s.enabled && s.dir.as_ref().zip(pin).is_some_and(|(d, p)| d.join(p.file).exists());
+    Status { supported: pin.is_some(), enabled: s.enabled, installed: lib.is_some() || kept, version: VERSION, url: pin.map(|p| p.url()), bz2_sha256: pin.map(|p| p.bz2_sha256), error: s.error.clone() }
 }
 
 /// The library, when it is turned on and installed (`regardless`: whether turned on or not).
