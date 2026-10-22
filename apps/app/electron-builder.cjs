@@ -17,6 +17,38 @@ const publishTimeoutMs = (() => {
 
 const bundleFullFilters = process.env.APEX_BUNDLE_FILTERS_FULL === "1";
 
+// The node_modules that ship. Main and preload are Vite builds that leave the packages they
+// import external, so those (and what they depend on) are loaded from node_modules at run time.
+// Everything else there is bundled into the renderer's JS by Vite (react, the icons, the fonts…)
+// or only used to build and package (ffmpeg-static and ffprobe-static ship as plain binaries
+// through `extraResources` below). A package main or preload starts importing must be added
+// here, or the packaged app can't load it.
+const runtimePackages = ["electron-store", "electron-updater", "mime-types"];
+
+/** The top-level node_modules names that `names` and their dependencies need (Node's lookup). */
+function withDependencies(names) {
+  const needed = new Set();
+  const seen = new Set();
+  const visit = (name, fromDir) => {
+    for (let dir = fromDir; ; dir = path.dirname(dir)) {
+      const pkgDir = join(dir, "node_modules", name);
+      if (existsSync(join(pkgDir, "package.json"))) {
+        // By name (its scope, for a scoped one), even when it's nested here: electron-builder
+        // may hoist it to the top of the app's node_modules.
+        needed.add(name.split("/")[0]);
+        if (seen.has(pkgDir)) return;
+        seen.add(pkgDir);
+        const { dependencies, optionalDependencies } = require(join(pkgDir, "package.json"));
+        for (const dep of Object.keys({ ...dependencies, ...optionalDependencies })) visit(dep, pkgDir);
+        return;
+      }
+      if (path.dirname(dir) === dir) return; // an optional dependency not installed here
+    }
+  };
+  for (const name of names) visit(name, __dirname);
+  return [...needed];
+}
+
 // electron-builder v26: `mac.notarize` enables notarization when truthy.
 // We disable notarization when we don't have the required environment variables.
 const hasMacNotarizeEnv =
@@ -109,15 +141,20 @@ module.exports = {
     "node_modules/@app/*/package.json",
 
     // Size trims:
+    // - only the node_modules main and preload load at run time (runtimePackages, above), and of
+    //   the app's own workspaces only main, preload and renderer (export-renderer is built into
+    //   the renderer's JS). electron-builder applies only `!` patterns to node_modules.
+    `!node_modules/!(${["@app", ...withDependencies(runtimePackages)].join("|")})/**`,
+    "!node_modules/@app/!(main|preload|renderer)/**",
     // - renderer filter packs are huge; ship "small" and "examples" by default
     ...(bundleFullFilters ? [] : ["!node_modules/@app/renderer/dist/filters/full/**"]),
-    // - never ship renderer source/public trees (dev-only); dist/** is the runtime payload
+    // - never ship the workspaces' sources or build configs (dev-only); dist/** is the runtime payload
     "!node_modules/@app/renderer/public/**",
-    "!node_modules/@app/renderer/src/**",
+    "!node_modules/@app/*/src/**",
     "!node_modules/@app/renderer/scripts/**",
-    "!node_modules/@app/renderer/vite.config.*",
+    "!node_modules/@app/*/vite.config.*",
     "!node_modules/@app/renderer/tailwind.config.*",
-    "!node_modules/@app/renderer/tsconfig*.json",
+    "!node_modules/@app/*/tsconfig*.json",
     "!node_modules/@app/renderer/components.json",
     "!node_modules/@app/renderer/index.html",
   ],
