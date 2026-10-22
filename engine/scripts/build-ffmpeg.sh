@@ -135,7 +135,10 @@ case "$OS" in
       (cd "$ROOT/src/zlib-$ZLIB_VERSION" &&
         MSYS2_ARG_CONV_EXCL='*' cl.exe -nologo -c -MT -O2 adler32.c compress.c crc32.c deflate.c gzclose.c gzlib.c gzread.c gzwrite.c infback.c inffast.c inflate.c inftrees.c trees.c uncompr.c zutil.c &&
         MSYS2_ARG_CONV_EXCL='*' lib.exe -nologo -out:zlib.lib adler32.obj compress.obj crc32.obj deflate.obj gzclose.obj gzlib.obj gzread.obj gzwrite.obj infback.obj inffast.obj inflate.obj inftrees.obj trees.obj uncompr.obj zutil.obj &&
-        cp zlib.lib "$ZLIB/lib/" && cp zlib.h zconf.h "$ZLIB/include/")
+        cp zlib.lib "$ZLIB/lib/" && cp zlib.h "$ZLIB/include/" &&
+        # As zlib's configure would: no unistd.h on Windows. The stock `#ifdef HAVE_UNISTD_H`
+        # is true in FFmpeg, whose config.h defines it as 0.
+        sed 's|^#ifdef HAVE_UNISTD_H .*|#if 0 /* no unistd.h on Windows */|' zconf.h > "$ZLIB/include/zconf.h")
     fi
     # Found through MSVC's own search paths, which configure's flag translation doesn't touch.
     INCLUDE="$(cygpath -w "$ZLIB/include");${INCLUDE:-}"
