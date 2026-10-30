@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { AppInitConfig } from "../AppInitConfig.js";
 import { attachPanelWindows } from "./PanelWindows.js";
+import { inBackground, showWindow } from "./background.js";
 
 class WindowManager implements AppModule {
   readonly #preload: { path: string };
@@ -38,8 +39,7 @@ class WindowManager implements AppModule {
   #wireReadyToShow(browserWindow: BrowserWindow) {
     browserWindow.once("ready-to-show", () => {
       if (browserWindow.isDestroyed()) return;
-      browserWindow.show();
-      browserWindow.focus();
+      showWindow(browserWindow);
     });
   }
 
@@ -91,7 +91,7 @@ class WindowManager implements AppModule {
     // A packaged app takes its icon from the bundle; in development the Dock (and on Windows
     // and Linux the window) would show Electron's, so give them the app's.
     const icon = app.isPackaged ? undefined : devIcon();
-    if (icon && process.platform === "darwin") app.dock?.setIcon(icon);
+    if (icon && process.platform === "darwin" && !inBackground) app.dock?.setIcon(icon);
     const browserWindow = new BrowserWindow({
       show: false,
       ...(icon ? { icon } : {}),
@@ -178,8 +178,7 @@ class WindowManager implements AppModule {
       window.restore();
     }
 
-    window?.show();
-    window.focus();
+    showWindow(window);
     return window;
   }
 }

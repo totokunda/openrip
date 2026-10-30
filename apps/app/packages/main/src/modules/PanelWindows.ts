@@ -16,6 +16,10 @@
 import { app, BrowserWindow, ipcMain, screen, type Rectangle } from "electron";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { inBackground } from "./background.js";
+
+// Shown as the editor shows its own (in a test run, behind the user's work).
+const showPanel = (child: BrowserWindow) => (inBackground ? child.showInactive() : child.show());
 
 type PanelId = "assets" | "player" | "inspector" | "timeline";
 const PANELS: PanelId[] = ["assets", "player", "inspector", "timeline"];
@@ -186,13 +190,13 @@ export function attachPanelWindows(editor: BrowserWindow) {
         const show = () => {
           clearTimeout(fallback);
           if (!editor.isDestroyed() && !editor.isFullScreen()) editor.maximize();
-          if (!child.isDestroyed() && !child.isVisible()) child.show();
+          if (!child.isDestroyed() && !child.isVisible()) showPanel(child);
         };
         const fallback = setTimeout(show, 2000);
         editor.once("leave-full-screen", show);
         editor.setFullScreen(false);
       } else {
-        child.show();
+        showPanel(child);
       }
     }
     if (places()[panel]?.maximized) child.maximize();
