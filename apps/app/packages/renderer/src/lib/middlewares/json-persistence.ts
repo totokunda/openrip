@@ -605,6 +605,33 @@ const computeAssetSignature = (assets: unknown): string => {
 
 // Cover generation debounce (export first frame as project cover when only clips change).
 let coverUpdateGeneration = 0;
+
+/** Write the automatic cover and tell the projects store, which the top bar and home screen follow (best-effort). */
+async function keepCover(getProjectState: () => JsonProjectSlice, projectId: string | number, jpeg: Uint8Array) {
+  const res = await saveProjectCover(projectId, jpeg);
+  if (res?.success && res.data?.path) getProjectState()?.updateProject?.(projectId, { coverPath: res.data.path, lastModified: Date.now() });
+}
+
+/**
+ * The automatic cover from the engine's picture of the project's first frame, when the engine
+ * draws the preview. False when it can't, and the page draws the cover itself.
+ */
+async function saveEngineCover(getProjectState: () => JsonProjectSlice, projectId: string | number, gen: number): Promise<boolean> {
+  const { canPickFrames, renderStill, loadImage, renderCoverJpeg } = await import("../cover");
+  if (!canPickFrames()) return false;
+  try {
+    await (await import("../engine-preview")).flushEngineSync();
+    const still = await renderStill(0);
+    if (!still) return false;
+    const jpeg = await renderCoverJpeg(await loadImage(`app://user-data${encodeURI(still.path)}?v=${Date.now()}`), []);
+    // Edited again, or a cover chosen, while it was drawn: the newer edit writes its own.
+    if (gen !== coverUpdateGeneration || useCoverStore.getState().cover) return true;
+    await keepCover(getProjectState, projectId, jpeg);
+    return true;
+  } catch {
+    return false;
+  }
+}
 const debouncedGenerateProjectCover = _.debounce(
   (gen: number, getProjectState: () => JsonProjectSlice) => {
     void (async () => {
@@ -612,6 +639,11 @@ const debouncedGenerateProjectCover = _.debounce(
         // If another request superseded this one, bail.
         if (gen !== coverUpdateGeneration) return;
         if (isHydratingFromJson) return;
+        // Not while it plays: look again in a moment (an edit meanwhile supersedes this one).
+        if (useControlsStore.getState().isPlaying) {
+          setTimeout(() => debouncedGenerateProjectCover(gen, getProjectState), 1000);
+          return;
+        }
 
         const projectState = getProjectState();
         const activeProjectId = projectState?.activeProjectId;
@@ -683,6 +715,11 @@ const debouncedGenerateProjectCover = _.debounce(
           return;
         }
 
+        // The page doesn't draw it while the engine can: the engine's first frame, drawn on its
+        // own threads, rather than every clip decoded and composited here (which held the page
+        // for over a second, with playback stuttering through it).
+        if (await saveEngineCover(getProjectState, activeProjectId, gen)) return;
+
         // Mirror export prep used by Topbar: stacking + ignore hidden timelines + expand groups/filters.
         let contentClips = sortClipsForStacking(clips, timelines);
         contentClips = contentClips.filter((clip) => {
@@ -746,19 +783,7 @@ const debouncedGenerateProjectCover = _.debounce(
         }
         if (!jpegBlob) return;
 
-        const buffer = await jpegBlob.arrayBuffer();
-        const res = await saveProjectCover(activeProjectId, new Uint8Array(buffer));
-
-        if (res?.success && res.data?.path) {
-          // Best-effort: update coverPath in the projects store so Topbar can render it.
-          const anyState = projectState;
-          if (typeof anyState.updateProject === "function") {
-            anyState.updateProject(activeProjectId, {
-              coverPath: res.data.path,
-              lastModified: Date.now(),
-            });
-          }
-        }
+        await keepCover(getProjectState, activeProjectId, new Uint8Array(await jpegBlob.arrayBuffer()));
       } catch (err) {
         console.error("jsonPersistence: failed to generate project cover", err);
       }

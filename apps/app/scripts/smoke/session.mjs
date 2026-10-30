@@ -23,7 +23,7 @@ const launch = async () => {
     // The media root ignores --user-data-dir; without this, previews land in the real profile.
     env: { ...process.env, APEX_USER_DATA_DIR: udDir, ...(process.env.WALKTHROUGH ? {} : { OPENRIP_NO_WALKTHROUGH: "1" }), ...(process.env.AUTO_PROXY ? {} : { OPENRIP_NO_AUTO_PROXY: "1" }), ...(process.env.FOREGROUND ? {} : { OPENRIP_BACKGROUND: "1" }) },
   });
-  app.process().stderr.on("data", (d) => logs.push("[main:err] " + d.toString().trim()));
+  app.process().stderr.on("data", (d) => logs.push(`[main:err${process.env.OPENRIP_TRACE ? " " + (Date.now() % 1e6) : ""}] ` + d.toString().trim()));
   const win = await app.firstWindow();
   win.on("console", (m) => { if (["error", "warning"].includes(m.type())) logs.push(`[renderer:${m.type()}] ${m.text().slice(0, 300)}`); });
   win.on("pageerror", (e) => logs.push("[pageerror] " + (e.stack || e.message).slice(0, 1500)));
