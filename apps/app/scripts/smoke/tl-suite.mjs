@@ -23,6 +23,7 @@ const CASES = [
   ["linkage", {}, "import timeline newtext tllinkage"],
   ["menus", {}, "import timeline newtext clipmenus"],
   ["undo", {}, "import timeline newtext undo"],
+  ["feel", {}, "import timeline newtext tlfeel"],
   ["capcut", { CAPCUT_DRAFT: TL_DRAFT }, "capcut tlcapcut"],
 ];
 for (const [name, env, steps] of CASES) {

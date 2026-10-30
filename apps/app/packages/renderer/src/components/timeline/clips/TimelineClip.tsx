@@ -107,11 +107,18 @@ import { useIsMissing } from "@/lib/media/missing";
 import { canReplaceClip, replaceClip, revealClipFile } from "@/lib/replace-clip";
 import { canTrimClip, useTrimClip } from "@/lib/trim-clip";
 import { isCompound } from "@/lib/compound";
-import { canGroup } from "@/lib/bundle";
+import { bundleMates, canGroup } from "@/lib/bundle";
 import { openCompound } from "@/lib/compound-edit";
 import { paintCompoundStrip } from "@/lib/compound-thumb";
 import { bladeCut, bladeFrame, frameAtStageX } from "@/lib/timeline-tools";
 import { startEdgeScroll, type EdgePointer } from "@/lib/edge-scroll";
+
+/**
+ * How wide a selected clip's trim handle is to grab, inside its edge: more than the 3 px bar
+ * drawn, so an edge is easy to take hold of again, and never over the clip next to it. A short
+ * clip keeps two thirds of itself to drag by.
+ */
+const trimGrab = (clipWidth: number) => Math.max(3, Math.min(10, clipWidth / 3));
 
 /** The diagonal stripes a deactivated clip is drawn with. */
 let hatch: HTMLCanvasElement | null = null;
@@ -195,6 +202,10 @@ const TimelineClip: React.FC<
   // Where the main track's clips would go while another is dragged over it (magnet on).
   const previewStart = useClipStore((s) => (assetMode ? undefined : s.mainPreview?.[clipId]));
   const setMainPreview = useClipStore((s) => s.setMainPreview);
+  // Going with another clip that's being dragged (selected with it, linked or grouped): how far.
+  const followDelta = useClipStore((s) => (!assetMode && s.dragFollow?.ids.includes(clipId) ? s.dragFollow.delta : 0));
+  const setDragFollow = useClipStore((s) => s.setDragFollow);
+  const shiftClips = useClipStore((s) => s.shiftClips);
   const setGhostX = useClipStore((s) => s.setGhostX);
   const setGhostTimelineId = useClipStore((s) => s.setGhostTimelineId);
   const setGhostStartEndFrame = useClipStore((s) => s.setGhostStartEndFrame);
@@ -302,13 +313,14 @@ const TimelineClip: React.FC<
   const clipX = useMemo(
     () =>
       getClipX(
-        previewStart ?? currentStartFrame,
-        currentEndFrame,
+        previewStart ?? currentStartFrame + followDelta,
+        currentEndFrame + followDelta,
         timelineWidth,
         timelineDuration,
       ),
     [
       previewStart,
+      followDelta,
       currentStartFrame,
       currentEndFrame,
       timelineWidth,
@@ -329,6 +341,9 @@ const TimelineClip: React.FC<
   const insertAtRef = useRef<number | null>(null);
   // A trim under way: the clip's ends when it began (its edge follows the pointer from them).
   const resizeFromRef = useRef<{ start: number; end: number } | null>(null);
+  // A drag under way: the clips that go with this one, and those of them its own move takes
+  // along already (its linked and grouped clips, which updateClip moves).
+  const followRef = useRef<{ ids: string[]; carried: Set<string> }>({ ids: [], carried: new Set() });
   const thumbnailClipWidth = useRef<number>(0);
   const maxTimelineWidth = useMemo(
     () => timelineWidth,
@@ -633,6 +648,10 @@ const TimelineClip: React.FC<
     (e: { target: Konva.Node; evt: EdgePointer }, scrolled = false) => {
       if (assetMode) return;
       const halfStroke = isSelected ? 1.5 : 0;
+      // The clips that go with it are drawn as far from where they are as it would move.
+      const follow = (start: number) => {
+        if (followRef.current.ids.length > 0) setDragFollow({ ids: followRef.current.ids, delta: start - currentStartFrame });
+      };
       setClipPosition({
         x: e.target.x() - halfStroke,
         y: e.target.y() - halfStroke,
@@ -730,6 +749,8 @@ const TimelineClip: React.FC<
         setSnapGuideX(null);
         setGhostTimelineId(null);
         setGhostInStage(false);
+        const [a, b] = useControlsStore.getState().timelineDuration;
+        follow(Math.max(0, Math.round(a + ((e.target.x() - halfStroke - timelinePadding) / timelineWidth) * Math.max(1, b - a))));
         return;
       }
 
@@ -789,6 +810,7 @@ const TimelineClip: React.FC<
         setGhostTimelineId(targetTimelineId);
         setGhostInStage(true);
         setGhostX(pxOfFrame(preview.insertAt ?? 0));
+        follow(preview.insertAt ?? 0);
         setSnapGuideX(null);
         setGhostStartEndFrame(0, clipLen);
         return;
@@ -803,7 +825,7 @@ const TimelineClip: React.FC<
       // Build occupied intervals on the target timeline excluding this clip (visible-window pixels,
       // from frame 0's: the clip can go before the visible part, as it's dragged there)
       const otherClips = getClipsForTimeline(targetTimelineId).filter(
-        (c) => c.clipId !== currentClipId,
+        (c) => c.clipId !== currentClipId && !followRef.current.ids.includes(c.clipId),
       );
       const zeroX = pxOfFrame(0);
       let maxRight = zeroX;
@@ -888,7 +910,7 @@ const TimelineClip: React.FC<
       let snapStageX: number | null = null;
       if (chosenGap && controls.snapping && !e.evt.metaKey) {
         const [gLo, gHi] = chosenGap;
-        const moving = new Set([currentClipId, ...(controls.linkage ? linkedClips(stateNow.clips, currentClip) : []).map((c) => c.clipId)]);
+        const moving = new Set([currentClipId, ...followRef.current.ids, ...(controls.linkage ? linkedClips(stateNow.clips, currentClip) : []).map((c) => c.clipId)]);
         const points = snapPoints(stateNow.clips, { playhead: controls.focusFrame, markers: stateNow.markers, exclude: moving, beats: projectBeatPoints(stateNow.clips, moving) });
         const start = frameOfPx(validatedLeft);
         const hit = snapToPoints([start, start + clipLen], points, (SNAP_PX * visibleFrames) / timelineWidth);
@@ -906,6 +928,7 @@ const TimelineClip: React.FC<
       setGhostInStage(true);
       // Not rounded: the drop takes its frame from it, exactly the one it snapped to.
       setGhostX(validatedLeft);
+      follow(Math.round(frameOfPx(validatedLeft)));
       setSnapGuideX(
         appliedSnap && snapStageX != null ? Math.round(snapStageX) : null,
       );
@@ -933,6 +956,7 @@ const TimelineClip: React.FC<
       clipType,
       currentClip,
       setSnapGuideX,
+      setDragFollow,
     ],
   );
 
@@ -952,8 +976,9 @@ const TimelineClip: React.FC<
     });
   }, [isDragging, assetMode, timelinePadding, timelineWidth]);
 
-  const handleDragEnd = useCallback(
-    (_e: Konva.KonvaEventObject<MouseEvent>) => {
+  // The drop: the clip goes where the drag showed (`moveLead` puts it at a frame of its own).
+  const dropDragged = useCallback(
+    (_e: Konva.KonvaEventObject<MouseEvent>, moveLead: (patch: Partial<AnyClipProps>) => void) => {
       if (assetMode) return;
       rectRefLeft.current?.moveToTop();
       rectRefRight.current?.moveToTop();
@@ -1079,7 +1104,7 @@ const TimelineClip: React.FC<
 
       // Validate against overlaps on target timeline (in frame units), excluding this clip if present
       const existing = getClipsForTimeline(dropTimelineId)
-        .filter((c) => c.clipId !== currentClipId)
+        .filter((c) => c.clipId !== currentClipId && !followRef.current.ids.includes(c.clipId))
         .map((c) => ({ lo: c.startFrame || 0, hi: c.endFrame || 0 }))
         .filter((iv) => iv.hi > iv.lo)
         .sort((a, b) => a.lo - b.lo);
@@ -1109,7 +1134,7 @@ const TimelineClip: React.FC<
           });
         }
 
-        updateClip(clipId, {
+        moveLead({
           timelineId: dropTimelineId,
           startFrame: startFrameClamped,
           endFrame: endFrameClamped,
@@ -1171,7 +1196,7 @@ const TimelineClip: React.FC<
           y: timelineY - totalClipHeight,
         });
       }
-      updateClip(clipId, { timelineId: dropTimelineId, startFrame, endFrame });
+      moveLead({ timelineId: dropTimelineId, startFrame, endFrame });
 
       // Conditionally restore window back to original length anchored at new clip start
       restoreWindowIfChanged(startFrame);
@@ -1213,6 +1238,31 @@ const TimelineClip: React.FC<
       setIsDraggingGlobal,
       tempClipPosition,
     ],
+  );
+
+  // The clips that go with it move as far as it does, in the same undo step: before it when it
+  // goes to a frame of its own (they may be where it's going), after it when the main track's
+  // magnet puts it in (where it ends up is the track's to say).
+  const handleDragEnd = useCallback(
+    (e: Konva.KonvaEventObject<MouseEvent>) => {
+      if (assetMode) return;
+      const { ids, carried } = followRef.current;
+      const shifted = ids.filter((id) => !carried.has(id));
+      const before = currentStartFrame;
+      let moved = false;
+      setDragFollow(null);
+      dropDragged(e, (patch) => {
+        if (patch.startFrame != null && shifted.length > 0) shiftClips(shifted, patch.startFrame - before);
+        moved = true;
+        updateClip(clipId, patch);
+      });
+      if (!moved && shifted.length > 0) {
+        const delta = (useClipStore.getState().getClipById(clipId)?.startFrame ?? before) - before;
+        if (delta !== 0) shiftClips(shifted, delta);
+      }
+      followRef.current = { ids: [], carried: new Set() };
+    },
+    [assetMode, currentStartFrame, setDragFollow, dropDragged, shiftClips, updateClip, clipId],
   );
 
   const handleClick = useCallback(
@@ -1734,6 +1784,29 @@ const TimelineClip: React.FC<
       // If this clip isn't already selected, select it (without shift behavior during drag)
       if (!isSelected) {
         ctrlToggleClipSelection(currentClipId, false);
+      }
+
+      // The clips that go with it: the others selected, and what's linked (linkage on) or
+      // grouped with any of them. With the magnet on, the main track's other clips keep its order.
+      {
+        const st = useClipStore.getState();
+        const controls = useControlsStore.getState();
+        const lead = st.getClipById(currentClipId);
+        const main = mainTrackOf(st.timelines);
+        const along = (c: AnyClipProps | undefined) => [...(controls.linkage ? linkedClips(st.clips, c) : []), ...bundleMates(st.clips, c)];
+        const carried = new Set(along(lead).map((c) => c.clipId));
+        const ids = new Set<string>(carried);
+        for (const id of isSelected ? controls.selectedClipIds : []) {
+          const c = st.getClipById(id);
+          if (c) for (const x of [c, ...along(c)]) ids.add(x.clipId);
+        }
+        ids.delete(currentClipId);
+        const follow = [...ids].filter((id) => {
+          const c = st.getClipById(id);
+          if (!c || c.hidden || c.type === "group" || isTrackLocked(st.timelines, c.timelineId)) return false;
+          return carried.has(id) || !(st.magnet && main && c.timelineId === main.timelineId);
+        });
+        followRef.current = { ids: follow, carried };
       }
 
       // Capture initial window at the start of drag
@@ -2501,6 +2574,13 @@ const TimelineClip: React.FC<
         height={timelineHeight}
         cornerRadius={[0, safeCornerRadius, safeCornerRadius, 0]}
         fill={isSelected ? "#FFFFFF" : "transparent"}
+        hitFunc={(ctx, shape) => {
+          const w = trimGrab(clipWidth);
+          ctx.beginPath();
+          ctx.rect(3 - w, 0, w, timelineHeight);
+          ctx.closePath();
+          ctx.fillStrokeShape(shape);
+        }}
         onMouseOver={(e) => {
           if (isSelected) {
             e.target.getStage()!.container().style.cursor = "col-resize";
@@ -2539,6 +2619,12 @@ const TimelineClip: React.FC<
         height={timelineHeight}
         cornerRadius={[safeCornerRadius, 0, 0, safeCornerRadius]}
         fill={isSelected ? "#FFFFFF" : "transparent"}
+        hitFunc={(ctx, shape) => {
+          ctx.beginPath();
+          ctx.rect(0, 0, trimGrab(clipWidth), timelineHeight);
+          ctx.closePath();
+          ctx.fillStrokeShape(shape);
+        }}
         onMouseOver={(e) => {
           if (isSelected) {
             e.target.getStage()!.container().style.cursor = "col-resize";

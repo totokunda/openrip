@@ -84,6 +84,11 @@ interface ClipStore {
     side: "left" | "right",
     newFrame: number,
   ) => void;
+  /**
+   * The clips of `ids` moved `delta` frames along their own tracks (the selected clips that go
+   * with a dragged one): none before frame 0, none on a locked track.
+   */
+  shiftClips: (ids: string[], delta: number) => void;
   separateClip: (clipId: string) => void;
   /**
    * The Speed tab's Curve: a video or audio clip plays by `curve` (a preset's or custom points;
@@ -262,6 +267,10 @@ interface ClipStore {
   // clips would start, so they make room as in CapCut. Null otherwise.
   mainPreview: Record<string, number> | null;
   setMainPreview: (starts: Record<string, number> | null) => void;
+  // While a clip is dragged: the clips that go with it (the others selected, its linked and
+  // grouped clips) and how many frames they'd move, so they're drawn moving with it.
+  dragFollow: { ids: string[]; delta: number } | null;
+  setDragFollow: (follow: { ids: string[]; delta: number } | null) => void;
 }
 
 // Helper function to calculate total duration of all clips
@@ -824,6 +833,13 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
   guides: [],
   mainPreview: null,
   setMainPreview: (starts) => set({ mainPreview: starts }),
+  dragFollow: null,
+  setDragFollow: (follow) =>
+    set((state) => {
+      const was = state.dragFollow;
+      if (was === follow || (was && follow && was.delta === follow.delta && was.ids === follow.ids)) return {};
+      return { dragFollow: follow };
+    }),
   addTrack: (type) => {
     const id = uuidv4();
     set((state) => {
@@ -1759,6 +1775,21 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       const prunedAssets = pruneAssetsForClips(state.assets, resolvedClips);
       get()._updateZoomLevel(resolvedClips, clipDuration);
       return { clips: resolvedClips, clipDuration, assets: prunedAssets };
+    }),
+  shiftClips: (ids, delta) =>
+    set((state) => {
+      const movers = state.clips.filter((c) => ids.includes(c.clipId) && !c.hidden && !isTrackLocked(state.timelines, c.timelineId));
+      if (movers.length === 0) return {};
+      const d = Math.max(Math.round(delta), -Math.min(...movers.map((c) => c.startFrame ?? 0)));
+      if (d === 0) return {};
+      const moved = new Set(movers.map((c) => c.clipId));
+      const newClips = state.clips.map((c) =>
+        moved.has(c.clipId) ? ({ ...c, startFrame: (c.startFrame ?? 0) + d, endFrame: (c.endFrame ?? 0) + d } as AnyClipProps) : c,
+      );
+      const resolvedClips = resolveOverlaps(newClips);
+      const clipDuration = calculateTotalClipDuration(resolvedClips);
+      get()._updateZoomLevel(resolvedClips, clipDuration);
+      return { clips: resolvedClips, clipDuration };
     }),
   updateMaskKeyframes: (clipId, maskId, updater) =>
     set((state) => {
