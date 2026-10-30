@@ -570,12 +570,31 @@ impl PreviewEngine {
     /// with the same media (so playback and scrubbing stay warm).
     pub fn set_project(&mut self, project: Project) {
         let old = std::mem::replace(&mut self.project, project);
+        self.hand_over_decoders(&old);
         let keep: Vec<String> = self.decoders.keys().filter(|id| self.media_path(id).is_some_and(|path| Some(path) == media_path(&old, id))).cloned().collect();
         self.decoders.retain(|id, _| keep.contains(id));
         self.compound_tracks.clear();
         self.chunk_plan = None;
         self.failed.clear(); // files may have been relinked
         self.scrub.forget_failures();
+    }
+
+    /// A cut leaves the clip under the playhead as a new one (the second half has an id of its
+    /// own) on the file the first half's decoder has open at that very spot. The new clip takes
+    /// that decoder over rather than opening the file and decoding from a keyframe while the
+    /// picture waits, which showed as a hitch at each cut of playing video.
+    fn hand_over_decoders(&mut self, old: &Project) {
+        let Some(t) = self.last_time else { return };
+        let active = Self::active_in(&self.project.tracks, t);
+        let was_active = Self::active_in(&old.tracks, t);
+        let heirs: Vec<(String, String)> = active.iter().filter(|s| !self.decoders.contains_key(&s.id)).filter_map(|s| Some((s.id.clone(), self.media_path(&s.id)?))).collect();
+        for (heir, path) in heirs {
+            // A decoder on that file that was playing at the playhead and whose clip no longer shows there.
+            let giver = self.decoders.iter().find(|(id, d)| d.path == path && was_active.iter().any(|s| &s.id == *id) && !active.iter().any(|s| &s.id == *id)).map(|(id, _)| id.clone());
+            if let Some(d) = giver.and_then(|id| self.decoders.remove(&id)) {
+                self.decoders.insert(heir, d);
+            }
+        }
     }
 
     /// Quick frames for a playhead being dragged (see `scrubbing`); the exact frame again

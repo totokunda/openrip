@@ -168,3 +168,25 @@ fn a_freeze_frame_without_its_still_draws_the_video_frame() {
         assert_eq!(number_at(&mut e, n), 123, "frame {n}");
     }
 }
+
+#[test]
+fn a_cut_under_the_playhead_hands_its_decoder_to_the_second_half() {
+    let Some(a) = clip("preview-edit-a.mp4") else { return };
+    let mut e = PreviewEngine::new(project(&a, 0)).unwrap();
+    assert_eq!(number_at(&mut e, 50), 50);
+    assert_eq!(e.open_decoders(), 1);
+    // Cut at 1.5 s (frame 45): the first half keeps its id, the second is a new clip.
+    let mut cut = project(&a, 0);
+    let mut second = cut.tracks[0].segments[0].clone();
+    cut.tracks[0].segments[0].target.duration = Micros(1_500_000);
+    cut.tracks[0].segments[0].source.as_mut().unwrap().duration = Micros(1_500_000);
+    second.id = "s2".into();
+    second.target.start = Micros(1_500_000);
+    second.target.duration = Micros(3_500_000);
+    *second.source.as_mut().unwrap() = openrip_model::TimeRange { start: Micros(1_500_000), duration: Micros(3_500_000) };
+    cut.tracks[0].segments.push(second);
+    e.set_project(cut);
+    // The second half plays on the first half's decoder, so no second one is opened.
+    assert_eq!(number_at(&mut e, 60), 60);
+    assert_eq!(e.open_decoders(), 1);
+}
