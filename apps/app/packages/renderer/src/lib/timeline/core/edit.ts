@@ -7,6 +7,7 @@ import { isTrackLocked, linkedClips, mainTrackOf, packMainTrack } from "../../ti
 import { bundleMates } from "../../bundle.ts";
 import { clampEdgeDelta, moveEdge } from "./edges.ts";
 import { resolveOverlapsTimelines } from "./tracks.ts";
+import { cloneContent, isCompound } from "../../compound.ts";
 
 /** The part of the project an edit changes: the clips and the tracks, top to bottom. */
 export interface Doc {
@@ -189,4 +190,29 @@ export function trimEdge(doc: Doc, rules: Rules, id: string, side: "left" | "rig
   let clips = doc.clips.map((c) => changed.get(c.clipId) ?? c);
   if (rules.magnet) clips = packMainTrack(clips, doc.tracks, undefined, rules.linkage);
   return { doc: { clips, tracks: doc.tracks }, applied: d };
+}
+
+/**
+ * Copies of `ids` where they are (⌥-drag, CapCut's Drag to duplicate), each with a fresh id;
+ * copies that were linked or grouped together are linked or grouped with each other, not with
+ * the originals, and a compound's content is copied too. `copies` maps each original to its copy.
+ */
+export function duplicateClips(doc: Doc, ids: string[], newId: () => string): { doc: Doc; copies: Map<string, string> } {
+  const copies = new Map<string, string>();
+  const links = new Map<string, string>();
+  const fresh = (key: string) => {
+    if (!links.has(key)) links.set(key, newId());
+    return links.get(key)!;
+  };
+  const made: AnyClipProps[] = [];
+  for (const c of doc.clips) {
+    if (!ids.includes(c.clipId)) continue;
+    const id = newId();
+    copies.set(c.clipId, id);
+    const copy = { ...(isCompound(c) ? { ...c, compound: cloneContent(c.compound, newId) } : c), clipId: id } as AnyClipProps;
+    if (c.linkId) copy.linkId = fresh(`link:${c.linkId}`);
+    if (c.bundleId) copy.bundleId = fresh(`bundle:${c.bundleId}`);
+    made.push(copy);
+  }
+  return { doc: { clips: [...doc.clips, ...made], tracks: doc.tracks }, copies };
 }

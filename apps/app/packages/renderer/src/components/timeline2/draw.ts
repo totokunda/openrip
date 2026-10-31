@@ -251,3 +251,86 @@ export function drawSkim(ctx: CanvasRenderingContext2D, l: Layout, frame: number
   ctx.fillRect(x - 0.5, OVERLAY_TOP, 1, l.height - OVERLAY_TOP);
   ctx.restore();
 }
+
+/** Where a moving clip would land: a translucent white slot. */
+export function drawSlot(ctx: CanvasRenderingContext2D, b: ClipBox) {
+  ctx.save();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.lineWidth = 1.5;
+  rounded(ctx, b.x + 0.75, b.y + 0.75, b.w - 1.5, b.h - 1.5, CLIP_RADIUS);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** A clip being moved, drawn where the pointer has taken it, over everything. */
+export function drawFloating(ctx: CanvasRenderingContext2D, l: Layout, b: ClipBox, p: ClipPaint) {
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = p.look.body;
+  rounded(ctx, b.x, b.y, b.w, b.h, CLIP_RADIUS);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  // Drawn whole wherever it is: the floating clip isn't held to its row's band.
+  drawClip(ctx, { ...l, tracks: { ...l.tracks, pinned: false }, height: Infinity } as Layout, { ...b, row: { ...b.row, pinned: true } }, p);
+  ctx.restore();
+}
+
+/** The snap guide: a dashed white line through the tracks at frame `f`. */
+export function drawGuide(ctx: CanvasRenderingContext2D, l: Layout, f: number) {
+  const x = Math.round(xOf(l.view, f)) + 0.5;
+  ctx.save();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
+  ctx.shadowBlur = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, OVERLAY_TOP);
+  ctx.lineTo(x, l.height);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Where a clip dragged between tracks would make a new one: an accent line across. */
+export function drawNewTrackLine(ctx: CanvasRenderingContext2D, l: Layout, y: number) {
+  ctx.save();
+  ctx.fillStyle = "#ae81ce";
+  ctx.fillRect(l.view.x0, Math.round(y) - 1, l.width - l.view.x0, 2);
+  ctx.restore();
+}
+
+/** The marquee a drag on empty space draws. */
+export function drawMarquee(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
+  ctx.save();
+  ctx.fillStyle = "rgba(174, 129, 206, 0.12)";
+  ctx.strokeStyle = "rgba(174, 129, 206, 0.9)";
+  ctx.lineWidth = 1;
+  const x = Math.min(x0, x1);
+  const y = Math.min(y0, y1);
+  ctx.fillRect(x, y, Math.abs(x1 - x0), Math.abs(y1 - y0));
+  ctx.strokeRect(x + 0.5, y + 0.5, Math.abs(x1 - x0), Math.abs(y1 - y0));
+  ctx.restore();
+}
+
+/** A trimmed clip's new length, in a tip above it by the pointer. */
+export function drawTrimTip(ctx: CanvasRenderingContext2D, l: Layout, b: ClipBox, text: string, pointerX: number) {
+  ctx.save();
+  ctx.font = `500 10.5px ${FONT}`;
+  ctx.textBaseline = "middle";
+  const w = ctx.measureText(text).width + 12;
+  const h = 18;
+  const x = Math.max(l.view.x0, Math.min(l.width - w - 2, pointerX - w / 2));
+  const y = Math.max(OVERLAY_TOP, b.y - h - 4);
+  ctx.fillStyle = "rgba(20, 20, 22, 0.92)";
+  rounded(ctx, x, y, w, h, 4);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(text, x + 6, y + h / 2 + 0.5);
+  ctx.restore();
+}

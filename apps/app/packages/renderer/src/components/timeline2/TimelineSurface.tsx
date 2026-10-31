@@ -1,23 +1,46 @@
 // The new timeline (docs/plan/timeline-rewrite.md): the track headers beside one canvas drawn
 // imperatively from the layout, and a small canvas over it for the playhead. Nothing here
 // re-renders through React as the timeline is scrolled, zoomed, played or edited: the canvases
-// redraw in the next animation frame when the stores change. Behind Settings › Labs › New
-// timeline until it does everything the timeline before it does.
+// redraw in the next animation frame when the stores change.
+//
+// One controller owns the pointer. A press hit-tests the layout and starts a gesture: a trim on a
+// selected clip's edge, a move on a clip's body (once the pointer has gone a few pixels), a
+// marquee on empty space, a scrub on the ruler or the playhead. Each pointer move asks the
+// editing rules (lib/timeline/gesture.ts) what the drag would leave, from the document as it was
+// at the press, and draws that; letting go commits exactly that as one change (one undo step).
+// Esc cancels. Behind Settings › Edit › New timeline until it does everything the old one does.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
-import { mainTrackOf } from "@/lib/timeline-edit";
+import { mainTrackOf, snapPoints, snapToPoints, SNAP_PX } from "@/lib/timeline-edit";
 import { layoutTracks, trackView } from "@/lib/timeline-view";
 import { scrubSound, scrubSoundStop, skimSound } from "@/lib/scrub-audio";
 import { zoomTimelineTo } from "@/lib/timeline-shortcuts";
-import { clipLook } from "@/lib/timeline/appearance";
-import { hitTest, layoutTimeline, SCROLL_BOTTOM_PADDING, type ClipBox, type Layout } from "@/lib/timeline/layout";
-import { frameAt, viewOf } from "@/lib/timeline/view";
+import { bladeCut, bladeFrame } from "@/lib/timeline-tools";
+import { projectBeatPoints } from "@/lib/audio-tools";
+import { startEdgeScroll, type EdgePointer } from "@/lib/edge-scroll";
+import { stickSelection } from "@/lib/bundle";
+import { clipLook, timecode } from "@/lib/timeline/appearance";
+import { hitTest, layoutTimeline, SCROLL_BOTTOM_PADDING, type ClipBox, type Hit, type Layout } from "@/lib/timeline/layout";
+import { frameAt, framesFor, viewOf, xOf } from "@/lib/timeline/view";
+import { duplicateClips, goingWith, type Doc, type Rules } from "@/lib/timeline/core/edit";
+import { marqueeHits, previewMove, previewTrim, type MoveDrag, type MovePreview, type SnapContext, type TrimDrag } from "@/lib/timeline/gesture";
 import TimelineSidebar from "../timeline/TimelineSidebar";
-import { drawClip, drawMarkers, drawPlayhead, drawRowShades, drawRows, drawRuler, drawSkim, inTrackAreas } from "./draw";
+import { drawClip, drawFloating, drawGuide, drawMarkers, drawMarquee, drawNewTrackLine, drawPlayhead, drawRowShades, drawRows, drawRuler, drawSkim, drawSlot, drawTrimTip, inTrackAreas } from "./draw";
 
 /** A ⌘-scroll (or pinch) of this many pixels is one zoom step. */
 const ZOOM_WHEEL_STEP = 40;
+/** How far (px) the pointer goes before a press on a clip or empty space becomes a drag. */
+const DRAG_START = 3;
+/** How near (px) the playhead a press takes hold of it. */
+const PLAYHEAD_GRAB = 4;
+
+type Gesture =
+  | { kind: "press"; hit: Hit; x0: number; y0: number; additive: boolean; reselect: string | null; copy: boolean }
+  | { kind: "scrub" }
+  | { kind: "move"; drag: MoveDrag; preview: MovePreview | null; x0: number; y0: number; x: number; y: number; select: string[] | null }
+  | { kind: "trim"; drag: TrimDrag; preview: { doc: Doc; applied: number; guide: number | null } | null; x: number; y: number }
+  | { kind: "marquee"; x0: number; y0: number; x: number; y: number; base: string[] };
 
 /** Sizes a canvas to its box at the screen's pixel density; its context draws in CSS pixels. */
 const fitCanvas = (canvas: HTMLCanvasElement, width: number, height: number) => {
@@ -33,6 +56,16 @@ const fitCanvas = (canvas: HTMLCanvasElement, width: number, height: number) => 
   return ctx;
 };
 
+/** The switches the editing rules follow, as the stores have them now. */
+const rulesNow = (): Rules => ({ magnet: useClipStore.getState().magnet, linkage: useControlsStore.getState().linkage, fps: useControlsStore.getState().fps || 24 });
+
+/** What snapping snaps to now (beats from every clip but those in `exclude`). */
+const snapNow = (exclude?: Set<string>): SnapContext => {
+  const controls = useControlsStore.getState();
+  const clips = useClipStore.getState();
+  return { on: controls.snapping, playhead: controls.focusFrame, markers: clips.markers, beats: projectBeatPoints(clips.clips, exclude) };
+};
+
 const TimelineSurface: React.FC = () => {
   const hasClips = useClipStore((s) => s.clips.length > 0);
   const timelines = useClipStore((s) => s.timelines);
@@ -41,7 +74,9 @@ const TimelineSurface: React.FC = () => {
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [scrollY, setScrollY] = useState(0);
-  const scene = useRef({ layout: null as Layout | null, dirty: true, overlayDirty: true, raf: 0 });
+  const scrollYRef = useRef(scrollY);
+  scrollYRef.current = scrollY;
+  const scene = useRef({ layout: null as Layout | null, dirty: true, overlayDirty: true, raf: 0, gesture: null as Gesture | null, stopScroll: null as null | (() => void) });
   const wheel = useRef({ zoom: 0, frames: 0 });
 
   // The pinning, worked out as the headers render so they and the canvas agree (the headers read
@@ -50,6 +85,21 @@ const TimelineSurface: React.FC = () => {
   Object.assign(trackView, tracks);
   const maxScroll = tracks.maxScroll;
   useEffect(() => setScrollY((s) => Math.max(0, Math.min(s, maxScroll))), [maxScroll]);
+
+  /** The layout of `doc` (the store's document by default) as the canvas is now. */
+  const layoutOf = useCallback((doc?: { clips: Doc["clips"]; tracks: Doc["tracks"] }): Layout | null => {
+    const area = areaRef.current;
+    if (!area) return null;
+    const clipsState = useClipStore.getState();
+    return layoutTimeline({
+      clips: doc?.clips ?? clipsState.clips,
+      tracks: doc?.tracks ?? clipsState.timelines,
+      view: viewOf(useControlsStore.getState().timelineDuration, area.clientWidth),
+      width: area.clientWidth,
+      height: area.clientHeight,
+      scrollY: Math.max(0, Math.min(scrollYRef.current, trackView.maxScroll)),
+    });
+  }, []);
 
   const draw = useCallback(() => {
     const s = scene.current;
@@ -62,32 +112,53 @@ const TimelineSurface: React.FC = () => {
     const height = area.clientHeight;
     const clipsState = useClipStore.getState();
     const controls = useControlsStore.getState();
+    const g = s.gesture;
     if (s.dirty || !s.layout) {
       s.dirty = false;
-      const layout = layoutTimeline({
-        clips: clipsState.clips,
-        tracks: clipsState.timelines,
-        view: viewOf(controls.timelineDuration, width),
-        width,
-        height,
-        scrollY: Math.max(0, Math.min(scrollYRef.current, trackView.maxScroll)),
-      });
+      // While a move or trim is under way, the timeline as it would be left, on the tracks as they are.
+      const preview = g && (g.kind === "move" || g.kind === "trim") ? g.preview : null;
+      const layout = layoutOf(preview ? { clips: preview.doc.clips, tracks: clipsState.timelines } : undefined);
+      if (!layout) return;
       s.layout = layout;
       const ctx = fitCanvas(main, width, height);
       ctx.clearRect(0, 0, width, height);
-      drawRuler(ctx, layout, controls.fps || 24);
+      const fps = controls.fps || 24;
+      drawRuler(ctx, layout, fps);
       drawMarkers(ctx, layout, clipsState.markers, controls.selectedMarkerId);
       const selected = new Set(controls.selectedClipIds);
-      const fps = controls.fps || 24;
+      const movers = g?.kind === "move" && g.preview ? new Set([g.drag.lead, ...g.drag.followers]) : null;
+      const lookOf = (b: ClipBox) => {
+        const id = (b.clip as { assetId?: string }).assetId;
+        return clipLook(b.clip, id ? clipsState.assets[id] : undefined, fps, b.h, b.row.main);
+      };
       inTrackAreas(ctx, layout, (pinned) => {
         drawRows(ctx, layout, pinned);
         for (const b of layout.clips) {
           if (layout.tracks.pinned && b.row.pinned !== pinned) continue;
-          const asset = (b.clip as { assetId?: string }).assetId ? clipsState.assets[(b.clip as { assetId?: string }).assetId!] : undefined;
-          drawClip(ctx, layout, b, { look: clipLook(b.clip, asset, fps, b.h, b.row.main), selected: selected.has(b.id), deactivated: !!b.clip.deactivated });
+          // A moving clip's place is where it would land; the clip itself follows the pointer.
+          if (movers?.has(b.id)) drawSlot(ctx, b);
+          else drawClip(ctx, layout, b, { look: lookOf(b), selected: selected.has(b.id), deactivated: !!b.clip.deactivated });
         }
         drawRowShades(ctx, layout, pinned);
       });
+      if (g?.kind === "move" && g.preview) {
+        if (g.preview.line) drawNewTrackLine(ctx, layout, g.preview.line.y);
+        if (g.preview.guide != null) drawGuide(ctx, layout, g.preview.guide);
+        // The clips being moved, where the pointer has taken them from where they were.
+        const before = layoutOf();
+        const dFrames = frameAt(layout.view, g.x) - frameAt(layout.view, g.x0);
+        for (const b of before?.clips ?? []) {
+          if (!movers!.has(b.id)) continue;
+          const x = xOf(layout.view, (b.clip.startFrame ?? 0) + dFrames);
+          drawFloating(ctx, layout, { ...b, x, y: b.y + (g.y - g.y0) }, { look: lookOf(b), selected: true, deactivated: !!b.clip.deactivated });
+        }
+      }
+      if (g?.kind === "trim" && g.preview) {
+        if (g.preview.guide != null) drawGuide(ctx, layout, g.preview.guide);
+        const b = layout.clips.find((c) => c.id === g.drag.id);
+        if (b) drawTrimTip(ctx, layout, b, timecode((b.clip.endFrame ?? 0) - (b.clip.startFrame ?? 0), fps), g.x);
+      }
+      if (g?.kind === "marquee") drawMarquee(ctx, g.x0, g.y0, g.x, g.y);
       s.overlayDirty = true;
     }
     if (s.overlayDirty && s.layout) {
@@ -97,9 +168,7 @@ const TimelineSurface: React.FC = () => {
       if (controls.previewAxis && !controls.isPlaying && controls.hoverFrame != null) drawSkim(ctx, s.layout, controls.hoverFrame);
       drawPlayhead(ctx, s.layout, controls.focusFrame);
     }
-  }, []);
-  const scrollYRef = useRef(scrollY);
-  scrollYRef.current = scrollY;
+  }, [layoutOf]);
 
   const redraw = useCallback(
     (main = true) => {
@@ -123,7 +192,13 @@ const TimelineSurface: React.FC = () => {
     return () => ro.disconnect();
   }, [redraw]);
   useEffect(() => redraw(), [scrollY, tracks, redraw]);
-  useEffect(() => () => cancelAnimationFrame(scene.current.raf), []);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(scene.current.raf);
+      scene.current.stopScroll?.();
+    },
+    [],
+  );
 
   // Redrawn when what they show changes; the playhead's canvas alone as it plays.
   useEffect(() => {
@@ -135,7 +210,7 @@ const TimelineSurface: React.FC = () => {
       else if (s.focusFrame !== p.focusFrame || s.hoverFrame !== p.hoverFrame || s.isPlaying !== p.isPlaying || s.previewAxis !== p.previewAxis) redraw(false);
       // The playhead played, sought or stepped out of view: the view follows it, as CapCut's does.
       // A scroll alone leaves it at its time, out of view if it goes there.
-      if (s.focusFrame !== p.focusFrame) {
+      if (s.focusFrame !== p.focusFrame && !(scene.current.gesture?.kind === "scrub")) {
         const [start, end] = s.timelineDuration;
         const length = end - start;
         if (s.focusFrame < start) s.shiftTimelineDuration(s.focusFrame - start);
@@ -153,12 +228,17 @@ const TimelineSurface: React.FC = () => {
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
 
-  /** The playhead to the frame at canvas x, paused, with a snippet of its sound. */
-  const seek = (x: number, accurate: boolean) => {
-    const layout = scene.current.layout;
+  /** The playhead to the frame at canvas x (snapped while dragged), paused, with a snippet of its sound. */
+  const seek = (x: number, accurate: boolean, snap = false, skipSnap = false) => {
+    const layout = layoutOf();
     if (!layout) return;
     const controls = useControlsStore.getState();
-    const frame = Math.max(0, Math.round(Math.max(layout.view.start, Math.min(layout.view.end, frameAt(layout.view, x)))));
+    let frame = Math.max(0, Math.round(frameAt(layout.view, Math.max(layout.view.x0, Math.min(layout.width, x)))));
+    if (snap && controls.snapping && !skipSnap) {
+      const s = snapNow();
+      const hit = snapToPoints([frame], snapPoints(useClipStore.getState().clips, { playhead: -Infinity, markers: s.markers, exclude: new Set(), beats: s.beats }), framesFor(layout.view, SNAP_PX));
+      if (hit) frame = hit.point;
+    }
     if (controls.isPlaying) controls.pause();
     controls.setFocusAnchorRatio(Math.max(0, Math.min(1, (x - layout.view.x0) / layout.view.width)));
     controls.setFocusFrame(frame, false);
@@ -168,51 +248,254 @@ const TimelineSurface: React.FC = () => {
 
   const canTrim = (b: ClipBox) => useControlsStore.getState().selectedClipIds.includes(b.id) && !b.row.track.locked && b.clip.type !== "group";
 
-  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const layout = scene.current.layout;
-    if (!layout || e.button !== 0) return;
-    const { x, y } = local(e);
-    const hit = hitTest(layout, x, y, canTrim);
+  /** The store's document now. */
+  const docNow = (): Doc => ({ clips: useClipStore.getState().clips, tracks: useClipStore.getState().timelines });
+
+  /** A press on a clip's body that has moved far enough: the clip and those going with it move. */
+  const beginMove = (box: ClipBox, x0: number, y0: number, layout: Layout, copy: boolean): Gesture => {
+    let doc = docNow();
+    const rules = rulesNow();
     const controls = useControlsStore.getState();
-    if (hit.kind === "clip") {
-      if (hit.box.row.track.locked) return;
-      if (e.shiftKey || e.metaKey) controls.toggleClipSelection(hit.box.id, true);
-      else if (!controls.selectedClipIds.includes(hit.box.id)) controls.toggleClipSelection(hit.box.id, false);
+    const main = mainTrackOf(doc.tracks);
+    // The others selected, and what's linked (linkage on) or grouped with any of them. With the
+    // magnet on, the main track's other clips keep its order unless they're the dragged clip's own.
+    const own = new Set(goingWith(doc, [box.id], rules));
+    const selected = controls.selectedClipIds.includes(box.id) ? controls.selectedClipIds : [box.id];
+    const followers = goingWith(doc, selected, rules).filter((id) => {
+      if (id === box.id) return false;
+      const c = doc.clips.find((x) => x.clipId === id);
+      return own.has(id) || !(rules.magnet && main && c?.timelineId === main.timelineId);
+    });
+    // ⌥ held (CapCut's Drag to duplicate): copies move, the originals stay where they are.
+    let lead = box.id;
+    let going = followers;
+    let select: string[] | null = null;
+    if (copy) {
+      const dup = duplicateClips(doc, [box.id, ...followers], () => crypto.randomUUID());
+      doc = dup.doc;
+      lead = dup.copies.get(box.id)!;
+      going = followers.map((id) => dup.copies.get(id)!).filter(Boolean);
+      select = [lead, ...going];
+    }
+    const drag: MoveDrag = {
+      start: doc,
+      lead,
+      followers: going,
+      pressFrame: frameAt(layout.view, x0),
+      leadStart: box.clip.startFrame ?? 0,
+      length: Math.max(1, (box.clip.endFrame ?? 0) - (box.clip.startFrame ?? 0)),
+      leadTrack: box.clip.timelineId ?? box.row.id,
+      newTrackId: crypto.randomUUID(),
+    };
+    return { kind: "move", drag, preview: null, x0, y0, x: x0, y: y0, select };
+  };
+
+  /** The gesture under way, at pointer (x, y) (again after an edge scroll, the pointer held still). */
+  const step = (x: number, y: number, meta: boolean) => {
+    const s = scene.current;
+    const g = s.gesture;
+    if (!g) return;
+    if (g.kind === "move" || g.kind === "marquee") scrollToward(y);
+    const layout = layoutOf();
+    if (!layout) return;
+    if (g.kind === "move") {
+      g.x = x;
+      g.y = y;
+      g.preview = previewMove(g.drag, layout, rulesNow(), snapNow(new Set([g.drag.lead, ...g.drag.followers])), x, y, meta);
+      redraw();
+    } else if (g.kind === "trim") {
+      g.x = x;
+      g.y = y;
+      g.preview = previewTrim(g.drag, layout, rulesNow(), snapNow(), x, meta);
+      redraw();
+    } else if (g.kind === "marquee") {
+      g.x = x;
+      g.y = y;
+      const hits = marqueeHits(layout, g.x0, g.y0, x, y);
+      const next = stickSelection(useClipStore.getState().clips, [...new Set([...g.base, ...hits])]);
+      const controls = useControlsStore.getState();
+      if (next.join() !== controls.selectedClipIds.join()) controls.setSelectedClipIds(next);
+      redraw();
+    } else if (g.kind === "scrub") {
+      seek(x, false, true, meta);
+    }
+  };
+
+  /**
+   * A move or marquee near the top or bottom of the scrolling tracks scrolls them that way, faster
+   * the nearer the edge (each animation frame while the edge scroll runs).
+   */
+  const scrollToward = (y: number) => {
+    const layout = scene.current.layout;
+    if (!layout || trackView.maxScroll <= 0) return;
+    const ZONE = 36;
+    const top = 24 + ZONE;
+    const bottom = (trackView.pinned ? trackView.overBottom : layout.height) - ZONE;
+    const delta = y < top ? -Math.max(2, ((top - y) / ZONE) * 14) : y > bottom ? Math.max(2, ((y - bottom) / ZONE) * 14) : 0;
+    if (delta) setScrollY((v) => Math.max(0, Math.min(trackView.maxScroll, v + delta)));
+  };
+
+  /** Edge scrolling for a drag: near or past either edge the timeline scrolls, the drag following. */
+  const edgeScroll = () => {
+    const canvas = overlayRef.current;
+    const layout = scene.current.layout;
+    if (!canvas || !layout) return;
+    scene.current.stopScroll?.();
+    scene.current.stopScroll = startEdgeScroll(canvas, layout.view.x0, layout.width, useControlsStore.getState, (p: EdgePointer) => {
+      const { x, y } = local(p);
+      step(x, y, p.metaKey);
+    });
+  };
+
+  const end = (commit: boolean) => {
+    const s = scene.current;
+    const g = s.gesture;
+    s.gesture = null;
+    s.stopScroll?.();
+    s.stopScroll = null;
+    if (commit && g && (g.kind === "move" || g.kind === "trim") && g.preview) {
+      useClipStore.getState().commitTimeline(g.preview.doc);
+      if (g.kind === "move" && g.select) useControlsStore.getState().setSelectedClipIds(g.select);
+    }
+    if (g?.kind === "scrub") {
+      useControlsStore.getState().setIsAccurateSeekNeeded(true);
+      scrubSoundStop();
+    }
+    if (overlayRef.current) overlayRef.current.style.cursor = "default";
+    redraw();
+  };
+
+  // For the smoke tests (scripts/smoke): the layout as the canvas has it, what a point hits, and
+  // the gesture under way, in place of probing the canvas's pixels.
+  useEffect(() => {
+    const hook = {
+      layout: () => layoutOf(),
+      hit: (x: number, y: number) => {
+        const l = layoutOf();
+        if (!l) return null;
+        const h = hitTest(l, x, y, canTrim);
+        return h.kind === "clip" ? { kind: h.kind, id: h.box.id, edge: h.edge, frame: h.frame } : { kind: h.kind, frame: h.frame };
+      },
+      gesture: () => scene.current.gesture?.kind ?? null,
+    };
+    (window as unknown as { __openripTimeline?: typeof hook }).__openripTimeline = hook;
+    return () => {
+      delete (window as unknown as { __openripTimeline?: typeof hook }).__openripTimeline;
+    };
+  }, [layoutOf]);
+
+  // Esc lets go of a drag without changing anything.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && scene.current.gesture && scene.current.gesture.kind !== "press") {
+        e.preventDefault();
+        e.stopPropagation();
+        end(false);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const layout = layoutOf();
+    if (!layout || e.button !== 0) return;
+    scene.current.layout = layout;
+    const { x, y } = local(e);
+    const controls = useControlsStore.getState();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    // The playhead's line takes a press near it, in the ruler or over the tracks.
+    if (Math.abs(x - xOf(layout.view, controls.focusFrame)) <= PLAYHEAD_GRAB && x >= layout.view.x0) {
+      scene.current.gesture = { kind: "scrub" };
+      if (controls.isPlaying) controls.pause();
+      edgeScroll();
       return;
     }
-    // The ruler, a track's empty space or below the tracks: the playhead goes there, dragged on
-    // as the pointer moves, and an empty-space press drops the selection.
-    if (hit.kind !== "ruler") controls.clearSelection();
+    const hit = hitTest(layout, x, y, canTrim);
+    if (hit.kind === "clip") {
+      const box = hit.box;
+      if (box.row.track.locked) return;
+      // The blade (B): a click cuts the clip under the pointer at its frame.
+      if (controls.timelineTool === "split") {
+        bladeCut(box.id, bladeFrame(Math.round(hit.frame), layout.width));
+        return;
+      }
+      if (hit.edge) {
+        const edge = hit.edge === "left" ? box.clip.startFrame ?? 0 : box.clip.endFrame ?? 0;
+        scene.current.gesture = { kind: "trim", drag: { start: docNow(), id: box.id, side: hit.edge, pressFrame: frameAt(layout.view, x), edge }, preview: null, x, y };
+        e.currentTarget.style.cursor = "col-resize";
+        edgeScroll();
+        return;
+      }
+      const additive = e.shiftKey || e.metaKey;
+      const selected = controls.selectedClipIds.includes(box.id);
+      if (additive) controls.toggleClipSelection(box.id, true);
+      else if (!selected) controls.toggleClipSelection(box.id, false);
+      // A press on one of several selected clips that doesn't drag selects it alone, on release.
+      scene.current.gesture = { kind: "press", hit, x0: x, y0: y, additive, reselect: !additive && selected && controls.selectedClipIds.length > 1 ? box.id : null, copy: e.altKey };
+      return;
+    }
+    if (hit.kind === "ruler") {
+      controls.setSelectedMarkerId(null);
+      scene.current.gesture = { kind: "scrub" };
+      seek(x, false);
+      edgeScroll();
+      return;
+    }
+    // Empty track space or below the tracks: a drag draws a marquee, a click moves the playhead
+    // there. Either drops the selection first, unless Shift or ⌘ is held.
+    const additive = e.shiftKey || e.metaKey;
+    if (!additive) controls.clearSelection();
     controls.setSelectedMarkerId(null);
-    const target = e.currentTarget;
-    target.setPointerCapture(e.pointerId);
-    seek(x, false);
-    const move = (ev: PointerEvent) => seek(local(ev).x, false);
-    const up = (ev: PointerEvent) => {
-      target.removeEventListener("pointermove", move);
-      target.removeEventListener("pointerup", up);
-      target.removeEventListener("pointercancel", up);
-      seek(local(ev).x, true);
-      scrubSoundStop();
-    };
-    target.addEventListener("pointermove", move);
-    target.addEventListener("pointerup", up);
-    target.addEventListener("pointercancel", up);
+    scene.current.gesture = { kind: "press", hit, x0: x, y0: y, additive, reselect: null, copy: false };
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const layout = scene.current.layout;
-    if (!layout || e.buttons) return;
+    const s = scene.current;
+    const layout = s.layout ?? layoutOf();
+    if (!layout) return;
     const { x, y } = local(e);
+    const g = s.gesture;
+    if (g?.kind === "press") {
+      if (Math.hypot(x - g.x0, y - g.y0) < DRAG_START) return;
+      if (g.hit.kind === "clip") {
+        s.gesture = beginMove(g.hit.box, g.x0, g.y0, layout, g.copy);
+        e.currentTarget.style.cursor = "grabbing";
+      } else {
+        s.gesture = { kind: "marquee", x0: g.x0, y0: g.y0, x: g.x0, y: g.y0, base: g.additive ? useControlsStore.getState().selectedClipIds : [] };
+      }
+      edgeScroll();
+    }
+    if (s.gesture) {
+      step(x, y, e.metaKey);
+      return;
+    }
+    if (e.buttons) return;
     const hit = hitTest(layout, x, y, canTrim);
-    e.currentTarget.style.cursor = hit.kind === "clip" ? (hit.edge ? "col-resize" : "pointer") : "default";
     const controls = useControlsStore.getState();
+    const nearHead = Math.abs(x - xOf(layout.view, controls.focusFrame)) <= PLAYHEAD_GRAB && x >= layout.view.x0;
+    e.currentTarget.style.cursor = nearHead ? "ew-resize" : hit.kind === "clip" ? (controls.timelineTool === "split" ? "crosshair" : hit.edge ? "col-resize" : "pointer") : "default";
     // The preview axis: the player shows the frame under the pointer (not while playing).
     if (controls.previewAxis && !controls.isPlaying && x >= layout.view.x0) {
       const frame = Math.max(0, Math.min(useClipStore.getState().clipDuration, Math.round(frameAt(layout.view, x))));
       controls.setHoverFrame(frame);
       skimSound(frame);
     }
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const s = scene.current;
+    const g = s.gesture;
+    if (!g) return;
+    if (g.kind === "press") {
+      s.gesture = null;
+      if (g.hit.kind === "clip") {
+        if (g.reselect) useControlsStore.getState().setSelectedClipIds(stickSelection(useClipStore.getState().clips, [g.reselect]));
+      } else seek(local(e).x, true);
+      return;
+    }
+    if (g.kind === "scrub") seek(local(e).x, true, true, e.metaKey);
+    end(true);
   };
 
   const onPointerLeave = () => {
@@ -235,7 +518,7 @@ const TimelineSurface: React.FC = () => {
     }
     if (Math.abs(e.deltaX) >= Math.abs(e.deltaY) || e.shiftKey) {
       const delta = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * (e.shiftKey ? 3 : 1);
-      const frames = delta / (layout.view.width / (layout.view.end - layout.view.start)) + wheel.current.frames;
+      const frames = framesFor(layout.view, delta) + wheel.current.frames;
       const whole = Math.trunc(frames);
       wheel.current.frames = frames - whole;
       if (whole !== 0 && controls.canTimelineDurationBeShifted(whole)) controls.shiftTimelineDuration(whole);
@@ -252,9 +535,11 @@ const TimelineSurface: React.FC = () => {
         <canvas
           ref={overlayRef}
           data-testid="timeline-canvas"
-          className="absolute inset-0 w-full h-full"
+          className="absolute inset-0 w-full h-full touch-none"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={() => end(false)}
           onPointerLeave={onPointerLeave}
           onContextMenu={(e) => e.preventDefault()}
         />

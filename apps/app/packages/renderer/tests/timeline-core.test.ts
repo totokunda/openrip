@@ -2,7 +2,7 @@
 // behaviour: `node --test tests/*.test.ts` in packages/renderer.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fitOnTrack, goingWith, moveClips, nearestFree, trimEdge, type Doc } from "../src/lib/timeline/core/edit.ts";
+import { duplicateClips, fitOnTrack, goingWith, moveClips, nearestFree, trimEdge, type Doc } from "../src/lib/timeline/core/edit.ts";
 import { resolveOverlapsTimelines } from "../src/lib/timeline/core/tracks.ts";
 
 const track = (timelineId: string, type: string, more: object = {}) => ({ timelineId, type, timelineY: 0, timelineHeight: 0, timelinePadding: 50, timelineWidth: 0, muted: false, hidden: false, ...more }) as any;
@@ -138,4 +138,22 @@ test("group mates go across as many tracks as the dragged clip; linked clips kee
   assert.deepEqual(at(up, "p"), [10, 34, "t0"], "a track up, as q went");
   const withSound = moveClips(d, free, { lead: "v", followers: ["s"], delta: 50, track: "main" });
   assert.deepEqual(at(withSound, "s"), [50, 150, "au"]);
+});
+
+test("⌥-drag copies: fresh ids, copies linked and grouped with each other, the originals untouched", () => {
+  const d = doc(
+    [clip("v", "video", "main", 0, 100, { linkId: "L", bundleId: "G" }), clip("s", "audio", "au", 0, 100, { linkId: "L" }), clip("t", "text", "tx", 0, 50, { bundleId: "G" })],
+    [track("tx", "text"), track("main", "media"), track("au", "audio")],
+  );
+  let n = 0;
+  const { doc: out, copies } = duplicateClips(d, ["v", "s"], () => `new${++n}`);
+  assert.equal(out.clips.length, 5);
+  const [cv, cs] = [out.clips.find((c) => c.clipId === copies.get("v"))!, out.clips.find((c) => c.clipId === copies.get("s"))!];
+  assert.equal(cv.linkId, cs.linkId, "the copies are linked to each other");
+  assert.notEqual(cv.linkId, "L");
+  assert.notEqual(cv.bundleId, "G", "and not grouped with the original's group");
+  assert.deepEqual(out.clips.slice(0, 3), d.clips, "the originals are the same objects");
+  const moved = moveClips(out, free, { lead: cv.clipId, followers: [cs.clipId], delta: 120, track: "main" });
+  assert.deepEqual(at(moved, cv.clipId), [120, 220, "main"]);
+  assert.deepEqual(at(moved, "v"), [0, 100, "main"]);
 });

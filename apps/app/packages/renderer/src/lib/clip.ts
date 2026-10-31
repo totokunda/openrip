@@ -91,6 +91,12 @@ interface ClipStore {
    * with a dragged one): none before frame 0, none on a locked track.
    */
   shiftClips: (ids: string[], delta: number) => void;
+  /**
+   * The new timeline's edits (lib/timeline/core): the clips and tracks a move or trim leaves,
+   * written as one change, the timeline's rules following (an emptied track goes, the magnet
+   * packs the main track).
+   */
+  commitTimeline: (doc: { clips: AnyClipProps[]; tracks: TimelineProps[] }) => void;
   separateClip: (clipId: string) => void;
   /**
    * The Speed tab's Curve: a video or audio clip plays by `curve` (a preset's or custom points;
@@ -1666,6 +1672,13 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       const prunedAssets = pruneAssetsForClips(state.assets, resolvedClips);
       get()._updateZoomLevel(resolvedClips, clipDuration);
       return { clips: resolvedClips, clipDuration, assets: prunedAssets };
+    }),
+  commitTimeline: ({ clips, tracks }) =>
+    set((state) => {
+      if (clips === state.clips && tracks === state.timelines) return {};
+      const clipDuration = calculateTotalClipDuration(clips);
+      get()._updateZoomLevel(clips, clipDuration);
+      return { clips, timelines: tracks, clipDuration, assets: pruneAssetsForClips(state.assets, clips) };
     }),
   shiftClips: (ids, delta) =>
     set((state) => {
