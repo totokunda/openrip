@@ -16,10 +16,10 @@
 import { app, BrowserWindow, ipcMain, screen, type Rectangle } from "electron";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { inBackground } from "./background.js";
+import { inBackground, showUnseen } from "./background.js";
 
 // Shown as the editor shows its own (in a test run, behind the user's work).
-const showPanel = (child: BrowserWindow) => (inBackground ? child.showInactive() : child.show());
+const showPanel = (child: BrowserWindow) => (inBackground ? showUnseen(child) : child.show());
 
 type PanelId = "assets" | "player" | "inspector" | "timeline";
 const PANELS: PanelId[] = ["assets", "player", "inspector", "timeline"];
