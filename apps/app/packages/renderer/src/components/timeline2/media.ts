@@ -72,6 +72,8 @@ export interface ClipFacts {
   thumbs?: { tiles: number; exact: number; placeholder: number; tileWidth: number; y: number; height: number };
   sound?: { y: number; height: number; heights: Bar[]; maxBar: number; line: Bar[]; pxPerFrame: number; color: string; scale: WaveScale };
   chips?: string[];
+  /** The glyph before the first chip (a compound's, an effect bar's wand). */
+  glyph?: string | null;
   missing?: boolean;
   beats?: number;
   sticker?: boolean;

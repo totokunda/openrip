@@ -61,7 +61,7 @@ const PLAYHEAD_GRAB = 4;
 
 type Gesture =
   | { kind: "press"; hit: Hit; x0: number; y0: number; additive: boolean; reselect: string | null; copy: boolean }
-  | { kind: "scrub" }
+  | { kind: "scrub"; x0: number; moved: boolean }
   | { kind: "move"; drag: MoveDrag; preview: MovePreview | null; x0: number; y0: number; x: number; y: number; select: string[] | null }
   | { kind: "trim"; drag: TrimDrag; preview: { doc: Doc; applied: number; guide: number | null } | null; x: number; y: number }
   | { kind: "marquee"; x0: number; y0: number; x: number; y: number; base: string[] }
@@ -109,6 +109,7 @@ const TimelineSurface: React.FC = () => {
   const areaRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  const headRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [scrollY, setScrollY] = useState(0);
   const scrollYRef = useRef(scrollY);
@@ -121,7 +122,19 @@ const TimelineSurface: React.FC = () => {
   const tracks = useMemo(() => layoutTracks(timelines, mainTrackOf(timelines), size.height, scrollY, SCROLL_BOTTOM_PADDING), [timelines, size.height, scrollY]);
   Object.assign(trackView, tracks);
   const maxScroll = tracks.maxScroll;
-  useEffect(() => setScrollY((s) => Math.max(0, Math.min(s, maxScroll))), [maxScroll]);
+  // With the main track pinned, the overlay tracks sit scrolled to the bottom, by the main track,
+  // and a new track above them keeps them so (as on the timeline before this one); scrolled up,
+  // they stay where they were put.
+  const atBottom = useRef(true);
+  const lastMax = useRef(0);
+  useEffect(() => {
+    if (tracks.pinned && atBottom.current && maxScroll !== lastMax.current) setScrollY(maxScroll);
+    else setScrollY((s) => Math.max(0, Math.min(s, maxScroll)));
+    lastMax.current = maxScroll;
+  }, [maxScroll, tracks.pinned]);
+  useEffect(() => {
+    atBottom.current = tracks.pinned ? scrollY >= maxScroll - 1 : true;
+  }, [scrollY, maxScroll, tracks.pinned]);
 
   /** The layout of `doc` (the store's document by default) as the canvas is now. */
   const layoutOf = useCallback((doc?: { clips: Doc["clips"]; tracks: Doc["tracks"] }): Layout | null => {
@@ -249,6 +262,13 @@ const TimelineSurface: React.FC = () => {
       if (controls.previewAxis && !controls.isPlaying && controls.hoverFrame != null) drawSkim(ctx, s.layout, controls.hoverFrame);
       if (controls.timelineTool === "split" && s.hover.bladeX != null && !s.gesture) drawBlade(ctx, s.layout, s.hover.bladeX);
       drawPlayhead(ctx, s.layout, controls.focusFrame);
+      const head = headRef.current;
+      if (head) {
+        const hx = xOf(s.layout.view, controls.focusFrame);
+        const seen = hx >= s.layout.view.x0 - 1 && hx <= s.layout.width;
+        head.style.left = `${Math.round(hx) - 5}px`;
+        head.style.visibility = seen ? "visible" : "hidden";
+      }
     }
   }, [layoutOf]);
 
@@ -439,7 +459,8 @@ const TimelineSurface: React.FC = () => {
       if (next.join() !== controls.selectedClipIds.join()) controls.setSelectedClipIds(next);
       redraw();
     } else if (g.kind === "scrub") {
-      seek(x, false, true, meta);
+      g.moved ||= x !== g.x0;
+      if (g.moved) seek(x, false, true, meta);
     } else if (g.kind === "marker") {
       // Dragged along the ruler, a marker snaps to the playhead and clip edges as a clip does.
       g.moved ||= Math.abs(x - g.x0) >= DRAG_START;
@@ -609,10 +630,6 @@ const TimelineSurface: React.FC = () => {
     }
     const marker = markerAt(layout, useClipStore.getState().markers, x, y);
     if (marker) {
-      if (e.detail === 2) {
-        useMarkerEditorStore.getState().open(marker.id);
-        return;
-      }
       scene.current.gesture = { kind: "marker", id: marker.id, from: marker.frame, frame: marker.frame, x0: x, moved: false };
       return;
     }
@@ -636,7 +653,8 @@ const TimelineSurface: React.FC = () => {
     }
     // The playhead's line takes a press near it, in the ruler or over the tracks.
     if (Math.abs(x - xOf(layout.view, controls.focusFrame)) <= PLAYHEAD_GRAB && x >= layout.view.x0) {
-      scene.current.gesture = { kind: "scrub" };
+      // Taken hold of without moving, it stays on its frame.
+      scene.current.gesture = { kind: "scrub", x0: x, moved: false };
       if (controls.isPlaying) controls.pause();
       edgeScroll();
       return;
@@ -703,7 +721,7 @@ const TimelineSurface: React.FC = () => {
     }
     if (hit.kind === "ruler") {
       controls.setSelectedMarkerId(null);
-      scene.current.gesture = { kind: "scrub" };
+      scene.current.gesture = { kind: "scrub", x0: x, moved: true };
       seek(x, false);
       edgeScroll();
       return;
@@ -790,7 +808,7 @@ const TimelineSurface: React.FC = () => {
       } else seek(local(e).x, true);
       return;
     }
-    if (g.kind === "scrub") seek(local(e).x, true, true, e.metaKey);
+    if (g.kind === "scrub" && g.moved) seek(local(e).x, true, true, e.metaKey);
     end(true);
   };
 
@@ -820,11 +838,13 @@ const TimelineSurface: React.FC = () => {
     }
   };
 
-  /** Double click on a clip: a compound opens, a text template opens its words. */
+  /** Double click: a marker's box opens; on a clip, a compound opens, a text template its words. */
   const onDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const layout = layoutOf();
     if (!layout) return;
     const { x, y } = local(e);
+    const marker = markerAt(layout, useClipStore.getState().markers, x, y);
+    if (marker) return useMarkerEditorStore.getState().open(marker.id);
     const hit = hitTest(layout, x, y, canTrim);
     if (hit.kind === "clip" && !hit.box.row.track.locked) doubleClickClip(hit.box.id);
   };
@@ -868,8 +888,6 @@ const TimelineSurface: React.FC = () => {
       {hasClips && <TimelineSidebar />}
       <div ref={areaRef} className="relative flex-1 h-full overflow-hidden" onWheel={onWheel}>
         <canvas ref={mainRef} className="absolute inset-0 w-full h-full" />
-        <MarkerEditor anchor={areaRef} stageWidth={Math.max(1, size.width - 50)} startPadding={50} />
-        {hasClips && <KeyframeGraph stageWidth={Math.max(1, size.width - 50)} />}
         {!hasClips && (
           <div className="absolute inset-0 flex items-center justify-center w-full p-8 z-10">
             <Droppable
@@ -899,6 +917,15 @@ const TimelineSurface: React.FC = () => {
           onContextMenu={onContextMenu}
           onDoubleClick={onDoubleClick}
         />
+        {/* Over the canvases: the marker's box and the keyframe graph take their own clicks. */}
+        <MarkerEditor anchor={areaRef} stageWidth={Math.max(1, size.width - 50)} startPadding={50} />
+        {hasClips && <KeyframeGraph stageWidth={Math.max(1, size.width - 50)} />}
+        {/* Where the playhead's head is, for the smoke tests that take hold of it (the canvas draws it; presses go through). */}
+        <div ref={headRef} aria-hidden className="absolute flex z-50 top-0 cursor-col-resize pointer-events-none" style={{ left: 0, visibility: "hidden" }}>
+          <div className="flex flex-col items-center">
+            <div data-testid="playhead-handle" className="w-[10px] h-[14px]" />
+          </div>
+        </div>
       </div>
     </div>
   );

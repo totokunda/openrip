@@ -6,14 +6,14 @@
 // - the text dragged so its end comes 3 px from the beat lands on it (not with snapping off);
 // - Auto beat from the toolbar's menu (Beat 2: every beat the engine finds, drawn) and from the
 //   clip's menu (Auto mark beats › Beat 1: bar starts only, fewer); Clear beats.
+import { beatDotCount } from "./_tlfacts.mjs";
 import { rulerMap, seek, settled, sectionButton } from "./_preview.mjs";
 import { checks, savedProject, select } from "./_anim.mjs";
 import { undoCase } from "./_undo.mjs";
 import { clipsOn, fpsOf, key, rowY } from "./_timeline.mjs";
 
-/** How many beat dots the timeline draws (react-konva registers Konva on the window). */
-export const markerCount = (win) =>
-  win.evaluate(() => (window.Konva?.stages ?? []).flatMap((s) => s.find(".beat-markers")).reduce((n, g) => n + g.getChildren().length, 0));
+/** How many beat dots the timeline draws (either timeline: _tlfacts.mjs). */
+export const markerCount = (win) => beatDotCount(win);
 
 /** The video's sound on its own track at the playhead, from Audio › Extracted. */
 export const addExtracted = async (win) => {

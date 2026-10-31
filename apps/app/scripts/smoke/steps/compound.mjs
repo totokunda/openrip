@@ -29,6 +29,7 @@
 // - the project survives a restart with the compound, its content and its name.
 // Shots: `cp1-compound` ↔ `28-inspector-compound/001`, `cp2-open` ↔ `002`, `cp3-menu` ↔ `003`,
 // `cp4-subprojects` ↔ `05-left-media/012`.
+import { chipsOf, waveOf } from "./_tlfacts.mjs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { engineFrame, grab, diff, drag, now, openEditor, rulerMap, sectionButton, seek, settled, tab } from "./_preview.mjs";
@@ -177,19 +178,13 @@ export default async (ctx) => {
   await win.waitForTimeout(300);
 
   // ---- the bar and its inspector --------------------------------------------------------------------
-  const chipInfo = await win.evaluate((id) => {
-    const g = (window.Konva?.stages ?? []).flatMap((st) => st.find(".clip-chips")).find((n) => n.getAttr("clipId") === id);
-    return g ? { chips: g.getAttr("chips"), glyph: g.find("Path").length } : null;
-  }, comp.clipId);
+  const chipInfo = await chipsOf(win, comp.clipId);
   check("the name chip has the compound glyph, 'Compound clip1', and the length", !!chipInfo && chipInfo.glyph === 1 && chipInfo.chips[0] === "Compound clip1" && /^\d\d:\d\d:\d\d:\d\d$/.test(chipInfo.chips[1]), JSON.stringify(chipInfo));
   await win.waitForFunction(() => Number(document.documentElement.dataset.compoundFrames ?? 0) > 0, null, { timeout: 15000 }).catch(() => {});
   const frames = Number(await win.evaluate(() => document.documentElement.dataset.compoundFrames ?? "0"));
   check("its thumbnails are the engine's composite frames of the compound", frames > 0, `${frames} frames drawn`);
   await win.waitForTimeout(2500);
-  const wave = await win.evaluate((id) => {
-    const n = (window.Konva?.stages ?? []).flatMap((st) => st.find(".waveform")).find((x) => x.getAttr("clipId") === id);
-    return n ? { bars: (n.getAttr("heights") ?? []).length, max: n.getAttr("maxBar") } : null;
-  }, comp.clipId);
+  const wave = await waveOf(win, comp.clipId);
   check("its waveform band is the mix of the compound's sound", !!wave && wave.bars > 10, JSON.stringify(wave));
   await selectBars([[comp.clipId, 2.5]], doc);
   const tabNames = await tabs(win);

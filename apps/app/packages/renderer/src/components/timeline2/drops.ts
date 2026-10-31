@@ -157,8 +157,7 @@ export function useTimelineDrops(api: DropsApi) {
   const clipUnder = (u: NonNullable<ReturnType<typeof under>>) => (u.hit.kind === "clip" ? u.hit.box.clip : null);
 
   /** A media card's landing for the pointer at (x, y). */
-  const landing = (x: number, y: number) => {
-    const c = card.current;
+  const landing = (c: { data: MediaItem; length: number } | null, x: number, y: number) => {
     const l = api.layout();
     if (!c || !l) return null;
     const state = useClipStore.getState();
@@ -210,7 +209,7 @@ export function useTimelineDrops(api: DropsApi) {
         api.setDrop(null);
         return;
       }
-      c.preview = landing(p.x, p.y);
+      c.preview = landing(c, p.x, p.y);
       api.setDrop({ preview: c.preview, x: p.x, y: p.y, label: c.data.name, length: c.length });
     },
     onDragEnd: (event: DragEndEvent) => {
@@ -266,7 +265,7 @@ export function useTimelineDrops(api: DropsApi) {
       if (!c || String(event.over?.id ?? "").startsWith("folder:")) return;
       const p = pointerOf(event);
       if (!p) return;
-      dropCard(c.data, c.length, landing(p.x, p.y));
+      dropCard(c.data, c.length, landing(c, p.x, p.y));
     },
     onDragCancel: () => {
       card.current = null;

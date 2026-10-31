@@ -1,7 +1,7 @@
 // How a clip looks on the new timeline (docs/plan/capcut-ui-spec.md §2.3, §4.11): its body and
 // chip colours, its label chips, and for a video or photo the bands its label, thumbnails and
 // own sound take. The colours are OpenRip's family (lib/timeline-colors.ts). Pure.
-import type { AnyClipProps, Asset, FilterClipProps, ShapeClipProps, TextClipProps, VideoClipProps } from "../types.ts";
+import type { AnyClipProps, Asset, FilterClipProps, GroupClipProps, ShapeClipProps, TextClipProps, VideoClipProps } from "../types.ts";
 import { TIMELINE_COLORS } from "../timeline-colors.ts";
 import { SOUND_COLORS, mediaBands, soundKindOf } from "../waveform.ts";
 
@@ -93,6 +93,9 @@ export const clipLook = (clip: AnyClipProps, asset: Pick<Asset, "path" | "type" 
     }
     case "draw":
       return { body: TIMELINE_COLORS.drawing, chip: BAR_CHIP, chips: ["Drawing"], bands: null, chipsOnTop: false };
+    case "group":
+      // A text template's container (its parts hidden under it): a text bar with the template's name.
+      return { body: TIMELINE_COLORS.text, chip: BAR_CHIP, chips: [(clip as GroupClipProps).template?.name ?? "Text template"], bands: null, chipsOnTop: true };
     default:
       return { body: TIMELINE_COLORS.video, chip: TIMELINE_COLORS.videoChip, chips: [], bands: null, chipsOnTop: false };
   }

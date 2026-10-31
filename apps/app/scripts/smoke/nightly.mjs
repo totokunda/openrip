@@ -184,7 +184,7 @@ const CASES = [
   ["new:windows", "import timeline windows", { ...V, ...NEW }],
 ];
 
-/** One case: its own profile, its PASS/FAIL lines kept; a case that hangs is stopped after 20 minutes. */
+/** One case: its own profile, its PASS/FAIL lines kept; one that hangs is stopped (a case after 20 minutes, a suite after 75). */
 const runCase = ([name, steps, env, clip]) =>
   new Promise((resolve) => {
     const clipPath = clip === "REAL" ? REAL : clip ?? STD;
@@ -204,7 +204,8 @@ const runCase = ([name, steps, env, clip]) =>
     let text = "";
     child.stdout.on("data", (d) => (text += d));
     child.stderr.on("data", (d) => (text += d));
-    const timer = setTimeout(() => child.kill("SIGKILL"), 20 * 60 * 1000);
+    // A suite runs a dozen sessions: an hour; a case, 20 minutes.
+    const timer = setTimeout(() => child.kill("SIGKILL"), (suite ? 75 : 20) * 60 * 1000);
     child.on("close", (code) => {
       clearTimeout(timer);
       fs.rmSync(profile, { recursive: true, force: true });
