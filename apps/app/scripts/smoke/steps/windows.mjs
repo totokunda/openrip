@@ -200,7 +200,8 @@ export default async (ctx) => {
   notes.push(`player window: ${(shown.changes / shown.secs).toFixed(1)} fps shown, ${del.rate.toFixed(1)} fps delivered, ${shown.ticks} samples`);
 
   // Space, with the player's window in front: pauses, then plays, then pauses.
-  await player.bringToFront();
+  // Brought to the front only when the run is in the foreground: in the background nothing comes to the front.
+  if (process.env.FOREGROUND) await player.bringToFront();
   await sleep(300);
   await player.keyboard.press("Space");
   await sleep(500);
@@ -371,7 +372,7 @@ export default async (ctx) => {
     check("media dragged from its window onto the editor's timeline is added there", m1 === m0 + 1, `clips ${m0} → ${m1}`);
     await ctx.shot("windows-dropped-from-media-window");
     if (m1 > m0) {
-      await win.bringToFront();
+      if (process.env.FOREGROUND) await win.bringToFront();
       await win.keyboard.press("Meta+z");
       await waitFor(async () => (await clipCount()) === m0, 8000);
     }

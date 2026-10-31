@@ -160,7 +160,9 @@ export function attachPanelWindows(editor: BrowserWindow) {
         show: !mac,
         // The editor itself may be full screen; its panels' windows never start so.
         fullscreen: false,
-        fullscreenable: true,
+        // Never full screen in a test run (a Space of its own would take over the user's screen).
+        fullscreenable: !inBackground,
+        ...(inBackground ? { opacity: 0, focusable: false } : {}),
         autoHideMenuBar: true,
         // CapCut's dark window chrome: the page draws a 34 px title strip under the window's
         // own buttons (macOS's lights, Windows' overlay).
