@@ -1,6 +1,8 @@
 import React from "react";
 import Controls from "../controls/Controls";
 import TimelineEditor from "../timeline/TimelineEditor";
+import TimelineSurface from "../timeline2/TimelineSurface";
+import { usePreferencesStore } from "@/lib/preferences";
 import { PanelShell, panelHeaderHandlers, topStrip } from "./PanelShell";
 
 interface TimelinePanelProps {
@@ -27,6 +29,8 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
   minSize = 25,
   detached = false,
 }) => {
+  // Settings › Edit › New timeline (Labs): the canvas timeline being built (docs/plan/timeline-rewrite.md).
+  const newTimeline = usePreferencesStore((s) => s.prefs.newTimeline);
   return (
     <PanelShell
       id={id}
@@ -40,7 +44,7 @@ const TimelinePanel: React.FC<TimelinePanelProps> = ({
     >
       <Controls />
       <div className="flex flex-col justify-center flex-1 min-h-0 overflow-auto">
-        <TimelineEditor />
+        {newTimeline ? <TimelineSurface /> : <TimelineEditor />}
       </div>
     </PanelShell>
   );
