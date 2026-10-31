@@ -39,7 +39,10 @@ import { setTransitionDuration } from "@/lib/transitions";
 import { moveKeysAt } from "@/lib/timeline-keyframes";
 import { withEnd } from "@/lib/range";
 import { useRenderStore } from "@/lib/prerender";
-import { openKeyframeMenu, openMarkerMenu, openTransitionMenu } from "./markMenus";
+import { openKeyframeMenu, openTransitionMenu } from "./markMenus";
+import { openMarkerMenu } from "../timeline/menus/markerMenu";
+import { doubleClickClip, openClipMenu } from "../timeline/menus/clipMenu";
+import { openTrackSpaceMenu } from "../timeline/menus/trackMenu";
 import { drawBlade, drawCoverTile, drawScrollbars, hThumb, onCoverTile, scrollbarAt, vThumb } from "./chrome";
 import { openCoverEditor } from "@/lib/cover";
 import { drawCardGhost, drawClip, drawCutTarget, drawDropTarget, drawFloating, drawGuide, drawMarkers, drawMarquee, drawNewTrackLine, drawPlayhead, drawRowShades, drawRows, drawRuler, drawSkim, drawSlot, drawTrimTip, inTrackAreas } from "./draw";
@@ -695,7 +698,7 @@ const TimelineSurface: React.FC = () => {
     end(true);
   };
 
-  /** A right-click on a marker, a transition or a keyframe opens its menu; the clips' and tracks' menus come next. */
+  /** Right click: a marker's, a transition's or a keyframe's menu; else a clip's (locked tracks get none) or a track's empty space's; nothing on the ruler. */
   const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const layout = layoutOf();
@@ -708,6 +711,26 @@ const TimelineSurface: React.FC = () => {
     if (key) return openKeyframeMenu(key.clipId, key.frame, e.clientX, e.clientY);
     const tr = transitionAt(transitionMarks(layout, useClipStore.getState().clips, controls.fps || 24, controls.selectedTransitionId, null), x, y);
     if (tr) return openTransitionMenu(tr.mark.clipId, e.clientX, e.clientY);
+    const hit = hitTest(layout, x, y, canTrim);
+    if (hit.kind === "clip") {
+      if (hit.box.row.track.locked) return;
+      openClipMenu(hit.box.id, e.clientX, e.clientY);
+    } else if (hit.kind === "row") {
+      // The playhead moves to the click first, as on the old timeline.
+      const frame = Math.max(0, Math.round(hit.frame));
+      controls.setFocusAnchorRatio(Math.max(0, Math.min(1, (x - layout.view.x0) / layout.view.width)));
+      controls.setFocusFrame(frame, false);
+      openTrackSpaceMenu(hit.row.track.timelineId, frame, e.clientX, e.clientY);
+    }
+  };
+
+  /** Double click on a clip: a compound opens, a text template opens its words. */
+  const onDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const layout = layoutOf();
+    if (!layout) return;
+    const { x, y } = local(e);
+    const hit = hitTest(layout, x, y, canTrim);
+    if (hit.kind === "clip" && !hit.box.row.track.locked) doubleClickClip(hit.box.id);
   };
 
   const onPointerLeave = () => {
@@ -778,6 +801,7 @@ const TimelineSurface: React.FC = () => {
           onPointerCancel={() => end(false)}
           onPointerLeave={onPointerLeave}
           onContextMenu={onContextMenu}
+          onDoubleClick={onDoubleClick}
         />
       </div>
     </div>

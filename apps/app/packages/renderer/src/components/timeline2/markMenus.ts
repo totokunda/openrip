@@ -1,27 +1,10 @@
-// The menus of the marks on the new timeline: a marker's, a transition's and a keyframe's, the
-// same items the timeline before this one had (GlobalContextMenu runs their actions).
+// The menus of the marks on the new timeline: a transition's and a keyframe's, the same items the
+// timeline before this one had (GlobalContextMenu runs their actions). A marker's is shared with
+// the old timeline (components/timeline/menus/markerMenu.ts).
 import { useControlsStore } from "@/lib/control";
 import { useContextMenuStore } from "@/lib/context-menu";
 import { useClipStore } from "@/lib/clip";
 import { EASE_PRESETS, easeAt, useKeyframeGraphStore } from "@/lib/timeline-keyframes";
-
-export function openMarkerMenu(markerId: string, x: number, y: number) {
-  useControlsStore.getState().setSelectedMarkerId(markerId);
-  useContextMenuStore.getState().openMenu({
-    position: { x, y },
-    target: { type: "marker", markerId },
-    groups: [
-      {
-        id: "marker",
-        items: [
-          { id: "edit", label: "Edit marker", action: "editMarker" },
-          { id: "delete", label: "Delete marker", action: "deleteMarker", shortcut: "Del" },
-          { id: "deleteAll", label: "Delete all markers in timeline", action: "deleteAllMarkers" },
-        ],
-      },
-    ],
-  });
-}
 
 export function openTransitionMenu(clipId: string, x: number, y: number) {
   useControlsStore.getState().setSelectedTransitionId(clipId);
