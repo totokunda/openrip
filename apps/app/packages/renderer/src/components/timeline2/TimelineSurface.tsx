@@ -26,6 +26,8 @@ import { frameAt, framesFor, viewOf, xOf } from "@/lib/timeline/view";
 import { duplicateClips, goingWith, type Doc, type Rules } from "@/lib/timeline/core/edit";
 import { marqueeHits, previewMove, previewTrim, type MoveDrag, type MovePreview, type SnapContext, type TrimDrag } from "@/lib/timeline/gesture";
 import TimelineSidebar from "../timeline/TimelineSidebar";
+import { doubleClickClip, openClipMenu } from "../timeline/menus/clipMenu";
+import { openTrackSpaceMenu } from "../timeline/menus/trackMenu";
 import { drawClip, drawFloating, drawGuide, drawMarkers, drawMarquee, drawNewTrackLine, drawPlayhead, drawRowShades, drawRows, drawRuler, drawSkim, drawSlot, drawTrimTip, inTrackAreas } from "./draw";
 
 /** A ⌘-scroll (or pinch) of this many pixels is one zoom step. */
@@ -498,6 +500,35 @@ const TimelineSurface: React.FC = () => {
     end(true);
   };
 
+  /** Right click: a clip's menu (locked tracks get none), a track's empty space's menu, nothing on the ruler. */
+  const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const layout = layoutOf();
+    if (!layout) return;
+    const { x, y } = local(e);
+    const hit = hitTest(layout, x, y, canTrim);
+    if (hit.kind === "clip") {
+      if (hit.box.row.track.locked) return;
+      openClipMenu(hit.box.id, e.clientX, e.clientY);
+    } else if (hit.kind === "row") {
+      // The playhead moves to the click first, as on the old timeline.
+      const controls = useControlsStore.getState();
+      const frame = Math.max(0, Math.round(hit.frame));
+      controls.setFocusAnchorRatio(Math.max(0, Math.min(1, (x - layout.view.x0) / layout.view.width)));
+      controls.setFocusFrame(frame, false);
+      openTrackSpaceMenu(hit.row.track.timelineId, frame, e.clientX, e.clientY);
+    }
+  };
+
+  /** Double click on a clip: a compound opens, a text template opens its words. */
+  const onDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const layout = layoutOf();
+    if (!layout) return;
+    const { x, y } = local(e);
+    const hit = hitTest(layout, x, y, canTrim);
+    if (hit.kind === "clip" && !hit.box.row.track.locked) doubleClickClip(hit.box.id);
+  };
+
   const onPointerLeave = () => {
     if (useControlsStore.getState().hoverFrame != null) useControlsStore.getState().setHoverFrame(null);
   };
@@ -541,7 +572,8 @@ const TimelineSurface: React.FC = () => {
           onPointerUp={onPointerUp}
           onPointerCancel={() => end(false)}
           onPointerLeave={onPointerLeave}
-          onContextMenu={(e) => e.preventDefault()}
+          onContextMenu={onContextMenu}
+          onDoubleClick={onDoubleClick}
         />
       </div>
     </div>
