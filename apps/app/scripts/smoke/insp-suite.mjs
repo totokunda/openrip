@@ -31,7 +31,7 @@ for (const [name, { clip, CLIP_NAME: label }, steps] of CASES) {
     console.log(`== ${name}: skipped, no clip given`);
     continue;
   }
-  const out = path.join("out/insp", name);
+  const out = path.join(process.env.SUITE_OUT || "out/insp", name);
   fs.rmSync(`${out}-profile`, { recursive: true, force: true });
   console.log(`== ${name}: ${steps}`);
   const r = spawnSync("node", ["session.mjs", appDir, out, `${out}-profile`, clip, ...steps.split(" ")], { env: { ...rest, CLIP_NAME: label }, encoding: "utf8" });

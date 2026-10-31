@@ -27,7 +27,7 @@ for (const [name, env, steps] of CASES) {
     console.log(`== ${name}: skipped, no MOTION_DEV given`);
     continue;
   }
-  const out = path.join("out/motion", name);
+  const out = path.join(process.env.SUITE_OUT || "out/motion", name);
   fs.rmSync(`${out}-profile`, { recursive: true, force: true });
   console.log(`== ${name}: ${steps}`);
   const r = spawnSync("node", ["session.mjs", appDir, out, `${out}-profile`, clip, ...steps.split(" ")], { env: { ...rest, ...env }, encoding: "utf8" });
