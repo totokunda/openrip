@@ -191,6 +191,9 @@ const CASES = [
   ["new:covereditor", "import timeline covereditor", { ...V, ...NEW }],
   ["new:trimclip", "import timeline trimclip", { ...V, ...NEW }],
   ["new:textpresetsave", "import timeline newtext textpresetsave", { ...V, ...NEW }],
+  // How smoothly each timeline keeps up with a drag, a marquee and the wheel over 140 clips.
+  ["perf:old", "import timeline tlperf", V],
+  ["perf:new", "import timeline tlperf", { ...V, ...NEW }],
 ];
 
 /** One case: its own profile, its PASS/FAIL lines kept; one that hangs is stopped (a case after 20 minutes, a suite after 75). */
