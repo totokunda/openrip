@@ -1,6 +1,17 @@
 # Plan: a new timeline
 
-Status 2026-10-31: started. The user asked for the timeline to be rewritten so it works the way CapCut's does. They found the current React-Konva timeline janky and full of bugs.
+Status 2026-10-31: the new timeline is built behind Settings › Edit › New timeline (Labs) and passes the timeline smoke suites. The user asked for the timeline to be rewritten so it works the way CapCut's does. They found the current React-Konva timeline janky and full of bugs.
+
+**Progress (branch `timeline2`):**
+- **Phases 1–4 are in.** That covers:
+  - the core, view, layout and canvas;
+  - gestures: moves with followers and ⌥-copy, trims, marquee, scrub, blade, edge scroll, Esc;
+  - thumbnails and waveforms from caches;
+  - transitions, keyframes, markers, range, render bar, Cover tile, scrollbars and the volume line;
+  - drops from every panel and from panel windows;
+  - shared context menus and double-click.
+- **On the new timeline these pass:** every `tl-suite.mjs` case (magnet, link, snap, markers, tracks, handle, keys, tools, pinned, linkage, menus, undo, feel), plus groups, timelines, zoomrange, menus, compound, beatsui, windows, play and perf.
+- **Phase 5 is next.** The nightly run (`scripts/smoke/nightly.mjs`) checks the rest on both timelines; then the new one becomes the default and the old one is deleted.
 
 ## Why the current timeline is janky
 
