@@ -33,3 +33,38 @@ export const beatDotCount = (win) =>
     if (window.__openripTimeline && media) return window.__openripTimeline.layout().clips.reduce((n, b) => n + (media.media(b.id)?.beats ?? 0), 0);
     return (window.Konva?.stages ?? []).flatMap((s) => s.find(".beat-markers")).reduce((n, g) => n + g.getChildren().length, 0);
   });
+
+/** A clip's sound as last drawn: { bars ({x, h} each), line, area (the band's height), max, pxPerFrame }, or null. */
+export const soundOf = (win, clipId) =>
+  win.evaluate((id) => {
+    const media = window.__openripTimelineMedia;
+    if (window.__openripTimeline && media) {
+      const s = media.media(id)?.sound;
+      return s ? { bars: s.heights, line: s.line, area: s.height, max: s.maxBar, pxPerFrame: s.pxPerFrame } : null;
+    }
+    const n = (window.Konva?.stages ?? []).flatMap((st) => st.find(".waveform")).find((x) => x.getAttr("clipId") === id);
+    return n ? { bars: n.getAttr("heights"), line: n.getAttr("line"), area: n.getAttr("area"), max: n.getAttr("maxBar"), pxPerFrame: n.getAttr("pxPerFrame") } : null;
+  }, clipId);
+
+/** The colour a sound clip's body is drawn in. */
+export const soundBodyOf = (win, clipId) =>
+  win.evaluate((id) => {
+    const media = window.__openripTimelineMedia;
+    if (window.__openripTimeline && media) return media.media(id)?.body ?? null;
+    const n = (window.Konva?.stages ?? []).flatMap((s) => s.find(".waveform")).find((x) => x.getAttr("clipId") === id);
+    return n?.getParent()?.getChildren()?.[0]?.fill?.() ?? null;
+  }, clipId);
+
+/** The keyframe diamonds drawn: their centres on screen, left to right. */
+export const diamondsOnScreen = (win) =>
+  win.evaluate(() => {
+    if (window.__openripTimeline) return window.__openripTimeline.diamonds().map(({ x, y }) => ({ x, y }));
+    const stage = (window.Konva?.stages ?? []).find((s) => s.container().closest("[data-testid=timeline]"));
+    if (!stage) return [];
+    const box = stage.container().getBoundingClientRect();
+    return stage
+      .find(".keyframe-diamond")
+      .map((n) => n.getAbsolutePosition())
+      .map((p) => ({ x: box.x + p.x, y: box.y + p.y }))
+      .sort((a, b) => a.x - b.x);
+  });

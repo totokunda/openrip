@@ -13,6 +13,7 @@
 // - zoomed in: still 1 px every 2 px;
 // - the track's "…" menu: Track height Tall (a taller clip, taller bars) and Audio waveform size
 //   60% (bars twice as tall), each one undo step and saved with the track.
+import { chipsOf, soundBodyOf, soundOf } from "./_tlfacts.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
 import path from "node:path";
 import { ffmpeg } from "./_audio.mjs";
@@ -23,14 +24,8 @@ import { key } from "./_timeline.mjs";
 import { audioSub } from "./audioui.mjs";
 
 /** What the timeline draws for a clip's sound: its bars (x px from its left, height), line and band height. */
-const drawn = (win, clipId) =>
-  win.evaluate((id) => {
-    const nodes = (window.Konva?.stages ?? []).flatMap((s) => s.find(".waveform")).filter((n) => n.getAttr("clipId") === id);
-    const n = nodes[0];
-    return n ? { bars: n.getAttr("heights"), line: n.getAttr("line"), area: n.getAttr("area"), max: n.getAttr("maxBar"), pxPerFrame: n.getAttr("pxPerFrame") } : null;
-  }, clipId);
-const chips = (win, clipId) =>
-  win.evaluate((id) => (window.Konva?.stages ?? []).flatMap((s) => s.find(".clip-chips")).find((n) => n.getAttr("clipId") === id)?.getAttr("chips") ?? null, clipId);
+const drawn = (win, clipId) => soundOf(win, clipId);
+const chips = async (win, clipId) => (await chipsOf(win, clipId))?.chips ?? null;
 
 /**
  * CapCut's bars in a reference screenshot: per bar (2 device px on, 2 off, from `left` + 3), its
@@ -150,10 +145,7 @@ export default async (ctx) => {
   const achips = await chips(win, sound.clipId);
   let a0 = await drawn(win, sound.clipId);
   check(`the audio clip: its name chip ${JSON.stringify(achips)}, its waveform over the clip (${a0?.bars.length} bars, the tallest ${a0?.max} px)`, achips?.[0] === "IMG_9079" && a0?.area === 50 && a0.max > 10 && a0.max <= 30.5);
-  const body = await win.evaluate((id) => {
-    const n = (window.Konva?.stages ?? []).flatMap((s) => s.find(".waveform")).find((x) => x.getAttr("clipId") === id);
-    return n?.getParent()?.getChildren()?.[0]?.fill?.();
-  }, sound.clipId);
+  const body = await soundBodyOf(win, sound.clipId);
   const fromVideo = await win.evaluate(async () => (await import("/src/lib/timeline-colors.ts")).TIMELINE_COLORS.fromVideoBg);
   check(`in the colour of a video's sound (${body}, fromVideoBg ${fromVideo})`, body === fromVideo);
   check(`the volume line at 13 px (${a0.line[0].h.toFixed(2)})`, Math.abs(a0.line[0].h - 13) < 0.01);

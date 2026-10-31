@@ -182,6 +182,15 @@ const CASES = [
   ["new:menus", "import timeline menus", { ...V, ...NEW }],
   ["new:beatsui", "import timeline newtext beatsui", { ...V, ...NEW }],
   ["new:windows", "import timeline windows", { ...V, ...NEW }],
+  ["new:suite:motion", "motion-suite.mjs", { ...V, ...NEW, MOTION_DEV: `http://localhost:${DEV_PORT}` }],
+  ["new:waveformui", "import timeline waveformui", { ...V, ...dev, ...NEW }],
+  ["new:scrubaudio", "import timeline scrubaudio", { ...V, ...NEW }],
+  ["new:shuttle", "import timeline shuttle", { ...V, ...NEW }],
+  ["new:presets", "import timeline newtext presets", { ...V, ...NEW }],
+  ["new:audioui", "import timeline audioui", { ...V, ...NEW }],
+  ["new:covereditor", "import timeline covereditor", { ...V, ...NEW }],
+  ["new:trimclip", "import timeline trimclip", { ...V, ...NEW }],
+  ["new:textpresetsave", "import timeline newtext textpresetsave", { ...V, ...NEW }],
 ];
 
 /** One case: its own profile, its PASS/FAIL lines kept; one that hangs is stopped (a case after 20 minutes, a suite after 75). */

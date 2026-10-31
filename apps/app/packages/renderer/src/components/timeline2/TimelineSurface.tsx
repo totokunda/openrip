@@ -594,6 +594,14 @@ const TimelineSurface: React.FC = () => {
         return h.kind === "clip" ? { kind: h.kind, id: h.box.id, edge: h.edge, frame: h.frame } : { kind: h.kind, frame: h.frame };
       },
       gesture: () => scene.current.gesture?.kind ?? null,
+      /** The keyframe diamonds drawn, their centres in the page's coordinates, left to right. */
+      diamonds: () => {
+        const l = layoutOf();
+        const r = overlayRef.current?.getBoundingClientRect();
+        if (!l || !r) return [];
+        const c = useControlsStore.getState();
+        return keyMarks(l, new Set(c.selectedClipIds), c.focusFrame).map((m) => ({ x: r.x + m.x, y: r.y + m.y, clipId: m.clipId, frame: m.frame })).sort((a, b) => a.x - b.x);
+      },
     };
     (window as unknown as { __openripTimeline?: typeof hook }).__openripTimeline = hook;
     return () => {

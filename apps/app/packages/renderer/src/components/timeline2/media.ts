@@ -74,6 +74,8 @@ export interface ClipFacts {
   chips?: string[];
   /** The glyph before the first chip (a compound's, an effect bar's wand). */
   glyph?: string | null;
+  /** The clip's body colour. */
+  body?: string;
   missing?: boolean;
   beats?: number;
   sticker?: boolean;

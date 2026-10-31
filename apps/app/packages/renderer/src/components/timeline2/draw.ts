@@ -191,6 +191,7 @@ export function drawClip(ctx: CanvasRenderingContext2D, l: Layout, b: ClipBox, p
   const shown = picture ? { ...look, chips: [] } : look;
   factsOf(b.id).chips = look.effects ? [look.effects, ...shown.chips] : shown.chips;
   factsOf(b.id).glyph = look.glyph ?? null;
+  factsOf(b.id).body = look.body;
   drawChips(ctx, b, shown, l.view.x0, l.width);
   drawBeats(ctx, l, b);
   if (p.deactivated) {
