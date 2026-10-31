@@ -46,7 +46,11 @@ import { openTrackSpaceMenu } from "../timeline/menus/trackMenu";
 import { drawBlade, drawCoverTile, drawScrollbars, hThumb, onCoverTile, scrollbarAt, vThumb } from "./chrome";
 import { openCoverEditor } from "@/lib/cover";
 import { drawCardGhost, drawClip, drawCutTarget, drawDropTarget, drawFloating, drawGuide, drawMarkers, drawMarquee, drawNewTrackLine, drawPlayhead, drawRowShades, drawRows, drawRuler, drawSkim, drawSlot, drawTrimTip, inTrackAreas } from "./draw";
-import { setMediaRedraw } from "./media";
+import { factsOf, setMediaRedraw } from "./media";
+import { dragVolume, formatDb, lineDb, lineHeight, volumeAt } from "@/lib/waveform";
+import { motionMarks } from "@/lib/timeline/marks";
+import { useInspectorStore } from "@/lib/inspector";
+import type { AnyClipProps } from "@/lib/types";
 
 /** A ⌘-scroll (or pinch) of this many pixels is one zoom step. */
 const ZOOM_WHEEL_STEP = 40;
@@ -66,7 +70,8 @@ type Gesture =
   | { kind: "transitionSide"; clipId: string; side: -1 | 1; from: number; x0: number }
   | { kind: "keyframe"; clipId: string; start: number; length: number; from: number; to: number; x0: number; moved: boolean }
   | { kind: "hbar"; x0: number; start: number; framesPerPx: number; wasPlaying: boolean }
-  | { kind: "vbar"; y0: number; scroll0: number; pxPerScroll: number };
+  | { kind: "vbar"; y0: number; scroll0: number; pxPerScroll: number }
+  | { kind: "volume"; clip: AnyClipProps; from: number; h0: number; y0: number; scale: import("@/lib/waveform").WaveScale; max: number; value: number; patch: Partial<AnyClipProps> | null; x: number; y: number };
 
 /** Sizes a canvas to its box at the screen's pixel density; its context draws in CSS pixels. */
 const fitCanvas = (canvas: HTMLCanvasElement, width: number, height: number) => {
@@ -108,7 +113,7 @@ const TimelineSurface: React.FC = () => {
   const [scrollY, setScrollY] = useState(0);
   const scrollYRef = useRef(scrollY);
   scrollYRef.current = scrollY;
-  const scene = useRef({ layout: null as Layout | null, dirty: true, overlayDirty: true, raf: 0, gesture: null as Gesture | null, stopScroll: null as null | (() => void), drop: null as DropState | null, hover: { cover: false, bar: null as "h" | "v" | null, bladeX: null as number | null } });
+  const scene = useRef({ layout: null as Layout | null, dirty: true, overlayDirty: true, raf: 0, gesture: null as Gesture | null, stopScroll: null as null | (() => void), drop: null as DropState | null, hover: { cover: false, bar: null as "h" | "v" | null, bladeX: null as number | null, volume: null as string | null } });
   const wheel = useRef({ zoom: 0, frames: 0 });
 
   // The pinning, worked out as the headers render so they and the canvas agree (the headers read
@@ -149,7 +154,8 @@ const TimelineSurface: React.FC = () => {
       s.dirty = false;
       // While a move, a trim or a card from a panel is under way, the timeline as it would be
       // left, on the tracks as they are.
-      const preview = s.drop?.preview ?? (g && (g.kind === "move" || g.kind === "trim") ? g.preview : null);
+      const volumed = g?.kind === "volume" && g.patch ? { doc: { clips: clipsState.clips.map((c) => (c.clipId === g.clip.clipId ? ({ ...c, ...g.patch } as AnyClipProps) : c)) } } : null;
+      const preview = s.drop?.preview ?? volumed ?? (g && (g.kind === "move" || g.kind === "trim") ? g.preview : null);
       const layout = layoutOf(preview ? { clips: preview.doc.clips, tracks: clipsState.timelines } : undefined);
       if (!layout) return;
       s.layout = layout;
@@ -186,6 +192,21 @@ const TimelineSurface: React.FC = () => {
         if (b) keys.push({ clipId: g.clipId, frame: g.to, x: b.x + (g.to * b.w) / g.length, y: b.y + b.h / 2, atPlayhead: false });
       }
       drawKeyframes(ctx, keys);
+      // The volume line hovered or dragged is lit, with its level in a tip while dragged.
+      const lit = g?.kind === "volume" ? g.clip.clipId : s.hover.volume;
+      const litBox = lit ? layout.clips.find((c) => c.id === lit) : null;
+      const sound = litBox ? factsOf(litBox.id).sound : null;
+      if (litBox && sound && sound.line.length > 1) {
+        ctx.save();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const bottom = sound.y + sound.height;
+        sound.line.forEach((p, i) => (i ? ctx.lineTo(litBox.x + p.x, bottom - p.h - 0.25) : ctx.moveTo(litBox.x + p.x, bottom - p.h - 0.25)));
+        ctx.stroke();
+        ctx.restore();
+        if (g?.kind === "volume") drawTrimTip(ctx, layout, litBox, formatDb(g.value), g.x);
+      }
       drawCoverTile(ctx, layout, s.hover.cover, clipsState.compoundStack.length > 0);
       drawScrollbars(ctx, layout, controls.totalTimelineFrames, scrollYRef.current, g?.kind === "hbar" ? "h" : g?.kind === "vbar" ? "v" : s.hover.bar);
       if (g?.kind === "move" && g.preview) {
@@ -314,6 +335,39 @@ const TimelineSurface: React.FC = () => {
     scrubSound(frame);
   };
 
+  /**
+   * A press on a clip's volume line (CapCut's: over its waveform, grabbed 3.5 px either side, its
+   * ends left free for the trim handles), as the last draw put it. Not with the blade, nor on a
+   * locked track.
+   */
+  const volumeLineAt = (layout: Layout, x: number, y: number): ClipBox | null => {
+    if (useControlsStore.getState().timelineTool === "split") return null;
+    for (let i = layout.clips.length - 1; i >= 0; i--) {
+      const b = layout.clips[i];
+      const sound = factsOf(b.id).sound;
+      if (!sound || b.row.track.locked || sound.line.length < 2 || x < b.x + 5 || x > b.x + b.w - 5) continue;
+      const local = x - b.x;
+      const k = sound.line.findIndex((p) => p.x >= local);
+      if (k < 0) continue;
+      const [a, c] = [sound.line[Math.max(0, k - 1)], sound.line[k]];
+      const h = c.x === a.x ? c.h : a.h + ((c.h - a.h) * (local - a.x)) / (c.x - a.x);
+      if (Math.abs(y - (sound.y + sound.height - h)) <= 3.5) return b;
+    }
+    return null;
+  };
+
+  /** A press on a selected clip's speed badge ("1.00x ▸"), which opens its Speed tab. */
+  const badgeAt = (layout: Layout, x: number, y: number): ClipBox | null => {
+    const selected = useControlsStore.getState().selectedClipIds;
+    const fps = useControlsStore.getState().fps || 24;
+    for (const b of layout.clips) {
+      if (!selected.includes(b.id)) continue;
+      const badge = motionMarks(b.clip, b.w, b.h, fps, true).badge;
+      if (badge && x >= b.x + badge.x && x <= b.x + badge.x + badge.w && y >= b.y + badge.y && y <= b.y + badge.y + badge.h) return b;
+    }
+    return null;
+  };
+
   const canTrim = (b: ClipBox) => useControlsStore.getState().selectedClipIds.includes(b.id) && !b.row.track.locked && b.clip.type !== "group";
 
   /** The store's document now. */
@@ -405,6 +459,13 @@ const TimelineSurface: React.FC = () => {
       // Both halves move together: the duration grows by twice what a side is dragged.
       const fps = useControlsStore.getState().fps || 24;
       setTransitionDuration(g.clipId, g.from + (2 * g.side * framesFor(layout.view, x - g.x0)) / fps);
+    } else if (g.kind === "volume") {
+      g.x = x;
+      g.y = y;
+      const { patch, value } = dragVolume(g.clip, g.from, lineDb(g.h0 + g.y0 - y, g.scale, g.max));
+      g.patch = patch;
+      g.value = value;
+      redraw();
     } else if (g.kind === "hbar") {
       const controls = useControlsStore.getState();
       const target = Math.round(g.start + (x - g.x0) * g.framesPerPx);
@@ -475,6 +536,7 @@ const TimelineSurface: React.FC = () => {
       }
     }
     if (g?.kind === "hbar" && g.wasPlaying) useControlsStore.getState().play();
+    if (commit && g?.kind === "volume" && g.patch) useClipStore.getState().updateClip(g.clip.clipId, g.patch);
     if (commit && g?.kind === "range") {
       const c = useControlsStore.getState();
       if (c.range) c.setRange(withEnd(c.range, g.which, g.frame, c.range.end));
@@ -579,6 +641,23 @@ const TimelineSurface: React.FC = () => {
       edgeScroll();
       return;
     }
+    // A selected clip's speed badge opens its Speed tab.
+    const badged = badgeAt(layout, x, y);
+    if (badged) {
+      useInspectorStore.getState().setTab("duration");
+      return;
+    }
+    // A clip's volume line drags its volume (or with keys its whole curve), from where it was pressed.
+    const voiced = volumeLineAt(layout, x, y);
+    const sound = voiced ? factsOf(voiced.id).sound : null;
+    if (voiced && sound) {
+      if (!controls.selectedClipIds.includes(voiced.id)) controls.toggleClipSelection(voiced.id, false);
+      const fps = controls.fps || 24;
+      const from = volumeAt(voiced.clip, (x - voiced.x) / sound.pxPerFrame, fps);
+      scene.current.gesture = { kind: "volume", clip: voiced.clip, from, h0: lineHeight(from, sound.scale, sound.height), y0: y, scale: sound.scale, max: sound.height, value: from, patch: null, x, y };
+      e.currentTarget.style.cursor = "ns-resize";
+      return;
+    }
     // A selected clip's keyframe diamonds, then the transitions' badges and a selected one's sides.
     const key = keyframeAt(keyMarks(layout, new Set(controls.selectedClipIds), controls.focusFrame), x, y);
     if (key) {
@@ -677,6 +756,19 @@ const TimelineSurface: React.FC = () => {
       e.currentTarget.style.cursor = cover && useClipStore.getState().compoundStack.length === 0 ? "pointer" : "default";
       return;
     }
+    const voiced = volumeLineAt(layout, x, y)?.id ?? null;
+    if (voiced !== s.hover.volume) {
+      s.hover.volume = voiced;
+      redraw();
+    }
+    if (voiced) {
+      e.currentTarget.style.cursor = "ns-resize";
+      return;
+    }
+    if (badgeAt(layout, x, y)) {
+      e.currentTarget.style.cursor = "pointer";
+      return;
+    }
     const nearHead = Math.abs(x - xOf(layout.view, controls.focusFrame)) <= PLAYHEAD_GRAB && x >= layout.view.x0;
     e.currentTarget.style.cursor = nearHead ? "ew-resize" : hit.kind === "clip" ? (controls.timelineTool === "split" ? "crosshair" : hit.edge ? "col-resize" : "pointer") : "default";
     // The preview axis: the player shows the frame under the pointer (not while playing).
@@ -739,8 +831,8 @@ const TimelineSurface: React.FC = () => {
 
   const onPointerLeave = () => {
     const hover = scene.current.hover;
-    if (hover.cover || hover.bar || hover.bladeX != null) {
-      scene.current.hover = { cover: false, bar: null, bladeX: null };
+    if (hover.cover || hover.bar || hover.bladeX != null || hover.volume) {
+      scene.current.hover = { cover: false, bar: null, bladeX: null, volume: null };
       redraw();
     }
     if (useControlsStore.getState().hoverFrame != null) useControlsStore.getState().setHoverFrame(null);

@@ -167,7 +167,7 @@ function drawBars(ctx: CanvasRenderingContext2D, l: Layout, b: ClipBox, buckets:
     ctx.stroke();
   }
   ctx.restore();
-  factsOf(b.id).sound = { y: o.y, height: o.height, heights: bars.filter((x) => x.x >= from - 4 && x.x <= to + 4), maxBar, line, pxPerFrame: ppf, color: o.color };
+  factsOf(b.id).sound = { y: o.y, height: o.height, heights: bars.filter((x) => x.x >= from - 4 && x.x <= to + 4), maxBar, line, pxPerFrame: ppf, color: o.color, scale: o.scale };
 }
 
 /** An audio clip's waveform over the whole clip. */

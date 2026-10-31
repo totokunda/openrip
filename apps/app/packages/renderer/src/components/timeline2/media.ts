@@ -70,7 +70,7 @@ export const mediaStats = (): MediaStats => ({ ...counters, tiles: store.size, b
 export interface ClipFacts {
   clipId: string;
   thumbs?: { tiles: number; exact: number; placeholder: number; tileWidth: number; y: number; height: number };
-  sound?: { y: number; height: number; heights: Bar[]; maxBar: number; line: Bar[]; pxPerFrame: number; color: string };
+  sound?: { y: number; height: number; heights: Bar[]; maxBar: number; line: Bar[]; pxPerFrame: number; color: string; scale: WaveScale };
   chips?: string[];
   missing?: boolean;
   beats?: number;
