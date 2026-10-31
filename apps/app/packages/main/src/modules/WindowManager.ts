@@ -96,14 +96,18 @@ class WindowManager implements AppModule {
       show: false,
       ...(icon ? { icon } : {}),
       backgroundColor: "#000000",
-      ...(process.platform === "win32"
-        ? {
-            // Don't force fullscreen on Windows: it can feel "stuck" and obscure exit affordances.
-            // Start maximized instead.
-            fullscreen: false,
-            autoHideMenuBar: true,
-          }
-        : { fullscreen: true }),
+      ...(inBackground
+        ? // A test run's window never reaches the screen (background.ts): never full screen, which
+          // on macOS opens a Space of its own and switches the user to it; transparent; never focused.
+          { fullscreen: false, fullscreenable: false, opacity: 0, focusable: false, skipTaskbar: true }
+        : process.platform === "win32"
+          ? {
+              // Don't force fullscreen on Windows: it can feel "stuck" and obscure exit affordances.
+              // Start maximized instead.
+              fullscreen: false,
+              autoHideMenuBar: true,
+            }
+          : { fullscreen: true }),
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,

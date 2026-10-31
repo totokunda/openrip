@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { openEditor } from "./steps/_preview.mjs";
+import { hiddenApp } from "./hidden-electron.mjs";
 // Absolute paths: the app doesn't open projects in a profile given by a relative path.
 const [appDir, outDir, udDir, clipPath, ...steps] = process.argv.slice(2).map((a, i) => (i < 3 ? path.resolve(a) : a));
 fs.mkdirSync(outDir, { recursive: true });
@@ -18,7 +19,8 @@ const logs = [];
 // profile with ctx.relaunch() (after a change that must outlive a restart).
 const launch = async () => {
   const app = await electron.launch({
-    executablePath: process.env.EXE || require("electron"),
+    // A copy that never comes to the front (hidden-electron.mjs), unless FOREGROUND=1.
+    executablePath: process.env.FOREGROUND ? process.env.EXE || require("electron") : hiddenApp(process.env.EXE || require("electron")),
     args: [process.env.ENTRY ? appDir + "/packages/entry-point.mjs" : appDir, `--user-data-dir=${udDir}`],
     // The media root ignores --user-data-dir; without this, previews land in the real profile.
     env: { ...process.env, APEX_USER_DATA_DIR: udDir, ...(process.env.WALKTHROUGH ? {} : { OPENRIP_NO_WALKTHROUGH: "1" }), ...(process.env.AUTO_PROXY ? {} : { OPENRIP_NO_AUTO_PROXY: "1" }), ...(process.env.FOREGROUND ? {} : { OPENRIP_BACKGROUND: "1" }) },
@@ -31,9 +33,15 @@ const launch = async () => {
   await win.waitForTimeout(5000);
   // Maximized, as the app starts itself: with several sessions at once a window can stay small.
   // Wait until it is, and its size has settled, since steps measure the layout.
-  const maximized = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isMaximized());
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.maximize());
-  for (let i = 0; i < 20 && !(await maximized()); i++) await win.waitForTimeout(500);
+  // In the background (the default) the window is never put on screen: maximizing would show it,
+  // so it's given the screen's working area instead.
+  if (process.env.FOREGROUND) {
+    const maximized = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isMaximized());
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.maximize());
+    for (let i = 0; i < 20 && !(await maximized()); i++) await win.waitForTimeout(500);
+  } else {
+    await app.evaluate(({ BrowserWindow, screen }) => BrowserWindow.getAllWindows()[0]?.setBounds(screen.getPrimaryDisplay().workArea));
+  }
   for (let last = "", i = 0; i < 20; i++) {
     await win.waitForTimeout(500);
     const size = await win.evaluate(() => `${innerWidth}x${innerHeight}`);
