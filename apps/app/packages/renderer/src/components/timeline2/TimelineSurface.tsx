@@ -46,6 +46,7 @@ import { openTrackSpaceMenu } from "../timeline/menus/trackMenu";
 import { drawBlade, drawCoverTile, drawScrollbars, hThumb, onCoverTile, scrollbarAt, vThumb } from "./chrome";
 import { openCoverEditor } from "@/lib/cover";
 import { drawCardGhost, drawClip, drawCutTarget, drawDropTarget, drawFloating, drawGuide, drawMarkers, drawMarquee, drawNewTrackLine, drawPlayhead, drawRowShades, drawRows, drawRuler, drawSkim, drawSlot, drawTrimTip, inTrackAreas } from "./draw";
+import { setMediaRedraw } from "./media";
 
 /** A ⌘-scroll (or pinch) of this many pixels is one zoom step. */
 const ZOOM_WHEEL_STEP = 40;
@@ -239,6 +240,9 @@ const TimelineSurface: React.FC = () => {
     },
     [draw],
   );
+
+  // What clips show of their media (thumbnails, waveforms) comes in the background and draws again when it does.
+  useEffect(() => setMediaRedraw(() => redraw()), [redraw]);
 
   // The canvases follow their box's size.
   useEffect(() => {
