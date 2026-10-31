@@ -9,6 +9,9 @@ import { OVERLAY_TOP, visibleBand, type ClipBox, type Layout, type Row } from "@
 import { ticksFor } from "@/lib/timeline/ticks";
 import { xOf } from "@/lib/timeline/view";
 import { RULER_HEIGHT } from "@/lib/timeline-geometry";
+import { TIMELINE_COLORS } from "@/lib/timeline-colors";
+import { drawBeats, drawCompoundGlyph, drawFace, drawMissing, drawMotion, drawWand } from "./clipface";
+import { beginMediaPass, factsOf } from "./media";
 
 export const FONT = "-apple-system, BlinkMacSystemFont, sans-serif";
 const CLIP_RADIUS = 3;
@@ -22,6 +25,8 @@ const rounded = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number,
 
 /** The ruler: ticks hanging from its foot, MM:SS (or frame) labels right of the majors. */
 export function drawRuler(ctx: CanvasRenderingContext2D, l: Layout, fps: number) {
+  // The ruler is the first thing of a draw of the main canvas: what the clips ask of their media from here to the next is what's wanted.
+  beginMediaPass();
   const foot = RULER_HEIGHT;
   ctx.save();
   ctx.font = `10.5px ${FONT}`;
@@ -122,10 +127,12 @@ const fit = (ctx: CanvasRenderingContext2D, text: string, max: number) => {
 /**
  * A clip's label chips: in its top band for media and sound, centred in a one-line bar
  * otherwise. They keep to the visible part of the clip, so a clip scrolled half out of view
- * still says what it is.
+ * still says what it is. A media clip's effects chip leads, in the effect bars' colour with the
+ * wand; a compound clip's name chip and an effect bar's lead with their glyphs.
  */
 function drawChips(ctx: CanvasRenderingContext2D, b: ClipBox, look: ClipLook, from: number, to: number) {
-  if (look.chips.length === 0) return;
+  const texts = look.chips;
+  if (texts.length === 0 && !look.effects) return;
   ctx.save();
   ctx.font = `500 10px ${FONT}`;
   ctx.letterSpacing = "-0.3px";
@@ -134,19 +141,26 @@ function drawChips(ctx: CanvasRenderingContext2D, b: ClipBox, look: ClipLook, fr
   const y = look.chipsOnTop ? b.y + 2 : b.y + (b.h - h) / 2;
   let x = Math.max(b.x, from) + 4.5;
   const right = Math.min(b.x + b.w, to) - 4;
-  const glyph = look.glyph ? 11 : 0;
-  const texts = look.effects ? [...look.chips, look.effects] : look.chips;
-  texts.forEach((t, i) => {
-    const room = right - x - 5 - (i === 0 ? glyph : 0);
-    const text = fit(ctx, t, room);
-    if (!text) return;
-    const w = ctx.measureText(text).width + 5 + (i === 0 ? glyph : 0);
-    ctx.fillStyle = look.chip;
+  // The glyph's room before the first chip's text: the compound glyph's, or the wand's.
+  const glyph = look.glyph === "compound" ? 14 : look.glyph === "effect" ? 13 : 0;
+  const chip = (text: string, lead: number, fill: string, draw?: (x: number) => void, color = "#e0e0e0") => {
+    const room = right - x - 5 - lead;
+    const t = fit(ctx, text, room);
+    if (!t) return false;
+    const w = ctx.measureText(t).width + 5 + lead;
+    ctx.fillStyle = fill;
     rounded(ctx, x, y, w, h, 3);
     ctx.fill();
-    ctx.fillStyle = "#e0e0e0";
-    ctx.fillText(text, x + 2.5 + (i === 0 ? glyph : 0), y + h / 2 + 0.5);
+    draw?.(x);
+    ctx.fillStyle = color;
+    ctx.fillText(t, x + 2.5 + lead, y + h / 2 + 0.5);
     x += w + 5;
+    return true;
+  };
+  if (look.effects) chip(look.effects, 13, TIMELINE_COLORS.effect, (cx) => drawWand(ctx, cx + 2.5, y + 2), "#ffffff");
+  texts.forEach((t, i) => {
+    if (i !== 0 || !glyph) return void chip(t, 0, look.chip);
+    chip(t, glyph, look.chip, (cx) => (look.glyph === "compound" ? drawCompoundGlyph(ctx, cx + 3.5, y + 2) : drawWand(ctx, cx + 2.5, y + 2)));
   });
   ctx.restore();
 }
@@ -172,13 +186,20 @@ export function drawClip(ctx: CanvasRenderingContext2D, l: Layout, b: ClipBox, p
     ctx.fillStyle = "rgba(0, 0, 0, 0.18)";
     ctx.fillRect(b.x, b.y + look.bands.label, b.w, look.bands.thumbs);
   }
-  drawChips(ctx, b, look, l.view.x0, l.width);
+  // The media: thumbnails and sound, a sound's waveform, a sticker's picture (which stands in for its name chip).
+  const { picture } = drawFace(ctx, l, b, look);
+  const shown = picture ? { ...look, chips: [] } : look;
+  factsOf(b.id).chips = look.effects ? [look.effects, ...shown.chips] : shown.chips;
+  drawChips(ctx, b, shown, l.view.x0, l.width);
+  drawBeats(ctx, l, b);
   if (p.deactivated) {
     ctx.fillStyle = "rgba(30, 30, 32, 0.72)";
     ctx.fillRect(b.x, b.y, b.w, b.h);
     ctx.fillStyle = hatchOn(ctx);
     ctx.fillRect(b.x, b.y, b.w, b.h);
   }
+  drawMissing(ctx, l, b, FONT);
+  drawMotion(ctx, b, p.selected, FONT);
   ctx.restore();
   if (p.selected) {
     ctx.save();

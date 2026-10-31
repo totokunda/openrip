@@ -26,6 +26,7 @@ import { frameAt, framesFor, viewOf, xOf } from "@/lib/timeline/view";
 import { duplicateClips, goingWith, type Doc, type Rules } from "@/lib/timeline/core/edit";
 import { marqueeHits, previewMove, previewTrim, type MoveDrag, type MovePreview, type SnapContext, type TrimDrag } from "@/lib/timeline/gesture";
 import TimelineSidebar from "../timeline/TimelineSidebar";
+import { setMediaRedraw } from "./media";
 import { drawClip, drawFloating, drawGuide, drawMarkers, drawMarquee, drawNewTrackLine, drawPlayhead, drawRowShades, drawRows, drawRuler, drawSkim, drawSlot, drawTrimTip, inTrackAreas } from "./draw";
 
 /** A ⌘-scroll (or pinch) of this many pixels is one zoom step. */
@@ -179,6 +180,9 @@ const TimelineSurface: React.FC = () => {
     },
     [draw],
   );
+
+  // What clips show of their media (thumbnails, waveforms) comes in the background and draws again when it does.
+  useEffect(() => setMediaRedraw(() => redraw()), [redraw]);
 
   // The canvases follow their box's size.
   useEffect(() => {
