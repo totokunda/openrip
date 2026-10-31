@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
 import { mainTrackOf, snapPoints, snapToPoints, SNAP_PX } from "@/lib/timeline-edit";
+import { RULER_HEIGHT } from "@/lib/timeline-geometry";
 import { layoutTracks, trackView } from "@/lib/timeline-view";
 import { scrubSound, scrubSoundStop, skimSound } from "@/lib/scrub-audio";
 import { zoomTimelineTo } from "@/lib/timeline-shortcuts";
@@ -26,7 +27,22 @@ import { frameAt, framesFor, viewOf, xOf } from "@/lib/timeline/view";
 import { duplicateClips, goingWith, type Doc, type Rules } from "@/lib/timeline/core/edit";
 import { marqueeHits, previewMove, previewTrim, type MoveDrag, type MovePreview, type SnapContext, type TrimDrag } from "@/lib/timeline/gesture";
 import TimelineSidebar from "../timeline/TimelineSidebar";
-import { drawClip, drawFloating, drawGuide, drawMarkers, drawMarquee, drawNewTrackLine, drawPlayhead, drawRowShades, drawRows, drawRuler, drawSkim, drawSlot, drawTrimTip, inTrackAreas } from "./draw";
+import Droppable from "../dnd/Droppable";
+import { GoFileMedia } from "react-icons/go";
+import { useEffectDropStore } from "@/lib/effects/library";
+import { useTransitionDropStore } from "@/lib/transitions";
+import { DROP_ID, useTimelineDrops, type DropState } from "./drops";
+import { drawKeyframes, drawRange, drawRendered, drawTransitions, keyMarks, keyframeAt, markerAt, rangeEdgeAt, transitionAt, transitionMarks } from "./marks";
+import { MarkerEditor, useMarkerEditorStore } from "../timeline/Markers";
+import KeyframeGraph from "../timeline/KeyframeGraph";
+import { setTransitionDuration } from "@/lib/transitions";
+import { moveKeysAt } from "@/lib/timeline-keyframes";
+import { withEnd } from "@/lib/range";
+import { useRenderStore } from "@/lib/prerender";
+import { openKeyframeMenu, openMarkerMenu, openTransitionMenu } from "./markMenus";
+import { drawBlade, drawCoverTile, drawScrollbars, hThumb, onCoverTile, scrollbarAt, vThumb } from "./chrome";
+import { openCoverEditor } from "@/lib/cover";
+import { drawCardGhost, drawClip, drawCutTarget, drawDropTarget, drawFloating, drawGuide, drawMarkers, drawMarquee, drawNewTrackLine, drawPlayhead, drawRowShades, drawRows, drawRuler, drawSkim, drawSlot, drawTrimTip, inTrackAreas } from "./draw";
 
 /** A ⌘-scroll (or pinch) of this many pixels is one zoom step. */
 const ZOOM_WHEEL_STEP = 40;
@@ -40,7 +56,13 @@ type Gesture =
   | { kind: "scrub" }
   | { kind: "move"; drag: MoveDrag; preview: MovePreview | null; x0: number; y0: number; x: number; y: number; select: string[] | null }
   | { kind: "trim"; drag: TrimDrag; preview: { doc: Doc; applied: number; guide: number | null } | null; x: number; y: number }
-  | { kind: "marquee"; x0: number; y0: number; x: number; y: number; base: string[] };
+  | { kind: "marquee"; x0: number; y0: number; x: number; y: number; base: string[] }
+  | { kind: "marker"; id: string; from: number; frame: number; x0: number; moved: boolean }
+  | { kind: "range"; which: "in" | "out"; frame: number }
+  | { kind: "transitionSide"; clipId: string; side: -1 | 1; from: number; x0: number }
+  | { kind: "keyframe"; clipId: string; start: number; length: number; from: number; to: number; x0: number; moved: boolean }
+  | { kind: "hbar"; x0: number; start: number; framesPerPx: number; wasPlaying: boolean }
+  | { kind: "vbar"; y0: number; scroll0: number; pxPerScroll: number };
 
 /** Sizes a canvas to its box at the screen's pixel density; its context draws in CSS pixels. */
 const fitCanvas = (canvas: HTMLCanvasElement, width: number, height: number) => {
@@ -54,6 +76,12 @@ const fitCanvas = (canvas: HTMLCanvasElement, width: number, height: number) => 
   const ctx = canvas.getContext("2d")!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return ctx;
+};
+
+/** The rendered parts of the timeline (lib/prerender.ts keeps them in µs) in frames. */
+const renderedFrames = () => {
+  const fps = useControlsStore.getState().fps || 24;
+  return useRenderStore.getState().ranges.map((r) => ({ start: (r.start * fps) / 1e6, end: (r.end * fps) / 1e6 }));
 };
 
 /** The switches the editing rules follow, as the stores have them now. */
@@ -76,7 +104,7 @@ const TimelineSurface: React.FC = () => {
   const [scrollY, setScrollY] = useState(0);
   const scrollYRef = useRef(scrollY);
   scrollYRef.current = scrollY;
-  const scene = useRef({ layout: null as Layout | null, dirty: true, overlayDirty: true, raf: 0, gesture: null as Gesture | null, stopScroll: null as null | (() => void) });
+  const scene = useRef({ layout: null as Layout | null, dirty: true, overlayDirty: true, raf: 0, gesture: null as Gesture | null, stopScroll: null as null | (() => void), drop: null as DropState | null, hover: { cover: false, bar: null as "h" | "v" | null, bladeX: null as number | null } });
   const wheel = useRef({ zoom: 0, frames: 0 });
 
   // The pinning, worked out as the headers render so they and the canvas agree (the headers read
@@ -115,8 +143,9 @@ const TimelineSurface: React.FC = () => {
     const g = s.gesture;
     if (s.dirty || !s.layout) {
       s.dirty = false;
-      // While a move or trim is under way, the timeline as it would be left, on the tracks as they are.
-      const preview = g && (g.kind === "move" || g.kind === "trim") ? g.preview : null;
+      // While a move, a trim or a card from a panel is under way, the timeline as it would be
+      // left, on the tracks as they are.
+      const preview = s.drop?.preview ?? (g && (g.kind === "move" || g.kind === "trim") ? g.preview : null);
       const layout = layoutOf(preview ? { clips: preview.doc.clips, tracks: clipsState.timelines } : undefined);
       if (!layout) return;
       s.layout = layout;
@@ -124,9 +153,13 @@ const TimelineSurface: React.FC = () => {
       ctx.clearRect(0, 0, width, height);
       const fps = controls.fps || 24;
       drawRuler(ctx, layout, fps);
-      drawMarkers(ctx, layout, clipsState.markers, controls.selectedMarkerId);
+      drawRendered(ctx, layout, renderedFrames());
+      const range = g?.kind === "range" && controls.range ? { ...controls.range, [g.which === "in" ? "start" : "end"]: g.frame } : controls.range;
+      if (range) drawRange(ctx, layout, range);
+      const markers = g?.kind === "marker" ? clipsState.markers.map((m) => (m.id === g.id ? { ...m, frame: g.frame } : m)) : clipsState.markers;
+      drawMarkers(ctx, layout, markers, controls.selectedMarkerId);
       const selected = new Set(controls.selectedClipIds);
-      const movers = g?.kind === "move" && g.preview ? new Set([g.drag.lead, ...g.drag.followers]) : null;
+      const movers = s.drop?.preview ? new Set([DROP_ID]) : g?.kind === "move" && g.preview ? new Set([g.drag.lead, ...g.drag.followers]) : null;
       const lookOf = (b: ClipBox) => {
         const id = (b.clip as { assetId?: string }).assetId;
         return clipLook(b.clip, id ? clipsState.assets[id] : undefined, fps, b.h, b.row.main);
@@ -141,6 +174,16 @@ const TimelineSurface: React.FC = () => {
         }
         drawRowShades(ctx, layout, pinned);
       });
+      // Transitions on the cuts, and the selected clips' keyframes, over the clips.
+      drawTransitions(ctx, layout, transitionMarks(layout, clipsState.clips, fps, controls.selectedTransitionId, useTransitionDropStore.getState().target));
+      const keys = g?.kind === "move" || g?.kind === "trim" ? [] : keyMarks(layout, selected, controls.focusFrame, g?.kind === "keyframe" && g.moved ? g.clipId : null);
+      if (g?.kind === "keyframe" && g.moved) {
+        const b = layout.clips.find((c) => c.id === g.clipId);
+        if (b) keys.push({ clipId: g.clipId, frame: g.to, x: b.x + (g.to * b.w) / g.length, y: b.y + b.h / 2, atPlayhead: false });
+      }
+      drawKeyframes(ctx, keys);
+      drawCoverTile(ctx, layout, s.hover.cover, clipsState.compoundStack.length > 0);
+      drawScrollbars(ctx, layout, controls.totalTimelineFrames, scrollYRef.current, g?.kind === "hbar" ? "h" : g?.kind === "vbar" ? "v" : s.hover.bar);
       if (g?.kind === "move" && g.preview) {
         if (g.preview.line) drawNewTrackLine(ctx, layout, g.preview.line.y);
         if (g.preview.guide != null) drawGuide(ctx, layout, g.preview.guide);
@@ -159,6 +202,19 @@ const TimelineSurface: React.FC = () => {
         if (b) drawTrimTip(ctx, layout, b, timecode((b.clip.endFrame ?? 0) - (b.clip.startFrame ?? 0), fps), g.x);
       }
       if (g?.kind === "marquee") drawMarquee(ctx, g.x0, g.y0, g.x, g.y);
+      // A card from a panel: where it would land, and the card itself at the pointer.
+      if (s.drop) {
+        if (s.drop.preview?.line) drawNewTrackLine(ctx, layout, s.drop.preview.line.y);
+        if (s.drop.preview?.guide != null) drawGuide(ctx, layout, s.drop.preview.guide);
+        drawCardGhost(ctx, s.drop.x, s.drop.y, s.drop.length * (layout.view.width / (layout.view.end - layout.view.start)), s.drop.label);
+      }
+      // An effect tile over a clip marks it; a transition card the cut it would go on.
+      const effectTarget = useEffectDropStore.getState().target;
+      const cutTarget = useTransitionDropStore.getState().target;
+      for (const b of layout.clips) {
+        if (b.id === effectTarget) drawDropTarget(ctx, layout, b);
+        if (b.id === cutTarget) drawCutTarget(ctx, layout, b);
+      }
       s.overlayDirty = true;
     }
     if (s.overlayDirty && s.layout) {
@@ -166,6 +222,7 @@ const TimelineSurface: React.FC = () => {
       const ctx = fitCanvas(overlay, width, height);
       ctx.clearRect(0, 0, width, height);
       if (controls.previewAxis && !controls.isPlaying && controls.hoverFrame != null) drawSkim(ctx, s.layout, controls.hoverFrame);
+      if (controls.timelineTool === "split" && s.hover.bladeX != null && !s.gesture) drawBlade(ctx, s.layout, s.hover.bladeX);
       drawPlayhead(ctx, s.layout, controls.focusFrame);
     }
   }, [layoutOf]);
@@ -203,10 +260,12 @@ const TimelineSurface: React.FC = () => {
   // Redrawn when what they show changes; the playhead's canvas alone as it plays.
   useEffect(() => {
     const offClips = useClipStore.subscribe((s, p) => {
-      if (s.clips !== p.clips || s.timelines !== p.timelines || s.assets !== p.assets || s.markers !== p.markers) redraw();
+      if (s.clips !== p.clips || s.timelines !== p.timelines || s.assets !== p.assets || s.markers !== p.markers || s.compoundStack !== p.compoundStack) redraw();
     });
     const offControls = useControlsStore.subscribe((s, p) => {
-      if (s.timelineDuration !== p.timelineDuration || s.selectedClipIds !== p.selectedClipIds || s.fps !== p.fps || s.selectedMarkerId !== p.selectedMarkerId) redraw();
+      if (s.timelineDuration !== p.timelineDuration || s.selectedClipIds !== p.selectedClipIds || s.fps !== p.fps || s.selectedMarkerId !== p.selectedMarkerId || s.selectedTransitionId !== p.selectedTransitionId || s.range !== p.range || s.totalTimelineFrames !== p.totalTimelineFrames) redraw();
+      // The diamond under the playhead is ringed.
+      else if (s.focusFrame !== p.focusFrame && s.selectedClipIds.length) redraw();
       else if (s.focusFrame !== p.focusFrame || s.hoverFrame !== p.hoverFrame || s.isPlaying !== p.isPlaying || s.previewAxis !== p.previewAxis) redraw(false);
       // The playhead played, sought or stepped out of view: the view follows it, as CapCut's does.
       // A scroll alone leaves it at its time, out of view if it goes there.
@@ -217,9 +276,11 @@ const TimelineSurface: React.FC = () => {
         else if (s.focusFrame > end) s.shiftTimelineDuration(length + (length + end > s.focusFrame ? 0 : s.focusFrame - end));
       }
     });
+    const offRender = useRenderStore.subscribe(() => redraw());
     return () => {
       offClips();
       offControls();
+      offRender();
     };
   }, [redraw]);
 
@@ -318,6 +379,39 @@ const TimelineSurface: React.FC = () => {
       redraw();
     } else if (g.kind === "scrub") {
       seek(x, false, true, meta);
+    } else if (g.kind === "marker") {
+      // Dragged along the ruler, a marker snaps to the playhead and clip edges as a clip does.
+      g.moved ||= Math.abs(x - g.x0) >= DRAG_START;
+      if (!g.moved) return;
+      let frame = Math.max(0, Math.round(frameAt(layout.view, Math.max(layout.view.x0, Math.min(layout.width, x)))));
+      const controls = useControlsStore.getState();
+      if (controls.snapping && !meta) {
+        const hit = snapToPoints([frame], snapPoints(useClipStore.getState().clips, { playhead: controls.focusFrame, markers: [], exclude: new Set() }), framesFor(layout.view, SNAP_PX));
+        if (hit) frame = hit.point;
+      }
+      g.frame = frame;
+      redraw();
+    } else if (g.kind === "range") {
+      g.frame = Math.max(0, Math.round(frameAt(layout.view, Math.max(layout.view.x0, Math.min(layout.width, x)))));
+      redraw();
+    } else if (g.kind === "transitionSide") {
+      // Both halves move together: the duration grows by twice what a side is dragged.
+      const fps = useControlsStore.getState().fps || 24;
+      setTransitionDuration(g.clipId, g.from + (2 * g.side * framesFor(layout.view, x - g.x0)) / fps);
+    } else if (g.kind === "hbar") {
+      const controls = useControlsStore.getState();
+      const target = Math.round(g.start + (x - g.x0) * g.framesPerPx);
+      const shift = target - controls.timelineDuration[0];
+      if (shift) controls.shiftTimelineDuration(shift);
+    } else if (g.kind === "vbar") {
+      const max = trackView.maxScroll;
+      setScrollY(Math.max(0, Math.min(max, g.scroll0 + (y - g.y0) / Math.max(1e-6, g.pxPerScroll))));
+    } else if (g.kind === "keyframe") {
+      g.moved ||= Math.abs(x - g.x0) >= DRAG_START;
+      if (!g.moved) return;
+      // Along the clip, on whole frames.
+      g.to = Math.round(Math.max(0, Math.min(g.length, g.from + framesFor(layout.view, x - g.x0))));
+      redraw();
     }
   };
 
@@ -361,9 +455,42 @@ const TimelineSurface: React.FC = () => {
       useControlsStore.getState().setIsAccurateSeekNeeded(true);
       scrubSoundStop();
     }
+    if (commit && g?.kind === "marker") {
+      const controls = useControlsStore.getState();
+      if (g.moved) useClipStore.getState().updateMarker(g.id, { frame: g.frame });
+      else {
+        // A click goes to the marker and selects it (Delete removes it).
+        if (controls.isPlaying) controls.pause();
+        controls.setFocusFrame(g.from, false);
+        controls.setIsAccurateSeekNeeded(true);
+        controls.clearSelection();
+        controls.setSelectedMarkerId(g.id);
+      }
+    }
+    if (g?.kind === "hbar" && g.wasPlaying) useControlsStore.getState().play();
+    if (commit && g?.kind === "range") {
+      const c = useControlsStore.getState();
+      if (c.range) c.setRange(withEnd(c.range, g.which, g.frame, c.range.end));
+    }
+    if (commit && g?.kind === "keyframe") {
+      const clip = useClipStore.getState().getClipById(g.clipId);
+      if (clip && g.moved && g.to !== g.from) useClipStore.getState().updateClip(g.clipId, { keyframes: moveKeysAt(clip.keyframes, g.from, g.to) });
+      useControlsStore.getState().setFocusFrame(Math.round(g.start + (g.moved ? g.to : g.from)));
+    }
     if (overlayRef.current) overlayRef.current.style.cursor = "default";
     redraw();
   };
+
+  // Drops from the panels: media cards land as a moved clip does; the rest at the frame or clip under the pointer.
+  useTimelineDrops({
+    canvas: () => overlayRef.current,
+    layout: () => layoutOf(),
+    setDrop: (drop) => {
+      scene.current.drop = drop;
+      redraw();
+    },
+    redraw: () => redraw(),
+  });
 
   // For the smoke tests (scripts/smoke): the layout as the canvas has it, what a point hits, and
   // the gesture under way, in place of probing the canvas's pixels.
@@ -404,11 +531,64 @@ const TimelineSurface: React.FC = () => {
     const { x, y } = local(e);
     const controls = useControlsStore.getState();
     e.currentTarget.setPointerCapture(e.pointerId);
+    // The range's edges and the markers' tags, in the ruler.
+    const edge = rangeEdgeAt(layout, controls.range, x, y);
+    if (edge && controls.range) {
+      scene.current.gesture = { kind: "range", which: edge, frame: edge === "in" ? controls.range.start : controls.range.end };
+      edgeScroll();
+      return;
+    }
+    const marker = markerAt(layout, useClipStore.getState().markers, x, y);
+    if (marker) {
+      if (e.detail === 2) {
+        useMarkerEditorStore.getState().open(marker.id);
+        return;
+      }
+      scene.current.gesture = { kind: "marker", id: marker.id, from: marker.frame, frame: marker.frame, x0: x, moved: false };
+      return;
+    }
+    // The Cover tile opens the cover editor (not inside a compound clip, which has no cover).
+    if (onCoverTile(layout, x, y)) {
+      if (useClipStore.getState().compoundStack.length === 0) openCoverEditor();
+      return;
+    }
+    // The scrollbars: the bottom one scrolls the timeline (playback pauses while it's dragged), the side one the overlay tracks.
+    const bar = scrollbarAt(layout, controls.totalTimelineFrames, scrollYRef.current, x, y);
+    if (bar === "h") {
+      const wasPlaying = controls.isPlaying;
+      if (wasPlaying) controls.pause();
+      scene.current.gesture = { kind: "hbar", x0: x, start: layout.view.start, framesPerPx: hThumb(layout, controls.totalTimelineFrames).framesPerPx, wasPlaying };
+      return;
+    }
+    if (bar === "v") {
+      const v = vThumb(layout, scrollYRef.current);
+      if (v) scene.current.gesture = { kind: "vbar", y0: y, scroll0: scrollYRef.current, pxPerScroll: v.pxPerScroll };
+      return;
+    }
     // The playhead's line takes a press near it, in the ruler or over the tracks.
     if (Math.abs(x - xOf(layout.view, controls.focusFrame)) <= PLAYHEAD_GRAB && x >= layout.view.x0) {
       scene.current.gesture = { kind: "scrub" };
       if (controls.isPlaying) controls.pause();
       edgeScroll();
+      return;
+    }
+    // A selected clip's keyframe diamonds, then the transitions' badges and a selected one's sides.
+    const key = keyframeAt(keyMarks(layout, new Set(controls.selectedClipIds), controls.focusFrame), x, y);
+    if (key) {
+      const clip = useClipStore.getState().getClipById(key.clipId);
+      if (clip) {
+        const start = clip.startFrame ?? 0;
+        scene.current.gesture = { kind: "keyframe", clipId: key.clipId, start, length: Math.max(1, (clip.endFrame ?? 0) - start), from: key.frame, to: key.frame, x0: x, moved: false };
+        return;
+      }
+    }
+    const tr = transitionAt(transitionMarks(layout, useClipStore.getState().clips, controls.fps || 24, controls.selectedTransitionId, null), x, y);
+    if (tr) {
+      controls.setSelectedTransitionId(tr.mark.clipId);
+      if (tr.side && tr.mark.transition) {
+        scene.current.gesture = { kind: "transitionSide", clipId: tr.mark.clipId, side: tr.side, from: tr.mark.transition.duration, x0: x };
+        e.currentTarget.style.cursor = "ew-resize";
+      }
       return;
     }
     const hit = hitTest(layout, x, y, canTrim);
@@ -473,6 +653,23 @@ const TimelineSurface: React.FC = () => {
     if (e.buttons) return;
     const hit = hitTest(layout, x, y, canTrim);
     const controls = useControlsStore.getState();
+    const cover = onCoverTile(layout, x, y);
+    const bar = scrollbarAt(layout, controls.totalTimelineFrames, scrollYRef.current, x, y);
+    if (cover !== s.hover.cover || bar !== s.hover.bar) {
+      s.hover.cover = cover;
+      s.hover.bar = bar;
+      redraw();
+    }
+    // The blade's line follows the pointer over the tracks, snapped where a click would cut.
+    const bladeX = controls.timelineTool === "split" && y > RULER_HEIGHT && x >= layout.view.x0 ? xOf(layout.view, bladeFrame(Math.round(frameAt(layout.view, x)), layout.width)) : null;
+    if (bladeX !== s.hover.bladeX) {
+      s.hover.bladeX = bladeX;
+      redraw(false);
+    }
+    if (cover || bar) {
+      e.currentTarget.style.cursor = cover && useClipStore.getState().compoundStack.length === 0 ? "pointer" : "default";
+      return;
+    }
     const nearHead = Math.abs(x - xOf(layout.view, controls.focusFrame)) <= PLAYHEAD_GRAB && x >= layout.view.x0;
     e.currentTarget.style.cursor = nearHead ? "ew-resize" : hit.kind === "clip" ? (controls.timelineTool === "split" ? "crosshair" : hit.edge ? "col-resize" : "pointer") : "default";
     // The preview axis: the player shows the frame under the pointer (not while playing).
@@ -498,7 +695,27 @@ const TimelineSurface: React.FC = () => {
     end(true);
   };
 
+  /** A right-click on a marker, a transition or a keyframe opens its menu; the clips' and tracks' menus come next. */
+  const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const layout = layoutOf();
+    if (!layout) return;
+    const { x, y } = local(e);
+    const controls = useControlsStore.getState();
+    const marker = markerAt(layout, useClipStore.getState().markers, x, y);
+    if (marker) return openMarkerMenu(marker.id, e.clientX, e.clientY);
+    const key = keyframeAt(keyMarks(layout, new Set(controls.selectedClipIds), controls.focusFrame), x, y);
+    if (key) return openKeyframeMenu(key.clipId, key.frame, e.clientX, e.clientY);
+    const tr = transitionAt(transitionMarks(layout, useClipStore.getState().clips, controls.fps || 24, controls.selectedTransitionId, null), x, y);
+    if (tr) return openTransitionMenu(tr.mark.clipId, e.clientX, e.clientY);
+  };
+
   const onPointerLeave = () => {
+    const hover = scene.current.hover;
+    if (hover.cover || hover.bar || hover.bladeX != null) {
+      scene.current.hover = { cover: false, bar: null, bladeX: null };
+      redraw();
+    }
     if (useControlsStore.getState().hoverFrame != null) useControlsStore.getState().setHoverFrame(null);
   };
 
@@ -532,6 +749,25 @@ const TimelineSurface: React.FC = () => {
       {hasClips && <TimelineSidebar />}
       <div ref={areaRef} className="relative flex-1 h-full overflow-hidden" onWheel={onWheel}>
         <canvas ref={mainRef} className="absolute inset-0 w-full h-full" />
+        <MarkerEditor anchor={areaRef} stageWidth={Math.max(1, size.width - 50)} startPadding={50} />
+        {hasClips && <KeyframeGraph stageWidth={Math.max(1, size.width - 50)} />}
+        {!hasClips && (
+          <div className="absolute inset-0 flex items-center justify-center w-full p-8 z-10">
+            <Droppable
+              id="timeline"
+              className="w-full rounded-[4px] border border-dashed border-[#3e3e3e] bg-[#292929] text-[#cccccc] duration-100 ease-in-out"
+              accepts={["media"]}
+              highlight={{ borderColor: "#A477C4", textColor: "#FFFFFF", bgColor: "#A477C4" }}
+            >
+              <div className="w-full py-6 px-10 rounded-lg flex items-center">
+                <h4 className="mx-auto flex items-center flex-row leading-none gap-x-3.5 font-sans">
+                  <GoFileMedia className="w-5 h-5" />
+                  <span className="text-[12px] font-light font-poppins leading-none">Drag and drop media to start creating</span>
+                </h4>
+              </div>
+            </Droppable>
+          </div>
+        )}
         <canvas
           ref={overlayRef}
           data-testid="timeline-canvas"
@@ -541,7 +777,7 @@ const TimelineSurface: React.FC = () => {
           onPointerUp={onPointerUp}
           onPointerCancel={() => end(false)}
           onPointerLeave={onPointerLeave}
-          onContextMenu={(e) => e.preventDefault()}
+          onContextMenu={onContextMenu}
         />
       </div>
     </div>

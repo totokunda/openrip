@@ -334,3 +334,52 @@ export function drawTrimTip(ctx: CanvasRenderingContext2D, l: Layout, b: ClipBox
   ctx.fillText(text, x + 6, y + h / 2 + 0.5);
   ctx.restore();
 }
+
+/** A card dragged in from a panel, at the pointer: translucent, with its name. */
+export function drawCardGhost(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, label: string) {
+  ctx.save();
+  const h = 34;
+  const width = Math.max(40, w);
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = 8;
+  rounded(ctx, x, y - h / 2, width, h, CLIP_RADIUS);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.font = `500 10.5px ${FONT}`;
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(fit(ctx, label, width - 10), x + 6, y);
+  ctx.restore();
+}
+
+/** An effect tile over a clip it would go onto. */
+export function drawDropTarget(ctx: CanvasRenderingContext2D, l: Layout, b: ClipBox) {
+  const [top, bottom] = visibleBand(l, b.row);
+  if (b.y > bottom || b.y + b.h < top) return;
+  ctx.save();
+  ctx.fillStyle = "rgba(174, 129, 206, 0.28)";
+  ctx.strokeStyle = "#ae81ce";
+  ctx.lineWidth = 2;
+  rounded(ctx, b.x + 1, b.y + 1, b.w - 2, b.h - 2, CLIP_RADIUS);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** The cut a transition card would go on: an accent badge on the end of the clip leaving it. */
+export function drawCutTarget(ctx: CanvasRenderingContext2D, l: Layout, b: ClipBox) {
+  const [top, bottom] = visibleBand(l, b.row);
+  if (b.y > bottom || b.y + b.h < top) return;
+  const x = b.x + b.w;
+  const size = 20;
+  ctx.save();
+  ctx.fillStyle = "#ae81ce";
+  rounded(ctx, x - size / 2, b.y + (b.h - size) / 2, size, size, 5);
+  ctx.fill();
+  ctx.restore();
+}
