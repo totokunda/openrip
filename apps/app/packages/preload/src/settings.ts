@@ -42,6 +42,8 @@ export interface Preferences {
   linkageOff: string[];
   /** Edit › Play audio while scrubbing. */
   scrubAudio: boolean;
+  /** Edit › New timeline (Labs): the canvas timeline being built to replace the current one. */
+  newTimeline: boolean;
   /** Edit › Arrange layers: a new project starts with free layer order. */
   arrangeLayers: boolean;
   /** Performance › Proxy: a project's Proxy switch starts on. */

@@ -137,24 +137,26 @@ export default async (ctx) => {
   // ---- Range ---------------------------------------------------------------------------------------
   await select(ctx, await saved(B), B.clipId, 5.5);
   const [b0, b1] = secs(B);
-  check("no range at first: the ruler is plain over B", !(await bandAt((b0 + b1) / 2)));
+  // A point inside B away from its middle, where the playhead can be (its line would hide the band).
+  const inB = b0 + (b1 - b0) * 0.3;
+  check("no range at first: the ruler is plain over B", !(await bandAt(inB)));
   await openMenu(B);
   await hover("Range");
   await win.getByText("Select by clip", { exact: false }).click();
   await win.waitForTimeout(500);
-  check("Range › Select by clip lights the ruler over B and not outside", (await bandAt((b0 + b1) / 2)) && !(await bandAt(b0 / 2)) && !(await bandAt((b1 + secs(C)[1]) / 2)));
+  check("Range › Select by clip lights the ruler over B and not outside", (await bandAt(inB)) && !(await bandAt(b0 / 2)) && !(await bandAt((b1 + secs(C)[1]) / 2)));
   await shot("range-1-by-clip");
   await openMenu(B);
   await hover("Range");
   check("with a range, Deselect is available", !(await deselect.isDisabled()) && (await win.getByText("Export range", { exact: true }).count()) === 1);
   await deselect.click();
   await win.waitForTimeout(400);
-  check("Deselect clears the band", !(await bandAt((b0 + b1) / 2)));
+  check("Deselect clears the band", !(await bandAt(inB)));
   await select(ctx, await saved(B), B.clipId, 5.5);
   await key(win, "Shift+x");
-  check("⇧X selects by clip", await bandAt((b0 + b1) / 2));
+  check("⇧X selects by clip", await bandAt(inB));
   await key(win, "Alt+Shift+x");
-  check("⌥⇧X deselects", !(await bandAt((b0 + b1) / 2)));
+  check("⌥⇧X deselects", !(await bandAt(inB)));
   await seek(win, map, 2);
   await key(win, "i");
   await seek(win, map, 5);

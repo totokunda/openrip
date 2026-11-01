@@ -24,7 +24,7 @@ import { zoomDuration, zoomLevelFor } from "./zoom";
 import { getMediaInfo, getMediaInfoCached } from "./media/utils";
 import { getLowercaseExtension } from "@app/preload";
 import { remapMaskWithClipTransformProportional } from "./mask/clipTransformUtils";
-import { scaleKeyframes, shiftKeyframes, splitKeyframes } from "./keyframes";
+import { scaleKeyframes, splitKeyframes } from "./keyframes";
 import { freezeFrame as freezeAt, reversePatch, speedPatch, splitCurveFields } from "./speed";
 import {
   mainTrackOf,
@@ -48,6 +48,8 @@ import { TIME_ZERO_X } from "@/lib/timeline-geometry";
 import { carriedClips } from "./linkage";
 import { bundleMates, canGroup, groupTogether, tidyBundles, ungroupTogether, withMates } from "./bundle";
 import { preferences } from "./preferences";
+import { getTimelineTypeForClip, resolveOverlapsTimelines, trackHeightFor } from "./timeline/core/tracks.ts";
+import { clampEdgeDelta, moveEdge } from "./timeline/core/edges.ts";
 
 interface ClipStore {
   // Clips
@@ -89,6 +91,12 @@ interface ClipStore {
    * with a dragged one): none before frame 0, none on a locked track.
    */
   shiftClips: (ids: string[], delta: number) => void;
+  /**
+   * The new timeline's edits (lib/timeline/core): the clips and tracks a move or trim leaves,
+   * written as one change, the timeline's rules following (an emptied track goes, the magnet
+   * packs the main track).
+   */
+  commitTimeline: (doc: { clips: AnyClipProps[]; tracks: TimelineProps[] }) => void;
   separateClip: (clipId: string) => void;
   /**
    * The Speed tab's Curve: a video or audio clip plays by `curve` (a preset's or custom points;
@@ -346,51 +354,8 @@ export const pruneAssetsForClips = (
   return pruned;
 };
 
-export const isValidTimelineForClip = (
-  timeline: TimelineProps,
-  clip: AnyClipProps | MediaItem | string,
-) => {
-  if (typeof clip === "string") clip = { type: clip } as AnyClipProps;
-  if (timeline.type === "media") {
-    return (
-      clip.type === "video" ||
-      clip.type === "image" ||
-      (clip as AnyClipProps).type === "group"
-    );
-  }
-  return timeline.type === clip.type;
-};
-
-export const getTimelineTypeForClip = (
-  clip: AnyClipProps | MediaItem | string,
-): TimelineType => {
-  if (typeof clip === "string") clip = { type: clip } as AnyClipProps;
-  if (
-    clip.type === "video" ||
-    clip.type === "image" ||
-    clip.type === "group"
-  ) {
-    return "media";
-  }
-  return clip.type;
-};
-
-/** The space the timeline draws between tracks (inside each track's height). */
-const TRACK_GAP = 8;
-
-/** The track menu's Track height: Short and Tall against the Default row. */
-const TRACK_SIZES = { short: 0.7, tall: 1.4 } as const;
-
-/**
- * A track's height: CapCut's row for its kind (docs/plan/capcut-ui-spec.md §4.11: the main
- * track 76 px, overlay video 52, audio 50, text, filter and the rest 24), scaled by its Track
- * height (video and audio tracks), and the gap below it.
- */
-export const trackHeightFor = (type: TimelineType, main: boolean, size?: TimelineProps["size"]) => {
-  const row = type === "media" ? (main ? 76 : 52) : type === "audio" ? 50 : 24;
-  const scaled = size && (type === "media" || type === "audio") ? Math.round(row * TRACK_SIZES[size]) : row;
-  return scaled + TRACK_GAP;
-};
+// The track kinds, heights and stacking live with the new timeline's editing rules (pure: lib/timeline/core/tracks.ts).
+export { isValidTimelineForClip, getTimelineTypeForClip, trackHeightFor, resolveOverlapsTimelines } from "./timeline/core/tracks.ts";
 
 export const getTimelineHeightForClip = (
   clip: AnyClipProps | MediaItem | string,
@@ -459,34 +424,6 @@ export const getCorrectedClip = (
 
 // The tracks laid out top to bottom, each its kind's height (trackHeightFor: the main track
 // taller than the overlays above it).
-export const resolveOverlapsTimelines = (
-  timelines: TimelineProps[],
-): TimelineProps[] => {
-  if (timelines.length === 0) return timelines;
-
-  const resolvedTimelines: TimelineProps[] = [];
-  const main = mainTrackOf(timelines);
-
-  for (let i = 0; i < timelines.length; i++) {
-    // Every track starts time 0 after the Cover column (an older project saved 24 px).
-    const timeline = { ...timelines[i], timelinePadding: TIME_ZERO_X, timelineHeight: trackHeightFor(timelines[i].type, timelines[i] === main, timelines[i].size) };
-
-    // First timeline starts at 0
-    if (i === 0) {
-      timeline.timelineY = 0;
-    } else {
-      // Each subsequent timeline is positioned based on the previous timeline's position + height
-      const previousTimeline = resolvedTimelines[i - 1];
-      const previousY = previousTimeline.timelineY || 0;
-      const previousHeight = previousTimeline.timelineHeight || 54;
-      timeline.timelineY = previousY + previousHeight;
-    }
-
-    resolvedTimelines.push(timeline);
-  }
-
-  return resolvedTimelines;
-};
 
 /**
  * What follows from any edit to the clips or tracks: a track the edit left empty goes, as in
@@ -747,46 +684,6 @@ export const splitClipAt = (clip: AnyClipProps, cutFrame: number): [AnyClipProps
     }
   }
   return [newClip1, newClip2];
-};
-
-/**
- * How far an edge of `clip` can move by `delta` frames: its length stays at least a frame, a
- * left edge stays at or after 0, and a trim doesn't reach past its media (`trimStart` ≥ 0,
- * `trimEnd` ≤ 0; text, photos and the like have no such bound).
- */
-const clampEdgeDelta = (clip: AnyClipProps, side: "left" | "right", delta: number) => {
-  const start = clip.startFrame ?? 0;
-  const end = Math.max(clip.endFrame ?? 0, start + 1);
-  // A freeze frame holds its still as long as it's made: it has no media to run out of.
-  const bounded = (trim: number | undefined) => isFinite(trim ?? 0) && !(clip as VideoClipProps).freeze;
-  if (side === "right") {
-    let d = Math.max(delta, start + 1 - end);
-    if (bounded(clip.trimEnd)) d = Math.min(d, -(clip.trimEnd ?? 0));
-    return d;
-  }
-  let d = Math.min(delta, end - 1 - start);
-  d = Math.max(d, -start);
-  if (bounded(clip.trimStart)) d = Math.max(d, -(clip.trimStart ?? 0));
-  return d;
-};
-
-/** `clip` with an edge moved by `delta` frames, its trim following. */
-const moveEdge = (clip: AnyClipProps, side: "left" | "right", delta: number): AnyClipProps => {
-  if (side === "right") {
-    return { ...clip, endFrame: (clip.endFrame ?? 0) + delta, trimEnd: (clip.trimEnd || 0) + delta };
-  }
-  const next = {
-    ...clip,
-    startFrame: (clip.startFrame ?? 0) + delta,
-    trimStart: (clip.trimStart || 0) + delta,
-    // Keys stay on the content as the start moves (they're clip-local).
-    keyframes: shiftKeyframes(clip.keyframes, -delta),
-  } as AnyClipProps;
-  // A caption's words keep time with the speech as its start moves.
-  if (clip.type === "text" && clip.spokenWords) {
-    (next as TextClipProps).spokenFrom = (clip.spokenFrom ?? 0) + delta / (useControlsStore.getState().fps || 30);
-  }
-  return next;
 };
 
 const INITIAL_TIMELINES: ProjectTimeline[] = [{ id: uuidv4(), name: "Timeline 01" }];
@@ -1768,13 +1665,20 @@ export const useClipStore = create<ClipStore>()(withTimelineRules((set, get) => 
       let delta = Math.round(newFrame) - edge;
       for (const c of group) delta = clampEdgeDelta(c, side, delta);
       if (delta === 0) return {};
-      const changed = new Map(group.map((c) => [c.clipId, moveEdge(c, side, delta)] as const));
+      const changed = new Map(group.map((c) => [c.clipId, moveEdge(c, side, delta, useControlsStore.getState().fps || 30)] as const));
       const newClips = state.clips.map((c) => changed.get(c.clipId) ?? c);
       const resolvedClips = resolveOverlaps(newClips);
       const clipDuration = calculateTotalClipDuration(resolvedClips);
       const prunedAssets = pruneAssetsForClips(state.assets, resolvedClips);
       get()._updateZoomLevel(resolvedClips, clipDuration);
       return { clips: resolvedClips, clipDuration, assets: prunedAssets };
+    }),
+  commitTimeline: ({ clips, tracks }) =>
+    set((state) => {
+      if (clips === state.clips && tracks === state.timelines) return {};
+      const clipDuration = calculateTotalClipDuration(clips);
+      get()._updateZoomLevel(clips, clipDuration);
+      return { clips, timelines: tracks, clipDuration, assets: pruneAssetsForClips(state.assets, clips) };
     }),
   shiftClips: (ids, delta) =>
     set((state) => {

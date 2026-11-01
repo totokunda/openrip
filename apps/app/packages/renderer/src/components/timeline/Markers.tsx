@@ -9,7 +9,7 @@ import { create } from "zustand";
 import { Group, Rect, Shape } from "react-konva";
 import { useClipStore } from "@/lib/clip";
 import { useControlsStore } from "@/lib/control";
-import { useContextMenuStore } from "@/lib/context-menu";
+import { openMarkerMenu } from "./menus/markerMenu";
 import { MARKER_COLORS, SNAP_PX, snapPoints, snapToPoints } from "@/lib/timeline-edit";
 import { cn } from "@/lib/utils";
 import { withEnd } from "@/lib/range";
@@ -183,20 +183,7 @@ export const MarkerFlags: React.FC<{ stageWidth: number; startPadding: number }>
               e.evt.preventDefault();
               e.cancelBubble = true;
               useControlsStore.getState().setSelectedMarkerId(m.id);
-              useContextMenuStore.getState().openMenu({
-                position: { x: e.evt.clientX, y: e.evt.clientY },
-                target: { type: "marker", markerId: m.id },
-                groups: [
-                  {
-                    id: "marker",
-                    items: [
-                      { id: "edit", label: "Edit marker", action: "editMarker" },
-                      { id: "delete", label: "Delete marker", action: "deleteMarker", shortcut: "Del" },
-                      { id: "deleteAll", label: "Delete all markers in timeline", action: "deleteAllMarkers" },
-                    ],
-                  },
-                ],
-              });
+              openMarkerMenu(m.id, e.evt.clientX, e.evt.clientY);
             }}
             onDragStart={(e) => {
               setDrag({ id: m.id, frame: m.frame });

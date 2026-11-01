@@ -6,16 +6,15 @@ import TimelineClip from "./clips/TimelineClip";
 import GhostTimeline from "./clips/GhostTimeline";
 import TransitionMarkers from "./clips/TransitionMarkers";
 import { useControlsStore } from "@/lib/control";
-import { useContextMenuStore } from "@/lib/context-menu";
+import { } from "@/lib/context-menu";
 import { calculateFrameFromX } from "@/lib/zoom";
 import { Rect as KonvaRect } from "konva/lib/shapes/Rect";
 import {
   useAssetControlsStore,
   updateAssetZoomLevel,
 } from "@/lib/assetControl";
-import { canDeleteTrack } from "./TrackControls";
+import { openTrackSpaceMenu } from "./menus/trackMenu";
 import { TIME_ZERO_X } from "@/lib/timeline-geometry";
-import { gapAt, trackGaps } from "@/lib/timeline-edit";
 
 // One function, so the memoised clips keep their props when no selection is passed.
 const NEVER_SELECTED = (_clipId: string) => false;
@@ -180,77 +179,7 @@ const Timeline: React.FC<
             useControlsStore.getState().setFocusAnchorRatio(progress);
             useControlsStore.getState().setFocusFrame(frame, false);
           }
-          const store = useClipStore.getState();
-          const track = store.getTimelineById(timelineId);
-          useContextMenuStore.getState().openMenu({
-            position: { x: e.evt.clientX, y: e.evt.clientY },
-            target: { type: "timeline", timelineId },
-            groups: [
-              // CapCut's empty-space menu: the gap under the mouse, every gap on the track, and
-              // the track's clips.
-              {
-                id: "gaps",
-                items: [
-                  {
-                    id: "close-gap",
-                    label: "Close gap",
-                    action: "custom",
-                    disabled: !!track?.locked || !gapAt(store.clips, timelineId, frame),
-                    run: () => void useClipStore.getState().closeGap(timelineId, frame),
-                  },
-                  {
-                    id: "close-all-gaps",
-                    label: "Close all gaps",
-                    action: "custom",
-                    disabled: !!track?.locked || trackGaps(store.clips, timelineId).length === 0,
-                    run: () => void useClipStore.getState().closeGap(timelineId, null),
-                  },
-                ],
-              },
-              {
-                id: "select",
-                items: [
-                  {
-                    id: "select-track",
-                    label: "Select",
-                    action: "custom",
-                    disabled: !!track?.locked || !store.clips.some((c) => c.timelineId === timelineId && !c.hidden),
-                    // Every clip on the track.
-                    run: () =>
-                      useControlsStore.getState().setSelectedClipIds(
-                        useClipStore.getState().clips.filter((c) => c.timelineId === timelineId && !c.hidden).map((c) => c.clipId),
-                      ),
-                  },
-                ],
-              },
-              {
-                id: "edit",
-                items: [
-                  {
-                    id: "paste",
-                    label: "Paste at Playhead",
-                    action: "paste",
-                    shortcut: "⌘V",
-                    disabled: !!track?.locked,
-                  },
-                ],
-              },
-              {
-                id: "track",
-                items: [
-                  track?.locked
-                    ? { id: "unlock", label: "Unlock track", action: "unlockTrack" }
-                    : { id: "lock", label: "Lock track", action: "lockTrack" },
-                  {
-                    id: "delete",
-                    label: "Delete track",
-                    action: "deleteTrack",
-                    disabled: !track || !canDeleteTrack(store.timelines, track),
-                  },
-                ],
-              },
-            ],
-          });
+          openTrackSpaceMenu(timelineId, frame, e.evt.clientX, e.evt.clientY);
         }}
       />
       {clips.map((clip) => (

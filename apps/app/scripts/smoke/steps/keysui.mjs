@@ -2,30 +2,21 @@
 // timeline. The keys are set through the store with lib/keyframes.ts (the inspector's diamonds
 // are another panel's), so the step needs the renderer's dev server, as `keyframes` does:
 // `npx vite --port 5199` in packages/renderer and the session with MODE=development
-// VITE_DEV_SERVER_URL=http://localhost:5199. The diamonds are found in the timeline's Konva
-// stage by name.
+// VITE_DEV_SERVER_URL=http://localhost:5199. The diamonds are found through _tlfacts.mjs: the new
+// timeline's test hook, or the old one's Konva stage by name.
 //
 // Keys: opacity 100 at 0 s and 0 at 2 s, scale 1 at 1 s and 1.5 at 2 s: diamonds at 0, 1 and
 // 2 s, none before the clip is selected. A click on the one at 1 s puts the playhead there; the
 // one at 2 s dragged to 3 s moves both keys there (the frame at 2 s brighter; ⌘Z / ⇧⌘Z); the
 // right-click menu ticks Linear, then Ease in sets the ease after the key at 1 s (another frame
 // at 1.5 s) and Delete keyframe takes it away.
+import { diamondsOnScreen } from "./_tlfacts.mjs";
 import { drag, engineFrame, now, rulerMap, seek, settled } from "./_preview.mjs";
 import { checks, clipsWhere, savedClips, savedProject, select } from "./_anim.mjs";
 import { undoCase } from "./_undo.mjs";
 
 /** The timeline's diamonds: their centres on screen, left to right. */
-const diamonds = (win) =>
-  win.evaluate(() => {
-    const stage = (window.Konva?.stages ?? []).find((s) => s.container().closest("[data-testid=timeline]"));
-    if (!stage) return [];
-    const box = stage.container().getBoundingClientRect();
-    return stage
-      .find(".keyframe-diamond")
-      .map((n) => n.getAbsolutePosition())
-      .map((p) => ({ x: box.x + p.x, y: box.y + p.y }))
-      .sort((a, b) => a.x - b.x);
-  });
+const diamonds = (win) => diamondsOnScreen(win);
 
 export default async (ctx) => {
   const { win, shot, udDir } = ctx;

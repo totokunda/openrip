@@ -61,6 +61,8 @@ export interface Preferences {
   linkageOff: string[];
   /** Edit › Play audio while scrubbing: short snippets of the sound play as the playhead is dragged or stepped (off by default, as CapCut's). */
   scrubAudio: boolean;
+  /** Edit › New timeline (Labs): the canvas timeline being built to replace the current one (docs/plan/timeline-rewrite.md). OPENRIP_NEW_TIMELINE=1 turns it on for a run. */
+  newTimeline: boolean;
   /** Edit › Arrange layers: a new project starts with free layer order (Project settings' Arrange layers). */
   arrangeLayers: boolean;
   /** Performance › Proxy: a project's Proxy switch starts on (a project's own choice, kept in the user store, wins). */
@@ -97,6 +99,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   renderCacheMaxGb: 10,
   linkageOff: [],
   scrubAudio: false,
+  newTimeline: process.env.OPENRIP_NEW_TIMELINE === "1",
   arrangeLayers: true,
   proxyDefault: true,
   renderCacheDir: "",

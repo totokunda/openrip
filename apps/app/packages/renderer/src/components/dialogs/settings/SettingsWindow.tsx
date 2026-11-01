@@ -251,6 +251,10 @@ export const SettingsWindow: React.FC<{ open: boolean; onOpenChange: (open: bool
         <Toggle testId="settings-scrub-audio" on={draft.scrubAudio} onChange={(v) => set("scrubAudio", v)} />
         <Help muted>{t("settings.scrubAudio.help")}</Help>
       </Row>
+      <Row id="newTimeline" label={t("settings.newTimeline")}>
+        <Toggle testId="settings-new-timeline" on={draft.newTimeline} onChange={(v) => set("newTimeline", v)} />
+        <Help muted>{t("settings.newTimeline.help")}</Help>
+      </Row>
       <Row id="linkage" label={t("settings.linkage")} disabled={!inEditor}>
         <SmallButton testId="settings-linkage" disabled={!inEditor} onClick={() => openLinkage(true)}>
           {t("settings.linkage.button")}

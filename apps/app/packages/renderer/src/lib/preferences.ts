@@ -46,6 +46,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   renderCacheMaxGb: 10,
   linkageOff: [],
   scrubAudio: false,
+  newTimeline: false,
   arrangeLayers: true,
   proxyDefault: true,
   renderCacheDir: "",

@@ -32,7 +32,7 @@ for (const [name, env, steps] of CASES) {
     console.log(`== ${name}: skipped, no draft given`);
     continue;
   }
-  const out = path.join("out/tl", name);
+  const out = path.join(process.env.SUITE_OUT || "out/tl", name);
   fs.rmSync(`${out}-profile`, { recursive: true, force: true });
   console.log(`== ${name}: ${steps}`);
   const r = spawnSync("node", ["session.mjs", appDir, out, `${out}-profile`, clip, ...steps.split(" ")], { env: { ...rest, ...env }, encoding: "utf8" });

@@ -43,6 +43,8 @@ const en = {
   "settings.loudness.tiktok": "TikTok (-12 LUFS)",
   "settings.scrubAudio": "Play audio while scrubbing",
   "settings.scrubAudio.help": "Play audio when you drag the playhead",
+  "settings.newTimeline": "New timeline (Labs)",
+  "settings.newTimeline.help": "Try the timeline being rebuilt to work like CapCut's. Not everything is in it yet",
   "settings.linkage": "Linkage",
   "settings.linkage.button": "Settings",
   "settings.linkage.note": "Open a project to choose which items follow the main track's clips.",
