@@ -53,7 +53,8 @@ export default async (ctx) => {
   };
   await menuOpen();
   const sub = await win.locator("[data-testid=menu-replace-clip], [data-testid=menu-trim-clip], [data-testid=menu-open-file-location]").allInnerTexts();
-  check(`More clip actions lists Replace clip, Trim clip, Open file location (${sub.join(", ")})`, sub.join(",") === "Replace clip,Trim clip,Open file location" && (await win.locator("[data-testid=menu-trim-clip]").isDisabled()));
+  // Trim clip (lib/trim-clip.ts) is there for any video or sound clip with a file.
+  check(`More clip actions lists Replace clip, Trim clip, Open file location (${sub.join(", ")})`, sub.join(",") === "Replace clip,Trim clip,Open file location" && !(await win.locator("[data-testid=menu-trim-clip]").isDisabled()));
   await shot("rc-1-menu");
   await win.locator("[data-testid=menu-replace-clip]").click();
   await win.waitForTimeout(3500);

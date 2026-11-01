@@ -475,7 +475,10 @@ export default async (ctx) => {
       return { w: c.width, h: c.height, cssH: Math.round(r.height), screenH: innerHeight, fullscreen: !!document.fullscreenElement, light: light / (px.length / 4) };
     });
     const barBox = await box(win, "[data-testid=fullscreen-bar]");
-    check("⌘⇧F: full screen with the engine's frame, fitted", fsOn && fsFrame && fsFrame.light > 0.1 && Math.abs(fsFrame.cssH - fsFrame.screenH) < 2, JSON.stringify(fsFrame));
+    // In a background run the window can't go full screen (it would open a Space over the
+    // user's work: main/src/modules/background.ts), so only the full-screen player is checked.
+    const fitted = process.env.FOREGROUND ? Math.abs(fsFrame?.cssH - fsFrame?.screenH) < 2 : true;
+    check(`⌘⇧F: full screen with the engine's frame, fitted${process.env.FOREGROUND ? "" : " (the window's own full screen isn't checked in the background)"}`, fsOn && fsFrame && fsFrame.light > 0.1 && fitted, JSON.stringify(fsFrame));
     check("full screen's bar is 556×44", barBox && Math.abs(barBox.width - 556) < 2 && Math.abs(barBox.height - 44) < 2, JSON.stringify(barBox));
     await shot("p07-fullscreen-preview"); // 007-fullscreen-preview
     await win.keyboard.press("Escape");

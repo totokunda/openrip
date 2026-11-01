@@ -7,10 +7,11 @@
 //   NIGHTLY_ONLY=tl,multisel node …       only the cases named
 //   ENGINE=0 node …                       without the engine's tests (they build it, ~15 min)
 // The clips are made here with FFmpeg (macOS keeps ~/Downloads from this session): a 12 s 4K
-// ProRes test picture with a tone, a photo, and a short red H.264 clip for replace and relink.
-// IMG_9079.MOV (speech, a face) is used where a step needs it, when it's somewhere readable
-// (NIGHTLY_REAL_CLIP, or ~/Movies/OpenRip test media/IMG_9079.MOV); those steps are skipped
-// without it.
+// ProRes test picture with a 523 Hz tone (off the stand-in microphone's 440 Hz), a photo, and a
+// 3 s red H.264 clip for Replace clip. The steps written around IMG_9079.MOV (a portrait 4K
+// shot of a man at a door: its shape, shake, shots, colours and speech) run on it when it's
+// somewhere readable (NIGHTLY_REAL_CLIP, or ~/Movies/OpenRip test media/IMG_9079.MOV) and are
+// skipped without it: on the test picture they measure the wrong thing.
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -38,9 +39,9 @@ const make = (name, args) => {
   if (!fs.existsSync(file)) execFileSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", ...args, file]);
   return file;
 };
-const STD = make("STD_4K.mov", ["-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=24:duration=12", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=12", "-c:v", "prores_ks", "-profile:v", "1", "-pix_fmt", "yuv422p10le", "-c:a", "pcm_s16le", "-shortest"]);
+const STD = make("STD_4K.mov", ["-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=24:duration=12", "-f", "lavfi", "-i", "sine=frequency=523:sample_rate=48000:duration=12", "-c:v", "prores_ks", "-profile:v", "1", "-pix_fmt", "yuv422p10le", "-c:a", "pcm_s16le", "-shortest"]);
 const PHOTO = make("photo.png", ["-f", "lavfi", "-i", "testsrc2=size=1920x1080", "-frames:v", "1"]);
-const RED = make("red.mp4", ["-f", "lavfi", "-i", "color=c=red:size=1280x720:rate=24:duration=5", "-f", "lavfi", "-i", "sine=frequency=330:duration=5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"]);
+const RED = make("red3.mp4", ["-f", "lavfi", "-i", "color=c=red:size=1280x720:rate=24:duration=3", "-f", "lavfi", "-i", "sine=frequency=330:duration=3", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"]);
 const realCandidates = [process.env.NIGHTLY_REAL_CLIP, path.join(os.homedir(), "Movies/OpenRip test media/IMG_9079.MOV")].filter(Boolean);
 const REAL = realCandidates.find((p) => {
   try {
@@ -78,18 +79,18 @@ const CASES = [
   ["exportui", "import timeline newtext exportui", { ...V, FFPROBE: ffprobe }],
   ["exportcodecs", "import timeline exportcodecs", { ...V, FFPROBE: ffprobe }],
   ["render", "import timeline render", V],
-  ["player", "import timeline player", V],
-  ["ratios", "import timeline ratios", V],
+  ["player", "import timeline player", { CLIP_NAME: "IMG_9079" }, "REAL"],
+  ["ratios", "import timeline ratios", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["windows", "import timeline windows", V],
   ["timelines", "import timeline timelines", { ...V, FFPROBE: ffprobe }],
   // Timeline editing.
   ["suite:tl", "tl-suite.mjs", V],
-  ["multisel", "import timeline newtext multisel", V],
+  ["multisel", "import timeline newtext multisel", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["groups", "import timeline newtext groups", V],
   ["presets", "import timeline newtext presets", V],
   ["compound", "import timeline newtext compound", V],
   ["compoundaudio", "import timeline compoundaudio", V],
-  ["compoundenhance", "import compoundenhance", V],
+  ["compoundenhance", "import compoundenhance", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["menus", "import timeline menus", V],
   ["duplicate", "import timeline duplicate", V],
   ["zoomrange", "import timeline zoomrange", V],
@@ -100,31 +101,31 @@ const CASES = [
   ["persist", "import timeline persist reopen persistcheck", V],
   // Motion, text and captions.
   ["suite:motion", "motion-suite.mjs", { ...V, MOTION_DEV: `http://localhost:${DEV_PORT}` }],
-  ["slowmo", "import timeline slowmo", V],
+  ["slowmo", "import timeline slowmo", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["texttemplates", "import timeline texttemplates", V],
   ["textpresets", "import timeline textpresets", V],
-  ["textpresetsave", "import timeline newtext textpresetsave", V],
-  ["textbg", "import timeline newtext textbg", V],
+  ["textpresetsave", "import timeline newtext textpresetsave", { CLIP_NAME: "IMG_9079" }, "REAL"],
+  ["textbg", "import timeline newtext textbg", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["textfavs", "import timeline textfavs", V],
   ["fontcheck", "import timeline newtext fontcheck", V],
   ["captionedit", "import timeline captionedit", V],
   ["captionsio", "import timeline captionsio", V],
   ["transcript", "import transcript", { ...V, OPENRIP_MODELS: models }],
   // The inspector, colour and effects.
-  ["suite:insp", "insp-suite.mjs", { ...V, PHOTO_NAME: "photo", ...dev }],
+  ["suite:insp", "insp-suite.mjs", { CLIP_NAME: "IMG_9079", PHOTO_NAME: "photo", ...dev }, "REAL"],
   ["canvaspatterns", "import timeline canvaspatterns", V],
   ["particles", "import timeline particles", V],
-  ["colorlog", "import timeline colorlog", V],
-  ["colormatch", "import colormatch", V],
+  ["colorlog", "import timeline colorlog", { CLIP_NAME: "IMG_9079" }, "REAL"],
+  ["colormatch", "import colormatch", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["adjustlayer", "import timeline adjustlayer", V],
   ["filtersui", "import timeline filtersui", V],
   ["effectsui", "import timeline effectsui", V],
   ["stickersui", "import timeline stickersui", V],
   ["shapes", "import timeline shapes", V],
-  ["pen", "import timeline pen", V],
+  ["pen", "import timeline pen", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["legacydraw", "import timeline legacydraw", V],
-  ["enhance", "import enhance", V],
-  ["scenes", "import scenes", V],
+  ["enhance", "import enhance", { CLIP_NAME: "IMG_9079" }, "REAL"],
+  ["scenes", "import scenes", { CLIP_NAME: "IMG_9079" }, "REAL"],
   // Sound.
   ["audioui", "import timeline audioui", V],
   ["audiodsp", "import audiodsp", V],
@@ -142,38 +143,38 @@ const CASES = [
   ["favourites", "import timeline favourites", V],
   ["copymedia", "import copymedia", V],
   ["cardexport", "import cardexport", { ...V, FFPROBE: ffprobe }],
-  ["replaceclip", "import timeline replaceclip", { CLIP_NAME: "red.mp4" }, RED],
-  ["proxy", "import timeline proxy", V],
+  ["replaceclip", "import timeline replaceclip", { CLIP_NAME: "red3" }, RED],
+  ["proxy", "import timeline proxy", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["proxydefault", "import proxydefault", { ...V, AUTO_PROXY: "1" }],
   ["autorender", "import timeline autorender", V],
   ["covereditor", "import timeline covereditor", V],
   ["projectsettings", "import timeline projectsettings reopen projectsettingscheck", { ...V, PS_KEEP: "1" }],
-  ["cropui", "import timeline cropui reopen cropuicheck", V],
+  ["cropui", "import timeline cropui reopen cropuicheck", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["settings", "import timeline settings", V],
   ["settingsrows", "import settingsrows", V],
   ["shortcuts", "import timeline shortcuts", V],
   ["home", "import timeline home", V],
   ["trash", "import timeline trash", V],
-  ["librarypage", "import timeline librarypage", V],
-  ["templatespage", "import timeline templatespage", V],
+  ["librarypage", "import timeline librarypage", { CLIP_NAME: "IMG_9079" }, "REAL"],
+  ["templatespage", "import timeline templatespage", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["updateindicator", "import timeline updateindicator", V],
   ["walkthrough", "walkthrough", { ...V, WALKTHROUGH: "1" }],
   // The renderer's own modules (its dev server).
   ["keyframes", "import timeline keyframes reopen keyframescheck", { ...V, ...dev }],
   ["transitions", "import timeline transitions", { ...V, ...dev }],
-  ["speed", "import timeline speed", { ...V, ...dev }],
-  ["compositing", "import timeline compositing", { ...V, ...dev }],
-  ["textstyles", "import timeline textstyles", { ...V, ...dev }],
-  ["waveformui", "import timeline waveformui", { ...V, ...dev }],
-  ["adjmaskhandles", "import timeline adjmaskhandles", { ...V, ...dev }],
-  ["effectmask", "import timeline effectmask", { ...V, ...dev }],
-  ["audio", "import timeline audio", { ...V, ...dev, OPENRIP_FAKE_MIC: "1" }],
+  ["speed", "import timeline speed", { CLIP_NAME: "IMG_9079", ...dev }, "REAL"],
+  ["compositing", "import timeline compositing", { CLIP_NAME: "IMG_9079", ...dev }, "REAL"],
+  ["textstyles", "import timeline textstyles", { CLIP_NAME: "IMG_9079", ...dev }, "REAL"],
+  ["waveformui", "import timeline waveformui", { CLIP_NAME: "IMG_9079", ...dev }, "REAL"],
+  ["adjmaskhandles", "import timeline adjmaskhandles", { CLIP_NAME: "IMG_9079", ...dev }, "REAL"],
+  ["effectmask", "import timeline effectmask", { CLIP_NAME: "IMG_9079", ...dev }, "REAL"],
+  ["audio", "import timeline audio", { CLIP_NAME: "IMG_9079", ...dev, OPENRIP_FAKE_MIC: "1" }, "REAL"],
   // On the real clip only: speech and a face.
   ["autocaptions", "import timeline autocaptions", { CLIP_NAME: "IMG_9079", OPENRIP_MODELS: models }, "REAL"],
   ["tracking", "import timeline newtext tracking", { CLIP_NAME: "IMG_9079" }, "REAL"],
   // The new timeline (docs/plan/timeline-rewrite.md).
   ["new:suite:tl", "tl-suite.mjs", { ...V, ...NEW }],
-  ["new:multisel", "import timeline newtext multisel", { ...V, ...NEW }],
+  ["new:multisel", "import timeline newtext multisel", { CLIP_NAME: "IMG_9079", ...NEW }, "REAL"],
   ["new:groups", "import timeline newtext groups", { ...V, ...NEW }],
   ["new:compound", "import timeline newtext compound", { ...V, ...NEW }],
   ["new:timelines", "import timeline timelines", { ...V, ...NEW, FFPROBE: ffprobe }],
@@ -183,14 +184,14 @@ const CASES = [
   ["new:beatsui", "import timeline newtext beatsui", { ...V, ...NEW }],
   ["new:windows", "import timeline windows", { ...V, ...NEW }],
   ["new:suite:motion", "motion-suite.mjs", { ...V, ...NEW, MOTION_DEV: `http://localhost:${DEV_PORT}` }],
-  ["new:waveformui", "import timeline waveformui", { ...V, ...dev, ...NEW }],
+  ["new:waveformui", "import timeline waveformui", { CLIP_NAME: "IMG_9079", ...dev, ...NEW }, "REAL"],
   ["new:scrubaudio", "import timeline scrubaudio", { ...V, ...NEW }],
   ["new:shuttle", "import timeline shuttle", { ...V, ...NEW }],
   ["new:presets", "import timeline newtext presets", { ...V, ...NEW }],
   ["new:audioui", "import timeline audioui", { ...V, ...NEW }],
   ["new:covereditor", "import timeline covereditor", { ...V, ...NEW }],
   ["new:trimclip", "import timeline trimclip", { ...V, ...NEW }],
-  ["new:textpresetsave", "import timeline newtext textpresetsave", { ...V, ...NEW }],
+  ["new:textpresetsave", "import timeline newtext textpresetsave", { CLIP_NAME: "IMG_9079", ...NEW }, "REAL"],
   // How smoothly each timeline keeps up with a drag, a marquee and the wheel over 140 clips.
   ["perf:old", "import timeline tlperf", V],
   ["perf:new", "import timeline tlperf", { ...V, ...NEW }],
