@@ -7,8 +7,7 @@
 //   NIGHTLY_ONLY=tl,multisel node …       only the cases named
 //   ENGINE=0 node …                       without the engine's tests (they build it, ~15 min)
 // The clips are made here with FFmpeg (macOS keeps ~/Downloads from this session): a 12 s 4K
-// ProRes test picture with a 523 Hz tone (off the stand-in microphone's 440 Hz), a photo, and a
-// 3 s red H.264 clip for Replace clip. The steps written around IMG_9079.MOV (a portrait 4K
+// ProRes test picture with a 440 Hz tone, a photo, and a 3 s red H.264 clip for Replace clip. The steps written around IMG_9079.MOV (a portrait 4K
 // shot of a man at a door: its shape, shake, shots, colours and speech) run on it when it's
 // somewhere readable (NIGHTLY_REAL_CLIP, or ~/Movies/OpenRip test media/IMG_9079.MOV) and are
 // skipped without it: on the test picture they measure the wrong thing.
@@ -39,7 +38,7 @@ const make = (name, args) => {
   if (!fs.existsSync(file)) execFileSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", ...args, file]);
   return file;
 };
-const STD = make("STD_4K.mov", ["-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=24:duration=12", "-f", "lavfi", "-i", "sine=frequency=523:sample_rate=48000:duration=12", "-c:v", "prores_ks", "-profile:v", "1", "-pix_fmt", "yuv422p10le", "-c:a", "pcm_s16le", "-shortest"]);
+const STD = make("STD_4K.mov", ["-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=24:duration=12", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=12", "-c:v", "prores_ks", "-profile:v", "1", "-pix_fmt", "yuv422p10le", "-c:a", "pcm_s16le", "-shortest"]);
 const PHOTO = make("photo.png", ["-f", "lavfi", "-i", "testsrc2=size=1920x1080", "-frames:v", "1"]);
 const RED = make("red3.mp4", ["-f", "lavfi", "-i", "color=c=red:size=1280x720:rate=24:duration=3", "-f", "lavfi", "-i", "sine=frequency=330:duration=3", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"]);
 const realCandidates = [process.env.NIGHTLY_REAL_CLIP, path.join(os.homedir(), "Movies/OpenRip test media/IMG_9079.MOV")].filter(Boolean);
