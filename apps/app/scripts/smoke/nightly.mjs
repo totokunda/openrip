@@ -99,7 +99,10 @@ const CASES = [
   ["arrange", "import timeline arrangelayers reopen arrangelayerscheck", V],
   ["persist", "import timeline persist reopen persistcheck", V],
   // Motion, text and captions.
-  ["suite:motion", "motion-suite.mjs", { ...V, MOTION_DEV: `http://localhost:${DEV_PORT}` }],
+  ["suite:motion", "motion-suite.mjs trans clipanim speed freeze keys", { ...V, MOTION_DEV: `http://localhost:${DEV_PORT}` }],
+  // The shader transitions' export-against-player check needs a real picture: on the test pattern
+  // the frames either side of a window are too alike to tell apart.
+  ["suite:motion:translib", "motion-suite.mjs translib", { CLIP_NAME: "IMG_9079", MOTION_DEV: `http://localhost:${DEV_PORT}` }, "REAL"],
   ["slowmo", "import timeline slowmo", { CLIP_NAME: "IMG_9079" }, "REAL"],
   ["texttemplates", "import timeline texttemplates", V],
   ["textpresets", "import timeline textpresets", V],
@@ -182,7 +185,8 @@ const CASES = [
   ["new:menus", "import timeline menus", { ...V, ...NEW }],
   ["new:beatsui", "import timeline newtext beatsui", { ...V, ...NEW }],
   ["new:windows", "import timeline windows", { ...V, ...NEW }],
-  ["new:suite:motion", "motion-suite.mjs", { ...V, ...NEW, MOTION_DEV: `http://localhost:${DEV_PORT}` }],
+  ["new:suite:motion", "motion-suite.mjs trans clipanim speed freeze keys", { ...V, ...NEW, MOTION_DEV: `http://localhost:${DEV_PORT}` }],
+  ["new:suite:motion:translib", "motion-suite.mjs translib", { CLIP_NAME: "IMG_9079", ...NEW, MOTION_DEV: `http://localhost:${DEV_PORT}` }, "REAL"],
   ["new:waveformui", "import timeline waveformui", { CLIP_NAME: "IMG_9079", ...dev, ...NEW }, "REAL"],
   ["new:scrubaudio", "import timeline scrubaudio", { ...V, ...NEW }],
   ["new:shuttle", "import timeline shuttle", { ...V, ...NEW }],
@@ -206,8 +210,10 @@ const runCase = ([name, steps, env, clip]) =>
     const profile = path.join(out, `${tag}-profile`);
     fs.rmSync(profile, { recursive: true, force: true });
     const suite = name.split(":").includes("suite");
+    // A suite's steps are its script and, optionally, the cases of it to run.
+    const [script, ...suiteCases] = steps.split(" ");
     const args = suite
-      ? [path.join(here, steps), appDir, ...(steps === "insp-suite.mjs" ? [clipPath, PHOTO] : [clipPath])]
+      ? [path.join(here, script), appDir, ...(script === "insp-suite.mjs" ? [clipPath, PHOTO] : [clipPath]), ...suiteCases]
       : [path.join(here, "session.mjs"), appDir, caseOut, profile, clipPath, ...steps.split(" ")];
     log(`case ${name} start`);
     const t = Date.now();
